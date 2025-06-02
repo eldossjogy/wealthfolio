@@ -896,6 +896,10 @@ impl SnapshotService {
 
         if all_individual_keyframes.is_empty() {
             warn!("No keyframes found for any active individual accounts. Cannot generate TOTAL snapshots.");
+            // Can't find any active accounts and cant generate Total so delete current snapshots
+            self.snapshot_repository
+                .delete_snapshots_by_account_ids(&[PORTFOLIO_TOTAL_ACCOUNT_ID.to_string()])
+                .await?;
             return Ok(0);
         }
 
