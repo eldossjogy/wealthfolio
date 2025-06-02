@@ -134,11 +134,11 @@ impl PerformanceService {
             start_date_opt,
             end_date_opt,
         )?;
-
-        if full_history.len() < 2 {
-            warn!("Performance calculation for account '{}': Not enough valuation data ({} points). Returning empty response.", account_id, full_history.len());
-            return Ok(PerformanceService::empty_response(account_id));
-        }
+        // Removed handling full_history less than 2 to allow account detail page for accounts with only 1 entry
+        // if full_history.len() < 2 {
+        //     warn!("Performance calculation for account '{}': Not enough valuation data ({} points). Returning empty response.", account_id, full_history.len());
+        //     return Ok(PerformanceService::empty_response(account_id));
+        // }
 
         let start_point: &DailyAccountValuation = full_history.first().unwrap();
         let end_point: &DailyAccountValuation = full_history.last().unwrap();
