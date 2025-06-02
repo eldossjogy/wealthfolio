@@ -15,21 +15,37 @@ use crate::activities::activities_model::*;
 use crate::db::{get_connection, WriteHandle};
 use crate::schema::{accounts, activities, activity_import_profiles, assets};
 use crate::{Error, Result};
+use async_trait::async_trait;
 use diesel::dsl::min;
 use num_traits::Zero;
-use async_trait::async_trait;
+
+// Get Delete functions for Snapshot & Daily Valuation
+use crate::portfolio::snapshot::snapshot_repository::SnapshotRepository;
+use crate::portfolio::valuation::valuation_repository::ValuationRepositoryTrait;
 
 /// Repository for managing activity data in the database
 pub struct ActivityRepository {
     pool: Arc<Pool<ConnectionManager<SqliteConnection>>>,
     writer: WriteHandle,
+    snapshot_repo: Arc<SnapshotRepository>,
+    valuation_repo: Arc<dyn ValuationRepositoryTrait>,
 }
 
 // Inherent methods for ActivityRepository
 impl ActivityRepository {
     /// Creates a new ActivityRepository instance
-    pub fn new(pool: Arc<Pool<ConnectionManager<SqliteConnection>>>, writer: WriteHandle) -> Self {
-        Self { pool, writer }
+    pub fn new(
+        pool: Arc<Pool<ConnectionManager<SqliteConnection>>>,
+        writer: WriteHandle,
+        snapshot_repo: Arc<SnapshotRepository>, // Add this parameter
+        valuation_repo: Arc<dyn ValuationRepositoryTrait>,
+    ) -> Self {
+        Self {
+            pool,
+            writer,
+            snapshot_repo, // Now this matches the parameter,
+            valuation_repo,
+        }
     }
 }
 
@@ -207,7 +223,17 @@ impl ActivityRepositoryTrait for ActivityRepository {
         let activity_db_owned: ActivityDB = activity_update.into();
         let activity_id_owned = activity_db_owned.id.clone();
 
-        self.writer
+        // Gets the account id of the activity before updating
+        let existing_account_id = {
+            let mut conn = get_connection(&self.pool)?;
+            let existing = activities::table
+                .find(&activity_id_owned)
+                .first::<ActivityDB>(&mut conn)?;
+            vec![existing.account_id.clone()]
+        };
+
+        // Update activity
+        let result = self.writer
             .exec(move |conn: &mut SqliteConnection| -> Result<Activity> {
                 let mut activity_to_update = activity_db_owned;
                 let existing = activities::table
@@ -221,8 +247,15 @@ impl ActivityRepositoryTrait for ActivityRepository {
                     .set(&activity_to_update)
                     .get_result::<ActivityDB>(conn)?;
                 Ok(Activity::from(updated_activity))
-            })
-            .await
+        })
+        .await?;
+        
+        // Delete snapshot data for the account ID that changed
+        self.snapshot_repo.delete_snapshots_by_account_ids(&existing_account_id).await?;
+        // Delete daily_account_valuation data for the account ID that changed
+        self.valuation_repo.delete_valuations_for_account(&existing_account_id[0]).await?;
+
+        Ok(result)
     }
 
     async fn delete_activity(&self, activity_id: String) -> Result<Activity> {

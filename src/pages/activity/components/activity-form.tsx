@@ -25,6 +25,7 @@ import { IncomeForm } from './forms/income-form';
 import { OtherForm } from './forms/other-form';
 import { HoldingsForm } from './forms/holdings-form';
 import { newActivitySchema, type NewActivityFormValues } from './forms/schemas';
+import { useUpdatePortfolioMutation } from '@/hooks/use-calculate-portfolio';
 
 export interface AccountSelectOption {
   value: string;
@@ -56,6 +57,12 @@ const ACTIVITY_TYPE_TO_TAB: Record<string, string> = {
 
 export function ActivityForm({ accounts, activity, open, onClose }: ActivityFormProps) {
   const { addActivityMutation, updateActivityMutation } = useActivityMutations(onClose);
+
+  const updatePortfolioMutation = useUpdatePortfolioMutation();
+
+  const handleRecalculate = async () => {
+    updatePortfolioMutation.mutate();
+  };
 
   const isValidActivityType = (type: string | undefined): type is NewActivityFormValues['activityType'] => {
     return type ? Object.keys(ACTIVITY_TYPE_TO_TAB).includes(type) : false;
@@ -118,7 +125,12 @@ export function ActivityForm({ accounts, activity, open, onClose }: ActivityForm
       }
 
       if (id) {
-        return await updateActivityMutation.mutateAsync({ id, ...submitData });
+        // Recalculates the portfolio after updating the activity.
+        // Updating an activity now deletes data from the original account it was changed from.
+        // This affects both the holdings_snapshots and daily_account_valuation tables.
+        const updateResult = await updateActivityMutation.mutateAsync({ id, ...submitData });
+        await handleRecalculate();
+        return updateResult;
       }
       return await addActivityMutation.mutateAsync(submitData);
     } catch (error) {

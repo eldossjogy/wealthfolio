@@ -1,6 +1,6 @@
 // src-core/src/portfolio/snapshot/mod.rs
 
-mod snapshot_repository;
+pub(crate) mod snapshot_repository;
 pub mod snapshot_service;
 pub mod holdings_calculator;
 mod positions_model;
