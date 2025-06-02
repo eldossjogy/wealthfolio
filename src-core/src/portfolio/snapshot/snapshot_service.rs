@@ -436,7 +436,11 @@ impl SnapshotService {
                     self.snapshot_repository.get_latest_snapshot_before_date(acc_id, calculation_end_date)?
                 {
                     initial_snapshot_for_acc = Some(latest_snapshot.clone());
-                    effective_start_date = latest_snapshot.snapshot_date; 
+                    // Updated date to next day to stop adding snapshot over and over
+                    effective_start_date = latest_snapshot
+                        .snapshot_date
+                        .succ_opt()
+                        .expect("Date overflow on succ_opt()");
                     debug!(
                         "Found latest snapshot for account {}: date {}. Starting incremental calc from here.",
                         acc_id, effective_start_date
