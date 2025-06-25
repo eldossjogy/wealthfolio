@@ -76,8 +76,8 @@ const SettingsContributionLimitPage = () => {
                   key={limit.id}
                   limit={limit}
                   accounts={accounts || []}
-                  onEdit={handleEditLimit}
-                  onDelete={handleDeleteLimit}
+                  // onEdit={handleEditLimit}
+                  // onDelete={handleDeleteLimit}
                 />
               ))}
             </>

@@ -5,6 +5,7 @@ import IntervalSelector from '@/components/interval-selector';
 import Balance from './balance';
 import { Skeleton } from '@/components/ui/skeleton';
 import SavingGoals from './goals';
+import ContributionLimits from './limits';
 import { useMemo, useState } from 'react';
 import { PrivacyToggle } from '@/components/privacy-toggle';
 import { AccountsSummary } from './accounts-summary';
@@ -148,6 +149,7 @@ export default function DashboardPage() {
           </div>
           <div className="sm:col-span-1">
             <SavingGoals />
+            <ContributionLimits />
           </div>
         </div>
       </div>

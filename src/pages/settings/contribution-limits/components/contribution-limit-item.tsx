@@ -101,16 +101,16 @@ export function ContributionLimitItem({
                         ? `${formatAmount(progressValue, baseCurrency)}`
                         : `${formatAmount(progressValue, baseCurrency)}`}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  {/* <span className="text-xs text-muted-foreground">
                     / {formatAmount(limit.limitAmount, baseCurrency)}
-                  </span>
+                  </span> */}
                 </div>
                 <span className="text-right text-xs text-muted-foreground">
                   {isComplete
                     ? 'completed'
                     : isOverLimit
                       ? `+${formatAmount(overLimitAmount, baseCurrency)} over limit`
-                      : `${limit.contributionYear}`}
+                      : ``}
                 </span>
               </div>
             )}
