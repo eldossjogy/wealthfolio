@@ -17,7 +17,6 @@ import type { ContributionLimit } from '@/lib/types';
 import { getContributionLimit } from '@/commands/contribution-limits';
 import { QueryKeys } from '@/lib/query-keys';
 import { useContributionLimitProgress } from '../settings/contribution-limits/use-contribution-limit-mutations';
-// import { useContributionLimitProgress } from '../use-contribution-limit-mutations';
 
 export function ContributionLimits() {
   const { isBalanceHidden } = useBalancePrivacy();
@@ -32,32 +31,50 @@ export function ContributionLimits() {
     error: errorValuations,
   } = useLatestValuations(accountIds);
 
+  // const {
+  //   data: goals,
+  //   isLoading: isLoadingGoals,
+  //   isError: isErrorGoals,
+  // } = useQuery<Goal[], Error>({
+  //   queryKey: ['goals'],
+  //   queryFn: getGoals,
+  // });
+
   const {
     data: goals,
     isLoading: isLoadingGoals,
     isError: isErrorGoals,
-  } = useQuery<Goal[], Error>({
-    queryKey: ['goals'],
-    queryFn: getGoals,
-  });
-
-  const { data: limitData, isLoading: isLoadingLimit } = useQuery<ContributionLimit[], Error>({
+  } = useQuery<ContributionLimit[], Error>({
     queryKey: [QueryKeys.CONTRIBUTION_LIMITS],
     queryFn: getContributionLimit,
   });
 
   // Assuming `limits` is already defined and is an array of objects with an `id` field
-  const limitProgressData = limitData?.map((limit) => useContributionLimitProgress(limit?.id));
+  const limitProgressData = goals?.map((limit) => useContributionLimitProgress(limit?.id));
 
+  const progressDict = {}
   // Just console.log each one (do this inside the component body)
   limitProgressData?.forEach(({ data, isLoading }, index) => {
-    // console.log('Limit ID:', limitData[index]?.id);
-    console.log('Progress' + index + ":", data);
+    // console.log('Limit ID:', goals[index]?.id);
+    const progressValue = data ? data.total : 0;
+    console.log('Progress' + index + ':', data);
+    console.log('Progress Value' + index + ':', progressValue);
     console.log('Is Loading:', isLoading);
+    console.log('goals', goals[index]);
+    const progressPercentageNumber =
+      goals[index].limitAmount > 0 ? (progressValue / goals[index].limitAmount) : 0;
+    const baseCurrency = data?.baseCurrency || 'USD';
+    console.log('progressPercentageNumber', progressPercentageNumber);
+    console.log('baseCurrency', baseCurrency);
+    console.log('max', goals[index].limitAmount);
+    progressDict[goals[index].id] = {"progressPercentageNumber" : progressPercentageNumber , "baseCurrency" : baseCurrency, "progressValue" : progressValue}
   });
 
-  console.log(limitData);
-  console.log(isLoadingLimit);
+  console.log('goals', goals);
+  console.log('goals', isLoadingGoals);
+  console.log('goals', progressDict)
+ 
+
 
   const {
     data: allocations,
@@ -163,12 +180,16 @@ export function ContributionLimits() {
               <CardContent className="pt-6">
                 {goals && goals.length > 0 ? (
                   [...goals]
-                    .sort((a, b) => a.targetAmount - b.targetAmount)
+                    .sort((a, b) => a.limitAmount - b.limitAmount)
+                    .filter(goal => goal.contributionYear == new Date().getFullYear())
                     .map((goal) => {
-                      const progressData = goalsProgress.find((p) => p.name === goal.title);
-
-                      const currentProgress = progressData?.progress ?? 0;
-                      const currentValue = progressData?.currentValue ?? 0;
+                      // const progressData = goalsProgress.find((p) => p.name === goal.title);
+                      // console.log("")
+                      // const testProgess = goals?.map((goal) => useContributionLimitProgress(goal.id));
+                      console.log("KOAOSDK", progressDict[goal.id]);
+                      const progressData = progressDict[goal.id]
+                      const currentProgress = progressData?.progressPercentageNumber ?? 0;
+                      const currentValue = progressData?.progressValue ?? 0;
                       const currency =
                         progressData?.currency ?? latestValuations?.[0]?.baseCurrency ?? 'USD';
 
@@ -177,7 +198,7 @@ export function ContributionLimits() {
                           <TooltipTrigger asChild>
                             <div className="mb-4 cursor-help items-center">
                               <CardDescription className="mb-2 flex items-center text-sm font-light text-muted-foreground">
-                                {goal.title}
+                                {goal.groupName} {goal.contributionYear}
                                 {currentProgress >= 100 ? (
                                   <Icons.CheckCircle className="ml-1 h-4 w-4 text-success" />
                                 ) : null}
@@ -212,7 +233,7 @@ export function ContributionLimits() {
                                 Target Value:{' '}
                                 <b>
                                   <AmountDisplay
-                                    value={goal.targetAmount}
+                                    value={goal.limitAmount}
                                     currency={currency}
                                     isHidden={isBalanceHidden}
                                   />
@@ -233,7 +254,7 @@ export function ContributionLimits() {
                     <Icons.Goal className="mb-2 h-12 w-12 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">No Contribution Limits set</p>
                     <p className="text-xs text-muted-foreground">
-                      Create a goal to start tracking your progress
+                      Create a contribution limit to start tracking your progress
                     </p>
                   </div>
                 )}

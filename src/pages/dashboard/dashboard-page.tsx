@@ -149,6 +149,7 @@ export default function DashboardPage() {
           </div>
           <div className="sm:col-span-1">
             <SavingGoals />
+            {/* <SavingGoals /> */}
             <ContributionLimits />
           </div>
         </div>

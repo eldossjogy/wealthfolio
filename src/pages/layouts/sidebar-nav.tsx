@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Icons } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-
+import pkg from '../../../package.json'; // adjust path if needed
 import { cn } from '@/lib/utils';
 
 export interface NavLink {
@@ -78,7 +78,8 @@ export function SidebarNav({ navigation }: { navigation: NavigationProps }) {
             <div className="flex flex-shrink-0 flex-col p-2">
               {navigation?.secondary?.map((item) => NavItem({ item }))}
               <Separator className="mt-0" />
-              <div className="flex justify-end">
+              <div className="flex items-center justify-between px-2">
+                {!collapsed && <p className="text-xs text-muted-foreground">v{pkg.version}</p>}
                 <Button
                   title="Toggle Sidebar"
                   variant="ghost"
