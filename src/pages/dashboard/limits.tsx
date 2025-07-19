@@ -1,10 +1,7 @@
-import { getGoals, getGoalsAllocation } from '@/commands/goal';
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { calculateGoalProgress } from '@/lib/portfolio-helper';
-import { Goal, GoalAllocation } from '@/lib/types';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { formatPercent } from '@/lib/utils';
 import { Icons } from '@/components/icons';
 import { useBalancePrivacy } from '@/context/privacy-context';
@@ -16,13 +13,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { ContributionLimit } from '@/lib/types';
 import { getContributionLimit } from '@/commands/contribution-limits';
 import { QueryKeys } from '@/lib/query-keys';
-import { useContributionLimitProgress } from '../settings/contribution-limits/use-contribution-limit-mutations';
+import { getContributionLimitProgress } from '../settings/contribution-limits/use-contribution-limit-mutations';
 
 export function ContributionLimits() {
   const { isBalanceHidden } = useBalancePrivacy();
 
   const { accounts, isLoading: isLoadingAccounts, isError: isErrorAccounts } = useAccounts();
-
   const accountIds = useMemo(() => accounts?.map((acc) => acc.id) ?? [], [accounts]);
 
   const {
@@ -30,15 +26,6 @@ export function ContributionLimits() {
     isLoading: isLoadingValuations,
     error: errorValuations,
   } = useLatestValuations(accountIds);
-
-  // const {
-  //   data: goals,
-  //   isLoading: isLoadingGoals,
-  //   isError: isErrorGoals,
-  // } = useQuery<Goal[], Error>({
-  //   queryKey: ['goals'],
-  //   queryFn: getGoals,
-  // });
 
   const {
     data: goals,
@@ -49,52 +36,43 @@ export function ContributionLimits() {
     queryFn: getContributionLimit,
   });
 
-  // Assuming `limits` is already defined and is an array of objects with an `id` field
-  const limitProgressData = goals?.map((limit) => useContributionLimitProgress(limit?.id));
-
-  const progressDict = {}
-  // Just console.log each one (do this inside the component body)
-  limitProgressData?.forEach(({ data, isLoading }, index) => {
-    // console.log('Limit ID:', goals[index]?.id);
-    const progressValue = data ? data.total : 0;
-    console.log('Progress' + index + ':', data);
-    console.log('Progress Value' + index + ':', progressValue);
-    console.log('Is Loading:', isLoading);
-    console.log('goals', goals[index]);
-    const progressPercentageNumber =
-      goals[index].limitAmount > 0 ? (progressValue / goals[index].limitAmount) : 0;
-    const baseCurrency = data?.baseCurrency || 'USD';
-    console.log('progressPercentageNumber', progressPercentageNumber);
-    console.log('baseCurrency', baseCurrency);
-    console.log('max', goals[index].limitAmount);
-    progressDict[goals[index].id] = {"progressPercentageNumber" : progressPercentageNumber , "baseCurrency" : baseCurrency, "progressValue" : progressValue}
-  });
-
   console.log('goals', goals);
-  console.log('goals', isLoadingGoals);
-  console.log('goals', progressDict)
- 
 
-
-  const {
-    data: allocations,
-    isLoading: isLoadingAllocations,
-    isError: isErrorAllocations,
-  } = useQuery<GoalAllocation[], Error>({
-    queryKey: ['goals_allocations'],
-    queryFn: getGoalsAllocation,
+  const limitProgressQueries = useQueries({
+    queries:
+      goals?.map((goal) => ({
+        queryKey: ['contribution-progress', goal.id],
+        queryFn: () => getContributionLimitProgress(goal.id),
+        enabled: !!goal.id,
+      })) ?? [],
   });
 
-  const goalsProgress = useMemo(() => {
-    if (!latestValuations || !goals || !allocations) {
-      return undefined;
-    }
-    return calculateGoalProgress(latestValuations, goals, allocations);
-  }, [latestValuations, goals, allocations]);
+  const progressDict: Record<string, any> = {};
+  goals?.forEach((goal, index) => {
+    const query = limitProgressQueries[index];
+    console.log(query);
+    const data = query?.data;
+    const progressValue = data?.total ?? 0;
+    const baseCurrency = data?.baseCurrency ?? 'USD';
+    const progressPercentageNumber = goal.limitAmount > 0 ? progressValue / goal.limitAmount : 0;
+
+    progressDict[goal.id] = {
+      progressPercentageNumber,
+      baseCurrency,
+      progressValue,
+    };
+  });
 
   const isLoading =
-    isLoadingAccounts || isLoadingValuations || isLoadingGoals || isLoadingAllocations;
-  const isError = isErrorAccounts || !!errorValuations || isErrorGoals || isErrorAllocations;
+    isLoadingAccounts ||
+    isLoadingValuations ||
+    isLoadingGoals ||
+    limitProgressQueries.some((q) => q.isLoading);
+  const isError =
+    isErrorAccounts ||
+    !!errorValuations ||
+    isErrorGoals ||
+    limitProgressQueries.some((q) => q.isError);
 
   if (isLoading) {
     return (
@@ -139,35 +117,6 @@ export function ContributionLimits() {
     );
   }
 
-  if (!goalsProgress) {
-    return (
-      <Card className="w-full border-0 bg-transparent shadow-none">
-        <CardHeader className="py-2">
-          <CardTitle className="text-md">Contribution Limits</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Card className="w-full border-none shadow-sm">
-            <CardContent className="pt-6">
-              {goals && goals.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <Icons.Goal className="mb-2 h-12 w-12 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">No Contribution Limits set</p>
-                  <p className="text-xs text-muted-foreground">
-                    Create a goal to start tracking your progress
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
-                  <p className="text-sm">Goal data not yet available.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <TooltipProvider>
       <div className="flex flex-wrap gap-4">
@@ -181,17 +130,13 @@ export function ContributionLimits() {
                 {goals && goals.length > 0 ? (
                   [...goals]
                     .sort((a, b) => a.limitAmount - b.limitAmount)
-                    .filter(goal => goal.contributionYear == new Date().getFullYear())
+                    .filter((goal) => goal.contributionYear === new Date().getFullYear())
                     .map((goal) => {
-                      // const progressData = goalsProgress.find((p) => p.name === goal.title);
-                      // console.log("")
-                      // const testProgess = goals?.map((goal) => useContributionLimitProgress(goal.id));
-                      console.log("KOAOSDK", progressDict[goal.id]);
-                      const progressData = progressDict[goal.id]
+                      const progressData = progressDict[goal.id];
                       const currentProgress = progressData?.progressPercentageNumber ?? 0;
                       const currentValue = progressData?.progressValue ?? 0;
                       const currency =
-                        progressData?.currency ?? latestValuations?.[0]?.baseCurrency ?? 'USD';
+                        progressData?.baseCurrency ?? latestValuations?.[0]?.baseCurrency ?? 'USD';
 
                       return (
                         <Tooltip key={goal.id}>
@@ -199,7 +144,7 @@ export function ContributionLimits() {
                             <div className="mb-4 cursor-help items-center">
                               <CardDescription className="mb-2 flex items-center text-sm font-light text-muted-foreground">
                                 {goal.groupName} {goal.contributionYear}
-                                {currentProgress >= 100 ? (
+                                {currentProgress >= 1 ? (
                                   <Icons.CheckCircle className="ml-1 h-4 w-4 text-success" />
                                 ) : null}
                               </CardDescription>

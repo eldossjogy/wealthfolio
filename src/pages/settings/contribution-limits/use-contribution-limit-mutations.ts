@@ -29,6 +29,15 @@ export const useContributionLimitProgress = (limitId: string) => {
   });
 };
 
+export const getContributionLimitProgress = async (limitId: string) => {
+  try {
+    return await calculateDepositsForLimit(limitId);
+  } catch (e) {
+    logger.error(`Error calculating deposits for limit: ${e}`);
+    throw e;
+  }
+};
+
 export const useContributionLimitMutations = () => {
   const queryClient = useQueryClient();
 
