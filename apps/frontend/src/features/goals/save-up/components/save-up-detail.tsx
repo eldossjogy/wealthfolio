@@ -801,7 +801,7 @@ function LeverRow({
               onValueChange={(next) => onChange(Math.min(max, Math.max(min, next ?? 0)))}
               thousandSeparator
               maxDecimalPlaces={0}
-              className="text-foreground h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0 dark:bg-input/0"
+              className="text-foreground dark:bg-input/0 h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0"
             />
           ) : (
             <input
