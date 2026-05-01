@@ -424,7 +424,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 min={0}
                 max={sliderMaxFor(Math.max(targetAmount, currentValue), 100_000, 25_000)}
                 step={100}
-                prefix="$"
+                prefix={currency}
                 format={(v) => Math.round(v).toLocaleString()}
               />
               <DateRow
@@ -442,7 +442,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 min={0}
                 max={sliderMaxFor(monthlyContribution, 5_000, 500)}
                 step={25}
-                prefix="$"
+                prefix={currency}
                 format={(v) => Math.round(v).toLocaleString()}
               />
               <LeverRow
