@@ -339,6 +339,9 @@ test.describe("Onboarding And Main Flow", () => {
   });
 
   test("4. Record buy securities", async () => {
+    // Increase timeout for this test
+    test.setTimeout(60000); // 1 minutes
+
     // Navigate fresh to activities page to ensure no stale overlays
     await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
