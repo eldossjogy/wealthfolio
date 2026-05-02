@@ -1,5 +1,5 @@
 import { expect, Page, test } from "@playwright/test";
-import { BASE_URL, loginIfNeeded } from "./helpers";
+import { BASE_URL, completeOnboardingIfNeeded, loginIfNeeded } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -30,9 +30,7 @@ test.describe("Symbol Mapping Validation", () => {
     const resetBtn = page.getByRole("button", { name: "Reset" });
     if (await resetBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await resetBtn.click();
-      await expect(resetBtn)
-        .not.toBeVisible({ timeout: 3000 })
-        .catch(() => {});
+      await page.waitForTimeout(500);
     }
 
     // Skip creation if asset already exists
@@ -53,9 +51,7 @@ test.describe("Symbol Mapping Validation", () => {
     const resetBtn2 = page.getByRole("button", { name: "Reset" });
     if (await resetBtn2.isVisible({ timeout: 2000 }).catch(() => false)) {
       await resetBtn2.click();
-      await expect(resetBtn2)
-        .not.toBeVisible({ timeout: 3000 })
-        .catch(() => {});
+      await page.waitForTimeout(500);
     }
 
     await expect(page.getByRole("row").filter({ hasText: ASSET_SYMBOL }).first()).toBeVisible({
@@ -73,9 +69,7 @@ test.describe("Symbol Mapping Validation", () => {
     const resetBtn = page.getByRole("button", { name: "Reset" });
     if (await resetBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await resetBtn.click();
-      await expect(resetBtn)
-        .not.toBeVisible({ timeout: 3000 })
-        .catch(() => {});
+      await page.waitForTimeout(500);
     }
 
     const assetRow = page.getByRole("row").filter({ hasText: ASSET_SYMBOL }).first();
@@ -83,32 +77,19 @@ test.describe("Symbol Mapping Validation", () => {
 
     const actionsBtn = assetRow.getByRole("button", { name: "Open actions" });
 
-    // Retry loop: Radix UI dropdown may close during animation before the click lands.
-    // The table can re-render (quote updates) causing the button to detach — we retry.
-    let editClicked = false;
-    for (let attempt = 0; attempt < 5 && !editClicked; attempt++) {
-      try {
-        await actionsBtn.click({ timeout: 5000 });
-        const editItem = page.getByRole("menuitem", { name: "Edit" });
-        await expect(editItem).toBeVisible({ timeout: 3000 });
-        await editItem.click({ force: true });
-        editClicked = true;
-      } catch {
-        // button detached or menu closed before click landed — retry
-        // Brief pause before retry is unavoidable here (no observable DOM state).
-        await page.waitForTimeout(100);
-      }
-    }
-    if (!editClicked) throw new Error("Could not click Edit menu item after 5 attempts");
+    // The table can re-render (quote updates) causing the dropdown to close before the click lands.
+    // toPass() retries the whole sequence automatically until it succeeds.
+    await expect(async () => {
+      await actionsBtn.click();
+      await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible({ timeout: 2000 });
+    }).toPass({ timeout: 15000 });
+    await page.getByRole("menuitem", { name: "Edit" }).click();
 
     const editSheet = page.getByRole("dialog").first();
     await expect(editSheet).toBeVisible({ timeout: 5000 });
 
     // Click the Market Data tab
     await page.getByRole("tab", { name: "Market Data" }).click();
-    await expect(page.getByRole("switch"))
-      .toBeVisible({ timeout: 3000 })
-      .catch(() => {});
 
     // Symbol Mapping section is only visible when pricing is Automatic.
     // If the asset is in Manual mode, enable Automatic pricing first.
@@ -143,13 +124,14 @@ test.describe("Symbol Mapping Validation", () => {
     const mappingTable = page.locator("table").filter({
       has: page.getByRole("columnheader", { name: "Provider" }),
     });
-    // Remove rows one at a time until none remain
-    while (true) {
+    const MAX_ROWS = 20;
+    for (let i = 0; i < MAX_ROWS; i++) {
       const rows = mappingTable.locator("tbody tr");
       if ((await rows.count()) === 0) break;
+      if (i === MAX_ROWS - 1)
+        throw new Error("clearAllMappings: too many rows, possible infinite loop");
       const rowCountBefore = await rows.count();
-      const deleteBtn = rows.first().locator("button").last();
-      await deleteBtn.click();
+      await rows.first().locator("button").last().click();
       await expect(mappingTable.locator("tbody tr")).not.toHaveCount(rowCountBefore, {
         timeout: 3000,
       });
@@ -238,6 +220,7 @@ test.describe("Symbol Mapping Validation", () => {
 
   test("0. Setup: login and create test asset", async () => {
     test.setTimeout(180000);
+    await completeOnboardingIfNeeded(page);
     await loginIfNeeded(page);
     await ensureAssetExists();
   });
