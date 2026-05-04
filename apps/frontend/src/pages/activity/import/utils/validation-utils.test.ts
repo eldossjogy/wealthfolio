@@ -137,6 +137,38 @@ describe("validation-utils", () => {
       expect(activity.fee).toBe(5.0);
     });
 
+    it("should apply symbol mappings using trimmed CSV symbol keys", () => {
+      const testData = [
+        {
+          lineNumber: "1",
+          date: "2024-01-01T00:00:00.000Z",
+          symbol: "  Long Fund Name  ",
+          activityType: "BUY",
+          quantity: "10",
+          unitPrice: "25.00",
+          amount: "250.00",
+          fee: "0",
+          currency: "USD",
+        },
+      ];
+
+      const result = validateActivityImport(
+        testData,
+        {
+          ...testMapping,
+          symbolMappings: {
+            "Long Fund Name": "VTI",
+          },
+        },
+        "test-account",
+        "USD",
+      );
+
+      expect(result.activities).toHaveLength(1);
+      expect(result.activities[0].symbol).toBe("VTI");
+      expect(result.activities[0].isValid).toBe(true);
+    });
+
     it("should convert negative values to positive for SELL activities", () => {
       const testData = [
         {

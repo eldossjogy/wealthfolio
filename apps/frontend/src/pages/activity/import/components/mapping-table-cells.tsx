@@ -371,7 +371,7 @@ export function MappingCell({
   // Nothing to display if value is empty and not a special field
   if (!value || value.trim() === "") {
     // For symbol field, if it's invalid (e.g. empty but required), we might still want to render SymbolDisplayCell
-    if (field === ImportFormat.SYMBOL && invalidSymbols.includes(value || "")) {
+    if (field === ImportFormat.SYMBOL && invalidSymbols.includes(value.trim())) {
       // Fall through to SymbolDisplayCell rendering
     } else if (field === ImportFormat.ACCOUNT) {
       // Fall through so the row shows the missing-account state.
