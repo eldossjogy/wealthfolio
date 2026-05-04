@@ -8,7 +8,6 @@ use wealthfolio_core::{
     fx, goals, health, limits, portfolio, quotes, settings, taxonomies,
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
-use wealthfolio_market_data::YahooProvider;
 use wealthfolio_storage_sqlite::{
     portfolio::snapshot::SnapshotRepository, sync::AppSyncRepository,
 };
@@ -36,7 +35,6 @@ pub struct ServiceContext {
     pub goal_service: Arc<dyn goals::GoalServiceTrait>,
     pub asset_service: Arc<dyn assets::AssetServiceTrait>,
     pub quote_service: Arc<dyn quotes::QuoteServiceTrait>,
-    pub yahoo_provider: Arc<YahooProvider>,
     pub limits_service: Arc<dyn limits::ContributionLimitServiceTrait>,
     pub fx_service: Arc<dyn fx::FxServiceTrait>,
     pub performance_service: Arc<dyn portfolio::performance::PerformanceServiceTrait>,
@@ -99,10 +97,6 @@ impl ServiceContext {
 
     pub fn quote_service(&self) -> Arc<dyn quotes::QuoteServiceTrait> {
         Arc::clone(&self.quote_service)
-    }
-
-    pub fn yahoo_provider(&self) -> Arc<YahooProvider> {
-        Arc::clone(&self.yahoo_provider)
     }
 
     pub fn limits_service(&self) -> Arc<dyn limits::ContributionLimitServiceTrait> {

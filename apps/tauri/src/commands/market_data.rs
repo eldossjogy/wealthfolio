@@ -250,10 +250,12 @@ pub fn get_exchanges() -> Vec<ExchangeInfo> {
 #[tauri::command]
 pub async fn fetch_yahoo_dividends(
     symbol: String,
-    state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<wealthfolio_market_data::YahooDividend>, String> {
-    state
-        .yahoo_provider()
+    // Addon compatibility endpoint. Keep Yahoo-specific dividend fetching out of core services.
+    let provider = wealthfolio_market_data::YahooProvider::new()
+        .await
+        .map_err(|e| e.to_string())?;
+    provider
         .fetch_dividends(&symbol)
         .await
         .map_err(|e| e.to_string())
