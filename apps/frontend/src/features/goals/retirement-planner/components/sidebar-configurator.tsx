@@ -40,6 +40,7 @@ const DEFAULT_RETURN_SLIDER_MAX = 0.12;
 const DEFAULT_INFLATION_SLIDER_MAX = 0.06;
 const MAX_RETIREMENT_RETURN = 0.3;
 const MAX_RETIREMENT_INFLATION = 0.2;
+const RATE_SLIDER_INCREMENT = 0.02;
 const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 const HIGH_INFLATION_WARNING_THRESHOLD = DEFAULT_INFLATION_SLIDER_MAX;
 
@@ -171,7 +172,7 @@ function LeverRow({
     Math.min(inputUpperBound, Math.max(min, next ?? 0));
   const clampInputValue = (next: number) =>
     Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
-  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(value);
+  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(undefined);
   const [moneyInputFocused, setMoneyInputFocused] = useState(false);
   const skipNextMoneyCommitRef = useRef(false);
   const [draftValue, setDraftValue] = useState<string | null>(null);
@@ -832,7 +833,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.preRetirementAnnualReturn,
                 DEFAULT_RETURN_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_RETURN,
               )}
               inputMax={MAX_RETIREMENT_RETURN}
@@ -850,7 +851,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.retirementAnnualReturn,
                 DEFAULT_RETURN_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_RETURN,
               )}
               inputMax={MAX_RETIREMENT_RETURN}
@@ -879,7 +880,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.inflationRate,
                 DEFAULT_INFLATION_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_INFLATION,
               )}
               inputMax={MAX_RETIREMENT_INFLATION}
@@ -1314,7 +1315,7 @@ export function SidebarConfigurator({
                               max={rateSliderMaxFor(
                                 s.accumulationReturn ?? draft.investment.preRetirementAnnualReturn,
                                 DEFAULT_RETURN_SLIDER_MAX,
-                                0.02,
+                                RATE_SLIDER_INCREMENT,
                                 MAX_RETIREMENT_RETURN,
                               )}
                               inputMax={MAX_RETIREMENT_RETURN}
@@ -1488,7 +1489,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.preRetirementAnnualReturn,
                 DEFAULT_RETURN_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_RETURN,
               )}
               inputMax={MAX_RETIREMENT_RETURN}
@@ -1505,7 +1506,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.retirementAnnualReturn,
                 DEFAULT_RETURN_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_RETURN,
               )}
               inputMax={MAX_RETIREMENT_RETURN}
@@ -1547,7 +1548,7 @@ export function SidebarConfigurator({
               max={rateSliderMaxFor(
                 draft.investment.inflationRate,
                 DEFAULT_INFLATION_SLIDER_MAX,
-                0.02,
+                RATE_SLIDER_INCREMENT,
                 MAX_RETIREMENT_INFLATION,
               )}
               inputMax={MAX_RETIREMENT_INFLATION}

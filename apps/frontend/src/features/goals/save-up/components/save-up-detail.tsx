@@ -22,6 +22,7 @@ const SAVE_UP_MAX_TARGET_AMOUNT = 1_000_000_000_000;
 const SAVE_UP_MAX_MONTHLY_CONTRIBUTION = 1_000_000_000;
 const SAVE_UP_MAX_ANNUAL_RETURN = 0.5;
 const DEFAULT_RETURN_SLIDER_MAX = 0.12;
+const RATE_SLIDER_INCREMENT = 0.02;
 
 interface SaveUpPlanSettings {
   targetDate?: string;
@@ -462,7 +463,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 max={rateSliderMaxFor(
                   annualReturn,
                   DEFAULT_RETURN_SLIDER_MAX,
-                  0.02,
+                  RATE_SLIDER_INCREMENT,
                   SAVE_UP_MAX_ANNUAL_RETURN,
                 )}
                 inputMax={SAVE_UP_MAX_ANNUAL_RETURN}
@@ -783,7 +784,7 @@ function LeverRow({
     Math.min(inputUpperBound, Math.max(min, next ?? 0));
   const clampInputValue = (next: number) =>
     Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
-  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(value);
+  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(undefined);
   const [moneyInputFocused, setMoneyInputFocused] = useState(false);
   const skipNextMoneyCommitRef = useRef(false);
   const [draftValue, setDraftValue] = useState(format(value));
