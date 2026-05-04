@@ -82,7 +82,13 @@ export function AllocationDetailSheet({
   }, [isOpen, initialCategoryId, allocation?.categories]);
 
   // Fetch holdings for the selected category
-  const { data: allocationHoldings, isLoading: holdingsLoading } = useQuery({
+  const {
+    data: allocationHoldings,
+    isLoading: holdingsLoading,
+    isError: holdingsError,
+    error: holdingsQueryError,
+    refetch: refetchAllocationHoldings,
+  } = useQuery({
     queryKey: [
       QueryKeys.HOLDINGS_BY_ALLOCATION,
       accountId,
@@ -322,6 +328,26 @@ export function AllocationDetailSheet({
                       </div>
                     </div>
                   ))}
+                </div>
+              ) : holdingsError ? (
+                <div className="space-y-3 py-4 text-center">
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-sm">
+                      Could not load holdings for this category.
+                    </p>
+                    {holdingsQueryError?.message && (
+                      <p className="text-muted-foreground text-xs">
+                        {holdingsQueryError.message}
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchAllocationHoldings()}
+                  >
+                    Retry
+                  </Button>
                 </div>
               ) : holdings && holdings.length > 0 ? (
                 <div className="divide-y">

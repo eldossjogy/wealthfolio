@@ -15,7 +15,7 @@ use wealthfolio_core::portfolio::{snapshot::SnapshotRecalcMode, valuation::Valua
 use wealthfolio_core::quotes::{
     LatestQuoteSnapshot, MarketSyncMode, ProviderInfo, Quote, QuoteImport, SymbolSearchResult,
 };
-use wealthfolio_market_data::ExchangeInfo;
+use wealthfolio_market_data::{ExchangeInfo, YahooDividend, YahooProvider};
 
 async fn get_market_data_providers(
     State(state): State<Arc<AppState>>,
@@ -74,6 +74,24 @@ async fn get_quote_history(
 ) -> ApiResult<Json<Vec<Quote>>> {
     let res = state.quote_service.get_historical_quotes(&q.symbol)?;
     Ok(Json(res))
+}
+
+#[derive(serde::Deserialize)]
+struct YahooDividendsQuery {
+    symbol: String,
+}
+
+async fn fetch_yahoo_dividends(
+    Query(q): Query<YahooDividendsQuery>,
+) -> ApiResult<Json<Vec<YahooDividend>>> {
+    let provider = YahooProvider::new()
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let dividends = provider
+        .fetch_dividends(&q.symbol)
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(Json(dividends))
 }
 
 async fn update_quote(
@@ -283,6 +301,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/market-data/search", get(search_symbol))
         .route("/market-data/resolve-currency", get(resolve_symbol_quote))
         .route("/market-data/quotes/history", get(get_quote_history))
+        .route("/market-data/yahoo/dividends", get(fetch_yahoo_dividends))
         .route("/market-data/quotes/latest", post(get_latest_quotes))
         .route("/market-data/quotes/{symbol}", put(update_quote))
         .route("/market-data/quotes/id/{id}", delete(delete_quote))

@@ -45,6 +45,7 @@ export const COMMANDS: CommandMap = {
   get_historical_valuations: { method: "GET", path: "/valuations/history" },
   get_latest_valuations: { method: "GET", path: "/valuations/latest" },
   get_portfolio_allocations: { method: "GET", path: "/allocations" },
+  get_holdings_by_allocation: { method: "GET", path: "/allocations/holdings" },
   // Snapshot management
   get_snapshots: { method: "GET", path: "/snapshots" },
   get_snapshot_by_date: { method: "GET", path: "/snapshots/holdings" },
@@ -140,6 +141,7 @@ export const COMMANDS: CommandMap = {
   search_symbol: { method: "GET", path: "/market-data/search" },
   resolve_symbol_quote: { method: "GET", path: "/market-data/resolve-currency" },
   get_quote_history: { method: "GET", path: "/market-data/quotes/history" },
+  fetch_yahoo_dividends: { method: "GET", path: "/market-data/yahoo/dividends" },
   get_latest_quotes: { method: "POST", path: "/market-data/quotes/latest" },
   update_quote: { method: "PUT", path: "/market-data/quotes" },
   delete_quote: { method: "DELETE", path: "/market-data/quotes/id" },
@@ -442,6 +444,19 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       const { accountId } = payload as { accountId: string };
       const params = new URLSearchParams();
       params.set("accountId", accountId);
+      url += `?${params.toString()}`;
+      break;
+    }
+    case "get_holdings_by_allocation": {
+      const { accountId, taxonomyId, categoryId } = payload as {
+        accountId: string;
+        taxonomyId: string;
+        categoryId: string;
+      };
+      const params = new URLSearchParams();
+      params.set("accountId", accountId);
+      params.set("taxonomyId", taxonomyId);
+      params.set("categoryId", categoryId);
       url += `?${params.toString()}`;
       break;
     }
@@ -826,6 +841,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "get_quote_history": {
+      const { symbol } = payload as { symbol: string };
+      const params = new URLSearchParams();
+      params.set("symbol", symbol);
+      url += `?${params.toString()}`;
+      break;
+    }
+    case "fetch_yahoo_dividends": {
       const { symbol } = payload as { symbol: string };
       const params = new URLSearchParams();
       params.set("symbol", symbol);
