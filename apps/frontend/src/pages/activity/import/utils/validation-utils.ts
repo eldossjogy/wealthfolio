@@ -374,7 +374,7 @@ const activityLogicMap: Partial<Record<ActivityType, ActivityLogicConfig>> = {
     calculateSymbol: (activity) => activity.symbol,
     calculateAmount: (activity) => {
       const amt = toNum(activity.amount);
-      return amt && amt > 0 ? Math.abs(amt) : undefined;
+      return typeof amt === "number" && amt > 0 ? amt : undefined;
     },
     calculateFee: () => 0, // SPLIT typically has no fee
   },

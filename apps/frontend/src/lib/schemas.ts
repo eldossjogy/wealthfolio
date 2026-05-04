@@ -307,7 +307,8 @@ export const importActivitySchema = z
   )
   .refine(
     (data) => {
-      if (isSplitActivity(data.activityType as string)) {
+      const activityType = data.activityType;
+      if (isSplitActivity(activityType)) {
         const amount = parseNumberLike(data.amount);
         return amount !== undefined && amount > 0;
       }
