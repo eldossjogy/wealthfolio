@@ -1,0 +1,15 @@
+[Unit]
+Description=Wealthfolio Investment Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wealthfolio
+EnvironmentFile=/opt/wealthfolio/.env
+ExecStart=/usr/local/bin/wealthfolio-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

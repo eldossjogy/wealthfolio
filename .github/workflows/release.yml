@@ -106,3 +106,84 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }} ${{ steps.win-bundles.outputs.args }}
+
+  prebuild-server-linux:
+    # Standalone server tarball for self-hosters (Proxmox LXC, bare metal, systemd).
+    # Tracks: https://github.com/afadil/wealthfolio/issues/563
+    # Built on ubuntu-22.04 (glibc 2.35) for forward compatibility with Debian 12+/Ubuntu 22.04+.
+    needs: release
+    # Run even if some matrix entries in `release` failed (fail-fast is off).
+    # Only skip on explicit cancellation.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libsqlite3-dev build-essential
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: prebuild-server-linux-amd64
+
+      - name: pnpm setup
+        run: npm install -g pnpm
+
+      - name: Sync node version and setup cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend (web target)
+        env:
+          BUILD_TARGET: web
+          CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
+          CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
+        run: pnpm --filter frontend... build
+
+      - name: Build server binary
+        env:
+          CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
+          CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
+          CONNECT_API_URL: ${{ vars.CONNECT_API_URL }}
+        run: cargo build --release --manifest-path apps/server/Cargo.toml
+
+      - name: Stage tarball contents
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="wealthfolio-server-${VERSION}-linux-amd64"
+          mkdir -p "${STAGE}"
+          cp target/release/wealthfolio-server "${STAGE}/wealthfolio-server"
+          cp -r dist "${STAGE}/dist"
+          cp LICENSE "${STAGE}/LICENSE" 2>/dev/null || true
+          cp packaging/server-prebuild/wealthfolio.service.example "${STAGE}/wealthfolio.service.example"
+          cp packaging/server-prebuild/README.md "${STAGE}/README.md"
+
+      - name: Create tarball + checksum
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="wealthfolio-server-${VERSION}-linux-amd64"
+          tar -czf "${STAGE}.tar.gz" "${STAGE}"
+          sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+
+      - name: Upload to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: |
+            wealthfolio-server-*-linux-amd64.tar.gz
+            wealthfolio-server-*-linux-amd64.tar.gz.sha256
