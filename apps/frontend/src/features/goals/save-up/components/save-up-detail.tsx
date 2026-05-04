@@ -7,15 +7,21 @@ import type {
   SaveUpPreviewInputDTO,
   SaveUpProjectionPointDTO,
 } from "@/lib/types";
+import { formatDateISO } from "@/lib/utils";
 import { AmountDisplay, Button, DatePickerInput, MoneyInput } from "@wealthfolio/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@wealthfolio/ui/components/ui/card";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GoalFundingEditor } from "../../components/goal-funding-editor";
 import { useGoalPlanMutations, useSaveUpPreview } from "../../hooks/use-goal-detail";
 import { useGoalMutations } from "../../hooks/use-goals";
 import { SaveUpProjectionCard } from "./save-up-projection-card";
 import { buildSavingsMilestones, SavingsMilestonesCard } from "./savings-milestones-card";
+
+const SAVE_UP_MAX_TARGET_AMOUNT = 1_000_000_000_000;
+const SAVE_UP_MAX_MONTHLY_CONTRIBUTION = 1_000_000_000;
+const SAVE_UP_MAX_ANNUAL_RETURN = 0.5;
+const DEFAULT_RETURN_SLIDER_MAX = 0.12;
 
 interface SaveUpPlanSettings {
   targetDate?: string;
@@ -423,6 +429,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 onChange={setTargetAmount}
                 min={0}
                 max={sliderMaxFor(Math.max(targetAmount, currentValue), 100_000, 25_000)}
+                inputMax={SAVE_UP_MAX_TARGET_AMOUNT}
                 step={100}
                 prefix="$"
                 format={(v) => Math.round(v).toLocaleString()}
@@ -441,6 +448,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 onChange={setMonthlyContribution}
                 min={0}
                 max={sliderMaxFor(monthlyContribution, 5_000, 500)}
+                inputMax={SAVE_UP_MAX_MONTHLY_CONTRIBUTION}
                 step={25}
                 prefix="$"
                 format={(v) => Math.round(v).toLocaleString()}
@@ -451,7 +459,13 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 value={annualReturn}
                 onChange={setAnnualReturn}
                 min={0}
-                max={0.12}
+                max={rateSliderMaxFor(
+                  annualReturn,
+                  DEFAULT_RETURN_SLIDER_MAX,
+                  0.02,
+                  SAVE_UP_MAX_ANNUAL_RETURN,
+                )}
+                inputMax={SAVE_UP_MAX_ANNUAL_RETURN}
                 step={0.001}
                 suffix="%"
                 format={(v) => (v * 100).toFixed(1)}
@@ -565,6 +579,11 @@ function formatGoalDate(value?: string | null) {
 
 function sliderMaxFor(value: number, baseMax: number, increment: number) {
   return Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
+}
+
+function rateSliderMaxFor(value: number, baseMax: number, increment: number, inputMax: number) {
+  if (value <= baseMax) return baseMax;
+  return Math.min(inputMax, Math.ceil(value / increment) * increment + increment);
 }
 
 function HeroMetric({ label, children }: { label: string; children: React.ReactNode }) {
@@ -737,6 +756,7 @@ function LeverRow({
   onChange,
   min,
   max,
+  inputMax,
   step,
   prefix,
   suffix,
@@ -749,6 +769,7 @@ function LeverRow({
   onChange: (v: number) => void;
   min: number;
   max: number;
+  inputMax?: number;
   step: number;
   prefix?: string;
   suffix?: string;
@@ -757,8 +778,14 @@ function LeverRow({
   const clampedValue = Math.min(max, Math.max(min, value));
   const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
   const inputScale = suffix === "%" ? 100 : 1;
+  const inputUpperBound = inputMax ?? max;
+  const clampMoneyInputValue = (next: number | undefined) =>
+    Math.min(inputUpperBound, Math.max(min, next ?? 0));
   const clampInputValue = (next: number) =>
-    Math.min(max * inputScale, Math.max(min * inputScale, next)) / inputScale;
+    Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
+  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(value);
+  const [moneyInputFocused, setMoneyInputFocused] = useState(false);
+  const skipNextMoneyCommitRef = useRef(false);
   const [draftValue, setDraftValue] = useState(format(value));
   const [inputFocused, setInputFocused] = useState(false);
 
@@ -767,6 +794,19 @@ function LeverRow({
       setDraftValue(format(value));
     }
   }, [format, inputFocused, value]);
+
+  const commitMoneyDraftValue = () => {
+    if (skipNextMoneyCommitRef.current) {
+      skipNextMoneyCommitRef.current = false;
+      setMoneyInputFocused(false);
+      return;
+    }
+    if (!moneyInputFocused) return;
+    const next = clampMoneyInputValue(moneyDraftValue);
+    onChange(next);
+    setMoneyDraftValue(next);
+    setMoneyInputFocused(false);
+  };
 
   const commitDraftValue = () => {
     const raw = draftValue.trim();
@@ -793,14 +833,35 @@ function LeverRow({
           <div className="text-foreground text-sm font-semibold leading-tight">{label}</div>
           {hint && <div className="text-muted-foreground mt-1 text-xs leading-tight">{hint}</div>}
         </div>
-        <div className="bg-muted/70 flex h-8 w-32 items-center gap-1 rounded-md border px-2.5">
+        <div
+          className="bg-muted/70 flex h-8 w-32 items-center gap-1 rounded-md border px-2.5"
+          onFocus={
+            kind === "money"
+              ? () => {
+                  setMoneyInputFocused(true);
+                  setMoneyDraftValue(value);
+                }
+              : undefined
+          }
+          onBlur={kind === "money" ? commitMoneyDraftValue : undefined}
+        >
           {prefix && <span className="text-muted-foreground text-xs tabular-nums">{prefix}</span>}
           {kind === "money" ? (
             <MoneyInput
-              value={value}
-              onValueChange={(next) => onChange(Math.min(max, Math.max(min, next ?? 0)))}
+              value={moneyInputFocused ? moneyDraftValue : value}
+              onValueChange={setMoneyDraftValue}
               thousandSeparator
               maxDecimalPlaces={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                }
+                if (e.key === "Escape") {
+                  skipNextMoneyCommitRef.current = true;
+                  setMoneyDraftValue(value);
+                  e.currentTarget.blur();
+                }
+              }}
               className="text-foreground h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0"
             />
           ) : (
@@ -872,7 +933,7 @@ function DateRow({
       </div>
       <DatePickerInput
         value={value || undefined}
-        onChange={(date) => onChange(date ? date.toISOString().split("T")[0] : "")}
+        onChange={(date) => onChange(date ? formatDateISO(date) : "")}
       />
     </div>
   );

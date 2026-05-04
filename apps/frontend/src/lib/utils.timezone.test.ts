@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDateTime, resolveDisplayTimezone } from "./utils";
+import { formatDateISO, formatDateTime, resolveDisplayTimezone } from "./utils";
 
 describe("timezone formatting", () => {
   it("formats with configured timezone", () => {
@@ -33,5 +33,19 @@ describe("timezone formatting", () => {
 
     const formatted = formatDateTime(instant, "Mars/Phobos");
     expect(formatted.date).toBe(expectedDate);
+  });
+
+  it("formats date picker dates without UTC day shift", () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = "Europe/Helsinki";
+
+    try {
+      const selectedDate = new Date(2026, 4, 2);
+
+      expect(selectedDate.toISOString().split("T")[0]).toBe("2026-05-01");
+      expect(formatDateISO(selectedDate)).toBe("2026-05-02");
+    } finally {
+      process.env.TZ = originalTimezone;
+    }
   });
 });
