@@ -2,7 +2,7 @@
 
 Wealthfolio runs as a standard Docker container managed through Unraid's Docker
 tab. The Community Apps (CA) template lives next to this README at
-[`template.xml`](./template.xml) — CA fetches it directly from the repo.
+[`template.xml`](./template.xml). CA fetches it directly from the repo.
 
 📘 **Full setup guide:**
 [wealthfolio.app/docs/guide/self-hosting](https://wealthfolio.app/docs/guide/self-hosting)

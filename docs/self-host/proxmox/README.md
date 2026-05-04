@@ -10,7 +10,7 @@ Docker paths are faster but introduce nesting.
 📘 **Full setup guide:**
 [wealthfolio.app/docs/guide/self-hosting](https://wealthfolio.app/docs/guide/self-hosting)
 
-## Getting started — LXC (recommended)
+## Getting started: LXC (recommended)
 
 Open a shell on the **Proxmox host** (not inside an existing container) and run:
 
@@ -21,7 +21,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 Defaults: Debian 13, 4 CPU / 4 GB RAM / 10 GB disk, port `8080`. Credentials are
 written to `/root/wealthfolio.creds` inside the container.
 
-## Getting started — Docker
+## Getting started: Docker
 
 If you already run a Docker host (LXC or VM) on Proxmox, just deploy the
 container there like any other service. See the website guide above for the full

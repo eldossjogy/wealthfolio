@@ -24,9 +24,9 @@ docker pull afadil/wealthfolio:latest
 
 ## Platform pointers
 
-- [**Docker / Docker Compose**](https://wealthfolio.app/docs/guide/self-hosting)
-  — the canonical path. Full walkthrough on the website.
-- [**Unraid**](./unraid/) — install via Community Apps. The CA template lives in
+- [**Docker / Docker Compose**](https://wealthfolio.app/docs/guide/self-hosting):
+  the canonical path. Full walkthrough on the website.
+- [**Unraid**](./unraid/): install via Community Apps. The CA template lives in
   this repo at [`unraid/template.xml`](./unraid/template.xml).
-- [**Proxmox VE**](./proxmox/) — LXC via community-scripts, Docker-in-LXC, or
+- [**Proxmox VE**](./proxmox/): LXC via community-scripts, Docker-in-LXC, or
   Docker VM.
