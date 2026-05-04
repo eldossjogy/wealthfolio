@@ -84,7 +84,7 @@ Full guide: https://github.com/afadil/wealthfolio/blob/main/docs/self-host/unrai
       <Mode/>
     </Variable>
     <Variable>
-      <Value>30000</Value>
+      <Value>300000</Value>
       <Name>WF_REQUEST_TIMEOUT_MS</Name>
       <Mode/>
     </Variable>
@@ -101,7 +101,7 @@ Full guide: https://github.com/afadil/wealthfolio/blob/main/docs/self-host/unrai
   <Config Name="WF_CORS_ALLOW_ORIGINS" Target="WF_CORS_ALLOW_ORIGINS" Default="" Mode="" Description="REQUIRED when auth is enabled. Comma-separated list of origins allowed to call the API. Must EXACTLY match the URL in your browser's address bar (scheme + host + port). Example: http://192.168.1.10:8088 or https://wealthfolio.example.com" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="WF_AUTH_REQUIRED" Target="WF_AUTH_REQUIRED" Default="true" Mode="" Description="Set to 'false' if a reverse proxy handles authentication (in which case leave WF_AUTH_PASSWORD_HASH empty)." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="WF_AUTH_TOKEN_TTL_MINUTES" Target="WF_AUTH_TOKEN_TTL_MINUTES" Default="60" Mode="" Description="JWT access token lifetime in minutes." Type="Variable" Display="advanced" Required="false" Mask="false">60</Config>
-  <Config Name="WF_REQUEST_TIMEOUT_MS" Target="WF_REQUEST_TIMEOUT_MS" Default="30000" Mode="" Description="HTTP request timeout in milliseconds." Type="Variable" Display="advanced" Required="false" Mask="false">30000</Config>
+  <Config Name="WF_REQUEST_TIMEOUT_MS" Target="WF_REQUEST_TIMEOUT_MS" Default="300000" Mode="" Description="HTTP request timeout in milliseconds. Default is 5 minutes — generous to accommodate large broker syncs." Type="Variable" Display="advanced" Required="false" Mask="false">300000</Config>
   <Config Name="WF_LISTEN_ADDR" Target="WF_LISTEN_ADDR" Default="0.0.0.0:8088" Mode="" Description="Bind address inside the container. Leave at 0.0.0.0:8088 unless you know what you're doing." Type="Variable" Display="advanced" Required="true" Mask="false">0.0.0.0:8088</Config>
   <Config Name="WF_DB_PATH" Target="WF_DB_PATH" Default="/data/wealthfolio.db" Mode="" Description="SQLite database path inside the container. Must live under /data so it persists." Type="Variable" Display="advanced" Required="true" Mask="false">/data/wealthfolio.db</Config>
   <Config Name="WF_LOG_FORMAT" Target="WF_LOG_FORMAT" Default="text" Mode="" Description="Log format: 'text' (human-readable) or 'json' (structured)." Type="Variable" Display="advanced" Required="false" Mask="false">text</Config>
