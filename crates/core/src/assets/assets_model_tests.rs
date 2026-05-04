@@ -432,6 +432,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_bond_to_instrument_id_prefers_metadata_isin() {
+        let asset = Asset {
+            instrument_type: Some(InstrumentType::Bond),
+            instrument_symbol: Some("BBG00VM3B640".to_string()),
+            metadata: Some(json!({
+                "identifiers": {
+                    "isin": "IT0005415291"
+                }
+            })),
+            ..create_test_asset(AssetKind::Investment)
+        };
+
+        let id = asset.to_instrument_id().unwrap();
+        match id {
+            crate::assets::InstrumentId::Bond { ref isin } => {
+                assert_eq!(isin.as_ref(), "IT0005415291");
+            }
+            _ => panic!("expected InstrumentId::Bond"),
+        }
+    }
+
+    #[test]
+    fn test_bond_to_instrument_id_falls_back_to_symbol() {
+        let asset = Asset {
+            instrument_type: Some(InstrumentType::Bond),
+            instrument_symbol: Some("US912797NQ65".to_string()),
+            metadata: Some(json!({ "identifiers": {} })),
+            ..create_test_asset(AssetKind::Investment)
+        };
+
+        let id = asset.to_instrument_id().unwrap();
+        match id {
+            crate::assets::InstrumentId::Bond { ref isin } => {
+                assert_eq!(isin.as_ref(), "US912797NQ65");
+            }
+            _ => panic!("expected InstrumentId::Bond"),
+        }
+    }
+
     // Helper function
     fn create_test_asset(kind: AssetKind) -> Asset {
         let quote_mode = match kind {

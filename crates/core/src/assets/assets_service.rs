@@ -155,6 +155,31 @@ impl AssetService {
         }
     }
 
+    fn metadata_identifier<'a>(
+        metadata: Option<&'a serde_json::Value>,
+        key: &str,
+    ) -> Option<&'a str> {
+        metadata
+            .and_then(|m| m.get("identifiers"))
+            .and_then(|v| v.as_object())
+            .and_then(|ids| ids.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
+    fn should_reset_sync_state_after_profile_change(before: &Asset, after: &Asset) -> bool {
+        before.quote_mode != after.quote_mode
+            || before.quote_ccy != after.quote_ccy
+            || before.instrument_type != after.instrument_type
+            || before.instrument_symbol != after.instrument_symbol
+            || before.instrument_exchange_mic != after.instrument_exchange_mic
+            || before.provider_config != after.provider_config
+            || ((before.is_bond() || after.is_bond())
+                && Self::metadata_identifier(before.metadata.as_ref(), "isin")
+                    != Self::metadata_identifier(after.metadata.as_ref(), "isin"))
+    }
+
     /// Creates a new AssetService instance
     pub fn new(
         asset_repository: Arc<dyn AssetRepositoryTrait>,
@@ -379,6 +404,19 @@ impl AssetServiceTrait for AssetService {
             .asset_repository
             .update_profile(asset_id, payload)
             .await?;
+
+        if Self::should_reset_sync_state_after_profile_change(&existing_asset, &asset) {
+            if let Err(err) = self
+                .quote_service
+                .reset_sync_state_for_profile_change(&asset.id)
+                .await
+            {
+                warn!(
+                    "Failed to reset quote sync state after asset profile update for {}: {}",
+                    asset.id, err
+                );
+            }
+        }
 
         self.event_sink
             .emit(DomainEvent::assets_updated(vec![asset.id.clone()]));
@@ -1351,7 +1389,7 @@ impl AssetServiceTrait for AssetService {
 
 #[cfg(test)]
 mod tests {
-    use super::super::assets_model::InstrumentType;
+    use super::super::assets_model::{Asset, AssetKind, InstrumentType};
     use super::{AssetService, QuoteMode};
 
     #[test]
@@ -1440,5 +1478,73 @@ mod tests {
             Some(serde_json::json!({ "preferred_provider": "BOERSE_FRANKFURT" })),
             "ISIN-backed XETR/XFRA equities should prefer Boerse Frankfurt"
         );
+    }
+
+    #[test]
+    fn test_profile_provider_change_resets_sync_state() {
+        let before = Asset {
+            provider_config: Some(serde_json::json!({ "preferred_provider": "YAHOO" })),
+            ..test_market_asset()
+        };
+        let after = Asset {
+            provider_config: Some(serde_json::json!({
+                "preferred_provider": "BOERSE_FRANKFURT"
+            })),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_bond_isin_metadata_change_resets_sync_state() {
+        let before = Asset {
+            instrument_type: Some(InstrumentType::Bond),
+            metadata: Some(serde_json::json!({
+                "identifiers": {
+                    "isin": "US912797NQ65"
+                }
+            })),
+            ..test_market_asset()
+        };
+        let after = Asset {
+            metadata: Some(serde_json::json!({
+                "identifiers": {
+                    "isin": "IT0005415291"
+                }
+            })),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_notes_change_does_not_reset_sync_state() {
+        let before = test_market_asset();
+        let after = Asset {
+            notes: Some("Updated notes".to_string()),
+            ..before.clone()
+        };
+
+        assert!(!AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    fn test_market_asset() -> Asset {
+        Asset {
+            id: "asset-1".to_string(),
+            kind: AssetKind::Investment,
+            quote_mode: QuoteMode::Market,
+            quote_ccy: "USD".to_string(),
+            instrument_type: Some(InstrumentType::Equity),
+            instrument_symbol: Some("AAPL".to_string()),
+            ..Default::default()
+        }
     }
 }

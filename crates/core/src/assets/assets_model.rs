@@ -409,42 +409,68 @@ impl Asset {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
+    fn metadata_identifier(&self, key: &str) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| m.get("identifiers"))
+            .and_then(|v| v.as_object())
+            .and_then(|ids| ids.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
     /// Convert to canonical instrument for market data resolution.
     /// Returns None for asset kinds that are not resolvable to market data.
     pub fn to_instrument_id(&self) -> Option<InstrumentId> {
         let inst_type = self.instrument_type.as_ref()?;
-        let symbol = self.instrument_symbol.as_ref()?;
 
         match inst_type {
-            InstrumentType::Equity => Some(InstrumentId::Equity {
-                ticker: Arc::from(symbol.as_str()),
-                mic: self
-                    .instrument_exchange_mic
-                    .as_ref()
-                    .map(|s| Cow::Owned(s.clone())),
-            }),
-            InstrumentType::Crypto => Some(InstrumentId::Crypto {
-                base: Arc::from(symbol.as_str()),
-                quote: Cow::Owned(self.quote_ccy.clone()),
-            }),
-            InstrumentType::Fx => Some(InstrumentId::Fx {
-                base: Cow::Owned(symbol.clone()),
-                quote: Cow::Owned(self.quote_ccy.clone()),
-            }),
-            InstrumentType::Metal => Some(InstrumentId::Metal {
-                code: Arc::from(symbol.as_str()),
-                quote: Cow::Owned(self.quote_ccy.clone()),
-            }),
+            InstrumentType::Equity => {
+                let symbol = self.instrument_symbol.as_ref()?;
+                Some(InstrumentId::Equity {
+                    ticker: Arc::from(symbol.as_str()),
+                    mic: self
+                        .instrument_exchange_mic
+                        .as_ref()
+                        .map(|s| Cow::Owned(s.clone())),
+                })
+            }
+            InstrumentType::Crypto => {
+                let symbol = self.instrument_symbol.as_ref()?;
+                Some(InstrumentId::Crypto {
+                    base: Arc::from(symbol.as_str()),
+                    quote: Cow::Owned(self.quote_ccy.clone()),
+                })
+            }
+            InstrumentType::Fx => {
+                let symbol = self.instrument_symbol.as_ref()?;
+                Some(InstrumentId::Fx {
+                    base: Cow::Owned(symbol.clone()),
+                    quote: Cow::Owned(self.quote_ccy.clone()),
+                })
+            }
+            InstrumentType::Metal => {
+                let symbol = self.instrument_symbol.as_ref()?;
+                Some(InstrumentId::Metal {
+                    code: Arc::from(symbol.as_str()),
+                    quote: Cow::Owned(self.quote_ccy.clone()),
+                })
+            }
             InstrumentType::Option => {
+                let symbol = self.instrument_symbol.as_ref()?;
                 // OCC symbol is stored as instrument_symbol
                 Some(InstrumentId::Option {
                     occ_symbol: Arc::from(symbol.as_str()),
                 })
             }
             InstrumentType::Bond => {
-                // ISIN is stored as instrument_symbol
+                let isin = self
+                    .metadata_identifier("isin")
+                    .map(|isin| isin.to_uppercase())
+                    .or_else(|| self.instrument_symbol.as_ref().map(|s| s.to_uppercase()))?;
                 Some(InstrumentId::Bond {
-                    isin: Arc::from(symbol.as_str()),
+                    isin: Arc::from(isin),
                 })
             }
         }
