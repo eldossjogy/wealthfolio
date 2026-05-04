@@ -336,9 +336,7 @@ export function AllocationDetailSheet({
                       Could not load holdings for this category.
                     </p>
                     {holdingsQueryError?.message && (
-                      <p className="text-muted-foreground text-xs">
-                        {holdingsQueryError.message}
-                      </p>
+                      <p className="text-muted-foreground text-xs">{holdingsQueryError.message}</p>
                     )}
                   </div>
                   <Button
