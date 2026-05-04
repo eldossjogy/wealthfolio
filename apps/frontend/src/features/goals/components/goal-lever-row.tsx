@@ -51,8 +51,7 @@ export function GoalLeverRow({
   const inputUpperBound = inputMax ?? max;
   const sliderUpperBound = Math.min(max, inputUpperBound);
   const clampedValue = Math.min(sliderUpperBound, Math.max(min, value));
-  const pct =
-    sliderUpperBound > min ? ((clampedValue - min) / (sliderUpperBound - min)) * 100 : 0;
+  const pct = sliderUpperBound > min ? ((clampedValue - min) / (sliderUpperBound - min)) * 100 : 0;
   const clampSliderValue = (next: number) => Math.min(inputUpperBound, Math.max(min, next));
   const clampMoneyInputValue = (next: number | undefined) =>
     Math.min(inputUpperBound, Math.max(min, next ?? 0));
