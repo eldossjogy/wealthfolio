@@ -156,10 +156,19 @@ jobs:
 
       - name: Build server binary
         env:
+          OPENSSL_STATIC: "1"
           CONNECT_AUTH_URL: ${{ vars.CONNECT_AUTH_URL }}
           CONNECT_AUTH_PUBLISHABLE_KEY: ${{ vars.CONNECT_AUTH_PUBLISHABLE_KEY }}
           CONNECT_API_URL: ${{ vars.CONNECT_API_URL }}
         run: cargo build --release --manifest-path apps/server/Cargo.toml
+
+      - name: Verify server binary runtime dependencies
+        run: |
+          ldd target/release/wealthfolio-server
+          if ldd target/release/wealthfolio-server | grep -E 'lib(ssl|crypto)\.so'; then
+            echo "Server binary still links dynamically to OpenSSL"
+            exit 1
+          fi
 
       - name: Stage tarball contents
         run: |

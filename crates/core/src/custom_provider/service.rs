@@ -1112,61 +1112,73 @@ fn detect_html_tables(body: &str) -> Vec<DetectedHtmlTable> {
     tables
 }
 
-/// Extract a single numeric value from an HTML table using "table_idx:col_idx" path.
-fn extract_table_value(body: &str, path: &str, locale: Option<&str>) -> Option<f64> {
+/// Parse a "table_idx:col_idx" path.
+fn parse_table_path(path: &str) -> Option<(usize, usize)> {
     let parts: Vec<&str> = path.split(':').collect();
     if parts.len() != 2 {
         return None;
     }
-    let table_idx: usize = parts[0].parse().ok()?;
-    let col_idx: usize = parts[1].parse().ok()?;
+    Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
+}
 
+/// Return the data rows of the Nth `<table>` in the document, skipping the
+/// header row in the same way `detect_html_tables` does (so column indices
+/// reported in the preview match the cells extracted here):
+/// - if the table has any `<thead><th>` cells, all `<td>` rows are data rows;
+/// - else if the first `<tr>` is `<th>`-only, it's the header and `<td>` rows
+///   that follow are data;
+/// - else the very first `<td>` row is treated as the header row.
+fn extract_table_data_rows(body: &str, table_idx: usize) -> Option<Vec<Vec<String>>> {
     let document = scraper::Html::parse_document(body);
     let table_sel = scraper::Selector::parse("table").ok()?;
     let table_el = document.select(&table_sel).nth(table_idx)?;
 
     let tr_sel = scraper::Selector::parse("tr").ok()?;
+    let th_sel = scraper::Selector::parse("th").ok()?;
     let td_sel = scraper::Selector::parse("td").ok()?;
+    let thead_sel = scraper::Selector::parse("thead th").ok()?;
 
-    // Find first row with <td> cells
-    for tr in table_el.select(&tr_sel) {
+    let mut headers_seen = table_el.select(&thead_sel).next().is_some();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    for (row_idx, tr) in table_el.select(&tr_sel).enumerate() {
         let cells: Vec<String> = tr.select(&td_sel).map(extract_cell_text).collect();
-        if cells.is_empty() || col_idx >= cells.len() {
+        if cells.is_empty() {
+            // <th>-only row counts as a header row
+            if !headers_seen && tr.select(&th_sel).next().is_some() {
+                headers_seen = true;
+            }
             continue;
         }
-        return parse_number_string(&cells[col_idx], locale);
+        if !headers_seen && row_idx == 0 {
+            // First <tr> has <td>s but no <th>/<thead> exists — it's the header row
+            headers_seen = true;
+            continue;
+        }
+        rows.push(cells);
     }
-    None
+
+    Some(rows)
+}
+
+/// Extract a single numeric value from an HTML table using "table_idx:col_idx" path.
+fn extract_table_value(body: &str, path: &str, locale: Option<&str>) -> Option<f64> {
+    let (table_idx, col_idx) = parse_table_path(path)?;
+    let rows = extract_table_data_rows(body, table_idx)?;
+    let cell = rows.first()?.get(col_idx)?;
+    parse_number_string(cell, locale)
 }
 
 /// Extract a raw cell string (e.g. a date) from an HTML table using "table:col".
 fn extract_table_string(body: &str, path: &str) -> Option<String> {
-    let parts: Vec<&str> = path.split(':').collect();
-    if parts.len() != 2 {
-        return None;
+    let (table_idx, col_idx) = parse_table_path(path)?;
+    let rows = extract_table_data_rows(body, table_idx)?;
+    let s = rows.first()?.get(col_idx)?.trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
     }
-    let table_idx: usize = parts[0].parse().ok()?;
-    let col_idx: usize = parts[1].parse().ok()?;
-
-    let document = scraper::Html::parse_document(body);
-    let table_sel = scraper::Selector::parse("table").ok()?;
-    let table_el = document.select(&table_sel).nth(table_idx)?;
-
-    let tr_sel = scraper::Selector::parse("tr").ok()?;
-    let td_sel = scraper::Selector::parse("td").ok()?;
-
-    for tr in table_el.select(&tr_sel) {
-        let cells: Vec<String> = tr.select(&td_sel).map(extract_cell_text).collect();
-        if cells.is_empty() || col_idx >= cells.len() {
-            continue;
-        }
-        let s = cells[col_idx].trim().to_string();
-        if s.is_empty() {
-            return None;
-        }
-        return Some(s);
-    }
-    None
 }
 
 // ─── CSV parsing ─────────────────────────────────────────────────────────────
@@ -1255,4 +1267,70 @@ pub fn detect_html_locale(body: &str) -> Option<String> {
     let el = document.select(&sel).next()?;
     let lang = el.value().attr("lang")?;
     Some(lang[..2.min(lang.len())].to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Header row uses <td> (no <thead>/<th>) — like ariva.de's historical
+    // prices table. The first <td> row is the headers, not data.
+    const TD_HEADER_TABLE: &str = r#"<html><body><table>
+        <tr><td>Datum</td><td>Erster</td><td>Hoch</td><td>Tief</td><td>Schluss</td><td>Volumen</td></tr>
+        <tr><td>04.05.26</td><td>781,68 €</td><td>794,70 €</td><td>781,68 €</td><td>794,70 €</td><td>1.589 €</td></tr>
+        <tr><td>30.04.26</td><td>805,57 €</td><td>805,57 €</td><td>798,89 €</td><td>798,89 €</td><td>0 €</td></tr>
+    </table></body></html>"#;
+
+    #[test]
+    fn extract_table_value_skips_td_header_row() {
+        // Column 4 ("Schluss") of the first data row is "794,70 €" → 794.70.
+        // Before the fix this returned None because the header row "Schluss"
+        // was being parsed as a number.
+        assert_eq!(
+            extract_table_value(TD_HEADER_TABLE, "0:4", Some("de-DE")),
+            Some(794.70)
+        );
+    }
+
+    #[test]
+    fn extract_table_string_skips_td_header_row() {
+        // Column 0 of the first data row is "04.05.26", not the "Datum" header.
+        assert_eq!(
+            extract_table_string(TD_HEADER_TABLE, "0:0"),
+            Some("04.05.26".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_value_with_thead_does_not_skip_data() {
+        // When proper <thead><th> is used, all <td> rows are data rows.
+        let body = r#"<html><body><table>
+            <thead><tr><th>Date</th><th>Close</th></tr></thead>
+            <tbody>
+                <tr><td>2026-05-04</td><td>123.45</td></tr>
+                <tr><td>2026-05-03</td><td>120.00</td></tr>
+            </tbody>
+        </table></body></html>"#;
+        assert_eq!(
+            extract_table_value(body, "0:1", Some("en-US")),
+            Some(123.45)
+        );
+        assert_eq!(
+            extract_table_string(body, "0:0"),
+            Some("2026-05-04".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_table_value_with_th_only_header_row() {
+        // <th> header row outside <thead> still counts as headers.
+        let body = r#"<html><body><table>
+            <tr><th>Date</th><th>Close</th></tr>
+            <tr><td>2026-05-04</td><td>123.45</td></tr>
+        </table></body></html>"#;
+        assert_eq!(
+            extract_table_value(body, "0:1", Some("en-US")),
+            Some(123.45)
+        );
+    }
 }

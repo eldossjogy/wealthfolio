@@ -1,5 +1,6 @@
 import type { Goal, GoalType, PlannerMode } from "@/lib/types";
 import { useSettingsContext } from "@/lib/settings-provider";
+import { formatDateISO } from "@/lib/utils";
 import {
   Button,
   DatePickerInput,
@@ -411,9 +412,7 @@ export default function GoalNewPage() {
                         <DatePickerInput
                           id="goal-target-date"
                           value={targetDate}
-                          onChange={(date) =>
-                            setTargetDate(date ? date.toISOString().split("T")[0] : "")
-                          }
+                          onChange={(date) => setTargetDate(date ? formatDateISO(date) : "")}
                         />
                       </div>
 

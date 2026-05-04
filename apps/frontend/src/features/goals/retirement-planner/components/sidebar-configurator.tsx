@@ -1,6 +1,16 @@
 import type { RetirementOverview } from "@/lib/types";
 import { GoalFundingEditor } from "@/features/goals/components/goal-funding-editor";
 import {
+  GoalLeverRow as LeverRow,
+  rateSliderMaxFor,
+  sliderMaxFor,
+} from "@/features/goals/components/goal-lever-row";
+import {
+  DEFAULT_RETURN_SLIDER_MAX,
+  RATE_SLIDER_INCREMENT,
+  highReturnWarning,
+} from "@/features/goals/components/goal-lever-constants";
+import {
   AnimatedToggleGroup,
   Button,
   Card,
@@ -8,9 +18,9 @@ import {
   CardHeader,
   CardTitle,
   formatAmount,
+  formatCurrencySymbol,
   formatPercent,
   Input,
-  MoneyInput,
 } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
@@ -36,22 +46,24 @@ import type {
   TaxProfile,
 } from "../types";
 
-function currencySymbol(currency: string) {
-  try {
-    return (
-      new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: currency || "USD",
-        currencyDisplay: "narrowSymbol",
-        maximumFractionDigits: 0,
-      })
-        .formatToParts(0)
-        .find((part) => part.type === "currency")?.value ?? "$"
-    );
-  } catch {
-    return "$";
-  }
-}
+const DEFAULT_INFLATION_SLIDER_MAX = 0.06;
+const DEFAULT_FEE_SLIDER_MAX = 0.03;
+const DEFAULT_VOLATILITY_SLIDER_MAX = 0.5;
+const DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX = 0.1;
+// Keep hard caps in sync with validate_retirement_plan in crates/core/src/goals/goals_service.rs.
+const MAX_RETIREMENT_RETURN = 0.5;
+const MAX_RETIREMENT_INFLATION = 0.2;
+const MAX_RETIREMENT_FEE = 0.1;
+const MAX_RETIREMENT_VOLATILITY = 1;
+const MAX_RETIREMENT_CONTRIBUTION_GROWTH = 0.25;
+const MAX_RETIREMENT_INCOME_GROWTH = 0.2;
+const FEE_SLIDER_INCREMENT = 0.01;
+const VOLATILITY_SLIDER_INCREMENT = 0.1;
+const CONTRIBUTION_GROWTH_SLIDER_INCREMENT = 0.05;
+const HIGH_INFLATION_WARNING_THRESHOLD = DEFAULT_INFLATION_SLIDER_MAX;
+const HIGH_FEE_WARNING_THRESHOLD = DEFAULT_FEE_SLIDER_MAX;
+const HIGH_VOLATILITY_WARNING_THRESHOLD = DEFAULT_VOLATILITY_SLIDER_MAX;
+const HIGH_CONTRIBUTION_GROWTH_WARNING_THRESHOLD = DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX;
 
 /** Read-only label:value row */
 function InfoLabel({ label, children }: { label: string; children: React.ReactNode }) {
@@ -126,126 +138,32 @@ function SidebarTotalRow({ amount, currency }: { amount: number; currency: strin
   );
 }
 
-/** A lever: title + hint + compact readout input + full-width slider. */
-function LeverRow({
-  label,
-  hint,
-  kind = "number",
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  prefix,
-  suffix,
-  format,
-}: {
-  label: React.ReactNode;
-  hint?: string;
-  kind?: "money" | "number";
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step: number;
-  prefix?: string;
-  suffix?: string;
-  format: (v: number) => string;
-}) {
-  const clampedValue = Math.min(max, Math.max(min, value));
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
-  const inputScale = suffix === "%" ? 100 : 1;
-  const clampInputValue = (next: number) =>
-    Math.min(max * inputScale, Math.max(min * inputScale, next)) / inputScale;
-  const [draftValue, setDraftValue] = useState<string | null>(null);
-  const displayValue = draftValue ?? format(value);
-
-  const commitDraftValue = () => {
-    const raw = displayValue.trim();
-    if (!raw) {
-      setDraftValue(null);
-      return;
-    }
-
-    const parsed = parseFloat(raw.replace(/,/g, ""));
-    if (Number.isNaN(parsed)) {
-      setDraftValue(null);
-      return;
-    }
-
-    const next = clampInputValue(parsed);
-    onChange(next);
-    setDraftValue(null);
-  };
-
-  return (
-    <div className="py-4 first:pt-1 last:pb-1">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-foreground text-sm font-semibold leading-tight">{label}</div>
-          {hint && <div className="text-muted-foreground mt-1 text-xs leading-tight">{hint}</div>}
-        </div>
-        <div className="bg-muted/70 flex h-8 w-32 items-center gap-1 rounded-md border px-2.5">
-          {prefix && <span className="text-muted-foreground text-xs tabular-nums">{prefix}</span>}
-          {kind === "money" ? (
-            <MoneyInput
-              value={value}
-              onValueChange={(next) => onChange(Math.min(max, Math.max(min, next ?? 0)))}
-              thousandSeparator
-              maxDecimalPlaces={0}
-              className="text-foreground h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0"
-            />
-          ) : (
-            <input
-              type="text"
-              inputMode={suffix === "%" ? "decimal" : "numeric"}
-              value={displayValue}
-              onFocus={() => {
-                setDraftValue(format(value));
-              }}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (/^-?\d*([.,]\d*)?$/.test(next)) {
-                  setDraftValue(next);
-                }
-              }}
-              onBlur={() => {
-                commitDraftValue();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Escape") {
-                  setDraftValue(null);
-                }
-              }}
-              className="text-foreground w-full min-w-0 bg-transparent text-right text-sm tabular-nums outline-none"
-            />
-          )}
-          {suffix && <span className="text-muted-foreground text-xs tabular-nums">{suffix}</span>}
-        </div>
-      </div>
-      <input
-        type="range"
-        value={clampedValue}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="lever-slider mt-3 w-full"
-        style={{ ["--lever-pct" as string]: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
 function pctOfTotal(value: number, total: number) {
   return total > 0 ? ((value / total) * 100).toFixed(0) + "%" : "0%";
 }
 
-function sliderMaxFor(value: number, baseMax: number, increment: number) {
-  return Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
+function highInflationWarning(value: number) {
+  return value > HIGH_INFLATION_WARNING_THRESHOLD
+    ? "High inflation assumption. Long-range spending needs become more sensitive at this rate."
+    : undefined;
+}
+
+function highFeeWarning(value: number) {
+  return value > HIGH_FEE_WARNING_THRESHOLD
+    ? "High fee assumption. Fee drag materially reduces long-term returns."
+    : undefined;
+}
+
+function highVolatilityWarning(value: number) {
+  return value > HIGH_VOLATILITY_WARNING_THRESHOLD
+    ? "High volatility assumption. Outcome ranges can become very wide."
+    : undefined;
+}
+
+function highContributionGrowthWarning(value: number) {
+  return value > HIGH_CONTRIBUTION_GROWTH_WARNING_THRESHOLD
+    ? "High contribution growth assumption. This assumes sustained large savings increases."
+    : undefined;
 }
 
 function AgeBoundInput({
@@ -322,10 +240,12 @@ function AgeBoundInput({
 function PercentOverrideInput({
   value,
   placeholder,
+  max,
   onChange,
 }: {
   value?: number;
   placeholder: string;
+  max: number;
   onChange: (value: number | undefined) => void;
 }) {
   const formatDraft = useCallback(
@@ -355,7 +275,7 @@ function PercentOverrideInput({
           }
           const parsed = parseFloat(raw);
           if (!Number.isNaN(parsed)) {
-            onChange(Math.min(50, Math.max(0, parsed)) / 100);
+            onChange(Math.min(max * 100, Math.max(0, parsed)) / 100);
           }
         }}
         className="text-foreground min-w-0 flex-1 bg-transparent text-right text-sm tabular-nums outline-none placeholder:text-left placeholder:text-xs"
@@ -464,7 +384,7 @@ export function SidebarConfigurator({
   const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
   const [expandedIncomeId, setExpandedIncomeId] = useState<string | null>(null);
   const L = modeLabel(draftMode);
-  const moneyPrefix = currencySymbol(currency);
+  const moneyPrefix = formatCurrencySymbol(currency);
 
   const update = useCallback((updater: (d: RetirementPlan) => RetirementPlan) => {
     setDraft((prev) => updater(prev));
@@ -756,10 +676,17 @@ export function SidebarConfigurator({
               value={draft.investment.preRetirementAnnualReturn}
               onChange={(v) => setInvestment("preRetirementAnnualReturn", v)}
               min={0}
-              max={0.12}
+              max={rateSliderMaxFor(
+                draft.investment.preRetirementAnnualReturn,
+                DEFAULT_RETURN_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_RETURN,
+              )}
+              inputMax={MAX_RETIREMENT_RETURN}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highReturnWarning(draft.investment.preRetirementAnnualReturn)}
             />
             <LeverRow
               label="Return during retirement"
@@ -767,10 +694,17 @@ export function SidebarConfigurator({
               value={draft.investment.retirementAnnualReturn}
               onChange={(v) => setInvestment("retirementAnnualReturn", v)}
               min={0}
-              max={0.1}
+              max={rateSliderMaxFor(
+                draft.investment.retirementAnnualReturn,
+                DEFAULT_RETURN_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_RETURN,
+              )}
+              inputMax={MAX_RETIREMENT_RETURN}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highReturnWarning(draft.investment.retirementAnnualReturn)}
             />
             <LeverRow
               label="Annual investment fee"
@@ -778,10 +712,17 @@ export function SidebarConfigurator({
               value={draft.investment.annualInvestmentFeeRate}
               onChange={(v) => setInvestment("annualInvestmentFeeRate", v)}
               min={0}
-              max={0.03}
+              max={rateSliderMaxFor(
+                draft.investment.annualInvestmentFeeRate,
+                DEFAULT_FEE_SLIDER_MAX,
+                FEE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_FEE,
+              )}
+              inputMax={MAX_RETIREMENT_FEE}
               step={0.0005}
               suffix="%"
               format={(v) => (v * 100).toFixed(2)}
+              warning={highFeeWarning(draft.investment.annualInvestmentFeeRate)}
             />
             <LeverRow
               label="Inflation"
@@ -789,10 +730,17 @@ export function SidebarConfigurator({
               value={draft.investment.inflationRate}
               onChange={(v) => setInvestment("inflationRate", v)}
               min={0}
-              max={0.06}
+              max={rateSliderMaxFor(
+                draft.investment.inflationRate,
+                DEFAULT_INFLATION_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_INFLATION,
+              )}
+              inputMax={MAX_RETIREMENT_INFLATION}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highInflationWarning(draft.investment.inflationRate)}
             />
           </div>
         }
@@ -973,6 +921,7 @@ export function SidebarConfigurator({
                           <PercentOverrideInput
                             value={item.inflationRate}
                             placeholder={`Plan ${(draft.investment.inflationRate * 100).toFixed(1)}`}
+                            max={MAX_RETIREMENT_INFLATION}
                             onChange={(value) =>
                               updateExpenseItem(item.id, { inflationRate: value })
                             }
@@ -1217,10 +1166,19 @@ export function SidebarConfigurator({
                               }
                               onChange={(v) => updateStream(s.id, { accumulationReturn: v })}
                               min={0}
-                              max={0.12}
+                              max={rateSliderMaxFor(
+                                s.accumulationReturn ?? draft.investment.preRetirementAnnualReturn,
+                                DEFAULT_RETURN_SLIDER_MAX,
+                                RATE_SLIDER_INCREMENT,
+                                MAX_RETIREMENT_RETURN,
+                              )}
+                              inputMax={MAX_RETIREMENT_RETURN}
                               step={0.001}
                               suffix="%"
                               format={(v) => (v * 100).toFixed(1)}
+                              warning={highReturnWarning(
+                                s.accumulationReturn ?? draft.investment.preRetirementAnnualReturn,
+                              )}
                             />
                             {s.startAge <= draft.personal.currentAge && (
                               <LeverRow
@@ -1295,6 +1253,7 @@ export function SidebarConfigurator({
                                 ? `Inflation ${(draft.investment.inflationRate * 100).toFixed(1)}`
                                 : "Fixed 0.0"
                             }
+                            max={MAX_RETIREMENT_INCOME_GROWTH}
                             onChange={(value) => updateStream(s.id, { annualGrowthRate: value })}
                           />
                         </div>
@@ -1382,30 +1341,51 @@ export function SidebarConfigurator({
               value={draft.investment.preRetirementAnnualReturn}
               onChange={(v) => setInvestment("preRetirementAnnualReturn", v)}
               min={0}
-              max={0.12}
+              max={rateSliderMaxFor(
+                draft.investment.preRetirementAnnualReturn,
+                DEFAULT_RETURN_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_RETURN,
+              )}
+              inputMax={MAX_RETIREMENT_RETURN}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highReturnWarning(draft.investment.preRetirementAnnualReturn)}
             />
             <LeverRow
               label="Return during retirement"
               value={draft.investment.retirementAnnualReturn}
               onChange={(v) => setInvestment("retirementAnnualReturn", v)}
               min={0}
-              max={0.1}
+              max={rateSliderMaxFor(
+                draft.investment.retirementAnnualReturn,
+                DEFAULT_RETURN_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_RETURN,
+              )}
+              inputMax={MAX_RETIREMENT_RETURN}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highReturnWarning(draft.investment.retirementAnnualReturn)}
             />
             <LeverRow
               label="Annual investment fee"
               value={draft.investment.annualInvestmentFeeRate}
               onChange={(v) => setInvestment("annualInvestmentFeeRate", v)}
               min={0}
-              max={0.03}
+              max={rateSliderMaxFor(
+                draft.investment.annualInvestmentFeeRate,
+                DEFAULT_FEE_SLIDER_MAX,
+                FEE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_FEE,
+              )}
+              inputMax={MAX_RETIREMENT_FEE}
               step={0.0005}
               suffix="%"
               format={(v) => (v * 100).toFixed(2)}
+              warning={highFeeWarning(draft.investment.annualInvestmentFeeRate)}
             />
             <LeverRow
               label={
@@ -1417,30 +1397,51 @@ export function SidebarConfigurator({
               value={draft.investment.annualVolatility}
               onChange={(v) => setInvestment("annualVolatility", v)}
               min={0}
-              max={0.5}
+              max={rateSliderMaxFor(
+                draft.investment.annualVolatility,
+                DEFAULT_VOLATILITY_SLIDER_MAX,
+                VOLATILITY_SLIDER_INCREMENT,
+                MAX_RETIREMENT_VOLATILITY,
+              )}
+              inputMax={MAX_RETIREMENT_VOLATILITY}
               step={0.005}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highVolatilityWarning(draft.investment.annualVolatility)}
             />
             <LeverRow
               label="Inflation"
               value={draft.investment.inflationRate}
               onChange={(v) => setInvestment("inflationRate", v)}
               min={0}
-              max={0.06}
+              max={rateSliderMaxFor(
+                draft.investment.inflationRate,
+                DEFAULT_INFLATION_SLIDER_MAX,
+                RATE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_INFLATION,
+              )}
+              inputMax={MAX_RETIREMENT_INFLATION}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highInflationWarning(draft.investment.inflationRate)}
             />
             <LeverRow
               label="Contribution growth per year"
               value={draft.investment.contributionGrowthRate}
               onChange={(v) => setInvestment("contributionGrowthRate", v)}
               min={0}
-              max={0.1}
+              max={rateSliderMaxFor(
+                draft.investment.contributionGrowthRate,
+                DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX,
+                CONTRIBUTION_GROWTH_SLIDER_INCREMENT,
+                MAX_RETIREMENT_CONTRIBUTION_GROWTH,
+              )}
+              inputMax={MAX_RETIREMENT_CONTRIBUTION_GROWTH}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highContributionGrowthWarning(draft.investment.contributionGrowthRate)}
             />
           </div>
         }

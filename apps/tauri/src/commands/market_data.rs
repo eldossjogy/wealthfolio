@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use log::{debug, error};
+use log::{debug, error, warn};
 use tauri::{AppHandle, State};
 use wealthfolio_core::quotes::{
     service::ProviderInfo, LatestQuoteSnapshot, MarketSyncMode, Quote, QuoteImport,
@@ -52,6 +52,19 @@ pub async fn sync_market_data(
         .market_sync_mode(market_sync_mode)
         .build();
     emit_portfolio_trigger_update(&handle, payload);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn synch_quotes(state: State<'_, Arc<ServiceContext>>) -> Result<(), String> {
+    let result = state
+        .quote_service()
+        .resync(None)
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.failed > 0 {
+        warn!("resync reported {} failures", result.failed);
+    }
     Ok(())
 }
 
@@ -238,6 +251,7 @@ pub fn get_exchanges() -> Vec<ExchangeInfo> {
 pub async fn fetch_yahoo_dividends(
     symbol: String,
 ) -> Result<Vec<wealthfolio_market_data::YahooDividend>, String> {
+    // Addon compatibility endpoint. Keep Yahoo-specific dividend fetching out of core services.
     let provider = wealthfolio_market_data::YahooProvider::new()
         .await
         .map_err(|e| e.to_string())?;

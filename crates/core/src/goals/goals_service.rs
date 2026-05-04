@@ -20,6 +20,10 @@ const RETIREMENT_ELIGIBLE_ACCOUNT_TYPES: &[&str] = &["SECURITIES", "CASH", "CRYP
 const GOAL_LIFECYCLE_ACTIVE: &str = "active";
 const GOAL_LIFECYCLE_ACHIEVED: &str = "achieved";
 const GOAL_LIFECYCLE_ARCHIVED: &str = "archived";
+const RETIREMENT_MIN_ANNUAL_RETURN: f64 = -0.20;
+const RETIREMENT_MAX_ANNUAL_RETURN: f64 = 0.50;
+const RETIREMENT_MAX_ANNUAL_INVESTMENT_FEE: f64 = 0.10;
+const RETIREMENT_MAX_ANNUAL_VOLATILITY: f64 = 1.0;
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -261,22 +265,27 @@ pub fn validate_retirement_plan(plan: &RetirementPlan) -> Result<()> {
     validate_finite_range(
         "Return before retirement",
         i.pre_retirement_annual_return,
-        -0.20,
-        0.30,
+        RETIREMENT_MIN_ANNUAL_RETURN,
+        RETIREMENT_MAX_ANNUAL_RETURN,
     )?;
     validate_finite_range(
         "Return during retirement",
         i.retirement_annual_return,
-        -0.20,
-        0.30,
+        RETIREMENT_MIN_ANNUAL_RETURN,
+        RETIREMENT_MAX_ANNUAL_RETURN,
     )?;
     validate_finite_range(
         "Annual investment fee",
         i.annual_investment_fee_rate,
         0.0,
-        0.05,
+        RETIREMENT_MAX_ANNUAL_INVESTMENT_FEE,
     )?;
-    validate_finite_range("Annual volatility", i.annual_volatility, 0.0, 0.50)?;
+    validate_finite_range(
+        "Annual volatility",
+        i.annual_volatility,
+        0.0,
+        RETIREMENT_MAX_ANNUAL_VOLATILITY,
+    )?;
     validate_finite_range("Inflation", i.inflation_rate, -0.10, 0.20)?;
     validate_non_negative_amount("Monthly contribution", i.monthly_contribution)?;
     validate_finite_range(
@@ -307,7 +316,12 @@ pub fn validate_retirement_plan(plan: &RetirementPlan) -> Result<()> {
             validate_non_negative_amount("Defined-contribution contribution", value)?;
         }
         if let Some(value) = stream.accumulation_return {
-            validate_finite_range("Defined-contribution return", value, -0.20, 0.30)?;
+            validate_finite_range(
+                "Defined-contribution return",
+                value,
+                RETIREMENT_MIN_ANNUAL_RETURN,
+                RETIREMENT_MAX_ANNUAL_RETURN,
+            )?;
         }
     }
     if let Some(ref tax) = plan.tax {
@@ -1462,6 +1476,30 @@ mod tests {
             .expect_err("invalid tax penalty should be rejected")
             .to_string()
             .contains("Early withdrawal penalty"));
+    }
+
+    #[test]
+    fn retirement_plan_validation_accepts_frontend_assumption_caps() {
+        let mut plan = valid_retirement_plan();
+        plan.investment.pre_retirement_annual_return = RETIREMENT_MAX_ANNUAL_RETURN;
+        plan.investment.retirement_annual_return = RETIREMENT_MAX_ANNUAL_RETURN;
+        plan.investment.annual_investment_fee_rate = RETIREMENT_MAX_ANNUAL_INVESTMENT_FEE;
+        plan.investment.annual_volatility = RETIREMENT_MAX_ANNUAL_VOLATILITY;
+        plan.income_streams.push(RetirementIncomeStream {
+            id: "dc".into(),
+            label: "Defined contribution".into(),
+            stream_type: StreamKind::DefinedContribution,
+            start_age: 45,
+            adjust_for_inflation: false,
+            annual_growth_rate: None,
+            monthly_amount: None,
+            linked_account_id: None,
+            current_value: Some(10_000.0),
+            monthly_contribution: Some(100.0),
+            accumulation_return: Some(RETIREMENT_MAX_ANNUAL_RETURN),
+        });
+
+        validate_retirement_plan(&plan).expect("frontend caps should validate");
     }
 
     #[tokio::test]
