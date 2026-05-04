@@ -149,9 +149,17 @@ pub async fn process_portfolio_job(
 
         match sync_result {
             Ok(result) => {
+                let skipped_reasons: Vec<(String, String)> = result
+                    .skipped_reasons
+                    .into_iter()
+                    .map(|(asset_id, reason)| (asset_id, reason.to_string()))
+                    .collect();
                 event_bus.publish(ServerEvent::with_payload(
                     MARKET_SYNC_COMPLETE,
-                    json!({ "failed_syncs": result.failed }),
+                    json!({
+                        "failed_syncs": result.failures,
+                        "skipped_reasons": skipped_reasons,
+                    }),
                 ));
                 tracing::info!("Market data sync completed in {:?}", sync_start.elapsed());
                 state.health_service.clear_cache().await;

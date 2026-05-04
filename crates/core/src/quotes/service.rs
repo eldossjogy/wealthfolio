@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use crate::utils::time_utils;
 
 use super::client::{MarketDataClient, ProviderConfig};
-use super::constants::{DATA_SOURCE_CUSTOM_SCRAPER, DATA_SOURCE_MANUAL};
+use super::constants::{DATA_SOURCE_CUSTOM_SCRAPER, DATA_SOURCE_MANUAL, MAX_SYNC_ERRORS};
 use super::import::{ImportValidationStatus, QuoteConverter, QuoteImport, QuoteValidator};
 use super::model::{LatestQuotePair, Quote, ResolvedQuote, SymbolSearchResult};
 use super::store::{ProviderSettingsStore, QuoteStore};
@@ -178,10 +178,19 @@ fn resolved_provider_matches_requested(
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatestQuoteSnapshot {
-    pub quote: Quote,
+    pub quote: Option<Quote>,
     pub is_stale: bool,
     pub effective_market_date: String,
-    pub quote_date: String,
+    pub quote_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_quote_reason: Option<NoQuoteReason>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoQuoteReason {
+    pub code: String,
+    pub message: String,
 }
 
 /// Unified trait for all quote operations.
@@ -696,6 +705,81 @@ where
             score: 100.0, // High score for existing assets
         }
     }
+
+    fn no_quote_reason(asset: Option<&Asset>, state: Option<&QuoteSyncState>) -> NoQuoteReason {
+        if let Some(asset) = asset {
+            if asset.quote_mode == QuoteMode::Manual {
+                return NoQuoteReason {
+                    code: "MANUAL_PRICING".to_string(),
+                    message: "Quote mode is Manual".to_string(),
+                };
+            }
+
+            if !asset.is_active {
+                return NoQuoteReason {
+                    code: "INACTIVE".to_string(),
+                    message: "Asset is inactive".to_string(),
+                };
+            }
+
+            if asset.is_bond() {
+                if let Some(spec) = asset.bond_spec() {
+                    if let Some(maturity) = spec.maturity_date {
+                        if maturity < Utc::now().date_naive() {
+                            return NoQuoteReason {
+                                code: "MATURED_BOND".to_string(),
+                                message: "Bond has matured".to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+
+            if asset.is_option() {
+                if let Some(spec) = asset.option_spec() {
+                    if spec.expiration < Utc::now().date_naive() {
+                        return NoQuoteReason {
+                            code: "EXPIRED_OPTION".to_string(),
+                            message: "Option has expired".to_string(),
+                        };
+                    }
+                }
+            }
+        }
+
+        if let Some(state) = state {
+            if state.error_count >= MAX_SYNC_ERRORS {
+                return NoQuoteReason {
+                    code: "TOO_MANY_ERRORS".to_string(),
+                    message: "Sync paused after repeated errors".to_string(),
+                };
+            }
+
+            if let Some(last_error) = state
+                .last_error
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                return NoQuoteReason {
+                    code: "LAST_ERROR".to_string(),
+                    message: format!("Last sync error: {}", last_error),
+                };
+            }
+
+            if state.last_synced_at.is_none() {
+                return NoQuoteReason {
+                    code: "PENDING_SYNC".to_string(),
+                    message: "No provider quote has been synced yet".to_string(),
+                };
+            }
+        }
+
+        NoQuoteReason {
+            code: "NO_DATA".to_string(),
+            message: "No data available from provider yet".to_string(),
+        }
+    }
 }
 
 #[async_trait]
@@ -746,6 +830,7 @@ where
             .into_iter()
             .map(|asset| (asset.id.clone(), asset))
             .collect();
+        let sync_states = self.sync_state_store.get_by_asset_ids(asset_ids)?;
         let now = Utc::now();
 
         for (asset_id, quote) in quotes.iter_mut() {
@@ -754,26 +839,39 @@ where
             }
         }
 
-        let snapshots = quotes
-            .into_iter()
-            .map(|(asset_id, quote)| {
-                let asset = assets_by_id.get(&asset_id);
+        let snapshots = asset_ids
+            .iter()
+            .map(|asset_id| {
+                let asset = assets_by_id.get(asset_id);
                 let effective_today = time_utils::market_effective_date(
                     now,
                     asset.and_then(|a| a.instrument_exchange_mic.as_deref()),
                 );
-                let quote_day = quote.timestamp.date_naive();
-                let is_inactive = asset.map(|a| !a.is_active).unwrap_or(false);
+                let snapshot = if let Some(quote) = quotes.remove(asset_id) {
+                    let quote_day = quote.timestamp.date_naive();
+                    let is_inactive = asset.map(|a| !a.is_active).unwrap_or(false);
 
-                (
-                    asset_id,
                     LatestQuoteSnapshot {
-                        quote,
+                        quote: Some(quote),
                         is_stale: is_inactive || quote_day < effective_today,
                         effective_market_date: effective_today.to_string(),
-                        quote_date: quote_day.to_string(),
-                    },
-                )
+                        quote_date: Some(quote_day.to_string()),
+                        no_quote_reason: None,
+                    }
+                } else {
+                    LatestQuoteSnapshot {
+                        quote: None,
+                        is_stale: true,
+                        effective_market_date: effective_today.to_string(),
+                        quote_date: None,
+                        no_quote_reason: Some(Self::no_quote_reason(
+                            asset,
+                            sync_states.get(asset_id),
+                        )),
+                    }
+                };
+
+                (asset_id.clone(), snapshot)
             })
             .collect();
 
@@ -2252,9 +2350,18 @@ mod tests {
 
         fn get_by_asset_ids(
             &self,
-            _asset_ids: &[String],
+            asset_ids: &[String],
         ) -> Result<HashMap<String, QuoteSyncState>> {
-            unimplemented!("unused in this test")
+            let states = self.states.lock().unwrap();
+            Ok(asset_ids
+                .iter()
+                .filter_map(|asset_id| {
+                    states
+                        .get(asset_id)
+                        .cloned()
+                        .map(|state| (asset_id.clone(), state))
+                })
+                .collect())
         }
 
         fn get_active_assets(&self) -> Result<Vec<QuoteSyncState>> {
@@ -2785,6 +2892,100 @@ mod tests {
         assert!(updated.last_error.is_none());
         assert_eq!(updated.last_synced_at, state.last_synced_at);
         assert_eq!(updated.profile_enriched_at, state.profile_enriched_at);
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_error_cooldown() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: Some(now),
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: MAX_SYNC_ERRORS,
+            last_error: Some("provider failed".to_string()),
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "TOO_MANY_ERRORS");
+        assert_eq!(reason.message, "Sync paused after repeated errors");
+    }
+
+    #[test]
+    fn test_no_quote_reason_prefers_manual_pricing() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Manual,
+            is_active: true,
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "MANUAL_PRICING");
+        assert_eq!(reason.message, "Quote mode is Manual");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_expired_option() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            instrument_type: Some(InstrumentType::Option),
+            metadata: Some(serde_json::json!({
+                "option": crate::assets::OptionSpec {
+                    underlying_asset_id: "underlying_1".to_string(),
+                    expiration: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+                    right: "CALL".to_string(),
+                    strike: dec!(100),
+                    multiplier: dec!(100),
+                    occ_symbol: None,
+                }
+            })),
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "EXPIRED_OPTION");
+        assert_eq!(reason.message, "Option has expired");
     }
 
     #[test]

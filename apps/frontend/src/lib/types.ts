@@ -672,10 +672,14 @@ export interface Quote {
 }
 
 export interface LatestQuoteSnapshot {
-  quote: Quote;
+  quote?: Quote | null;
   isStale: boolean;
   effectiveMarketDate: string; // YYYY-MM-DD in market timezone semantics
-  quoteDate: string; // YYYY-MM-DD extracted from quote timestamp
+  quoteDate?: string | null; // YYYY-MM-DD extracted from quote timestamp
+  noQuoteReason?: {
+    code: string;
+    message: string;
+  } | null;
 }
 
 export interface QuoteUpdate {

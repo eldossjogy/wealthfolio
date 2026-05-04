@@ -28,7 +28,7 @@ import {
 } from "@wealthfolio/ui/components/ui/sheet";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
-import { isStaleQuote, ParsedAsset } from "./asset-utils";
+import { getNoQuoteReasonText, isStaleQuote, ParsedAsset } from "./asset-utils";
 
 interface AssetsTableMobileProps {
   assets: ParsedAsset[];
@@ -246,34 +246,56 @@ export function AssetsTableMobile({
 
               <div className="flex flex-shrink-0 items-center gap-2">
                 <div className="text-right text-sm">
-                  {latestQuotes[asset.id]?.quote ? (
-                    <>
-                      <div className="flex items-center justify-end gap-1 font-semibold">
-                        {formatAmount(
-                          latestQuotes[asset.id].quote.close,
-                          latestQuotes[asset.id].quote.currency ?? asset.quoteCcy ?? baseCurrency,
-                        )}
-                        {isStaleQuote(latestQuotes[asset.id], asset) ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Icons.AlertTriangle
-                                className="text-destructive h-3.5 w-3.5"
-                                aria-label="Quote is behind market day"
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              Latest quote is behind the current market day
-                            </TooltipContent>
-                          </Tooltip>
-                        ) : null}
+                  {(() => {
+                    const snapshot = latestQuotes[asset.id];
+                    const quote = snapshot?.quote;
+
+                    if (quote) {
+                      return (
+                        <>
+                          <div className="flex items-center justify-end gap-1 font-semibold">
+                            {formatAmount(
+                              quote.close,
+                              quote.currency ?? asset.quoteCcy ?? baseCurrency,
+                            )}
+                            {isStaleQuote(snapshot, asset) ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Icons.AlertTriangle
+                                    className="text-destructive h-3.5 w-3.5"
+                                    aria-label="Quote is behind market day"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Latest quote is behind the current market day
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                          <p className="text-muted-foreground text-xs">
+                            {formatDate(quote.timestamp)}
+                          </p>
+                        </>
+                      );
+                    }
+
+                    const noQuoteReason = getNoQuoteReasonText(snapshot, asset);
+
+                    return (
+                      <div className="flex items-center justify-end gap-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Icons.AlertTriangle
+                              className="h-3.5 w-3.5 text-amber-500"
+                              aria-label={noQuoteReason}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent>{noQuoteReason}</TooltipContent>
+                        </Tooltip>
+                        <span className="text-muted-foreground text-xs">No quotes</span>
                       </div>
-                      <p className="text-muted-foreground text-xs">
-                        {formatDate(latestQuotes[asset.id].quote.timestamp)}
-                      </p>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">No quotes</span>
-                  )}
+                    );
+                  })()}
                 </div>
 
                 <DropdownMenu>

@@ -189,10 +189,11 @@ mod tests {
                     (
                         asset_id,
                         LatestQuoteSnapshot {
-                            quote,
+                            quote: Some(quote),
                             is_stale: quote_day < today,
                             effective_market_date: today.to_string(),
-                            quote_date: quote_day.to_string(),
+                            quote_date: Some(quote_day.to_string()),
+                            no_quote_reason: None,
                         },
                     )
                 })

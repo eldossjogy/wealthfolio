@@ -82,6 +82,11 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                             Ok(result) => {
                                 // Convert SyncResult to legacy format for backwards compatibility
                                 let failed_syncs = result.failures;
+                                let skipped_reasons = result
+                                    .skipped_reasons
+                                    .into_iter()
+                                    .map(|(asset_id, reason)| (asset_id, reason.to_string()))
+                                    .collect();
 
                                 let health_service = context.health_service();
                                 let health_clone = health_service.clone();
@@ -89,7 +94,10 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                                     health_clone.clear_cache().await;
                                 });
 
-                                let result_payload = MarketSyncResult { failed_syncs };
+                                let result_payload = MarketSyncResult {
+                                    failed_syncs,
+                                    skipped_reasons,
+                                };
                                 if let Err(e) =
                                     handle_clone.emit(MARKET_SYNC_COMPLETE, &result_payload)
                                 {

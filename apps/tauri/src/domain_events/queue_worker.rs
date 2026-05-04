@@ -283,11 +283,19 @@ async fn run_portfolio_job(
         match sync_result {
             Ok(result) => {
                 let failed_syncs = result.failures;
+                let skipped_reasons = result
+                    .skipped_reasons
+                    .into_iter()
+                    .map(|(asset_id, reason)| (asset_id, reason.to_string()))
+                    .collect();
 
                 let health_service = context.health_service();
                 health_service.clear_cache().await;
 
-                let result_payload = MarketSyncResult { failed_syncs };
+                let result_payload = MarketSyncResult {
+                    failed_syncs,
+                    skipped_reasons,
+                };
                 if let Err(e) = app_handle.emit(MARKET_SYNC_COMPLETE, &result_payload) {
                     error!("Failed to emit market:sync-complete event: {}", e);
                 }

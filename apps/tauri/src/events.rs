@@ -34,6 +34,8 @@ pub const MARKET_SYNC_COMPLETE: &str = "market:sync-complete";
 pub struct MarketSyncResult {
     /// List of (asset_id, error_message) tuples for failed syncs.
     pub failed_syncs: Vec<(String, String)>,
+    /// List of (asset_id, reason) tuples for skipped syncs.
+    pub skipped_reasons: Vec<(String, String)>,
 }
 
 /// Event emitted when the market data sync process encounters an error.

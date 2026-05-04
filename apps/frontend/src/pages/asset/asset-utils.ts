@@ -53,6 +53,25 @@ export const isStaleQuote = (snapshot?: LatestQuoteSnapshot, asset?: ParsedAsset
   return snapshot.isStale;
 };
 
+export const getNoQuoteReasonText = (
+  snapshot?: LatestQuoteSnapshot,
+  asset?: ParsedAsset,
+): string => {
+  if (snapshot?.noQuoteReason?.message) {
+    return snapshot.noQuoteReason.message;
+  }
+
+  if (asset?.quoteMode === "MANUAL") {
+    return "Quote mode is Manual";
+  }
+
+  if (asset?.isActive === false) {
+    return "Asset is inactive";
+  }
+
+  return "No data available from provider yet";
+};
+
 const normalizeWeight = (weight: unknown): number => {
   if (weight === null || weight === undefined) {
     return 0;

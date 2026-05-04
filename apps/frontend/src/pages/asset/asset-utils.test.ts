@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetKind } from "@/lib/constants";
 import type { Asset } from "@/lib/types";
-import { isExpiredOptionAsset } from "./asset-utils";
+import { getNoQuoteReasonText, isExpiredOptionAsset, toParsedAsset } from "./asset-utils";
 
 const makeAsset = (overrides: Partial<Asset> = {}): Asset => ({
   id: "asset-1",
@@ -63,5 +63,31 @@ describe("isExpiredOptionAsset", () => {
         "UTC",
       ),
     ).toBe(false);
+  });
+});
+
+describe("getNoQuoteReasonText", () => {
+  it("uses the backend reason when present", () => {
+    expect(
+      getNoQuoteReasonText({
+        quote: null,
+        isStale: true,
+        effectiveMarketDate: "2026-04-27",
+        quoteDate: null,
+        noQuoteReason: {
+          code: "TOO_MANY_ERRORS",
+          message: "Sync paused after repeated errors",
+        },
+      }),
+    ).toBe("Sync paused after repeated errors");
+  });
+
+  it("falls back to asset state when the snapshot has no reason", () => {
+    expect(getNoQuoteReasonText(undefined, toParsedAsset(makeAsset({ quoteMode: "MANUAL" })))).toBe(
+      "Quote mode is Manual",
+    );
+    expect(getNoQuoteReasonText(undefined, toParsedAsset(makeAsset({ isActive: false })))).toBe(
+      "Asset is inactive",
+    );
   });
 });
