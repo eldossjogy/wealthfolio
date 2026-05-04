@@ -28,6 +28,7 @@ const SAVE_UP_MAX_MONTHLY_CONTRIBUTION = 1_000_000_000;
 const SAVE_UP_MAX_ANNUAL_RETURN = 0.5;
 const DEFAULT_RETURN_SLIDER_MAX = 0.12;
 const RATE_SLIDER_INCREMENT = 0.02;
+const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 
 interface SaveUpPlanSettings {
   targetDate?: string;
@@ -72,6 +73,12 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   }, [delay, value]);
 
   return debouncedValue;
+}
+
+function highReturnWarning(value: number) {
+  return value > HIGH_RETURN_WARNING_THRESHOLD
+    ? "High return assumption. This assumes consistently beating broad market returns."
+    : undefined;
 }
 
 interface Props {
@@ -476,6 +483,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 step={0.001}
                 suffix="%"
                 format={(v) => (v * 100).toFixed(1)}
+                warning={highReturnWarning(annualReturn)}
               />
             </>
           }

@@ -43,11 +43,23 @@ import type {
 
 const DEFAULT_RETURN_SLIDER_MAX = 0.12;
 const DEFAULT_INFLATION_SLIDER_MAX = 0.06;
-const MAX_RETIREMENT_RETURN = 0.3;
+const DEFAULT_FEE_SLIDER_MAX = 0.03;
+const DEFAULT_VOLATILITY_SLIDER_MAX = 0.5;
+const DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX = 0.1;
+const MAX_RETIREMENT_RETURN = 0.5;
 const MAX_RETIREMENT_INFLATION = 0.2;
+const MAX_RETIREMENT_FEE = 0.1;
+const MAX_RETIREMENT_VOLATILITY = 1;
+const MAX_RETIREMENT_CONTRIBUTION_GROWTH = 0.25;
 const RATE_SLIDER_INCREMENT = 0.02;
+const FEE_SLIDER_INCREMENT = 0.01;
+const VOLATILITY_SLIDER_INCREMENT = 0.1;
+const CONTRIBUTION_GROWTH_SLIDER_INCREMENT = 0.05;
 const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 const HIGH_INFLATION_WARNING_THRESHOLD = DEFAULT_INFLATION_SLIDER_MAX;
+const HIGH_FEE_WARNING_THRESHOLD = DEFAULT_FEE_SLIDER_MAX;
+const HIGH_VOLATILITY_WARNING_THRESHOLD = DEFAULT_VOLATILITY_SLIDER_MAX;
+const HIGH_CONTRIBUTION_GROWTH_WARNING_THRESHOLD = DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX;
 
 /** Read-only label:value row */
 function InfoLabel({ label, children }: { label: string; children: React.ReactNode }) {
@@ -135,6 +147,24 @@ function highReturnWarning(value: number) {
 function highInflationWarning(value: number) {
   return value > HIGH_INFLATION_WARNING_THRESHOLD
     ? "High inflation assumption. Long-range spending needs become more sensitive at this rate."
+    : undefined;
+}
+
+function highFeeWarning(value: number) {
+  return value > HIGH_FEE_WARNING_THRESHOLD
+    ? "High fee assumption. Fee drag materially reduces long-term returns."
+    : undefined;
+}
+
+function highVolatilityWarning(value: number) {
+  return value > HIGH_VOLATILITY_WARNING_THRESHOLD
+    ? "High volatility assumption. Outcome ranges can become very wide."
+    : undefined;
+}
+
+function highContributionGrowthWarning(value: number) {
+  return value > HIGH_CONTRIBUTION_GROWTH_WARNING_THRESHOLD
+    ? "High contribution growth assumption. This assumes sustained large savings increases."
     : undefined;
 }
 
@@ -682,10 +712,17 @@ export function SidebarConfigurator({
               value={draft.investment.annualInvestmentFeeRate}
               onChange={(v) => setInvestment("annualInvestmentFeeRate", v)}
               min={0}
-              max={0.03}
+              max={rateSliderMaxFor(
+                draft.investment.annualInvestmentFeeRate,
+                DEFAULT_FEE_SLIDER_MAX,
+                FEE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_FEE,
+              )}
+              inputMax={MAX_RETIREMENT_FEE}
               step={0.0005}
               suffix="%"
               format={(v) => (v * 100).toFixed(2)}
+              warning={highFeeWarning(draft.investment.annualInvestmentFeeRate)}
             />
             <LeverRow
               label="Inflation"
@@ -1336,10 +1373,17 @@ export function SidebarConfigurator({
               value={draft.investment.annualInvestmentFeeRate}
               onChange={(v) => setInvestment("annualInvestmentFeeRate", v)}
               min={0}
-              max={0.03}
+              max={rateSliderMaxFor(
+                draft.investment.annualInvestmentFeeRate,
+                DEFAULT_FEE_SLIDER_MAX,
+                FEE_SLIDER_INCREMENT,
+                MAX_RETIREMENT_FEE,
+              )}
+              inputMax={MAX_RETIREMENT_FEE}
               step={0.0005}
               suffix="%"
               format={(v) => (v * 100).toFixed(2)}
+              warning={highFeeWarning(draft.investment.annualInvestmentFeeRate)}
             />
             <LeverRow
               label={
@@ -1351,10 +1395,17 @@ export function SidebarConfigurator({
               value={draft.investment.annualVolatility}
               onChange={(v) => setInvestment("annualVolatility", v)}
               min={0}
-              max={0.5}
+              max={rateSliderMaxFor(
+                draft.investment.annualVolatility,
+                DEFAULT_VOLATILITY_SLIDER_MAX,
+                VOLATILITY_SLIDER_INCREMENT,
+                MAX_RETIREMENT_VOLATILITY,
+              )}
+              inputMax={MAX_RETIREMENT_VOLATILITY}
               step={0.005}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highVolatilityWarning(draft.investment.annualVolatility)}
             />
             <LeverRow
               label="Inflation"
@@ -1378,10 +1429,17 @@ export function SidebarConfigurator({
               value={draft.investment.contributionGrowthRate}
               onChange={(v) => setInvestment("contributionGrowthRate", v)}
               min={0}
-              max={0.1}
+              max={rateSliderMaxFor(
+                draft.investment.contributionGrowthRate,
+                DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX,
+                CONTRIBUTION_GROWTH_SLIDER_INCREMENT,
+                MAX_RETIREMENT_CONTRIBUTION_GROWTH,
+              )}
+              inputMax={MAX_RETIREMENT_CONTRIBUTION_GROWTH}
               step={0.001}
               suffix="%"
               format={(v) => (v * 100).toFixed(1)}
+              warning={highContributionGrowthWarning(draft.investment.contributionGrowthRate)}
             />
           </div>
         }

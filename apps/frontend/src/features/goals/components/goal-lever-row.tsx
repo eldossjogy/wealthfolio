@@ -47,10 +47,13 @@ export function GoalLeverRow({
   format,
   warning,
 }: GoalLeverRowProps) {
-  const clampedValue = Math.min(max, Math.max(min, value));
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
   const inputScale = suffix === "%" ? 100 : 1;
   const inputUpperBound = inputMax ?? max;
+  const sliderUpperBound = Math.min(max, inputUpperBound);
+  const clampedValue = Math.min(sliderUpperBound, Math.max(min, value));
+  const pct =
+    sliderUpperBound > min ? ((clampedValue - min) / (sliderUpperBound - min)) * 100 : 0;
+  const clampSliderValue = (next: number) => Math.min(inputUpperBound, Math.max(min, next));
   const clampMoneyInputValue = (next: number | undefined) =>
     Math.min(inputUpperBound, Math.max(min, next ?? 0));
   const clampInputValue = (next: number) =>
@@ -166,9 +169,9 @@ export function GoalLeverRow({
         type="range"
         value={clampedValue}
         min={min}
-        max={max}
+        max={sliderUpperBound}
         step={step}
-        onChange={(event) => onChange(parseFloat(event.target.value))}
+        onChange={(event) => onChange(clampSliderValue(parseFloat(event.target.value)))}
         className="lever-slider mt-3 w-full"
         style={{ ["--lever-pct" as string]: `${pct}%` }}
       />
