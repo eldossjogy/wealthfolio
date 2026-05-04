@@ -8,10 +8,15 @@ import type {
   SaveUpProjectionPointDTO,
 } from "@/lib/types";
 import { formatDateISO } from "@/lib/utils";
-import { AmountDisplay, Button, DatePickerInput, MoneyInput } from "@wealthfolio/ui";
+import { AmountDisplay, Button, DatePickerInput, formatCurrencySymbol } from "@wealthfolio/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@wealthfolio/ui/components/ui/card";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  GoalLeverRow as LeverRow,
+  rateSliderMaxFor,
+  sliderMaxFor,
+} from "../../components/goal-lever-row";
 import { GoalFundingEditor } from "../../components/goal-funding-editor";
 import { useGoalPlanMutations, useSaveUpPreview } from "../../hooks/use-goal-detail";
 import { useGoalMutations } from "../../hooks/use-goals";
@@ -84,6 +89,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
   const progress = overview?.progress ?? goal.summaryProgress ?? 0;
   const currentValue = overview?.currentValue ?? goal.summaryCurrentValue ?? 0;
   const currency = settings?.baseCurrency ?? goal.currency ?? "USD";
+  const moneyPrefix = formatCurrencySymbol(currency);
   const initialTargetAmount = goal.targetAmount ?? 0;
   const initialTargetDate = existingSettings.targetDate ?? goal.targetDate ?? "";
   const initialMonthlyContribution =
@@ -432,7 +438,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 max={sliderMaxFor(Math.max(targetAmount, currentValue), 100_000, 25_000)}
                 inputMax={SAVE_UP_MAX_TARGET_AMOUNT}
                 step={100}
-                prefix={currency}
+                prefix={moneyPrefix}
                 format={(v) => Math.round(v).toLocaleString()}
               />
               <DateRow
@@ -451,7 +457,7 @@ export default function SaveUpDetailPage({ goal, plan, overview }: Props) {
                 max={sliderMaxFor(monthlyContribution, 5_000, 500)}
                 inputMax={SAVE_UP_MAX_MONTHLY_CONTRIBUTION}
                 step={25}
-                prefix={currency}
+                prefix={moneyPrefix}
                 format={(v) => Math.round(v).toLocaleString()}
               />
               <LeverRow
@@ -576,15 +582,6 @@ function formatGoalDate(value?: string | null) {
     year: "numeric",
     month: "short",
   });
-}
-
-function sliderMaxFor(value: number, baseMax: number, increment: number) {
-  return Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
-}
-
-function rateSliderMaxFor(value: number, baseMax: number, increment: number, inputMax: number) {
-  if (value <= baseMax) return baseMax;
-  return Math.min(inputMax, Math.ceil(value / increment) * increment + increment);
 }
 
 function HeroMetric({ label, children }: { label: string; children: React.ReactNode }) {
@@ -746,170 +743,6 @@ function SidebarCard({
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function LeverRow({
-  label,
-  hint,
-  kind = "number",
-  value,
-  onChange,
-  min,
-  max,
-  inputMax,
-  step,
-  prefix,
-  suffix,
-  format,
-}: {
-  label: React.ReactNode;
-  hint?: string;
-  kind?: "money" | "number";
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  inputMax?: number;
-  step: number;
-  prefix?: string;
-  suffix?: string;
-  format: (v: number) => string;
-}) {
-  const clampedValue = Math.min(max, Math.max(min, value));
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
-  const inputScale = suffix === "%" ? 100 : 1;
-  const inputUpperBound = inputMax ?? max;
-  const clampMoneyInputValue = (next: number | undefined) =>
-    Math.min(inputUpperBound, Math.max(min, next ?? 0));
-  const clampInputValue = (next: number) =>
-    Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
-  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(undefined);
-  const [moneyInputFocused, setMoneyInputFocused] = useState(false);
-  const skipNextMoneyCommitRef = useRef(false);
-  const [draftValue, setDraftValue] = useState(format(value));
-  const [inputFocused, setInputFocused] = useState(false);
-
-  useEffect(() => {
-    if (!inputFocused) {
-      setDraftValue(format(value));
-    }
-  }, [format, inputFocused, value]);
-
-  const commitMoneyDraftValue = () => {
-    if (skipNextMoneyCommitRef.current) {
-      skipNextMoneyCommitRef.current = false;
-      setMoneyInputFocused(false);
-      return;
-    }
-    if (!moneyInputFocused) return;
-    const next = clampMoneyInputValue(moneyDraftValue);
-    onChange(next);
-    setMoneyDraftValue(next);
-    setMoneyInputFocused(false);
-  };
-
-  const commitDraftValue = () => {
-    const raw = draftValue.trim();
-    if (!raw) {
-      setDraftValue(format(value));
-      return;
-    }
-
-    const parsed = parseFloat(raw.replace(/,/g, ""));
-    if (Number.isNaN(parsed)) {
-      setDraftValue(format(value));
-      return;
-    }
-
-    const next = clampInputValue(parsed);
-    onChange(next);
-    setDraftValue(format(next));
-  };
-
-  return (
-    <div className="py-4 first:pt-1 last:pb-1">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-foreground text-sm font-semibold leading-tight">{label}</div>
-          {hint && <div className="text-muted-foreground mt-1 text-xs leading-tight">{hint}</div>}
-        </div>
-        <div
-          className="bg-muted/70 flex h-8 w-32 items-center gap-1 rounded-md border px-2.5"
-          onFocus={
-            kind === "money"
-              ? () => {
-                  setMoneyInputFocused(true);
-                  setMoneyDraftValue(value);
-                }
-              : undefined
-          }
-          onBlur={kind === "money" ? commitMoneyDraftValue : undefined}
-        >
-          {prefix && <span className="text-muted-foreground text-xs tabular-nums">{prefix}</span>}
-          {kind === "money" ? (
-            <MoneyInput
-              value={moneyInputFocused ? moneyDraftValue : value}
-              onValueChange={setMoneyDraftValue}
-              thousandSeparator
-              maxDecimalPlaces={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Escape") {
-                  skipNextMoneyCommitRef.current = true;
-                  setMoneyDraftValue(value);
-                  e.currentTarget.blur();
-                }
-              }}
-              className="text-foreground dark:bg-input/0 h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0"
-            />
-          ) : (
-            <input
-              type="text"
-              inputMode={suffix === "%" ? "decimal" : "numeric"}
-              value={draftValue}
-              onFocus={() => {
-                setInputFocused(true);
-                setDraftValue(format(value));
-              }}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (/^-?\d*([.,]\d*)?$/.test(next)) {
-                  setDraftValue(next);
-                }
-              }}
-              onBlur={() => {
-                setInputFocused(false);
-                commitDraftValue();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Escape") {
-                  setDraftValue(format(value));
-                  e.currentTarget.blur();
-                }
-              }}
-              className="text-foreground w-full min-w-0 bg-transparent text-right text-sm tabular-nums outline-none"
-            />
-          )}
-          {suffix && <span className="text-muted-foreground text-xs tabular-nums">{suffix}</span>}
-        </div>
-      </div>
-      <input
-        type="range"
-        value={clampedValue}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="lever-slider mt-3 w-full"
-        style={{ ["--lever-pct" as string]: `${pct}%` }}
-      />
-    </div>
   );
 }
 

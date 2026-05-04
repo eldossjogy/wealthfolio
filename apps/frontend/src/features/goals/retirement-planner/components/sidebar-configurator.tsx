@@ -1,6 +1,11 @@
 import type { RetirementOverview } from "@/lib/types";
 import { GoalFundingEditor } from "@/features/goals/components/goal-funding-editor";
 import {
+  GoalLeverRow as LeverRow,
+  rateSliderMaxFor,
+  sliderMaxFor,
+} from "@/features/goals/components/goal-lever-row";
+import {
   AnimatedToggleGroup,
   Button,
   Card,
@@ -8,13 +13,13 @@ import {
   CardHeader,
   CardTitle,
   formatAmount,
+  formatCurrencySymbol,
   formatPercent,
   Input,
-  MoneyInput,
 } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { DEFAULT_DC_PAYOUT_ESTIMATE_RATE } from "../lib/constants";
 import { incomeStreamMonthlyAmount, modeLabel, type PlannerMode } from "../lib/dashboard-math";
 import {
@@ -43,23 +48,6 @@ const MAX_RETIREMENT_INFLATION = 0.2;
 const RATE_SLIDER_INCREMENT = 0.02;
 const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 const HIGH_INFLATION_WARNING_THRESHOLD = DEFAULT_INFLATION_SLIDER_MAX;
-
-function currencySymbol(currency: string) {
-  try {
-    return (
-      new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: currency || "USD",
-        currencyDisplay: "narrowSymbol",
-        maximumFractionDigits: 0,
-      })
-        .formatToParts(0)
-        .find((part) => part.type === "currency")?.value ?? "$"
-    );
-  } catch {
-    return "$";
-  }
-}
 
 /** Read-only label:value row */
 function InfoLabel({ label, children }: { label: string; children: React.ReactNode }) {
@@ -134,180 +122,8 @@ function SidebarTotalRow({ amount, currency }: { amount: number; currency: strin
   );
 }
 
-/** A lever: title + hint + compact readout input + full-width slider. */
-function LeverRow({
-  label,
-  hint,
-  kind = "number",
-  value,
-  onChange,
-  min,
-  max,
-  inputMax,
-  step,
-  prefix,
-  suffix,
-  format,
-  warning,
-}: {
-  label: React.ReactNode;
-  hint?: string;
-  kind?: "money" | "number";
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  inputMax?: number;
-  step: number;
-  prefix?: string;
-  suffix?: string;
-  format: (v: number) => string;
-  warning?: React.ReactNode;
-}) {
-  const clampedValue = Math.min(max, Math.max(min, value));
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
-  const inputScale = suffix === "%" ? 100 : 1;
-  const inputUpperBound = inputMax ?? max;
-  const clampMoneyInputValue = (next: number | undefined) =>
-    Math.min(inputUpperBound, Math.max(min, next ?? 0));
-  const clampInputValue = (next: number) =>
-    Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
-  const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(undefined);
-  const [moneyInputFocused, setMoneyInputFocused] = useState(false);
-  const skipNextMoneyCommitRef = useRef(false);
-  const [draftValue, setDraftValue] = useState<string | null>(null);
-  const displayValue = draftValue ?? format(value);
-
-  const commitMoneyDraftValue = () => {
-    if (skipNextMoneyCommitRef.current) {
-      skipNextMoneyCommitRef.current = false;
-      setMoneyInputFocused(false);
-      return;
-    }
-    if (!moneyInputFocused) return;
-    const next = clampMoneyInputValue(moneyDraftValue);
-    onChange(next);
-    setMoneyDraftValue(next);
-    setMoneyInputFocused(false);
-  };
-
-  const commitDraftValue = () => {
-    const raw = displayValue.trim();
-    if (!raw) {
-      setDraftValue(null);
-      return;
-    }
-
-    const parsed = parseFloat(raw.replace(/,/g, ""));
-    if (Number.isNaN(parsed)) {
-      setDraftValue(null);
-      return;
-    }
-
-    const next = clampInputValue(parsed);
-    onChange(next);
-    setDraftValue(null);
-  };
-
-  return (
-    <div className="py-4 first:pt-1 last:pb-1">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-foreground text-sm font-semibold leading-tight">{label}</div>
-          {hint && <div className="text-muted-foreground mt-1 text-xs leading-tight">{hint}</div>}
-        </div>
-        <div
-          className="bg-muted/70 flex h-8 w-32 items-center gap-1 rounded-md border px-2.5"
-          onFocus={
-            kind === "money"
-              ? () => {
-                  setMoneyInputFocused(true);
-                  setMoneyDraftValue(value);
-                }
-              : undefined
-          }
-          onBlur={kind === "money" ? commitMoneyDraftValue : undefined}
-        >
-          {prefix && <span className="text-muted-foreground text-xs tabular-nums">{prefix}</span>}
-          {kind === "money" ? (
-            <MoneyInput
-              value={moneyInputFocused ? moneyDraftValue : value}
-              onValueChange={setMoneyDraftValue}
-              thousandSeparator
-              maxDecimalPlaces={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Escape") {
-                  skipNextMoneyCommitRef.current = true;
-                  setMoneyDraftValue(value);
-                  e.currentTarget.blur();
-                }
-              }}
-              className="text-foreground h-auto min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-right text-sm tabular-nums shadow-none outline-none ring-0 focus-visible:ring-0"
-            />
-          ) : (
-            <input
-              type="text"
-              inputMode={suffix === "%" ? "decimal" : "numeric"}
-              value={displayValue}
-              onFocus={() => {
-                setDraftValue(format(value));
-              }}
-              onChange={(e) => {
-                const next = e.target.value;
-                if (/^-?\d*([.,]\d*)?$/.test(next)) {
-                  setDraftValue(next);
-                }
-              }}
-              onBlur={() => {
-                commitDraftValue();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Escape") {
-                  setDraftValue(null);
-                }
-              }}
-              className="text-foreground w-full min-w-0 bg-transparent text-right text-sm tabular-nums outline-none"
-            />
-          )}
-          {suffix && <span className="text-muted-foreground text-xs tabular-nums">{suffix}</span>}
-        </div>
-      </div>
-      <input
-        type="range"
-        value={clampedValue}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="lever-slider mt-3 w-full"
-        style={{ ["--lever-pct" as string]: `${pct}%` }}
-      />
-      {warning && (
-        <p className="mt-2 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs leading-snug text-amber-800 dark:text-amber-300">
-          {warning}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function pctOfTotal(value: number, total: number) {
   return total > 0 ? ((value / total) * 100).toFixed(0) + "%" : "0%";
-}
-
-function sliderMaxFor(value: number, baseMax: number, increment: number) {
-  return Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
-}
-
-function rateSliderMaxFor(value: number, baseMax: number, increment: number, inputMax: number) {
-  if (value <= baseMax) return baseMax;
-  return Math.min(inputMax, Math.ceil(value / increment) * increment + increment);
 }
 
 function highReturnWarning(value: number) {
@@ -538,7 +354,7 @@ export function SidebarConfigurator({
   const [expandedExpenseId, setExpandedExpenseId] = useState<string | null>(null);
   const [expandedIncomeId, setExpandedIncomeId] = useState<string | null>(null);
   const L = modeLabel(draftMode);
-  const moneyPrefix = currencySymbol(currency);
+  const moneyPrefix = formatCurrencySymbol(currency);
 
   const update = useCallback((updater: (d: RetirementPlan) => RetirementPlan) => {
     setDraft((prev) => updater(prev));

@@ -17,6 +17,7 @@ const DECIMAL_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
 const decimalFormatter = new Intl.NumberFormat("en-US", DECIMAL_FORMAT_OPTIONS);
 const currencyFormatterCache = new Map<string, Intl.NumberFormat>();
 const compactCurrencyFormatterCache = new Map<string, Intl.NumberFormat>();
+const currencySymbolFormatterCache = new Map<string, Intl.NumberFormat>();
 
 const getCurrencyFormatter = (currency: string) => {
   const normalizedCurrency = currency?.toUpperCase?.() ?? "USD";
@@ -64,6 +65,39 @@ const getCompactCurrencyFormatter = (currency: string, maximumFractionDigits: nu
   compactCurrencyFormatterCache.set(cacheKey, formatter);
   return formatter;
 };
+
+export function formatCurrencySymbol(currency: string | null | undefined) {
+  const rawCurrency = currency || "USD";
+
+  if (rawCurrency === "GBp" || rawCurrency === "GBX") {
+    return "p";
+  }
+
+  const normalizedCurrency = rawCurrency.toUpperCase();
+
+  try {
+    if (!currencySymbolFormatterCache.has(normalizedCurrency)) {
+      currencySymbolFormatterCache.set(
+        normalizedCurrency,
+        new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: normalizedCurrency,
+          currencyDisplay: "narrowSymbol",
+          maximumFractionDigits: 0,
+        }),
+      );
+    }
+
+    return (
+      currencySymbolFormatterCache
+        .get(normalizedCurrency)!
+        .formatToParts(0)
+        .find((part) => part.type === "currency")?.value ?? rawCurrency
+    );
+  } catch {
+    return rawCurrency;
+  }
+}
 
 export function formatAmount(
   amount: number | string | null | undefined,
