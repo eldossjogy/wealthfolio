@@ -9,7 +9,7 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendSrcDir = path.resolve(currentDir, "..");
 const repoRoot = path.resolve(currentDir, "../../../..");
 
-const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*["`]([a-zA-Z0-9_]+)["`]/g;
+const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*['"`]([a-zA-Z0-9_]+)['"`]/g;
 const TAURI_REGISTERED_COMMAND_RE = /commands::[a-z_]+::([a-zA-Z0-9_]+)/g;
 
 afterEach(() => {

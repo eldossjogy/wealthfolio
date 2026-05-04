@@ -2,8 +2,16 @@ import { MoneyInput } from "@wealthfolio/ui";
 import type { ReactNode } from "react";
 import { useRef, useState } from "react";
 
-export function sliderMaxFor(value: number, baseMax: number, increment: number) {
-  return Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
+const DEFAULT_SLIDER_GROWTH_MULTIPLE = 10;
+
+export function sliderMaxFor(
+  value: number,
+  baseMax: number,
+  increment: number,
+  maxGrowthMultiple = DEFAULT_SLIDER_GROWTH_MULTIPLE,
+) {
+  const steppedMax = Math.max(baseMax, Math.ceil(value / increment) * increment + increment);
+  return Math.min(baseMax * maxGrowthMultiple, steppedMax);
 }
 
 export function rateSliderMaxFor(
@@ -49,14 +57,16 @@ export function GoalLeverRow({
 }: GoalLeverRowProps) {
   const inputScale = suffix === "%" ? 100 : 1;
   const inputUpperBound = inputMax ?? max;
+  // Sliders use a practical range; text inputs can allow a higher hard cap.
   const sliderUpperBound = Math.min(max, inputUpperBound);
   const clampedValue = Math.min(sliderUpperBound, Math.max(min, value));
   const pct = sliderUpperBound > min ? ((clampedValue - min) / (sliderUpperBound - min)) * 100 : 0;
-  const clampSliderValue = (next: number) => Math.min(inputUpperBound, Math.max(min, next));
+  const clampSliderValue = (next: number) => Math.min(sliderUpperBound, Math.max(min, next));
   const clampMoneyInputValue = (next: number | undefined) =>
     Math.min(inputUpperBound, Math.max(min, next ?? 0));
   const clampInputValue = (next: number) =>
     Math.min(inputUpperBound * inputScale, Math.max(min * inputScale, next)) / inputScale;
+  // Focused drafts are intentionally local until commit/cancel so previews do not overwrite typing.
   const [moneyDraftValue, setMoneyDraftValue] = useState<number | undefined>(undefined);
   const [moneyInputFocused, setMoneyInputFocused] = useState(false);
   const skipNextMoneyCommitRef = useRef(false);

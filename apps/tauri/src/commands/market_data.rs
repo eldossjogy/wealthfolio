@@ -250,11 +250,10 @@ pub fn get_exchanges() -> Vec<ExchangeInfo> {
 #[tauri::command]
 pub async fn fetch_yahoo_dividends(
     symbol: String,
+    state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<wealthfolio_market_data::YahooDividend>, String> {
-    let provider = wealthfolio_market_data::YahooProvider::new()
-        .await
-        .map_err(|e| e.to_string())?;
-    provider
+    state
+        .yahoo_provider()
         .fetch_dividends(&symbol)
         .await
         .map_err(|e| e.to_string())

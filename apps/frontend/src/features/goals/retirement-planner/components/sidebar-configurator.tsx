@@ -6,6 +6,11 @@ import {
   sliderMaxFor,
 } from "@/features/goals/components/goal-lever-row";
 import {
+  DEFAULT_RETURN_SLIDER_MAX,
+  RATE_SLIDER_INCREMENT,
+  highReturnWarning,
+} from "@/features/goals/components/goal-lever-constants";
+import {
   AnimatedToggleGroup,
   Button,
   Card,
@@ -41,21 +46,20 @@ import type {
   TaxProfile,
 } from "../types";
 
-const DEFAULT_RETURN_SLIDER_MAX = 0.12;
 const DEFAULT_INFLATION_SLIDER_MAX = 0.06;
 const DEFAULT_FEE_SLIDER_MAX = 0.03;
 const DEFAULT_VOLATILITY_SLIDER_MAX = 0.5;
 const DEFAULT_CONTRIBUTION_GROWTH_SLIDER_MAX = 0.1;
+// Keep hard caps in sync with validate_retirement_plan in crates/core/src/goals/goals_service.rs.
 const MAX_RETIREMENT_RETURN = 0.5;
 const MAX_RETIREMENT_INFLATION = 0.2;
 const MAX_RETIREMENT_FEE = 0.1;
 const MAX_RETIREMENT_VOLATILITY = 1;
 const MAX_RETIREMENT_CONTRIBUTION_GROWTH = 0.25;
-const RATE_SLIDER_INCREMENT = 0.02;
+const MAX_RETIREMENT_INCOME_GROWTH = 0.2;
 const FEE_SLIDER_INCREMENT = 0.01;
 const VOLATILITY_SLIDER_INCREMENT = 0.1;
 const CONTRIBUTION_GROWTH_SLIDER_INCREMENT = 0.05;
-const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 const HIGH_INFLATION_WARNING_THRESHOLD = DEFAULT_INFLATION_SLIDER_MAX;
 const HIGH_FEE_WARNING_THRESHOLD = DEFAULT_FEE_SLIDER_MAX;
 const HIGH_VOLATILITY_WARNING_THRESHOLD = DEFAULT_VOLATILITY_SLIDER_MAX;
@@ -136,12 +140,6 @@ function SidebarTotalRow({ amount, currency }: { amount: number; currency: strin
 
 function pctOfTotal(value: number, total: number) {
   return total > 0 ? ((value / total) * 100).toFixed(0) + "%" : "0%";
-}
-
-function highReturnWarning(value: number) {
-  return value > HIGH_RETURN_WARNING_THRESHOLD
-    ? "High return assumption. This assumes consistently beating broad market returns."
-    : undefined;
 }
 
 function highInflationWarning(value: number) {
@@ -242,10 +240,12 @@ function AgeBoundInput({
 function PercentOverrideInput({
   value,
   placeholder,
+  max,
   onChange,
 }: {
   value?: number;
   placeholder: string;
+  max: number;
   onChange: (value: number | undefined) => void;
 }) {
   const formatDraft = useCallback(
@@ -275,7 +275,7 @@ function PercentOverrideInput({
           }
           const parsed = parseFloat(raw);
           if (!Number.isNaN(parsed)) {
-            onChange(Math.min(50, Math.max(0, parsed)) / 100);
+            onChange(Math.min(max * 100, Math.max(0, parsed)) / 100);
           }
         }}
         className="text-foreground min-w-0 flex-1 bg-transparent text-right text-sm tabular-nums outline-none placeholder:text-left placeholder:text-xs"
@@ -921,6 +921,7 @@ export function SidebarConfigurator({
                           <PercentOverrideInput
                             value={item.inflationRate}
                             placeholder={`Plan ${(draft.investment.inflationRate * 100).toFixed(1)}`}
+                            max={MAX_RETIREMENT_INFLATION}
                             onChange={(value) =>
                               updateExpenseItem(item.id, { inflationRate: value })
                             }
@@ -1252,6 +1253,7 @@ export function SidebarConfigurator({
                                 ? `Inflation ${(draft.investment.inflationRate * 100).toFixed(1)}`
                                 : "Fixed 0.0"
                             }
+                            max={MAX_RETIREMENT_INCOME_GROWTH}
                             onChange={(value) => updateStream(s.id, { annualGrowthRate: value })}
                           />
                         </div>

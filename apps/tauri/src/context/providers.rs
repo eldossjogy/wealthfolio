@@ -33,6 +33,7 @@ use wealthfolio_core::{
     taxonomies::TaxonomyService,
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
+use wealthfolio_market_data::YahooProvider;
 use wealthfolio_storage_sqlite::{
     accounts::AccountRepository,
     activities::ActivityRepository,
@@ -143,6 +144,7 @@ pub async fn initialize_context(
         )
         .await?,
     );
+    let yahoo_provider = Arc::new(YahooProvider::new().await?);
 
     // Custom provider service
     let custom_provider_service = Arc::new(
@@ -366,6 +368,7 @@ pub async fn initialize_context(
             asset_service,
             goal_service,
             quote_service,
+            yahoo_provider,
             limits_service,
             fx_service,
             performance_service,

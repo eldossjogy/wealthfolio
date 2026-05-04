@@ -15,7 +15,7 @@ use wealthfolio_core::portfolio::{snapshot::SnapshotRecalcMode, valuation::Valua
 use wealthfolio_core::quotes::{
     LatestQuoteSnapshot, MarketSyncMode, ProviderInfo, Quote, QuoteImport, SymbolSearchResult,
 };
-use wealthfolio_market_data::{ExchangeInfo, YahooDividend, YahooProvider};
+use wealthfolio_market_data::{ExchangeInfo, YahooDividend};
 
 async fn get_market_data_providers(
     State(state): State<Arc<AppState>>,
@@ -82,12 +82,11 @@ struct YahooDividendsQuery {
 }
 
 async fn fetch_yahoo_dividends(
+    State(state): State<Arc<AppState>>,
     Query(q): Query<YahooDividendsQuery>,
 ) -> ApiResult<Json<Vec<YahooDividend>>> {
-    let provider = YahooProvider::new()
-        .await
-        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-    let dividends = provider
+    let dividends = state
+        .yahoo_provider
         .fetch_dividends(&q.symbol)
         .await
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;

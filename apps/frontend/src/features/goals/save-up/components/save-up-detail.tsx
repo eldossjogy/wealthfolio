@@ -17,18 +17,21 @@ import {
   rateSliderMaxFor,
   sliderMaxFor,
 } from "../../components/goal-lever-row";
+import {
+  DEFAULT_RETURN_SLIDER_MAX,
+  RATE_SLIDER_INCREMENT,
+  highReturnWarning,
+} from "../../components/goal-lever-constants";
 import { GoalFundingEditor } from "../../components/goal-funding-editor";
 import { useGoalPlanMutations, useSaveUpPreview } from "../../hooks/use-goal-detail";
 import { useGoalMutations } from "../../hooks/use-goals";
 import { SaveUpProjectionCard } from "./save-up-projection-card";
 import { buildSavingsMilestones, SavingsMilestonesCard } from "./savings-milestones-card";
 
+// Keep in sync with crates/core/src/planning/save_up.rs validator limits.
 const SAVE_UP_MAX_TARGET_AMOUNT = 1_000_000_000_000;
 const SAVE_UP_MAX_MONTHLY_CONTRIBUTION = 1_000_000_000;
 const SAVE_UP_MAX_ANNUAL_RETURN = 0.5;
-const DEFAULT_RETURN_SLIDER_MAX = 0.12;
-const RATE_SLIDER_INCREMENT = 0.02;
-const HIGH_RETURN_WARNING_THRESHOLD = DEFAULT_RETURN_SLIDER_MAX;
 
 interface SaveUpPlanSettings {
   targetDate?: string;
@@ -73,12 +76,6 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   }, [delay, value]);
 
   return debouncedValue;
-}
-
-function highReturnWarning(value: number) {
-  return value > HIGH_RETURN_WARNING_THRESHOLD
-    ? "High return assumption. This assumes consistently beating broad market returns."
-    : undefined;
 }
 
 interface Props {

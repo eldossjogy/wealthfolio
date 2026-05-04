@@ -43,6 +43,7 @@ use wealthfolio_core::{
     taxonomies::{TaxonomyService, TaxonomyServiceTrait},
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
+use wealthfolio_market_data::YahooProvider;
 use wealthfolio_storage_sqlite::{
     accounts::AccountRepository,
     activities::ActivityRepository,
@@ -72,6 +73,7 @@ pub struct AppState {
     pub valuation_service: Arc<dyn ValuationServiceTrait + Send + Sync>,
     pub allocation_service: Arc<dyn AllocationServiceTrait + Send + Sync>,
     pub quote_service: Arc<dyn QuoteServiceTrait + Send + Sync>,
+    pub yahoo_provider: Arc<YahooProvider>,
     pub base_currency: Arc<RwLock<String>>,
     pub timezone: Arc<RwLock<String>>,
     pub snapshot_service: Arc<dyn SnapshotServiceTrait + Send + Sync>,
@@ -242,6 +244,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         )
         .await?,
     );
+    let yahoo_provider = Arc::new(YahooProvider::new().await?);
     let custom_provider_service = Arc::new(
         wealthfolio_core::custom_provider::CustomProviderService::new(
             custom_provider_repository.clone(),
@@ -501,6 +504,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         valuation_service,
         allocation_service,
         quote_service,
+        yahoo_provider,
         base_currency,
         timezone,
         snapshot_service,
