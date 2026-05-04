@@ -313,11 +313,11 @@ export function MappingStepUnified() {
     const symbolMap = new Map<string, { row: CsvRowData; count: number }>();
 
     data.forEach((row) => {
-      const symbol = getMappedValue(row, ImportFormat.SYMBOL);
+      const symbol = getMappedValue(row, ImportFormat.SYMBOL)?.trim();
       if (!symbol) return;
 
       // Skip symbols that only appear on cash activity rows
-      if (!nonCashSymbolSet.has(symbol.trim())) return;
+      if (!nonCashSymbolSet.has(symbol)) return;
 
       if (!symbolMap.has(symbol)) {
         symbolMap.set(symbol, { row, count: 1 });
