@@ -13,7 +13,6 @@ import { normalizeInstrumentType, splitInstrumentPrefixedSymbol } from "./instru
 import { buildImportAssetCandidateKey } from "./asset-review-utils";
 import {
   parseNumericValue,
-  toNumber,
   hasPositiveValue,
   hasNonZeroValue,
   resolveCashActivityFields,
@@ -316,8 +315,8 @@ export function validateDraft(draft: Partial<DraftActivity>): {
     if (!draft.symbol) {
       errors.symbol = ["Symbol is required for split activities"];
     }
-    if (toNumber(draft.amount) === undefined) {
-      errors.amount = ["Amount (split ratio) is required for split activities"];
+    if (!hasPositiveValue(draft.amount)) {
+      errors.amount = ["Amount (split ratio) must be greater than 0"];
     }
   }
 

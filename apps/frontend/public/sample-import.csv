@@ -8,7 +8,7 @@ date,type,symbol,instrumentType,quantity,unit_price,currency,fee,amount,comment,
 2024-04-01,INTEREST,,,,,USD,,12.50,Savings interest,,COUPON
 2024-04-15,FEE,,,,,USD,,25.00,Advisory fee,,MANAGEMENT_FEE
 2024-05-01,TRANSFER_IN,GOOGL,EQUITY,2,140.00,USD,,,Transfer from other account,,
-2024-05-15,SPLIT,NVDA,EQUITY,3,,,,,,3-for-1 stock split,,
+2024-05-15,SPLIT,NVDA,EQUITY,,,USD,,3,3-for-1 stock split,,
 2024-06-01,TAX,,,,,USD,,150.00,Withholding tax,,WITHHOLDING
 2024-06-15,CREDIT,,,,,USD,,50.00,Rebate credit,,REBATE
 2024-07-01,BUY,TD.TO,EQUITY,20,85.00,CAD,9.99,,Canadian stock purchase,1.36,

@@ -1124,6 +1124,202 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_create_split_rejects_missing_amount_ratio() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let new_activity = NewActivity {
+            id: Some("split-1".to_string()),
+            account_id: "acc-1".to_string(),
+            asset: Some(AssetResolutionInput {
+                id: Some("AAPL".to_string()),
+                ..Default::default()
+            }),
+            activity_type: "SPLIT".to_string(),
+            subtype: None,
+            activity_date: "2024-01-15".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: None,
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+        };
+
+        let result = activity_service.create_activity(new_activity).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("positive amount ratio"));
+    }
+
+    #[tokio::test]
+    async fn test_create_split_accepts_negative_amount_after_normalization() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let new_activity = NewActivity {
+            id: Some("split-1".to_string()),
+            account_id: "acc-1".to_string(),
+            asset: Some(AssetResolutionInput {
+                id: Some("AAPL".to_string()),
+                ..Default::default()
+            }),
+            activity_type: "SPLIT".to_string(),
+            subtype: None,
+            activity_date: "2024-01-15".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(-2)),
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+        };
+
+        let result = activity_service.create_activity(new_activity).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, Some(dec!(2)));
+    }
+
+    #[tokio::test]
+    async fn test_update_to_split_rejects_missing_amount_ratio() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+        activity_repository.add_activity(create_stored_activity(
+            "activity-1",
+            "acc-1",
+            Some("AAPL"),
+        ));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let mut update = create_test_activity_update(
+            "activity-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("AAPL".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "SPLIT".to_string();
+        update.quantity = None;
+        update.unit_price = None;
+        update.amount = None;
+
+        let result = activity_service.update_activity(update).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("positive amount ratio"));
+    }
+
+    #[tokio::test]
+    async fn test_update_existing_split_allows_omitted_amount_ratio() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+        let mut existing = create_stored_activity("activity-1", "acc-1", Some("AAPL"));
+        existing.activity_type = "SPLIT".to_string();
+        existing.amount = Some(dec!(2));
+        existing.quantity = None;
+        existing.unit_price = None;
+        activity_repository.add_activity(existing);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let mut update = create_test_activity_update(
+            "activity-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("AAPL".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "SPLIT".to_string();
+        update.quantity = None;
+        update.unit_price = None;
+        update.amount = None;
+        update.notes = Some("Updated note".to_string());
+
+        let result = activity_service.update_activity(update).await;
+
+        assert!(result.is_ok());
+        let updated = result.unwrap();
+        assert_eq!(updated.amount, Some(dec!(2)));
+        assert_eq!(updated.notes.as_deref(), Some("Updated note"));
+    }
+
     /// Test: When creating an activity where the activity currency matches the account currency,
     /// but the asset has a different currency, we should still register the FX pair for the asset currency.
     ///

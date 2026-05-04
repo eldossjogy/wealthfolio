@@ -372,7 +372,10 @@ const activityLogicMap: Partial<Record<ActivityType, ActivityLogicConfig>> = {
   },
   [ActivityType.SPLIT]: {
     calculateSymbol: (activity) => activity.symbol,
-    calculateAmount: () => 0, // SPLIT has no cash impact according to docs
+    calculateAmount: (activity) => {
+      const amt = toNum(activity.amount);
+      return amt && amt > 0 ? Math.abs(amt) : undefined;
+    },
     calculateFee: () => 0, // SPLIT typically has no fee
   },
   [ActivityType.CREDIT]: {
@@ -522,8 +525,11 @@ function transformRowToActivity(
   if (activity.fee !== undefined && isNaN(activity.fee)) activity.fee = 0; // Ensure fee is 0 if NaN
   if (activity.amount !== undefined && isNaN(activity.amount)) activity.amount = undefined;
 
-  // If amount is validly set (not undefined and not NaN), default quantity/unitPrice to 0 if they are undefined/NaN
-  if (activity.amount !== undefined && !isNaN(activity.amount)) {
+  if (activity.activityType === ActivityType.SPLIT) {
+    activity.quantity = undefined;
+    activity.unitPrice = undefined;
+  } else if (activity.amount !== undefined && !isNaN(activity.amount)) {
+    // If amount is validly set (not undefined and not NaN), default quantity/unitPrice to 0 if they are undefined/NaN
     if (activity.quantity === undefined || isNaN(activity.quantity)) {
       activity.quantity = 0;
     }
