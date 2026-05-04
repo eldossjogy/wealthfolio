@@ -72,7 +72,7 @@ export function CsvMappingEditor(props: CsvMappingEditorProps) {
     const symbolMap = new Map<string, { row: CsvRowData; count: number }>();
 
     props.data.forEach((row) => {
-      const symbol = props.getMappedValue(row, ImportFormat.SYMBOL);
+      const symbol = props.getMappedValue(row, ImportFormat.SYMBOL)?.trim();
       if (!symbol) return;
 
       if (!symbolMap.has(symbol)) {
