@@ -24,6 +24,10 @@ WF_DB_PATH=/opt/wealthfolio_data/wealthfolio.db
 WF_STATIC_DIR=/opt/wealthfolio/dist
 WF_SECRET_KEY=$(openssl rand -base64 32)
 WF_AUTH_PASSWORD_HASH=<argon2id hash, see docs/self-host>
+# Required when auth is enabled AND you reach the server via a different
+# scheme/host/port than the bind address (e.g. reverse proxy). Must match
+# the URL in the browser's address bar exactly. Setting "*" is rejected.
+WF_CORS_ALLOW_ORIGINS=http://<your-server-ip>:8080
 EOF
 sudo chmod 600 /opt/wealthfolio/.env
 
