@@ -55,23 +55,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Path, useFieldArray, useForm, useWatch } from "react-hook-form";
 import * as z from "zod";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
+import { serializeProviderConfig } from "./asset-provider-config";
 import { useAssetProfileMutations } from "./hooks/use-asset-profile-mutations";
 
-// Schema for a single provider override (type is derived from asset kind)
+// Schema for a single provider override (type is derived from instrument type)
 const providerOverrideSchema = z.object({
   provider: z.string(),
   symbol: z.string(),
 });
-
-// Derive override type from asset kind
-function getOverrideTypeForKind(kind: string): "equity_symbol" | "crypto_symbol" | "fx_symbol" {
-  switch (kind) {
-    case "FX":
-      return "fx_symbol";
-    default:
-      return "equity_symbol";
-  }
-}
 
 // QuoteMode values matching Rust enum
 const QuoteMode = {
@@ -173,41 +164,6 @@ function parsePreferredProvider(
     return typeof code === "string" ? `CUSTOM:${code}` : pref;
   }
   return pref;
-}
-
-// Serialize form values to nested provider config JSON
-function serializeProviderConfig(
-  preferredProvider: string | undefined,
-  overrides: ProviderOverride[],
-  assetKind: string,
-): Record<string, unknown> | null {
-  const overrideType = getOverrideTypeForKind(assetKind);
-  const overridesMap: Record<string, unknown> = {};
-  for (const override of overrides ?? []) {
-    if (override.provider && override.symbol) {
-      overridesMap[override.provider] = {
-        type: overrideType,
-        symbol: override.symbol,
-      };
-    }
-  }
-  const hasOverrides = Object.keys(overridesMap).length > 0;
-
-  // Handle CUSTOM:<code> format
-  let actualProvider = preferredProvider;
-  let customProviderCode: string | undefined;
-  if (preferredProvider?.startsWith("CUSTOM:")) {
-    actualProvider = "CUSTOM_SCRAPER";
-    customProviderCode = preferredProvider.slice("CUSTOM:".length);
-  }
-
-  const hasPref = !!actualProvider;
-  if (!hasOverrides && !hasPref) return null;
-  const result: Record<string, unknown> = {};
-  if (hasPref) result.preferred_provider = actualProvider;
-  if (customProviderCode) result.custom_provider_code = customProviderCode;
-  if (hasOverrides) result.overrides = overridesMap;
-  return result;
 }
 
 type EditTab = "general" | "classification" | "market-data" | "fx-settings";
@@ -632,7 +588,7 @@ export function AssetEditSheet({
       const serializedOverrides = serializeProviderConfig(
         values.preferredProvider,
         values.providerConfig ?? [],
-        asset.kind ?? "INVESTMENT",
+        values.instrumentType || asset.instrumentType,
       );
       const normalizedMic = normalizeMic(values.instrumentExchangeMic);
 

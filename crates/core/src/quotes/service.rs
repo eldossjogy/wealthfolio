@@ -391,6 +391,12 @@ pub trait QuoteServiceTrait: Send + Sync {
     /// Reset sync error counts for the given asset IDs, allowing retry.
     async fn reset_sync_errors(&self, asset_ids: &[String]) -> Result<()>;
 
+    /// Reset stale sync routing/error state after a market identity or provider profile change.
+    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()> {
+        let _ = asset_id;
+        Ok(())
+    }
+
     /// Update position status (active/inactive) based on current holdings.
     async fn update_position_status_from_holdings(
         &self,
@@ -1451,6 +1457,17 @@ where
         Ok(())
     }
 
+    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()> {
+        if let Some(mut state) = self.sync_state_store.get_by_asset_id(asset_id)? {
+            state.error_count = 0;
+            state.last_error = None;
+            state.data_source.clear();
+            state.updated_at = Utc::now();
+            self.sync_state_store.upsert(&state).await?;
+        }
+        Ok(())
+    }
+
     // =========================================================================
     // Provider Settings
     // =========================================================================
@@ -2076,7 +2093,7 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal_macros::dec;
     use std::collections::HashMap;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_instrument_key_from_bf_search_result_uses_isin_and_mic() {
@@ -2216,6 +2233,7 @@ mod tests {
     struct MockSyncStateStore {
         provider_sync_stats: Vec<ProviderSyncStats>,
         with_errors: Vec<QuoteSyncState>,
+        states: Arc<Mutex<HashMap<String, QuoteSyncState>>>,
     }
 
     #[async_trait]
@@ -2228,8 +2246,8 @@ mod tests {
             unimplemented!("unused in this test")
         }
 
-        fn get_by_asset_id(&self, _asset_id: &str) -> Result<Option<QuoteSyncState>> {
-            unimplemented!("unused in this test")
+        fn get_by_asset_id(&self, asset_id: &str) -> Result<Option<QuoteSyncState>> {
+            Ok(self.states.lock().unwrap().get(asset_id).cloned())
         }
 
         fn get_by_asset_ids(
@@ -2247,8 +2265,12 @@ mod tests {
             unimplemented!("unused in this test")
         }
 
-        async fn upsert(&self, _state: &QuoteSyncState) -> Result<QuoteSyncState> {
-            unimplemented!("unused in this test")
+        async fn upsert(&self, state: &QuoteSyncState) -> Result<QuoteSyncState> {
+            self.states
+                .lock()
+                .unwrap()
+                .insert(state.asset_id.clone(), state.clone());
+            Ok(state.clone())
         }
 
         async fn upsert_batch(&self, _states: &[QuoteSyncState]) -> Result<usize> {
@@ -2683,6 +2705,7 @@ mod tests {
                 created_at: now,
                 updated_at: now,
             }],
+            states: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let service = QuoteService::new(
@@ -2714,6 +2737,54 @@ mod tests {
             Some(finnhub_error.as_str())
         );
         assert_eq!(finnhub.unique_errors, vec![finnhub_error]);
+    }
+
+    #[tokio::test]
+    async fn test_reset_sync_state_for_profile_change_clears_errors_and_provider_binding() {
+        let now = Utc::now();
+        let state = QuoteSyncState {
+            asset_id: "asset_1".to_string(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: Some(now),
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: 10,
+            last_error: Some("old failure".to_string()),
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+        let states = Arc::new(Mutex::new(HashMap::from([(
+            state.asset_id.clone(),
+            state.clone(),
+        )])));
+        let sync_state_store = Arc::new(MockSyncStateStore {
+            provider_sync_stats: vec![],
+            with_errors: vec![],
+            states: Arc::clone(&states),
+        });
+        let service = QuoteService::new(
+            Arc::new(NoopQuoteStore),
+            sync_state_store,
+            Arc::new(MockProviderSettingsStore { providers: vec![] }),
+            Arc::new(NoopAssetRepository),
+            Arc::new(NoopActivityRepository),
+            Arc::new(MockSecretStore),
+        )
+        .await
+        .unwrap();
+
+        QuoteServiceTrait::reset_sync_state_for_profile_change(&service, "asset_1")
+            .await
+            .unwrap();
+
+        let updated = states.lock().unwrap().get("asset_1").cloned().unwrap();
+        assert_eq!(updated.data_source, "");
+        assert_eq!(updated.error_count, 0);
+        assert!(updated.last_error.is_none());
+        assert_eq!(updated.last_synced_at, state.last_synced_at);
+        assert_eq!(updated.profile_enriched_at, state.profile_enriched_at);
     }
 
     #[test]
