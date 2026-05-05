@@ -80,6 +80,16 @@ ENV WF_DB_PATH=/data/wealthfolio.db
 # Wealthfolio Connect API URL (can be overridden at runtime via -e or docker-compose)
 ARG CONNECT_API_URL=
 ENV CONNECT_API_URL=${CONNECT_API_URL}
+
+# Run as non-root. chown /data BEFORE the VOLUME directive so named volumes
+# inherit ownership on first creation. Existing volumes from older images
+# need a one-time chown — see docs/self-host/README.md.
+RUN addgroup -S -g 1000 wealthfolio \
+ && adduser -S -u 1000 -G wealthfolio -H -s /sbin/nologin wealthfolio \
+ && mkdir -p /data \
+ && chown -R wealthfolio:wealthfolio /data
+USER 1000:1000
+
 VOLUME ["/data"]
 EXPOSE 8080
 CMD ["/usr/local/bin/wealthfolio-server"]

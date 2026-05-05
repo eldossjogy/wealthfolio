@@ -23,7 +23,7 @@ Full guide: https://github.com/afadil/wealthfolio/blob/main/docs/self-host/unrai
   <WebUI>http://[IP]:[PORT:8088]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/afadil/wealthfolio/main/docs/self-host/unraid/template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/afadil/wealthfolio/main/assets/brand/icon.png</Icon>
-  <ExtraParams>--health-cmd="wget --quiet --tries=1 --spider http://127.0.0.1:8088/api/v1/healthz || exit 1" --health-interval=30s --health-timeout=10s --health-retries=3 --health-start-period=15s</ExtraParams>
+  <ExtraParams>--user=99:100 --health-cmd="wget --quiet --tries=1 --spider http://127.0.0.1:8088/api/v1/healthz || exit 1" --health-interval=30s --health-timeout=10s --health-retries=3 --health-start-period=15s</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>

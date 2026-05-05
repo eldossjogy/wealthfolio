@@ -411,7 +411,7 @@ docker run --rm -d \
   --name wealthfolio \
   --env-file .env.docker \
   -p 8088:8088 \
-  -v "$(pwd)/wealthfolio-data:/data" \
+  -v wealthfolio-data:/data \
   afadil/wealthfolio:latest
 ```
 
@@ -423,7 +423,7 @@ docker run --rm -d \
   -e WF_LISTEN_ADDR=0.0.0.0:8088 \
   -e WF_DB_PATH=/data/wealthfolio.db \
   -p 8088:8088 \
-  -v "$(pwd)/wealthfolio-data:/data" \
+  -v wealthfolio-data:/data \
   afadil/wealthfolio:latest
 ```
 
@@ -436,7 +436,7 @@ docker run --rm -it \
   -e WF_DB_PATH=/data/wealthfolio.db \
   -e WF_CORS_ALLOW_ORIGINS=http://localhost:1420 \
   -p 8088:8088 \
-  -v "$(pwd)/wealthfolio-data:/data" \
+  -v wealthfolio-data:/data \
   afadil/wealthfolio:latest
 ```
 
@@ -449,7 +449,7 @@ docker run --rm -d \
   -e WF_DB_PATH=/data/wealthfolio.db \
   -e WF_SECRET_KEY=$(openssl rand -base64 32) \
   -p 8088:8088 \
-  -v "$(pwd)/wealthfolio-data:/data" \
+  -v wealthfolio-data:/data \
   afadil/wealthfolio:latest
 ```
 
