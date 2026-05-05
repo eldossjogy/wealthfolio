@@ -155,7 +155,7 @@ function ActivitiesHelpContent() {
               <li>TRANSFER_OUT (Moves cash/assets out)</li>
               <li>FEE</li>
               <li>TAX</li>
-              <li>SPLIT (Adjusts quantity & unit cost, no cash impact)</li>
+              <li>SPLIT (Use Amount as the split ratio, e.g. 2 for 2:1)</li>
               <li>CREDIT (Cash credits: refunds, rebates, bonuses)</li>
               <li>ADJUSTMENT (Non-trade corrections)</li>
             </ul>

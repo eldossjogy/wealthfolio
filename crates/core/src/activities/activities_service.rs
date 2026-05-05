@@ -162,6 +162,48 @@ impl ActivityService {
         requires_symbol(activity_type) || Self::is_asset_backed_import_subtype(subtype)
     }
 
+    fn has_valid_split_ratio(amount: Option<Decimal>) -> bool {
+        amount.is_some_and(|amount| amount.is_sign_positive() && !amount.is_zero())
+    }
+
+    fn split_ratio_error() -> crate::errors::Error {
+        ActivityError::InvalidData("Split activities require a positive amount ratio".to_string())
+            .into()
+    }
+
+    fn validate_split_ratio(activity_type: &str, amount: Option<Decimal>) -> Result<()> {
+        if activity_type == ACTIVITY_TYPE_SPLIT && !Self::has_valid_split_ratio(amount) {
+            return Err(Self::split_ratio_error());
+        }
+        Ok(())
+    }
+
+    fn validate_split_ratio_update(
+        &self,
+        activity_id: &str,
+        activity_type: &str,
+        amount: Option<Option<Decimal>>,
+    ) -> Result<()> {
+        if activity_type != ACTIVITY_TYPE_SPLIT {
+            return Ok(());
+        }
+
+        match amount {
+            Some(Some(amount)) if Self::has_valid_split_ratio(Some(amount)) => Ok(()),
+            Some(_) => Err(Self::split_ratio_error()),
+            None => {
+                let existing = self.activity_repository.get_activity(activity_id)?;
+                if existing.activity_type == ACTIVITY_TYPE_SPLIT
+                    && Self::has_valid_split_ratio(existing.amount)
+                {
+                    Ok(())
+                } else {
+                    Err(Self::split_ratio_error())
+                }
+            }
+        }
+    }
+
     fn duplicate_activity_error(existing_activity_id: Option<&str>) -> crate::errors::Error {
         let message = if let Some(activity_id) = existing_activity_id {
             format!(
@@ -1284,6 +1326,11 @@ impl ActivityService {
 
         let currency = resolve_currency(&[&activity.currency, &account_currency, &base_ccy]);
 
+        if activity.activity_type == ACTIVITY_TYPE_SPLIT {
+            activity.amount = activity.amount.map(|v| v.abs());
+            Self::validate_split_ratio(&activity.activity_type, activity.amount)?;
+        }
+
         // Extract asset fields from nested `asset` object
         let symbol = activity.get_symbol_code().map(|s| s.to_string());
         let exchange_mic = activity.get_exchange_mic().map(|s| s.to_string());
@@ -1706,6 +1753,15 @@ impl ActivityService {
         let base_ccy = self.account_service.get_base_currency().unwrap_or_default();
         let account_currency = resolve_currency(&[&account.currency, &base_ccy]);
         let currency = resolve_currency(&[&activity.currency, &account_currency]);
+
+        if activity.activity_type == ACTIVITY_TYPE_SPLIT {
+            activity.amount = activity.amount.map(|v| v.map(|d| d.abs()));
+            self.validate_split_ratio_update(
+                &activity.id,
+                &activity.activity_type,
+                activity.amount,
+            )?;
+        }
 
         // Extract asset fields
         let symbol = activity.get_symbol_code().map(|s| s.to_string());
@@ -4405,6 +4461,8 @@ impl ActivityService {
             activity.unit_price = activity.unit_price.map(|v| v.abs());
             activity.amount = activity.amount.map(|v| v.abs());
             activity.fee = activity.fee.map(|v| v.abs());
+
+            Self::validate_split_ratio(&activity.activity_type, activity.amount)?;
 
             // Securities transfers derive monetary value from quantity × unit_price;
             // never persist an inbound `amount` for them when unit_price is present

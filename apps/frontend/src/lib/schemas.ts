@@ -307,6 +307,20 @@ export const importActivitySchema = z
   )
   .refine(
     (data) => {
+      const activityType = data.activityType;
+      if (isSplitActivity(activityType)) {
+        const amount = parseNumberLike(data.amount);
+        return amount !== undefined && amount > 0;
+      }
+      return true;
+    },
+    {
+      message: "Split ratio must be greater than 0",
+      path: ["amount"],
+    },
+  )
+  .refine(
+    (data) => {
       // Non-cash, non-trade activities need positive quantity
       const isNonCashNonTradeActivity =
         !isCashActivity(data.activityType as string) &&

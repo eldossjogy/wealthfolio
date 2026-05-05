@@ -143,6 +143,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     "net value",
     "proceeds",
     "cost",
+    "split ratio",
+    "splitratio",
   ],
   [ImportFormat.CURRENCY]: [
     "currency",

@@ -112,6 +112,65 @@ describe("createDraftActivities explicit activity mapping", () => {
     expect(draft.amount).toBe("250.00");
   });
 
+  it("accepts a positive split ratio from the amount column", () => {
+    const [draft] = createDraftActivities(
+      [["2024-05-15", "SPLIT", "NVDA", "3", "USD"]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+        },
+        activityMappings: { [ActivityType.SPLIT]: ["SPLIT"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.status).toBe("valid");
+    expect(draft.amount).toBe("3");
+    expect(draft.errors).toEqual({});
+  });
+
+  it("rejects zero split ratios", () => {
+    const [draft] = createDraftActivities(
+      [["2024-05-15", "SPLIT", "NVDA", "0", "USD"]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+        },
+        activityMappings: { [ActivityType.SPLIT]: ["SPLIT"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.status).toBe("error");
+    expect(draft.errors.amount).toEqual(["Amount (split ratio) must be greater than 0"]);
+  });
+
   it("marks rows as invalid until the activity type is explicitly mapped", () => {
     const draft = createSingleDraft(["2024-03-15", "WITHDRAWAL", "1000.00", "USD"]);
 
