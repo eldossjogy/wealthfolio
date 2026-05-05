@@ -1,6 +1,11 @@
 # Claude worktrees
 .claude/
 
+# Local tooling
+.air/
+.agents/
+.agent/
+
 # Build outputs
 dist/
 coverage/
