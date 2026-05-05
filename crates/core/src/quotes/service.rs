@@ -824,13 +824,20 @@ where
         &self,
         asset_ids: &[String],
     ) -> Result<HashMap<String, LatestQuoteSnapshot>> {
-        let mut quotes = self.quote_store.get_latest_quotes(asset_ids)?;
-        let assets = self.asset_repo.list_by_asset_ids(asset_ids)?;
+        let mut seen_asset_ids = HashSet::new();
+        let unique_asset_ids: Vec<String> = asset_ids
+            .iter()
+            .filter(|asset_id| seen_asset_ids.insert(asset_id.as_str()))
+            .cloned()
+            .collect();
+
+        let mut quotes = self.quote_store.get_latest_quotes(&unique_asset_ids)?;
+        let assets = self.asset_repo.list_by_asset_ids(&unique_asset_ids)?;
         let assets_by_id: HashMap<String, Asset> = assets
             .into_iter()
             .map(|asset| (asset.id.clone(), asset))
             .collect();
-        let sync_states = self.sync_state_store.get_by_asset_ids(asset_ids)?;
+        let sync_states = self.sync_state_store.get_by_asset_ids(&unique_asset_ids)?;
         let now = Utc::now();
 
         for (asset_id, quote) in quotes.iter_mut() {
@@ -839,7 +846,7 @@ where
             }
         }
 
-        let snapshots = asset_ids
+        let snapshots = unique_asset_ids
             .iter()
             .map(|asset_id| {
                 let asset = assets_by_id.get(asset_id);
@@ -847,7 +854,7 @@ where
                     now,
                     asset.and_then(|a| a.instrument_exchange_mic.as_deref()),
                 );
-                let snapshot = if let Some(quote) = quotes.remove(asset_id) {
+                let snapshot = if let Some(quote) = quotes.get(asset_id).cloned() {
                     let quote_day = quote.timestamp.date_naive();
                     let is_inactive = asset.map(|a| !a.is_active).unwrap_or(false);
 
@@ -2328,6 +2335,124 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct SnapshotQuoteStore {
+        quotes: HashMap<String, Quote>,
+        requested_latest_quotes: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    #[async_trait]
+    impl QuoteStore for SnapshotQuoteStore {
+        async fn save_quote(&self, _quote: &Quote) -> Result<Quote> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_quote(&self, _quote_id: &str) -> Result<()> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn upsert_quotes(&self, _quotes: &[Quote]) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_quotes_for_asset(&self, _asset_id: &AssetId) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_provider_quotes_for_asset(&self, _asset_id: &AssetId) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest(
+            &self,
+            _asset_id: &AssetId,
+            _source: Option<&QuoteSource>,
+        ) -> Result<Option<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn range(
+            &self,
+            _asset_id: &AssetId,
+            _start: Day,
+            _end: Day,
+            _source: Option<&QuoteSource>,
+        ) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest_batch(
+            &self,
+            _asset_ids: &[AssetId],
+            _source: Option<&QuoteSource>,
+        ) -> Result<HashMap<AssetId, Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest_with_previous(
+            &self,
+            _asset_ids: &[AssetId],
+        ) -> Result<HashMap<AssetId, LatestQuotePair>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_quote_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+            _source: &str,
+        ) -> Result<HashMap<String, (NaiveDate, NaiveDate)>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_latest_quote(&self, _symbol: &str) -> Result<Quote> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_latest_quotes(&self, symbols: &[String]) -> Result<HashMap<String, Quote>> {
+            self.requested_latest_quotes
+                .lock()
+                .unwrap()
+                .push(symbols.to_vec());
+            Ok(symbols
+                .iter()
+                .filter_map(|symbol| {
+                    self.quotes
+                        .get(symbol)
+                        .cloned()
+                        .map(|quote| (symbol.clone(), quote))
+                })
+                .collect())
+        }
+
+        fn get_latest_quotes_pair(
+            &self,
+            _symbols: &[String],
+        ) -> Result<HashMap<String, LatestQuotePair>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_historical_quotes(&self, _symbol: &str) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_all_historical_quotes(&self) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_quotes_in_range(
+            &self,
+            _symbol: &str,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn find_duplicate_quotes(&self, _symbol: &str, _date: NaiveDate) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+    }
+
     struct MockSyncStateStore {
         provider_sync_stats: Vec<ProviderSyncStats>,
         with_errors: Vec<QuoteSyncState>,
@@ -2481,7 +2606,7 @@ mod tests {
         }
 
         fn list_by_asset_ids(&self, _asset_ids: &[String]) -> Result<Vec<Asset>> {
-            unimplemented!("unused in this test")
+            Ok(Vec::new())
         }
 
         async fn delete(&self, _asset_id: &str) -> Result<()> {
@@ -2892,6 +3017,59 @@ mod tests {
         assert!(updated.last_error.is_none());
         assert_eq!(updated.last_synced_at, state.last_synced_at);
         assert_eq!(updated.profile_enriched_at, state.profile_enriched_at);
+    }
+
+    #[tokio::test]
+    async fn test_latest_quote_snapshot_deduplicates_requested_asset_ids() -> Result<()> {
+        let asset_id = "asset_1".to_string();
+        let quote = Quote {
+            id: "quote_1".to_string(),
+            asset_id: asset_id.clone(),
+            timestamp: Utc::now(),
+            open: dec!(42),
+            high: dec!(42),
+            low: dec!(42),
+            close: dec!(42),
+            adjclose: dec!(42),
+            volume: dec!(0),
+            currency: "USD".to_string(),
+            data_source: "YAHOO".to_string(),
+            created_at: Utc::now(),
+            notes: None,
+        };
+        let requested_latest_quotes = Arc::new(Mutex::new(Vec::new()));
+        let service = QuoteService::new(
+            Arc::new(SnapshotQuoteStore {
+                quotes: HashMap::from([(asset_id.clone(), quote)]),
+                requested_latest_quotes: requested_latest_quotes.clone(),
+            }),
+            Arc::new(MockSyncStateStore {
+                provider_sync_stats: vec![],
+                with_errors: vec![],
+                states: Arc::new(Mutex::new(HashMap::new())),
+            }),
+            Arc::new(MockProviderSettingsStore { providers: vec![] }),
+            Arc::new(NoopAssetRepository),
+            Arc::new(NoopActivityRepository),
+            Arc::new(MockSecretStore),
+        )
+        .await?;
+
+        let snapshots =
+            service.get_latest_quotes_snapshot(&[asset_id.clone(), asset_id.clone()])?;
+
+        assert_eq!(
+            *requested_latest_quotes.lock().unwrap(),
+            vec![vec![asset_id.clone()]]
+        );
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = snapshots.get(&asset_id).expect("snapshot should exist");
+        assert_eq!(
+            snapshot.quote.as_ref().map(|quote| quote.id.as_str()),
+            Some("quote_1")
+        );
+        assert!(snapshot.no_quote_reason.is_none());
+        Ok(())
     }
 
     #[test]
