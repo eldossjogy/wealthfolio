@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { createWriteStream, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { resolve, basename } from "node:path";
 
 function loadDotenvFile(file) {
   const p = resolve(process.cwd(), file);
@@ -32,11 +32,34 @@ loadDotenvFile(".env.web");
 // Set build target for web mode
 process.env.BUILD_TARGET = "web";
 
+const fileLog = process.argv.includes("--file-log");
+let logStream = null;
+
+if (fileLog) {
+  const dbUrl = process.env.WF_DB_PATH || process.env.DATABASE_URL || "app.db";
+  const dbName = basename(dbUrl, ".db");
+  mkdirSync("logs", { recursive: true });
+  logStream = createWriteStream(`logs/${dbName}.log`);
+}
+
 const children = new Map();
 let exiting = false;
 
 function spawnNamed(name, cmd, args, opts = {}) {
-  const child = spawn(cmd, args, { stdio: "inherit", shell: false, ...opts });
+  const stdio = logStream ? ["inherit", "pipe", "pipe"] : "inherit";
+  const child = spawn(cmd, args, { stdio, shell: false, ...opts });
+
+  if (logStream) {
+    child.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      logStream.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      process.stderr.write(chunk);
+      logStream.write(chunk);
+    });
+  }
+
   children.set(name, child);
   child.on("exit", (code, signal) => {
     if (exiting) return;
