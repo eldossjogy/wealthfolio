@@ -1,10 +1,8 @@
 # Claude worktrees
 .claude/
 
-# Local tooling
-.air/
-.agents/
-.agent/
+# Local hidden directories
+.*
 
 # Build outputs
 dist/
