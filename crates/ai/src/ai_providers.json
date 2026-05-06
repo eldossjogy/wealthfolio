@@ -187,7 +187,7 @@
         "claude-haiku-4-5-20251001": {
           "capabilities": { "tools": true, "thinking": false, "vision": true }
         },
-        "claude-opus-4-6": {
+        "claude-opus-4-7": {
           "capabilities": { "tools": true, "thinking": false, "vision": true }
         }
       },
@@ -196,11 +196,7 @@
       "documentationUrl": "https://docs.anthropic.com/en/api/getting-started",
       "tuning": {
         "maxTokens": 16384,
-        "maxTokensThinking": 32000,
-        "extraOptions": {
-          "top_p": 1.0,
-          "top_k": 0
-        }
+        "maxTokensThinking": 32000
       }
     },
     "openai": {

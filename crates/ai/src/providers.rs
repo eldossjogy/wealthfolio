@@ -403,7 +403,10 @@ impl<E: AiEnvironment> ProviderService<E> {
             .and_then(|p| p.tuning_overrides.clone());
 
         match user_overrides {
-            Some(ovr) => catalog_tuning.apply_overrides(&ovr),
+            Some(ovr) => {
+                let sanitized = ovr.sanitized_for_provider(provider_id);
+                catalog_tuning.apply_overrides(&sanitized)
+            }
             None => catalog_tuning,
         }
     }
