@@ -105,6 +105,15 @@ impl ProviderCapabilities {
                 coverage: "Global".to_string(),
                 features: vec!["Search".to_string(), "Profiles".to_string()],
             }),
+            "US_TREASURY_CALC" => Some(Self {
+                instruments: "US Treasuries".to_string(),
+                coverage: "US Treasury".to_string(),
+                features: vec![
+                    "Real-time".to_string(),
+                    "Historical".to_string(),
+                    "No API key".to_string(),
+                ],
+            }),
             "CUSTOM_SCRAPER" => Some(Self {
                 instruments: "Any".to_string(),
                 coverage: "User-defined".to_string(),
