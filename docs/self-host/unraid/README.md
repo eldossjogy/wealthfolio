@@ -30,3 +30,17 @@ Then **Docker → Add Container → Template → User templates → wealthfolio*
 
 See the website guide for required values, the password hash recipe, reverse
 proxy setup, backups, and troubleshooting.
+
+## Permissions
+
+The image runs as a non-root user (UID 1000) by default. The Unraid template
+overrides this via `--user=99:100` in `<ExtraParams>` so the container matches
+Unraid's standard `nobody:users` appdata ownership — fresh installs work without
+any host-side `chown`.
+
+**Upgrading from an older image** (pre-`v3.4.0`): existing data was written as
+`root:root`. Run once on the Unraid host:
+
+```bash
+chown -R 99:100 /mnt/user/appdata/wealthfolio
+```

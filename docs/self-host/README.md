@@ -22,6 +22,27 @@ Multi-arch (`linux/amd64`, `linux/arm64`), published on every `v*.*.*` tag:
 docker pull afadil/wealthfolio:latest
 ```
 
+## Permissions
+
+The container runs as a non-root user (UID/GID **1000:1000**).
+
+**Fresh install:** Docker named volumes work out of the box. For a bind mount,
+make the host directory writable by UID 1000:
+
+```bash
+mkdir -p ./data && sudo chown -R 1000:1000 ./data
+```
+
+**Upgrading from an older image:** existing data is owned by `root` and must be
+chowned once. Pick the line that matches your setup:
+
+```bash
+# named volume
+docker run --rm -v <your-volume>:/data alpine chown -R 1000:1000 /data
+# bind mount
+sudo chown -R 1000:1000 /path/to/your/data
+```
+
 ## Platform pointers
 
 - [**Docker / Docker Compose**](https://wealthfolio.app/docs/guide/self-hosting):
