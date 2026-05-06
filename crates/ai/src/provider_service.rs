@@ -301,7 +301,10 @@ impl AiProviderServiceTrait for AiProviderService {
                 // user-only, and the effective merged value the runtime uses.
                 let catalog_tuning = catalog_provider.tuning.clone();
                 let tuning_overrides = user.tuning_overrides.clone();
-                let resolved_tuning = match (&catalog_tuning, &tuning_overrides) {
+                let sanitized_overrides = tuning_overrides
+                    .clone()
+                    .map(|ovr| ovr.sanitized_for_provider(id));
+                let resolved_tuning = match (&catalog_tuning, &sanitized_overrides) {
                     (Some(cat), Some(ovr)) => Some(cat.apply_overrides(ovr)),
                     (Some(cat), None) => Some(cat.clone()),
                     (None, Some(ovr)) => Some(ProviderTuning::default().apply_overrides(ovr)),
@@ -513,7 +516,10 @@ impl AiProviderServiceTrait for AiProviderService {
             .get(provider_id)
             .and_then(|s| s.tuning_overrides.clone());
         match user_overrides {
-            Some(ovr) => catalog_tuning.apply_overrides(&ovr),
+            Some(ovr) => {
+                let sanitized = ovr.sanitized_for_provider(provider_id);
+                catalog_tuning.apply_overrides(&sanitized)
+            }
             None => catalog_tuning,
         }
     }

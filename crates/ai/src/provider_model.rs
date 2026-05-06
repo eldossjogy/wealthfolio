@@ -123,6 +123,18 @@ pub struct ProviderTuningOverrides {
 }
 
 impl ProviderTuningOverrides {
+    /// Remove provider-specific overrides that should not reach runtime params.
+    pub fn sanitized_for_provider(mut self, provider_id: &str) -> Self {
+        if provider_id == "anthropic" {
+            // Claude rejects top_k/top_p on current Anthropic models. Users may
+            // still have these as orphaned overrides from older catalogs, so
+            // drop them before merging to avoid rebuilding unsupported params.
+            self.extra_option_overrides.remove("top_k");
+            self.extra_option_overrides.remove("top_p");
+        }
+        self
+    }
+
     /// Whether every field is empty — in which case this override is a no-op
     /// and should be cleared from the user settings to keep things tidy.
     pub fn is_empty(&self) -> bool {
@@ -589,4 +601,54 @@ pub struct ListModelsResponse {
     /// Whether the provider supports dynamic model listing.
     /// If false, only catalog models are available.
     pub supports_listing: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn sanitized_for_provider_removes_unsupported_anthropic_sampling_overrides() {
+        let overrides = ProviderTuningOverrides {
+            extra_option_overrides: HashMap::from([
+                ("top_k".to_string(), json!(0)),
+                ("top_p".to_string(), json!(1.0)),
+                ("seed".to_string(), json!(42)),
+            ]),
+            ..Default::default()
+        };
+
+        let sanitized = overrides.sanitized_for_provider("anthropic");
+
+        assert!(!sanitized.extra_option_overrides.contains_key("top_k"));
+        assert!(!sanitized.extra_option_overrides.contains_key("top_p"));
+        assert_eq!(
+            sanitized.extra_option_overrides.get("seed"),
+            Some(&json!(42))
+        );
+    }
+
+    #[test]
+    fn sanitized_for_provider_preserves_other_provider_sampling_overrides() {
+        let overrides = ProviderTuningOverrides {
+            extra_option_overrides: HashMap::from([
+                ("top_k".to_string(), json!(40)),
+                ("top_p".to_string(), json!(0.9)),
+            ]),
+            ..Default::default()
+        };
+
+        let sanitized = overrides.sanitized_for_provider("ollama");
+
+        assert_eq!(
+            sanitized.extra_option_overrides.get("top_k"),
+            Some(&json!(40))
+        );
+        assert_eq!(
+            sanitized.extra_option_overrides.get("top_p"),
+            Some(&json!(0.9))
+        );
+    }
 }
