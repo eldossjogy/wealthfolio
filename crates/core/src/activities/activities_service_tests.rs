@@ -692,7 +692,7 @@ mod tests {
                 activity_type: new_activity.activity_type,
                 activity_type_override: None,
                 source_type: None,
-                subtype: None,
+                subtype: new_activity.subtype,
                 status: new_activity.status.unwrap_or(ActivityStatus::Posted),
                 activity_date: Utc::now(),
                 settlement_date: None,
@@ -729,7 +729,11 @@ mod tests {
             existing.account_id = activity_update.account_id;
             existing.asset_id = asset_id;
             existing.activity_type = activity_update.activity_type;
-            existing.subtype = activity_update.subtype;
+            existing.subtype = match activity_update.subtype {
+                Some(subtype) if subtype.trim().is_empty() => None,
+                Some(subtype) => Some(subtype),
+                None => existing.subtype.clone(),
+            };
             existing.quantity = activity_update.quantity.unwrap_or(existing.quantity);
             existing.unit_price = activity_update.unit_price.unwrap_or(existing.unit_price);
             existing.amount = activity_update.amount.unwrap_or(existing.amount);
@@ -1653,6 +1657,261 @@ mod tests {
         assert_eq!(key.len(), 64, "key should be a sha256 hex string");
     }
 
+    #[tokio::test]
+    async fn test_bulk_update_preserves_existing_asset_backed_subtype_when_omitted() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "ETH",
+            "ETH",
+            None,
+            Some(InstrumentType::Crypto),
+            "USD",
+        ));
+
+        let mut existing = create_stored_activity("staking-1", "acc-1", Some("ETH"));
+        existing.activity_type = "INTEREST".to_string();
+        existing.subtype = Some("STAKING_REWARD".to_string());
+        existing.quantity = Some(dec!(1));
+        existing.unit_price = Some(dec!(100));
+        existing.amount = Some(dec!(100));
+        activity_repository.add_activity(existing);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let mut update = create_test_activity_update(
+            "staking-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("ETH".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "INTEREST".to_string();
+        update.subtype = None;
+        update.quantity = None;
+        update.unit_price = None;
+        update.amount = None;
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![update],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk update should succeed");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.updated.len(), 1);
+        assert_eq!(result.updated[0].subtype.as_deref(), Some("STAKING_REWARD"));
+        assert_eq!(result.updated[0].quantity, Some(dec!(1)));
+        assert_eq!(result.updated[0].unit_price, Some(dec!(100)));
+    }
+
+    #[tokio::test]
+    async fn test_bulk_update_clears_existing_subtype_when_explicitly_cleared() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "ETH",
+            "ETH",
+            None,
+            Some(InstrumentType::Crypto),
+            "USD",
+        ));
+
+        let mut existing = create_stored_activity("staking-1", "acc-1", Some("ETH"));
+        existing.activity_type = "INTEREST".to_string();
+        existing.subtype = Some("STAKING_REWARD".to_string());
+        existing.quantity = Some(dec!(1));
+        existing.unit_price = Some(dec!(100));
+        existing.amount = Some(dec!(100));
+        activity_repository.add_activity(existing);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let mut update = create_test_activity_update(
+            "staking-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("ETH".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "DIVIDEND".to_string();
+        update.subtype = Some(String::new());
+        update.quantity = None;
+        update.unit_price = None;
+        update.amount = Some(Some(dec!(100)));
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![update],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk update should succeed");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.updated.len(), 1);
+        assert_eq!(result.updated[0].activity_type, "DIVIDEND");
+        assert_eq!(result.updated[0].subtype, None);
+    }
+
+    #[tokio::test]
+    async fn test_bulk_update_preserves_provider_subtype_label_when_omitted() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "AAPL_OPT",
+            "AAPL251219C00200000",
+            None,
+            Some(InstrumentType::Option),
+            "USD",
+        ));
+
+        let mut existing = create_stored_activity("option-1", "acc-1", Some("AAPL_OPT"));
+        existing.activity_type = "BUY".to_string();
+        existing.subtype = Some("BUY_TO_OPEN".to_string());
+        activity_repository.add_activity(existing);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let mut update = create_test_activity_update(
+            "option-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("AAPL_OPT".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "BUY".to_string();
+        update.subtype = None;
+        update.quantity = None;
+        update.unit_price = None;
+        update.amount = None;
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![update],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk update should succeed");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.updated.len(), 1);
+        assert_eq!(result.updated[0].subtype.as_deref(), Some("BUY_TO_OPEN"));
+    }
+
+    #[tokio::test]
+    async fn test_bulk_update_rejects_asset_backed_subtype_without_quantity() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "ETH",
+            "ETH",
+            None,
+            Some(InstrumentType::Crypto),
+            "USD",
+        ));
+
+        let mut existing = create_stored_activity("interest-1", "acc-1", Some("ETH"));
+        existing.activity_type = "INTEREST".to_string();
+        existing.subtype = None;
+        existing.quantity = None;
+        existing.unit_price = None;
+        existing.amount = Some(dec!(25));
+        activity_repository.add_activity(existing);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let mut update = create_test_activity_update(
+            "interest-1",
+            "acc-1",
+            Some(AssetResolutionInput {
+                id: Some("ETH".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+        update.activity_type = "INTEREST".to_string();
+        update.subtype = Some("STAKING_REWARD".to_string());
+        update.quantity = None;
+        update.unit_price = Some(Some(dec!(100)));
+        update.amount = Some(Some(dec!(100)));
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![update],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk mutation should return structured errors");
+
+        assert_eq!(result.updated.len(), 0);
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].action, "update");
+        assert!(
+            result.errors[0]
+                .message
+                .contains("Asset-backed income activities require a positive quantity"),
+            "unexpected error: {}",
+            result.errors[0].message
+        );
+    }
+
     /// Test: When activity currency, asset currency, and account currency are all the same,
     /// no FX pair should be registered
     #[tokio::test]
@@ -1966,6 +2225,408 @@ mod tests {
             error.contains("Asset-backed activities need either asset_id or symbol"),
             "unexpected error: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_canonicalizes_case_insensitive_subtype() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "ETH",
+            "ETH",
+            None,
+            Some(InstrumentType::Crypto),
+            "USD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let activity = activity_service
+            .create_activity(NewActivity {
+                id: Some("staking-reward-lowercase".to_string()),
+                account_id: "acc-1".to_string(),
+                asset: Some(AssetResolutionInput {
+                    id: Some("ETH".to_string()),
+                    ..Default::default()
+                }),
+                activity_type: "INTEREST".to_string(),
+                subtype: Some("staking_reward".to_string()),
+                activity_date: "2024-01-15".to_string(),
+                quantity: Some(dec!(0.25)),
+                unit_price: Some(dec!(4000)),
+                currency: "USD".to_string(),
+                fee: Some(dec!(0)),
+                amount: Some(dec!(1000)),
+                status: None,
+                notes: None,
+                fx_rate: None,
+                metadata: None,
+                needs_review: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: None,
+                idempotency_key: None,
+            })
+            .await
+            .expect("lowercase subtype should save");
+
+        assert_eq!(activity.subtype.as_deref(), Some("STAKING_REWARD"));
+    }
+
+    #[tokio::test]
+    async fn test_create_asset_backed_income_normalizes_negative_values_before_validation() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-1", "USD"));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "ETH",
+            "ETH",
+            None,
+            Some(InstrumentType::Crypto),
+            "USD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let activity = activity_service
+            .create_activity(NewActivity {
+                id: Some("staking-reward-negative".to_string()),
+                account_id: "acc-1".to_string(),
+                asset: Some(AssetResolutionInput {
+                    id: Some("ETH".to_string()),
+                    ..Default::default()
+                }),
+                activity_type: "INTEREST".to_string(),
+                subtype: Some("STAKING_REWARD".to_string()),
+                activity_date: "2024-01-15".to_string(),
+                quantity: Some(dec!(-0.25)),
+                unit_price: Some(dec!(-4000)),
+                currency: "USD".to_string(),
+                fee: Some(dec!(0)),
+                amount: Some(dec!(-1000)),
+                status: None,
+                notes: None,
+                fx_rate: None,
+                metadata: None,
+                needs_review: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: None,
+                idempotency_key: None,
+            })
+            .await
+            .expect("negative provider-style signs should normalize before validation");
+
+        assert_eq!(activity.quantity, Some(dec!(0.25)));
+        assert_eq!(activity.unit_price, Some(dec!(4000)));
+        assert_eq!(activity.amount, Some(dec!(1000)));
+    }
+
+    #[tokio::test]
+    async fn test_sync_prepare_allows_provider_subtype_label() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account.clone());
+        asset_service.add_asset(create_test_asset("AAPL_OPT", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("option-buy".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: Some(AssetResolutionInput {
+                        id: Some("AAPL_OPT".to_string()),
+                        ..Default::default()
+                    }),
+                    activity_type: "BUY".to_string(),
+                    subtype: Some("BUY_TO_OPEN".to_string()),
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: Some(dec!(1)),
+                    unit_price: Some(dec!(100)),
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: Some(dec!(100)),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("option-buy".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should not reject provider subtype labels");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        assert_eq!(
+            result.prepared[0].activity.subtype.as_deref(),
+            Some("BUY_TO_OPEN")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_prepare_keeps_incomplete_valid_asset_backed_subtype_for_review() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account.clone());
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("staking-cash-only".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: None,
+                    activity_type: "INTEREST".to_string(),
+                    subtype: Some("STAKING_REWARD".to_string()),
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: None,
+                    unit_price: None,
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: Some(dec!(25)),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("staking-cash-only".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should keep broker rows for review");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        let prepared = &result.prepared[0].activity;
+        assert_eq!(prepared.activity_type, "INTEREST");
+        assert_eq!(prepared.subtype, None);
+        assert_eq!(prepared.amount, Some(dec!(25)));
+        assert_eq!(prepared.quantity, None);
+        assert_eq!(prepared.needs_review, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_sync_prepare_keeps_unresolved_asset_backed_income_for_review() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account.clone());
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("staking-invalid-symbol".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: Some(AssetResolutionInput {
+                        symbol: Some("$FOO".to_string()),
+                        ..Default::default()
+                    }),
+                    activity_type: "INTEREST".to_string(),
+                    subtype: Some("STAKING_REWARD".to_string()),
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: Some(dec!(2)),
+                    unit_price: Some(dec!(12.50)),
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: None,
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("staking-invalid-symbol".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should not drop unresolved broker rows");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        let prepared = &result.prepared[0];
+        assert_eq!(prepared.resolved_asset_id, None);
+        assert_eq!(prepared.activity.subtype, None);
+        assert_eq!(prepared.activity.amount, Some(dec!(25.00)));
+        assert_eq!(prepared.activity.needs_review, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_sync_prepare_keeps_mismatched_asset_backed_subtype_as_metadata() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account.clone());
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("interest-drip-label".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: None,
+                    activity_type: "INTEREST".to_string(),
+                    subtype: Some("DRIP".to_string()),
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: None,
+                    unit_price: None,
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: Some(dec!(25)),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("interest-drip-label".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should keep mismatched subtype as inert metadata");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        assert_eq!(result.prepared[0].activity.subtype.as_deref(), Some("DRIP"));
+        assert_eq!(result.prepared[0].activity.needs_review, None);
+        assert_eq!(result.prepared[0].activity.status, None);
+    }
+
+    #[tokio::test]
+    async fn test_sync_prepare_keeps_known_mismatched_subtype_as_metadata() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account.clone());
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("credit-staking-label".to_string()),
+                    account_id: "acc-1".to_string(),
+                    asset: None,
+                    activity_type: "CREDIT".to_string(),
+                    subtype: Some("STAKING_REWARD".to_string()),
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: None,
+                    unit_price: None,
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: Some(dec!(25)),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: None,
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("credit-staking-label".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should keep mismatched subtype as inert metadata");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        assert_eq!(
+            result.prepared[0].activity.subtype.as_deref(),
+            Some("STAKING_REWARD")
+        );
+        assert_eq!(result.prepared[0].activity.needs_review, None);
+        assert_eq!(result.prepared[0].activity.status, None);
     }
 
     #[tokio::test]
@@ -3914,6 +4575,129 @@ mod tests {
             .expect("expected import errors");
         assert!(errors.contains_key("quoteCcy"));
         assert!(errors.contains_key("instrumentType"));
+    }
+
+    #[tokio::test]
+    async fn test_import_keeps_mismatched_known_subtype_as_metadata() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let mismatched_subtype = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "AAPL".to_string(),
+            activity_type: "DIVIDEND".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(100)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(100)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: Some("Apple".to_string()),
+            exchange_mic: Some("XNAS".to_string()),
+            quote_ccy: Some("USD".to_string()),
+            instrument_type: Some("EQUITY".to_string()),
+            quote_mode: Some("MARKET".to_string()),
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: Some("STAKING_REWARD".to_string()),
+            asset_id: None,
+            isin: None,
+            force_import: false,
+        };
+
+        let result = activity_service
+            .import_activities(vec![mismatched_subtype])
+            .await
+            .expect("import should keep subtype labels as metadata");
+
+        assert!(result.summary.success);
+        assert_eq!(result.summary.imported, 1);
+        assert_eq!(
+            result.activities[0].subtype.as_deref(),
+            Some("STAKING_REWARD")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_allows_unknown_provider_subtype_label() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let option_buy = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "AAPL251219C00200000".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(5)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(500)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: Some("AAPL Dec 2025 200 Call".to_string()),
+            exchange_mic: None,
+            quote_ccy: Some("USD".to_string()),
+            instrument_type: Some("OPTION".to_string()),
+            quote_mode: Some("MARKET".to_string()),
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: Some("BUY_TO_OPEN".to_string()),
+            asset_id: None,
+            isin: None,
+            force_import: false,
+        };
+
+        let result = activity_service
+            .import_activities(vec![option_buy])
+            .await
+            .expect("import should accept provider subtype labels");
+
+        assert!(result.summary.success);
+        assert_eq!(result.summary.imported, 1);
+        assert_eq!(result.activities[0].subtype.as_deref(), Some("BUY_TO_OPEN"));
     }
 
     #[tokio::test]
