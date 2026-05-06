@@ -368,6 +368,107 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn test_new_activity_validates_staking_reward_quantity() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "INTEREST".to_string();
+        activity.subtype = Some("STAKING_REWARD".to_string());
+        activity.quantity = None;
+        activity.unit_price = Some(dec!(2000));
+        activity.amount = Some(dec!(20));
+
+        let result = activity.validate();
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("positive quantity"));
+    }
+
+    #[test]
+    fn test_new_activity_validates_dividend_in_kind_value_source() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "DIVIDEND".to_string();
+        activity.subtype = Some("DIVIDEND_IN_KIND".to_string());
+        activity.quantity = Some(dec!(2));
+        activity.unit_price = None;
+        activity.amount = None;
+
+        let result = activity.validate();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("FMV per unit"));
+    }
+
+    #[test]
+    fn test_new_activity_allows_mismatched_subtype_as_metadata() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "DIVIDEND".to_string();
+        activity.subtype = Some("STAKING_REWARD".to_string());
+        activity.quantity = Some(dec!(1));
+        activity.unit_price = Some(dec!(100));
+        activity.amount = Some(dec!(100));
+
+        let result = activity.validate();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_new_activity_allows_unknown_provider_subtype_label() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "BUY".to_string();
+        activity.subtype = Some("BUY_TO_OPEN".to_string());
+
+        let result = activity.validate();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_new_activity_treats_zero_income_value_source_as_missing() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "INTEREST".to_string();
+        activity.subtype = Some("STAKING_REWARD".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = Some(dec!(0));
+        activity.amount = Some(dec!(0));
+
+        let result = activity.validate();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("FMV per unit"));
+    }
+
+    #[test]
+    fn test_new_activity_allows_zero_amount_with_positive_unit_price() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "INTEREST".to_string();
+        activity.subtype = Some("STAKING_REWARD".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = Some(dec!(200));
+        activity.amount = Some(dec!(0));
+
+        let result = activity.validate();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_new_activity_allows_asset_income_amount_without_unit_price() {
+        let mut activity = create_test_new_activity();
+        activity.activity_type = "INTEREST".to_string();
+        activity.subtype = Some("STAKING_REWARD".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = None;
+        activity.amount = Some(dec!(20));
+
+        let result = activity.validate();
+
+        assert!(result.is_ok());
+    }
+
     // ============================================================================
     // ActivityUpdate Validation Tests
     // ============================================================================
@@ -452,6 +553,7 @@ mod tests {
             "currency": "USD",
             "quantity": "1e-7",
             "unitPrice": 2.5e3,
+            "subtype": null,
             "fee": null
         });
 
@@ -465,6 +567,7 @@ mod tests {
             parsed.unit_price,
             Some(Some(Decimal::from_scientific("2.5e3").unwrap()))
         );
+        assert_eq!(parsed.subtype, Some(String::new()));
         assert_eq!(parsed.fee, Some(None));
         assert_eq!(parsed.amount, None);
     }

@@ -839,7 +839,7 @@ impl HoldingsCalculator {
         use crate::activities::ACTIVITY_SUBTYPE_OPTION_EXPIRY;
 
         match activity.subtype.as_deref() {
-            Some(ACTIVITY_SUBTYPE_OPTION_EXPIRY) => {
+            Some(subtype) if subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_OPTION_EXPIRY) => {
                 let asset_id = activity.asset_id.as_deref().unwrap_or("");
                 if let Some(position) = state.positions.get_mut(asset_id) {
                     let qty = activity.qty();

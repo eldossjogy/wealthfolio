@@ -1,7 +1,9 @@
 // Test cases for HoldingsCalculator will go here.
 #[cfg(test)]
 mod tests {
-    use crate::activities::{Activity, ActivityStatus, ActivityType};
+    use crate::activities::{
+        Activity, ActivityCompiler, ActivityStatus, ActivityType, DefaultActivityCompiler,
+    };
     use crate::assets::{
         Asset, AssetKind, AssetRepositoryTrait, InstrumentType, NewAsset, QuoteMode,
         UpdateAssetProfile,
@@ -583,6 +585,93 @@ mod tests {
 
         assert_eq!(next_state.cost_basis, dec!(1505));
         assert_eq!(next_state.net_contribution, dec!(0));
+    }
+
+    #[test]
+    fn test_dividend_in_kind_compiles_to_zero_cash_and_no_contribution() {
+        let mock_fx_service = MockFxService::new();
+        let account_currency = "USD";
+        let base_currency = Arc::new(RwLock::new(account_currency.to_string()));
+        let calculator = create_calculator(Arc::new(mock_fx_service), base_currency);
+
+        let target_date_str = "2023-01-01";
+        let target_date = NaiveDate::from_str(target_date_str).unwrap();
+        let previous_snapshot = create_initial_snapshot("acc_1", account_currency, "2022-12-31");
+
+        let mut dividend_in_kind = create_default_activity(
+            "div-in-kind-1",
+            ActivityType::Dividend,
+            "AAPL",
+            dec!(10),
+            dec!(25),
+            dec!(0),
+            account_currency,
+            target_date_str,
+        );
+        dividend_in_kind.subtype = Some("DIVIDEND_IN_KIND".to_string());
+        dividend_in_kind.amount = None;
+
+        let compiler = DefaultActivityCompiler::new();
+        let activities_today = compiler.compile(&dividend_in_kind).unwrap();
+
+        let result =
+            calculator.calculate_next_holdings(&previous_snapshot, &activities_today, target_date);
+        assert!(result.is_ok());
+        let next_state = result.unwrap().snapshot;
+
+        let position = next_state.positions.get("AAPL").unwrap();
+        assert_eq!(position.quantity, dec!(10));
+        assert_eq!(position.total_cost_basis, dec!(250));
+        assert_eq!(
+            next_state.cash_balances.get(account_currency),
+            Some(&dec!(0))
+        );
+        assert_eq!(next_state.net_contribution, dec!(0));
+        assert_eq!(next_state.net_contribution_base, dec!(0));
+    }
+
+    #[test]
+    fn test_staking_reward_compiles_to_fmv_cost_basis_without_cash_or_contribution() {
+        let mock_fx_service = MockFxService::new();
+        let account_currency = "USD";
+        let base_currency = Arc::new(RwLock::new(account_currency.to_string()));
+        let calculator = create_calculator(Arc::new(mock_fx_service), base_currency);
+
+        let target_date_str = "2026-05-05";
+        let target_date = NaiveDate::from_str(target_date_str).unwrap();
+        let previous_snapshot = create_initial_snapshot("acc_1", account_currency, "2026-05-04");
+
+        let mut staking_reward = create_default_activity(
+            "staking-reward-1",
+            ActivityType::Interest,
+            "SOL",
+            dec!(0.01),
+            dec!(200),
+            dec!(0),
+            account_currency,
+            target_date_str,
+        );
+        staking_reward.subtype = Some("STAKING_REWARD".to_string());
+        staking_reward.amount = None;
+
+        let compiler = DefaultActivityCompiler::new();
+        let activities_today = compiler.compile(&staking_reward).unwrap();
+
+        let result =
+            calculator.calculate_next_holdings(&previous_snapshot, &activities_today, target_date);
+        assert!(result.is_ok());
+        let next_state = result.unwrap().snapshot;
+
+        let position = next_state.positions.get("SOL").unwrap();
+        assert_eq!(position.quantity, dec!(0.01));
+        assert_eq!(position.average_cost, dec!(200));
+        assert_eq!(position.total_cost_basis, dec!(2));
+        assert_eq!(
+            next_state.cash_balances.get(account_currency),
+            Some(&dec!(0))
+        );
+        assert_eq!(next_state.net_contribution, dec!(0));
+        assert_eq!(next_state.net_contribution_base, dec!(0));
     }
 
     #[test]

@@ -232,8 +232,8 @@ pub const ACTIVITY_SUBTYPE_DRIP: &str = "DRIP";
 /// Expands to: INTEREST + BUY
 pub const ACTIVITY_SUBTYPE_STAKING_REWARD: &str = "STAKING_REWARD";
 
-/// Dividend in Kind: Dividend paid in a different asset (e.g., spinoff shares).
-/// Expands to: DIVIDEND + TRANSFER_IN (with metadata.flow.is_external=true)
+/// Dividend in Kind: Dividend paid as additional units of the same asset.
+/// Expands to: DIVIDEND + BUY
 pub const ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND: &str = "DIVIDEND_IN_KIND";
 
 /// Bonus: External cash credit (new capital entering portfolio).
