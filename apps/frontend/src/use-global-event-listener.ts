@@ -55,6 +55,15 @@ function shouldInvalidateAfterPortfolioUpdate(queryKey: readonly unknown[]): boo
   return true;
 }
 
+interface MarketSyncCompletePayload {
+  failed_syncs?: [string, string][];
+  skipped_reasons?: [string, string][];
+}
+
+function getSyncFailures(payload?: MarketSyncCompletePayload | null): [string, string][] {
+  return Array.isArray(payload?.failed_syncs) ? payload.failed_syncs : [];
+}
+
 const useGlobalEventListener = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -92,8 +101,8 @@ const useGlobalEventListener = () => {
       }
     };
 
-    const handleMarketSyncComplete = (event: { payload: { failed_syncs: [string, string][] } }) => {
-      const { failed_syncs } = event.payload || { failed_syncs: [] };
+    const handleMarketSyncComplete = (event: { payload: MarketSyncCompletePayload | null }) => {
+      const failed_syncs = getSyncFailures(event.payload);
 
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setIdle();

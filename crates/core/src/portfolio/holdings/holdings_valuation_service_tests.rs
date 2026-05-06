@@ -189,10 +189,11 @@ mod tests {
                     (
                         asset_id,
                         LatestQuoteSnapshot {
-                            quote,
+                            quote: Some(quote),
                             is_stale: quote_day < today,
                             effective_market_date: today.to_string(),
-                            quote_date: quote_day.to_string(),
+                            quote_date: Some(quote_day.to_string()),
+                            no_quote_reason: None,
                         },
                     )
                 })
@@ -376,6 +377,10 @@ mod tests {
         }
 
         async fn reset_sync_errors(&self, _asset_ids: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn reset_sync_state_for_profile_change(&self, _asset_id: &str) -> Result<()> {
             Ok(())
         }
 

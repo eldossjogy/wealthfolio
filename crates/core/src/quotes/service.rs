@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use crate::utils::time_utils;
 
 use super::client::{MarketDataClient, ProviderConfig};
-use super::constants::{DATA_SOURCE_CUSTOM_SCRAPER, DATA_SOURCE_MANUAL};
+use super::constants::{DATA_SOURCE_CUSTOM_SCRAPER, DATA_SOURCE_MANUAL, MAX_SYNC_ERRORS};
 use super::import::{ImportValidationStatus, QuoteConverter, QuoteImport, QuoteValidator};
 use super::model::{LatestQuotePair, Quote, ResolvedQuote, SymbolSearchResult};
 use super::store::{ProviderSettingsStore, QuoteStore};
@@ -178,10 +178,19 @@ fn resolved_provider_matches_requested(
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatestQuoteSnapshot {
-    pub quote: Quote,
+    pub quote: Option<Quote>,
     pub is_stale: bool,
     pub effective_market_date: String,
-    pub quote_date: String,
+    pub quote_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_quote_reason: Option<NoQuoteReason>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoQuoteReason {
+    pub code: String,
+    pub message: String,
 }
 
 /// Unified trait for all quote operations.
@@ -392,10 +401,12 @@ pub trait QuoteServiceTrait: Send + Sync {
     async fn reset_sync_errors(&self, asset_ids: &[String]) -> Result<()>;
 
     /// Reset stale sync routing/error state after a market identity or provider profile change.
-    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()> {
-        let _ = asset_id;
-        Ok(())
-    }
+    ///
+    /// Implementors must clear `error_count`, `last_error`, and `data_source` on
+    /// the matching `QuoteSyncState` so the next sync re-routes to the asset's
+    /// `preferred_provider`. Note: clearing `data_source` to an empty string is
+    /// the contract — `effective_provider` treats `""` as "no override".
+    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()>;
 
     /// Update position status (active/inactive) based on current holdings.
     async fn update_position_status_from_holdings(
@@ -696,6 +707,81 @@ where
             score: 100.0, // High score for existing assets
         }
     }
+
+    fn no_quote_reason(asset: Option<&Asset>, state: Option<&QuoteSyncState>) -> NoQuoteReason {
+        if let Some(asset) = asset {
+            if asset.quote_mode == QuoteMode::Manual {
+                return NoQuoteReason {
+                    code: "MANUAL_PRICING".to_string(),
+                    message: "Quote mode is Manual".to_string(),
+                };
+            }
+
+            if !asset.is_active {
+                return NoQuoteReason {
+                    code: "INACTIVE".to_string(),
+                    message: "Asset is inactive".to_string(),
+                };
+            }
+
+            if asset.is_bond() {
+                if let Some(spec) = asset.bond_spec() {
+                    if let Some(maturity) = spec.maturity_date {
+                        if maturity < Utc::now().date_naive() {
+                            return NoQuoteReason {
+                                code: "MATURED_BOND".to_string(),
+                                message: "Bond has matured".to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+
+            if asset.is_option() {
+                if let Some(spec) = asset.option_spec() {
+                    if spec.expiration < Utc::now().date_naive() {
+                        return NoQuoteReason {
+                            code: "EXPIRED_OPTION".to_string(),
+                            message: "Option has expired".to_string(),
+                        };
+                    }
+                }
+            }
+        }
+
+        if let Some(state) = state {
+            if state.error_count >= MAX_SYNC_ERRORS {
+                return NoQuoteReason {
+                    code: "TOO_MANY_ERRORS".to_string(),
+                    message: "Sync paused after repeated errors".to_string(),
+                };
+            }
+
+            if let Some(last_error) = state
+                .last_error
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                return NoQuoteReason {
+                    code: "LAST_ERROR".to_string(),
+                    message: format!("Last sync error: {}", last_error),
+                };
+            }
+
+            if state.last_synced_at.is_none() {
+                return NoQuoteReason {
+                    code: "PENDING_SYNC".to_string(),
+                    message: "No provider quote has been synced yet".to_string(),
+                };
+            }
+        }
+
+        NoQuoteReason {
+            code: "NO_DATA".to_string(),
+            message: "No data available from provider yet".to_string(),
+        }
+    }
 }
 
 #[async_trait]
@@ -740,12 +826,20 @@ where
         &self,
         asset_ids: &[String],
     ) -> Result<HashMap<String, LatestQuoteSnapshot>> {
-        let mut quotes = self.quote_store.get_latest_quotes(asset_ids)?;
-        let assets = self.asset_repo.list_by_asset_ids(asset_ids)?;
+        let mut seen_asset_ids = HashSet::new();
+        let unique_asset_ids: Vec<String> = asset_ids
+            .iter()
+            .filter(|asset_id| seen_asset_ids.insert(asset_id.as_str()))
+            .cloned()
+            .collect();
+
+        let mut quotes = self.quote_store.get_latest_quotes(&unique_asset_ids)?;
+        let assets = self.asset_repo.list_by_asset_ids(&unique_asset_ids)?;
         let assets_by_id: HashMap<String, Asset> = assets
             .into_iter()
             .map(|asset| (asset.id.clone(), asset))
             .collect();
+        let sync_states = self.sync_state_store.get_by_asset_ids(&unique_asset_ids)?;
         let now = Utc::now();
 
         for (asset_id, quote) in quotes.iter_mut() {
@@ -754,26 +848,42 @@ where
             }
         }
 
-        let snapshots = quotes
-            .into_iter()
-            .map(|(asset_id, quote)| {
-                let asset = assets_by_id.get(&asset_id);
+        let snapshots = unique_asset_ids
+            .iter()
+            .map(|asset_id| {
+                let asset = assets_by_id.get(asset_id);
                 let effective_today = time_utils::market_effective_date(
                     now,
                     asset.and_then(|a| a.instrument_exchange_mic.as_deref()),
                 );
-                let quote_day = quote.timestamp.date_naive();
-                let is_inactive = asset.map(|a| !a.is_active).unwrap_or(false);
+                let snapshot = if let Some(quote) = quotes.get(asset_id).cloned() {
+                    let quote_day = quote.timestamp.date_naive();
+                    let is_inactive = asset.map(|a| !a.is_active).unwrap_or(false);
 
-                (
-                    asset_id,
                     LatestQuoteSnapshot {
-                        quote,
+                        quote: Some(quote),
                         is_stale: is_inactive || quote_day < effective_today,
                         effective_market_date: effective_today.to_string(),
-                        quote_date: quote_day.to_string(),
-                    },
-                )
+                        quote_date: Some(quote_day.to_string()),
+                        no_quote_reason: None,
+                    }
+                } else {
+                    // No quote available — flag as stale so any UI surface that
+                    // already filters on `is_stale` keeps treating the row as
+                    // outdated; the contextual message lives in `no_quote_reason`.
+                    LatestQuoteSnapshot {
+                        quote: None,
+                        is_stale: true,
+                        effective_market_date: effective_today.to_string(),
+                        quote_date: None,
+                        no_quote_reason: Some(Self::no_quote_reason(
+                            asset,
+                            sync_states.get(asset_id),
+                        )),
+                    }
+                };
+
+                (asset_id.clone(), snapshot)
             })
             .collect();
 
@@ -1461,6 +1571,8 @@ where
         if let Some(mut state) = self.sync_state_store.get_by_asset_id(asset_id)? {
             state.error_count = 0;
             state.last_error = None;
+            // Empty string (not absent) is the contract: `effective_provider`
+            // filters empty `data_source` and falls back to `preferred_provider`.
             state.data_source.clear();
             state.updated_at = Utc::now();
             self.sync_state_store.upsert(&state).await?;
@@ -2230,6 +2342,124 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct SnapshotQuoteStore {
+        quotes: HashMap<String, Quote>,
+        requested_latest_quotes: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    #[async_trait]
+    impl QuoteStore for SnapshotQuoteStore {
+        async fn save_quote(&self, _quote: &Quote) -> Result<Quote> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_quote(&self, _quote_id: &str) -> Result<()> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn upsert_quotes(&self, _quotes: &[Quote]) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_quotes_for_asset(&self, _asset_id: &AssetId) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        async fn delete_provider_quotes_for_asset(&self, _asset_id: &AssetId) -> Result<usize> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest(
+            &self,
+            _asset_id: &AssetId,
+            _source: Option<&QuoteSource>,
+        ) -> Result<Option<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn range(
+            &self,
+            _asset_id: &AssetId,
+            _start: Day,
+            _end: Day,
+            _source: Option<&QuoteSource>,
+        ) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest_batch(
+            &self,
+            _asset_ids: &[AssetId],
+            _source: Option<&QuoteSource>,
+        ) -> Result<HashMap<AssetId, Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn latest_with_previous(
+            &self,
+            _asset_ids: &[AssetId],
+        ) -> Result<HashMap<AssetId, LatestQuotePair>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_quote_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+            _source: &str,
+        ) -> Result<HashMap<String, (NaiveDate, NaiveDate)>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_latest_quote(&self, _symbol: &str) -> Result<Quote> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_latest_quotes(&self, symbols: &[String]) -> Result<HashMap<String, Quote>> {
+            self.requested_latest_quotes
+                .lock()
+                .unwrap()
+                .push(symbols.to_vec());
+            Ok(symbols
+                .iter()
+                .filter_map(|symbol| {
+                    self.quotes
+                        .get(symbol)
+                        .cloned()
+                        .map(|quote| (symbol.clone(), quote))
+                })
+                .collect())
+        }
+
+        fn get_latest_quotes_pair(
+            &self,
+            _symbols: &[String],
+        ) -> Result<HashMap<String, LatestQuotePair>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_historical_quotes(&self, _symbol: &str) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_all_historical_quotes(&self) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn get_quotes_in_range(
+            &self,
+            _symbol: &str,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+
+        fn find_duplicate_quotes(&self, _symbol: &str, _date: NaiveDate) -> Result<Vec<Quote>> {
+            unimplemented!("unused in this test")
+        }
+    }
+
     struct MockSyncStateStore {
         provider_sync_stats: Vec<ProviderSyncStats>,
         with_errors: Vec<QuoteSyncState>,
@@ -2252,9 +2482,18 @@ mod tests {
 
         fn get_by_asset_ids(
             &self,
-            _asset_ids: &[String],
+            asset_ids: &[String],
         ) -> Result<HashMap<String, QuoteSyncState>> {
-            unimplemented!("unused in this test")
+            let states = self.states.lock().unwrap();
+            Ok(asset_ids
+                .iter()
+                .filter_map(|asset_id| {
+                    states
+                        .get(asset_id)
+                        .cloned()
+                        .map(|state| (asset_id.clone(), state))
+                })
+                .collect())
         }
 
         fn get_active_assets(&self) -> Result<Vec<QuoteSyncState>> {
@@ -2374,7 +2613,7 @@ mod tests {
         }
 
         fn list_by_asset_ids(&self, _asset_ids: &[String]) -> Result<Vec<Asset>> {
-            unimplemented!("unused in this test")
+            Ok(Vec::new())
         }
 
         async fn delete(&self, _asset_id: &str) -> Result<()> {
@@ -2785,6 +3024,299 @@ mod tests {
         assert!(updated.last_error.is_none());
         assert_eq!(updated.last_synced_at, state.last_synced_at);
         assert_eq!(updated.profile_enriched_at, state.profile_enriched_at);
+    }
+
+    #[tokio::test]
+    async fn test_latest_quote_snapshot_deduplicates_requested_asset_ids() -> Result<()> {
+        let asset_id = "asset_1".to_string();
+        let quote = Quote {
+            id: "quote_1".to_string(),
+            asset_id: asset_id.clone(),
+            timestamp: Utc::now(),
+            open: dec!(42),
+            high: dec!(42),
+            low: dec!(42),
+            close: dec!(42),
+            adjclose: dec!(42),
+            volume: dec!(0),
+            currency: "USD".to_string(),
+            data_source: "YAHOO".to_string(),
+            created_at: Utc::now(),
+            notes: None,
+        };
+        let requested_latest_quotes = Arc::new(Mutex::new(Vec::new()));
+        let service = QuoteService::new(
+            Arc::new(SnapshotQuoteStore {
+                quotes: HashMap::from([(asset_id.clone(), quote)]),
+                requested_latest_quotes: requested_latest_quotes.clone(),
+            }),
+            Arc::new(MockSyncStateStore {
+                provider_sync_stats: vec![],
+                with_errors: vec![],
+                states: Arc::new(Mutex::new(HashMap::new())),
+            }),
+            Arc::new(MockProviderSettingsStore { providers: vec![] }),
+            Arc::new(NoopAssetRepository),
+            Arc::new(NoopActivityRepository),
+            Arc::new(MockSecretStore),
+        )
+        .await?;
+
+        let snapshots =
+            service.get_latest_quotes_snapshot(&[asset_id.clone(), asset_id.clone()])?;
+
+        assert_eq!(
+            *requested_latest_quotes.lock().unwrap(),
+            vec![vec![asset_id.clone()]]
+        );
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = snapshots.get(&asset_id).expect("snapshot should exist");
+        assert_eq!(
+            snapshot.quote.as_ref().map(|quote| quote.id.as_str()),
+            Some("quote_1")
+        );
+        assert!(snapshot.no_quote_reason.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_error_cooldown() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: Some(now),
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: MAX_SYNC_ERRORS,
+            last_error: Some("provider failed".to_string()),
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "TOO_MANY_ERRORS");
+        assert_eq!(reason.message, "Sync paused after repeated errors");
+    }
+
+    #[test]
+    fn test_no_quote_reason_prefers_manual_pricing() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Manual,
+            is_active: true,
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "MANUAL_PRICING");
+        assert_eq!(reason.message, "Quote mode is Manual");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_expired_option() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            instrument_type: Some(InstrumentType::Option),
+            metadata: Some(serde_json::json!({
+                "option": crate::assets::OptionSpec {
+                    underlying_asset_id: "underlying_1".to_string(),
+                    expiration: NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
+                    right: "CALL".to_string(),
+                    strike: dec!(100),
+                    multiplier: dec!(100),
+                    occ_symbol: None,
+                }
+            })),
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "EXPIRED_OPTION");
+        assert_eq!(reason.message, "Option has expired");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_inactive_asset() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: false,
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "INACTIVE");
+        assert_eq!(reason.message, "Asset is inactive");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_matured_bond() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            instrument_type: Some(InstrumentType::Bond),
+            metadata: Some(serde_json::json!({
+                "bond": crate::assets::BondSpec {
+                    maturity_date: Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
+                    coupon_rate: None,
+                    face_value: None,
+                    coupon_frequency: None,
+                    isin: None,
+                }
+            })),
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "MATURED_BOND");
+        assert_eq!(reason.message, "Bond has matured");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_last_error_below_threshold() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: Some(now),
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: 1,
+            last_error: Some("symbol not found".to_string()),
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "LAST_ERROR");
+        assert_eq!(reason.message, "Last sync error: symbol not found");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_pending_sync() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: None,
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: 0,
+            last_error: None,
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "PENDING_SYNC");
+        assert_eq!(reason.message, "No provider quote has been synced yet");
+    }
+
+    #[test]
+    fn test_no_quote_reason_falls_back_to_no_data() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let reason = TestQuoteService::no_quote_reason(None, None);
+
+        assert_eq!(reason.code, "NO_DATA");
+        assert_eq!(reason.message, "No data available from provider yet");
     }
 
     #[test]

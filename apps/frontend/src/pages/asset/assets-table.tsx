@@ -30,7 +30,7 @@ import { ASSET_KIND_DISPLAY_NAMES, LatestQuoteSnapshot } from "@/lib/types";
 import { parseOccSymbol } from "@/lib/occ-symbol";
 import { formatAmount, formatDate } from "@/lib/utils";
 import { useSettingsContext } from "@/lib/settings-provider";
-import { isStaleQuote, ParsedAsset } from "./asset-utils";
+import { getNoQuoteReasonText, isStaleQuote, ParsedAsset } from "./asset-utils";
 
 interface AssetsTableProps {
   assets: ParsedAsset[];
@@ -205,12 +205,21 @@ export function AssetsTable({
           const snapshot = latestQuotes[asset.id];
           const quote = snapshot?.quote;
           const stale = isStaleQuote(snapshot, asset);
+          const noQuoteReason = getNoQuoteReasonText(snapshot, asset);
 
           if (!quote) {
             return (
               <div className="text-right">
                 <div className="flex items-center justify-end gap-1.5">
-                  <Icons.AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Icons.AlertTriangle
+                        className="h-3.5 w-3.5 text-amber-500"
+                        aria-label={noQuoteReason}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>{noQuoteReason}</TooltipContent>
+                  </Tooltip>
                   <span className="text-muted-foreground text-sm">No quotes</span>
                 </div>
               </div>

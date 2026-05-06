@@ -155,8 +155,14 @@ pub async fn execute_health_fix(
                         result.failures.iter().map(|(s, _)| s.as_str()).collect();
                     warn!("Some assets failed to sync: {:?}", failed_symbols);
                 }
+                let skipped_reasons = result
+                    .skipped_reasons
+                    .into_iter()
+                    .map(|(asset_id, reason)| (asset_id, reason.to_string()))
+                    .collect();
                 let result_payload = MarketSyncResult {
                     failed_syncs: result.failures,
+                    skipped_reasons,
                 };
                 if let Err(e) = app_handle.emit(MARKET_SYNC_COMPLETE, &result_payload) {
                     error!("Failed to emit market:sync-complete event: {}", e);
