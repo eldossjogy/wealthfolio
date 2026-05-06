@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ActivityType, ImportFormat } from "@/lib/constants";
-import { createDraftActivities } from "./draft-utils";
+import { ACTIVITY_SUBTYPES, ActivityType, ImportFormat } from "@/lib/constants";
+import { createDraftActivities, draftToActivityImport } from "./draft-utils";
 
 const headers = [
   ImportFormat.DATE,
@@ -177,5 +177,138 @@ describe("createDraftActivities explicit activity mapping", () => {
     expect(draft.activityType).toBeUndefined();
     expect(draft.status).toBe("error");
     expect(draft.errors.activityType).toContain("Activity type is required");
+  });
+
+  it("accepts dividend in kind with amount instead of unit price", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "DIVIDEND", "AAPL", "2", "100", "USD", ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.QUANTITY,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+        ImportFormat.SUBTYPE,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.QUANTITY]: ImportFormat.QUANTITY,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+          [ImportFormat.SUBTYPE]: ImportFormat.SUBTYPE,
+        },
+        activityMappings: { [ActivityType.DIVIDEND]: ["DIVIDEND"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.errors).toEqual({});
+    expect(draft.status).toBe("valid");
+  });
+
+  it("keeps mismatched known subtype labels as inert metadata", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "DIVIDEND", "AAPL", "100", "USD", ACTIVITY_SUBTYPES.STAKING_REWARD]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+        ImportFormat.SUBTYPE,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+          [ImportFormat.SUBTYPE]: ImportFormat.SUBTYPE,
+        },
+        activityMappings: { [ActivityType.DIVIDEND]: ["DIVIDEND"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.status).toBe("valid");
+    expect(draft.errors.subtype).toBeUndefined();
+    expect(draft.subtype).toBe(ACTIVITY_SUBTYPES.STAKING_REWARD);
+    expect(draftToActivityImport(draft).subtype).toBe(ACTIVITY_SUBTYPES.STAKING_REWARD);
+  });
+
+  it("clears broker subtype labels that mirror the activity type", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "DIVIDEND", "AAPL", "100", "USD", "DIVIDEND"]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+        ImportFormat.SUBTYPE,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+          [ImportFormat.SUBTYPE]: ImportFormat.SUBTYPE,
+        },
+        activityMappings: { [ActivityType.DIVIDEND]: ["DIVIDEND"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.status).toBe("valid");
+    expect(draft.subtype).toBeUndefined();
+    expect(draftToActivityImport(draft).subtype).toBeUndefined();
+  });
+
+  it("allows unknown provider subtype labels without treating them as semantic subtype errors", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "BUY", "AAPL251219C00200000", "1", "5", "USD", "BUY_TO_OPEN"]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.QUANTITY,
+        ImportFormat.UNIT_PRICE,
+        ImportFormat.CURRENCY,
+        ImportFormat.SUBTYPE,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.QUANTITY]: ImportFormat.QUANTITY,
+          [ImportFormat.UNIT_PRICE]: ImportFormat.UNIT_PRICE,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+          [ImportFormat.SUBTYPE]: ImportFormat.SUBTYPE,
+        },
+        activityMappings: { [ActivityType.BUY]: ["BUY"] },
+      },
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draft.status).toBe("valid");
+    expect(draft.errors.subtype).toBeUndefined();
+    expect(draft.subtype).toBe("BUY_TO_OPEN");
+    expect(draftToActivityImport(draft).subtype).toBe("BUY_TO_OPEN");
   });
 });

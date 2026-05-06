@@ -11,6 +11,9 @@ import {
 import { needsImportAssetResolution } from "@/lib/activity-utils";
 import { ActivityTypeBadge } from "../../components/activity-type-badge";
 
+const UNIT_PRICE_HELP_TEXT =
+  "For buys and sells, enter the trade price. For staking rewards and in-kind dividends, enter the fair market value per unit at receipt; it sets income amount and cost basis.";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared Import Row Type
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,8 +205,12 @@ export function useImportColumns<T extends ImportRowData>({
         cell: {
           variant: "select",
           options: activityTypeOptions,
-          valueRenderer: (value: string) => (
-            <ActivityTypeBadge type={value as ActivityType} className="text-xs font-normal" />
+          valueRenderer: (value: string, _option, rowData) => (
+            <ActivityTypeBadge
+              type={value as ActivityType}
+              subtype={(rowData as T | undefined)?.subtype}
+              className="text-xs font-normal"
+            />
           ),
         },
       },
@@ -308,7 +315,10 @@ export function useImportColumns<T extends ImportRowData>({
       header: "Price",
       size: 120,
       enableSorting: false,
-      meta: { cell: { variant: "number", step: 0.000001, valueType: "string" } },
+      meta: {
+        helpText: UNIT_PRICE_HELP_TEXT,
+        cell: { variant: "number", step: 0.000001, valueType: "string" },
+      },
     });
 
     // 11. Amount

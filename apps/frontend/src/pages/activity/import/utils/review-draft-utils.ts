@@ -1,4 +1,5 @@
 import { ActivityType } from "@/lib/constants";
+import { isAssetBackedIncomeSubtype } from "@/lib/activity-utils";
 
 /**
  * Parse a numeric value from a string, handling various formats.
@@ -123,10 +124,12 @@ export function resolveCashActivityFields(
   quantity: string | undefined,
   amount: string | undefined,
   unitPrice: string | undefined,
+  subtype?: string,
 ): { quantity: string | undefined; amount: string | undefined } {
   if (
     activityType &&
     CASH_LIKE_TYPES.includes(activityType) &&
+    !isAssetBackedIncomeSubtype(activityType, subtype) &&
     !toNumber(amount) &&
     toNumber(quantity) &&
     !toNumber(unitPrice)

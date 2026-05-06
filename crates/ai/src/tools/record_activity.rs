@@ -7,6 +7,14 @@ use log::debug;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use wealthfolio_core::activities::{
+    ACTIVITY_SUBTYPE_BONUS, ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND, ACTIVITY_SUBTYPE_DRIP,
+    ACTIVITY_SUBTYPE_STAKING_REWARD, ACTIVITY_TYPE_ADJUSTMENT, ACTIVITY_TYPE_BUY,
+    ACTIVITY_TYPE_CREDIT, ACTIVITY_TYPE_DEPOSIT, ACTIVITY_TYPE_DIVIDEND, ACTIVITY_TYPE_FEE,
+    ACTIVITY_TYPE_INTEREST, ACTIVITY_TYPE_SELL, ACTIVITY_TYPE_SPLIT, ACTIVITY_TYPE_TAX,
+    ACTIVITY_TYPE_TRANSFER_IN, ACTIVITY_TYPE_TRANSFER_OUT, ACTIVITY_TYPE_UNKNOWN,
+    ACTIVITY_TYPE_WITHDRAWAL,
+};
 use wealthfolio_core::utils::time_utils::{parse_user_timezone, DEFAULT_VALUATION_TZ};
 
 use crate::env::AiEnvironment;
@@ -177,20 +185,20 @@ pub struct SubtypeOption {
 
 /// Canonical activity types.
 const ACTIVITY_TYPES: &[&str] = &[
-    "BUY",
-    "SELL",
-    "SPLIT",
-    "DIVIDEND",
-    "INTEREST",
-    "DEPOSIT",
-    "WITHDRAWAL",
-    "TRANSFER_IN",
-    "TRANSFER_OUT",
-    "FEE",
-    "TAX",
-    "CREDIT",
-    "ADJUSTMENT",
-    "UNKNOWN",
+    ACTIVITY_TYPE_BUY,
+    ACTIVITY_TYPE_SELL,
+    ACTIVITY_TYPE_SPLIT,
+    ACTIVITY_TYPE_DIVIDEND,
+    ACTIVITY_TYPE_INTEREST,
+    ACTIVITY_TYPE_DEPOSIT,
+    ACTIVITY_TYPE_WITHDRAWAL,
+    ACTIVITY_TYPE_TRANSFER_IN,
+    ACTIVITY_TYPE_TRANSFER_OUT,
+    ACTIVITY_TYPE_FEE,
+    ACTIVITY_TYPE_TAX,
+    ACTIVITY_TYPE_CREDIT,
+    ACTIVITY_TYPE_ADJUSTMENT,
+    ACTIVITY_TYPE_UNKNOWN,
 ];
 
 // ============================================================================
@@ -202,24 +210,24 @@ const ACTIVITY_TYPES: &[&str] = &[
 fn get_subtypes_for_activity_type(activity_type: &str) -> Vec<SubtypeOption> {
     match activity_type.to_uppercase().as_str() {
         // DIVIDEND subtypes
-        "DIVIDEND" => vec![
+        s if s == ACTIVITY_TYPE_DIVIDEND => vec![
             SubtypeOption {
-                value: "DRIP".to_string(),
+                value: ACTIVITY_SUBTYPE_DRIP.to_string(),
                 label: "Dividend Reinvested (DRIP)".to_string(),
             },
             SubtypeOption {
-                value: "DIVIDEND_IN_KIND".to_string(),
+                value: ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND.to_string(),
                 label: "Dividend in Kind".to_string(),
             },
         ],
         // STAKING_REWARD expands to INTEREST + BUY
-        "INTEREST" => vec![SubtypeOption {
-            value: "STAKING_REWARD".to_string(),
+        s if s == ACTIVITY_TYPE_INTEREST => vec![SubtypeOption {
+            value: ACTIVITY_SUBTYPE_STAKING_REWARD.to_string(),
             label: "Staking Reward".to_string(),
         }],
         // BONUS is external flow (affects TWR)
-        "CREDIT" => vec![SubtypeOption {
-            value: "BONUS".to_string(),
+        s if s == ACTIVITY_TYPE_CREDIT => vec![SubtypeOption {
+            value: ACTIVITY_SUBTYPE_BONUS.to_string(),
             label: "Bonus".to_string(),
         }],
         _ => vec![],
@@ -473,6 +481,13 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
         let mut errors = Vec::new();
 
         let activity_type = draft.activity_type.to_uppercase();
+        let subtype = draft.subtype.as_deref().map(str::to_uppercase);
+        let is_dividend_asset_income = activity_type == ACTIVITY_TYPE_DIVIDEND
+            && subtype.as_deref().is_some_and(|subtype| {
+                subtype == ACTIVITY_SUBTYPE_DRIP || subtype == ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND
+            });
+        let is_staking_reward = activity_type == ACTIVITY_TYPE_INTEREST
+            && subtype.as_deref() == Some(ACTIVITY_SUBTYPE_STAKING_REWARD);
 
         // Account is always required
         if draft.account_id.is_none() {
@@ -481,7 +496,7 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
 
         // Validate based on activity type
         match activity_type.as_str() {
-            "BUY" | "SELL" => {
+            s if s == ACTIVITY_TYPE_BUY || s == ACTIVITY_TYPE_SELL => {
                 if draft.symbol.is_none() && draft.asset_id.is_none() {
                     missing_fields.push("symbol".to_string());
                 }
@@ -493,28 +508,46 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
                     missing_fields.push("unit_price".to_string());
                 }
             }
-            "DEPOSIT" | "WITHDRAWAL" | "TAX" | "FEE" | "CREDIT" if draft.amount.is_none() => {
-                missing_fields.push("amount".to_string());
-            }
-            "DIVIDEND" => {
-                if draft.symbol.is_none() && draft.asset_id.is_none() {
-                    missing_fields.push("symbol".to_string());
-                }
-                // Either amount or (quantity + unit_price) is required
-                if draft.amount.is_none()
-                    && (draft.quantity.is_none() || draft.unit_price.is_none())
-                {
-                    missing_fields.push("amount".to_string());
-                }
-            }
-            // Amount is required, symbol is optional
-            "INTEREST"
-                if draft.amount.is_none()
-                    && (draft.quantity.is_none() || draft.unit_price.is_none()) =>
+            s if (s == ACTIVITY_TYPE_DEPOSIT
+                || s == ACTIVITY_TYPE_WITHDRAWAL
+                || s == ACTIVITY_TYPE_TAX
+                || s == ACTIVITY_TYPE_FEE
+                || s == ACTIVITY_TYPE_CREDIT)
+                && draft.amount.is_none() =>
             {
                 missing_fields.push("amount".to_string());
             }
-            "SPLIT" => {
+            s if s == ACTIVITY_TYPE_DIVIDEND => {
+                if draft.symbol.is_none() && draft.asset_id.is_none() {
+                    missing_fields.push("symbol".to_string());
+                }
+                if is_dividend_asset_income && draft.quantity.is_none() {
+                    missing_fields.push("quantity".to_string());
+                }
+                if is_dividend_asset_income && draft.amount.is_none() && draft.unit_price.is_none()
+                {
+                    missing_fields.push("unit_price".to_string());
+                }
+                if !is_dividend_asset_income && draft.amount.is_none() {
+                    missing_fields.push("amount".to_string());
+                }
+            }
+            s if s == ACTIVITY_TYPE_INTEREST => {
+                if is_staking_reward {
+                    if draft.symbol.is_none() && draft.asset_id.is_none() {
+                        missing_fields.push("symbol".to_string());
+                    }
+                    if draft.quantity.is_none() {
+                        missing_fields.push("quantity".to_string());
+                    }
+                    if draft.amount.is_none() && draft.unit_price.is_none() {
+                        missing_fields.push("unit_price".to_string());
+                    }
+                } else if draft.amount.is_none() {
+                    missing_fields.push("amount".to_string());
+                }
+            }
+            s if s == ACTIVITY_TYPE_SPLIT => {
                 if draft.symbol.is_none() && draft.asset_id.is_none() {
                     missing_fields.push("symbol".to_string());
                 }
@@ -523,7 +556,10 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
                 }
             }
             // Either amount (for cash) or (symbol + quantity) for assets
-            "TRANSFER_IN" | "TRANSFER_OUT" if draft.amount.is_none() && draft.symbol.is_none() => {
+            s if (s == ACTIVITY_TYPE_TRANSFER_IN || s == ACTIVITY_TYPE_TRANSFER_OUT)
+                && draft.amount.is_none()
+                && draft.symbol.is_none() =>
+            {
                 missing_fields.push("amount".to_string());
             }
             _ => {}
@@ -623,7 +659,7 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivityTool<E> {
                     },
                     "symbol": {
                         "type": "string",
-                        "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT"
+                        "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD"
                     },
                     "activityDate": {
                         "type": "string",
@@ -637,15 +673,15 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivityTool<E> {
                     },
                     "quantity": {
                         "type": "number",
-                        "description": "Number of shares or units. Required for BUY/SELL/SPLIT"
+                        "description": "Number of shares or units. Required for BUY/SELL/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD"
                     },
                     "unitPrice": {
                         "type": "number",
-                        "description": "Price per unit. If omitted for BUY/SELL, user will need to provide it"
+                        "description": "Price or fair market value per unit. Required for BUY/SELL unless amount is provided; for DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either unitPrice or amount"
                     },
                     "amount": {
                         "type": "number",
-                        "description": "Total amount. For DEPOSIT/WITHDRAWAL/DIVIDEND or when quantity*price doesn't apply"
+                        "description": "Total cash amount or taxable income amount. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either amount or unitPrice"
                     },
                     "fee": {
                         "type": "number",
@@ -657,7 +693,7 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivityTool<E> {
                     },
                     "subtype": {
                         "type": "string",
-                        "description": "Activity subtype for semantic variations: DRIP (dividend reinvested), DIVIDEND_IN_KIND (dividend paid in asset), STAKING_REWARD (crypto staking), BONUS (promotional credit)"
+                        "description": "Activity subtype for semantic variations: DRIP (dividend reinvested), DIVIDEND_IN_KIND (dividend paid as additional units of the same asset), STAKING_REWARD (staking income received as more units of the same asset), BONUS (promotional credit)"
                     },
                     "notes": {
                         "type": "string",
@@ -770,6 +806,34 @@ mod tests {
         // Should have subtypes available for DIVIDEND
         assert!(!output.available_subtypes.is_empty());
         assert!(output.available_subtypes.iter().any(|s| s.value == "DRIP"));
+    }
+
+    #[tokio::test]
+    async fn test_record_activity_allows_unknown_provider_subtype_label() {
+        let env = Arc::new(MockEnvironment::new());
+        let tool = RecordActivityTool::new(env);
+
+        let output = tool
+            .call(RecordActivityArgs {
+                activity_type: "BUY".to_string(),
+                symbol: Some("AAPL".to_string()),
+                activity_date: "2026-01-17".to_string(),
+                quantity: Some(2.0),
+                unit_price: Some(100.0),
+                amount: None,
+                fee: None,
+                account: None,
+                subtype: Some("BUY_TO_OPEN".to_string()),
+                notes: None,
+            })
+            .await
+            .expect("tool should return an editable draft");
+
+        assert!(!output
+            .validation
+            .errors
+            .iter()
+            .any(|error| error.field == "subtype"));
     }
 
     #[tokio::test]

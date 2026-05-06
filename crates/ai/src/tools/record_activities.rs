@@ -101,7 +101,7 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivitiesTool<E> {
                                 },
                                 "symbol": {
                                     "type": "string",
-                                    "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT"
+                                    "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD"
                                 },
                                 "activityDate": {
                                     "type": "string",
@@ -109,15 +109,15 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivitiesTool<E> {
                                 },
                                 "quantity": {
                                     "type": "number",
-                                    "description": "Number of shares or units. Required for BUY/SELL/SPLIT"
+                                    "description": "Number of shares or units. Required for BUY/SELL/SPLIT and asset-backed income subtypes like DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD"
                                 },
                                 "unitPrice": {
                                     "type": "number",
-                                    "description": "Price per unit"
+                                    "description": "Price or fair market value per unit. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either unitPrice or amount"
                                 },
                                 "amount": {
                                     "type": "number",
-                                    "description": "Total amount for cash-style activities"
+                                    "description": "Total cash amount or taxable income amount. For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, provide either amount or unitPrice"
                                 },
                                 "fee": {
                                     "type": "number",
@@ -129,7 +129,7 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivitiesTool<E> {
                                 },
                                 "subtype": {
                                     "type": "string",
-                                    "description": "Activity subtype: DRIP, DIVIDEND_IN_KIND, STAKING_REWARD, BONUS"
+                                    "description": "Activity subtype: DRIP, DIVIDEND_IN_KIND (additional units of the same asset), STAKING_REWARD (staking income received as more units of the same asset), BONUS"
                                 },
                                 "notes": {
                                     "type": "string",

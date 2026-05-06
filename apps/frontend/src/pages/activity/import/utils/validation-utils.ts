@@ -9,7 +9,7 @@ import {
 import { importActivitySchema } from "@/lib/schemas";
 import { tryParseDate } from "@/lib/utils";
 import { logger } from "@/adapters";
-import { SUBTYPES_BY_ACTIVITY_TYPE, SUBTYPE_DISPLAY_NAMES } from "@/lib/constants";
+import { SUBTYPE_DISPLAY_NAMES } from "@/lib/constants";
 import { looksLikeOccSymbol, normalizeOptionSymbol } from "@/lib/occ-symbol";
 import { looksLikeIsin } from "@/lib/isin";
 import { findMappedActivityType } from "./activity-type-mapping";
@@ -84,8 +84,8 @@ function normalizeSubtype(rawSubtype: string): string | undefined {
 }
 
 /**
- * Validates and returns the subtype if it's valid for the given activity type.
- * Returns undefined if the subtype is not valid for the activity type.
+ * Returns the subtype as metadata. Calculation paths only honor known valid
+ * type/subtype pairs, so import should not discard broker/provider labels here.
  */
 function validateSubtypeForActivityType(
   subtype: string | undefined,
@@ -93,19 +93,9 @@ function validateSubtypeForActivityType(
 ): string | undefined {
   if (!subtype || !activityType) return undefined;
 
-  const allowedSubtypes = SUBTYPES_BY_ACTIVITY_TYPE[activityType];
-  if (!allowedSubtypes || allowedSubtypes.length === 0) {
-    // Activity type doesn't support subtypes
-    return undefined;
-  }
+  if (subtype === activityType) return undefined;
 
-  // Check if the subtype is in the allowed list
-  if (allowedSubtypes.includes(subtype)) {
-    return subtype;
-  }
-
-  // Subtype not valid for this activity type
-  return undefined;
+  return subtype;
 }
 
 /**

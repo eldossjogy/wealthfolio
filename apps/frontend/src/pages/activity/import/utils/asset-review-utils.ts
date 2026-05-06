@@ -1,4 +1,5 @@
 import { isCashSymbol, needsImportAssetResolution } from "@/lib/activity-utils";
+import { ActivityType } from "@/lib/constants";
 import type {
   ImportAssetCandidate,
   ImportMappingData,
@@ -211,7 +212,7 @@ export function buildSyntheticDraftsFromHoldings(
       rowIndex: i,
       rawRow: row,
       activityDate: "2000-01-01",
-      activityType: "BUY",
+      activityType: ActivityType.BUY,
       symbol: resolvedSymbol,
       currency,
       accountId,
