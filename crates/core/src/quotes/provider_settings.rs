@@ -91,6 +91,20 @@ impl ProviderCapabilities {
                     "Profiles".to_string(),
                 ],
             }),
+            "BOERSE_FRANKFURT" => Some(Self {
+                instruments: "Stocks • ETFs • Bonds".to_string(),
+                coverage: "XETR • XFRA".to_string(),
+                features: vec![
+                    "Real-time".to_string(),
+                    "Historical".to_string(),
+                    "Profiles".to_string(),
+                ],
+            }),
+            "OPENFIGI" => Some(Self {
+                instruments: "Bonds".to_string(),
+                coverage: "Global".to_string(),
+                features: vec!["Search".to_string(), "Profiles".to_string()],
+            }),
             "CUSTOM_SCRAPER" => Some(Self {
                 instruments: "Any".to_string(),
                 coverage: "User-defined".to_string(),
