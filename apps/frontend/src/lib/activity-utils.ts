@@ -48,6 +48,31 @@ export const isSymbolRequired = (activityType: string): boolean => {
 };
 
 /**
+ * Subtypes that make income activities asset-backed rather than cash-only.
+ */
+export const isAssetBackedIncomeSubtype = (
+  activityType: string,
+  subtype?: string | null,
+): boolean => {
+  const normalizedActivityType = activityType?.trim().toUpperCase();
+  const normalizedSubtype = subtype?.trim().toUpperCase();
+  return (
+    (normalizedActivityType === ActivityType.DIVIDEND &&
+      (normalizedSubtype === ACTIVITY_SUBTYPES.DRIP ||
+        normalizedSubtype === ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND)) ||
+    (normalizedActivityType === ActivityType.INTEREST &&
+      normalizedSubtype === ACTIVITY_SUBTYPES.STAKING_REWARD)
+  );
+};
+
+/**
+ * Activity/subtype pairs that must carry a market asset identity.
+ */
+export const isAssetIdentityRequired = (activityType: string, subtype?: string | null): boolean => {
+  return isSymbolRequired(activityType) || isAssetBackedIncomeSubtype(activityType, subtype);
+};
+
+/**
  * Import-time asset resolution can also be required by subtype even when the
  * base activity type is normally cash-oriented (e.g. staking rewards).
  */
@@ -55,13 +80,7 @@ export const needsImportAssetResolution = (
   activityType: string,
   subtype?: string | null,
 ): boolean => {
-  const normalizedSubtype = subtype?.trim().toUpperCase();
-  return (
-    isSymbolRequired(activityType) ||
-    normalizedSubtype === ACTIVITY_SUBTYPES.DRIP ||
-    normalizedSubtype === ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND ||
-    normalizedSubtype === ACTIVITY_SUBTYPES.STAKING_REWARD
-  );
+  return isAssetIdentityRequired(activityType, subtype);
 };
 
 /**
@@ -255,7 +274,7 @@ export const getUnitPrice = (activity: ActivityDetails): number => {
  * @returns The calculated value
  */
 export const calculateActivityValue = (activity: ActivityDetails): number => {
-  const { activityType, assetSymbol, assetId } = activity;
+  const { activityType, assetSymbol, assetId, subtype } = activity;
 
   // Handle special cases first
   if (activityType === ActivityType.SPLIT) {
@@ -278,8 +297,15 @@ export const calculateActivityValue = (activity: ActivityDetails): number => {
     isCashTransfer(activityType, assetSymbol, assetId) ||
     isIncomeActivity(activityType)
   ) {
-    const amount = getAmount(activity);
+    let amount = getAmount(activity);
     const fee = getFee(activity);
+
+    if (isAssetBackedIncomeSubtype(activityType, subtype) && amount === 0) {
+      const derivedAmount = getQuantity(activity) * getUnitPrice(activity);
+      if (Number.isFinite(derivedAmount) && derivedAmount > 0) {
+        amount = derivedAmount;
+      }
+    }
 
     // For outgoing cash activities, subtract fee from amount
     if (activityType === ActivityType.WITHDRAWAL || activityType === ActivityType.TRANSFER_OUT) {

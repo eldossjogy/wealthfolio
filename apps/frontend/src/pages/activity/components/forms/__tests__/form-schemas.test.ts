@@ -3,15 +3,15 @@ import { buyFormSchema } from "../buy-form";
 import { sellFormSchema } from "../sell-form";
 import { depositFormSchema } from "../deposit-form";
 import { withdrawalFormSchema } from "../withdrawal-form";
-import { dividendFormSchema } from "../dividend-form";
+import { dividendFormSchema, type DividendFormValues } from "../dividend-form";
 import { transferFormSchema } from "../transfer-form";
 import { splitFormSchema } from "../split-form";
 import { feeFormSchema } from "../fee-form";
-import { interestFormSchema } from "../interest-form";
+import { interestFormSchema, type InterestFormValues } from "../interest-form";
 import { taxFormSchema } from "../tax-form";
 import { newActivitySchema } from "../schemas";
 import { ACTIVITY_FORM_CONFIG } from "../../../config/activity-form-config";
-import { ActivityType } from "@/lib/constants";
+import { ACTIVITY_SUBTYPES, ActivityType } from "@/lib/constants";
 
 describe("Form Schemas Validation", () => {
   describe("buyFormSchema", () => {
@@ -903,6 +903,84 @@ describe("Form Schemas Validation", () => {
     });
   });
 
+  describe("income toPayload", () => {
+    it("clears stale asset-backed dividend values when switching back to cash", () => {
+      const formData = {
+        accountId: "acc-123",
+        activityDate: new Date(),
+        symbol: "AAPL",
+        amount: 12,
+        quantity: 2,
+        unitPrice: 6,
+        subtype: null,
+        currency: "USD",
+      } satisfies DividendFormValues;
+
+      const payload = ACTIVITY_FORM_CONFIG.DIVIDEND.toPayload(formData);
+
+      expect(payload).toMatchObject({ subtype: null, quantity: null, unitPrice: null });
+    });
+
+    it("keeps asset-backed values for dividend in kind", () => {
+      const formData = {
+        accountId: "acc-123",
+        activityDate: new Date(),
+        symbol: "AAPL",
+        amount: 12,
+        quantity: 2,
+        unitPrice: 6,
+        subtype: ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND,
+        currency: "USD",
+      } satisfies DividendFormValues;
+
+      const payload = ACTIVITY_FORM_CONFIG.DIVIDEND.toPayload(formData);
+
+      expect(payload).toMatchObject({
+        subtype: ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND,
+        quantity: 2,
+        unitPrice: 6,
+      });
+    });
+
+    it("clears stale staking values when switching interest back to cash", () => {
+      const formData = {
+        accountId: "acc-123",
+        activityDate: new Date(),
+        symbol: "ETH",
+        amount: 12,
+        quantity: 2,
+        unitPrice: 6,
+        subtype: null,
+        currency: "USD",
+      } satisfies InterestFormValues;
+
+      const payload = ACTIVITY_FORM_CONFIG.INTEREST.toPayload(formData);
+
+      expect(payload).toMatchObject({ subtype: null, quantity: null, unitPrice: null });
+    });
+
+    it("keeps asset-backed values for staking rewards", () => {
+      const formData = {
+        accountId: "acc-123",
+        activityDate: new Date(),
+        symbol: "ETH",
+        amount: 12,
+        quantity: 2,
+        unitPrice: 6,
+        subtype: ACTIVITY_SUBTYPES.STAKING_REWARD,
+        currency: "USD",
+      } satisfies InterestFormValues;
+
+      const payload = ACTIVITY_FORM_CONFIG.INTEREST.toPayload(formData);
+
+      expect(payload).toMatchObject({
+        subtype: ACTIVITY_SUBTYPES.STAKING_REWARD,
+        quantity: 2,
+        unitPrice: 6,
+      });
+    });
+  });
+
   describe("asset identity payloads", () => {
     it("omits stale selected asset id for option payloads", () => {
       const payload = ACTIVITY_FORM_CONFIG.BUY.toPayload({
@@ -928,6 +1006,22 @@ describe("Form Schemas Validation", () => {
         activityType: "CREDIT",
         activityDate: new Date(),
         amount: 25,
+        currency: "USD",
+        exchangeMic: null,
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts cash interest after asset-backed fields are cleared", () => {
+      const result = newActivitySchema.safeParse({
+        accountId: "acc-123",
+        activityType: "INTEREST",
+        activityDate: new Date(),
+        subtype: null,
+        amount: 25,
+        quantity: undefined,
+        unitPrice: undefined,
         currency: "USD",
         exchangeMic: null,
       });

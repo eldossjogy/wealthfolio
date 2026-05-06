@@ -2,6 +2,7 @@ import { FormControl, FormField, FormItem } from "@wealthfolio/ui/components/ui/
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { RadioGroup, RadioGroupItem } from "@wealthfolio/ui/components/ui/radio-group";
 import { ScrollArea } from "@wealthfolio/ui/components/ui/scroll-area";
+import { ActivityType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { useFormContext } from "react-hook-form";
 
@@ -10,13 +11,13 @@ const activityTypes = [
     category: "Trade",
     types: [
       {
-        value: "BUY",
+        value: ActivityType.BUY,
         label: "Buy",
         icon: "ArrowDown" as const,
         description: "Purchase an asset",
       },
       {
-        value: "SELL",
+        value: ActivityType.SELL,
         label: "Sell",
         icon: "ArrowUp" as const,
         description: "Sell an asset",
@@ -27,19 +28,19 @@ const activityTypes = [
     category: "Cash",
     types: [
       {
-        value: "DEPOSIT",
+        value: ActivityType.DEPOSIT,
         label: "Deposit",
         icon: "ArrowDown" as const,
         description: "Add funds to account",
       },
       {
-        value: "WITHDRAWAL",
+        value: ActivityType.WITHDRAWAL,
         label: "Withdrawal",
         icon: "ArrowUp" as const,
         description: "Remove funds from account",
       },
       {
-        value: "TRANSFER_OUT",
+        value: ActivityType.TRANSFER_OUT,
         label: "Transfer",
         icon: "ArrowLeftRight" as const,
         description: "Move cash or securities between accounts",
@@ -50,13 +51,13 @@ const activityTypes = [
     category: "Income",
     types: [
       {
-        value: "DIVIDEND",
+        value: ActivityType.DIVIDEND,
         label: "Dividend",
         icon: "Income" as const,
         description: "Dividend payment received",
       },
       {
-        value: "INTEREST",
+        value: ActivityType.INTEREST,
         label: "Interest",
         icon: "Percent" as const,
         description: "Interest earned",
@@ -67,25 +68,25 @@ const activityTypes = [
     category: "Other",
     types: [
       {
-        value: "FEE",
+        value: ActivityType.FEE,
         label: "Fee",
         icon: "DollarSign" as const,
         description: "Account or transaction fee",
       },
       {
-        value: "TAX",
+        value: ActivityType.TAX,
         label: "Tax",
         icon: "Receipt" as const,
         description: "Tax payment",
       },
       {
-        value: "SPLIT",
+        value: ActivityType.SPLIT,
         label: "Stock Split",
         icon: "Split" as const,
         description: "Stock split adjustment",
       },
       {
-        value: "ADJUSTMENT",
+        value: ActivityType.ADJUSTMENT,
         label: "Adjustment",
         icon: "RefreshCw" as const,
         description: "Non-trade correction or adjustment",

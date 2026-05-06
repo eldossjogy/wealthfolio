@@ -205,6 +205,7 @@ export function useActivityMutations(
       // Build nested asset object
       const updatePayload: ActivityUpdate = {
         ...rest,
+        subtype: rest.subtype === null ? "" : rest.subtype,
         quantity: toDecimalPayload(quantity),
         unitPrice: toDecimalPayload(unitPrice),
         amount: toDecimalPayload(amount),

@@ -1,5 +1,6 @@
 import { useFormContext } from "react-hook-form";
 import { Alert, AlertDescription, Icons } from "@wealthfolio/ui";
+import { ActivityType } from "@/lib/constants";
 import { useCashBalanceValidation } from "../hooks/use-cash-balance-validation";
 import { NewActivityFormValues } from "./forms/schemas";
 
@@ -9,7 +10,7 @@ export function CashBalanceWarning() {
   const { isValid, warning, isLoading, hasAccount, hasValues } = useCashBalanceValidation();
 
   // Only show for BUY activities with insufficient funds
-  if (activityType !== "BUY" || !hasAccount || !hasValues || isLoading || isValid) {
+  if (activityType !== ActivityType.BUY || !hasAccount || !hasValues || isLoading || isValid) {
     return null;
   }
 

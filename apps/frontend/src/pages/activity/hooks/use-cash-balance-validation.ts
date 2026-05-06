@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useFormContext } from "react-hook-form";
 import { useLatestValuations } from "@/hooks/use-latest-valuations";
+import { ActivityType } from "@/lib/constants";
 import { NewActivityFormValues } from "../components/forms/schemas";
 
 export interface CashBalanceValidationResult {
@@ -42,7 +43,7 @@ export function useCashBalanceValidation(): CashBalanceValidationResult {
     const hasValues = Boolean(quantity && unitPrice && quantity > 0 && unitPrice > 0);
 
     // Only validate for BUY activities
-    if (activityType !== "BUY") {
+    if (activityType !== ActivityType.BUY) {
       setValidationResult({
         isValid: true,
         currentBalance: 0,

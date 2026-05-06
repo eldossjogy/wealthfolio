@@ -11,8 +11,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { ActivityType, METADATA_CONTRACT_MULTIPLIER, QuoteMode } from "@/lib/constants";
-import { isSecuritiesTransfer, isSymbolRequired } from "@/lib/activity-utils";
+import {
+  ACTIVITY_SUBTYPES,
+  ActivityType,
+  METADATA_CONTRACT_MULTIPLIER,
+  QuoteMode,
+} from "@/lib/constants";
+import {
+  isAssetBackedIncomeSubtype,
+  isSecuritiesTransfer,
+  isSymbolRequired,
+} from "@/lib/activity-utils";
 import { buildOccSymbol, parseOccSymbol } from "@/lib/occ-symbol";
 import { generateId } from "@/lib/id";
 import type { ActivityCreate, ActivityDetails } from "@/lib/types";
@@ -49,6 +58,35 @@ export interface TransferValidationError {
   message: string;
 }
 
+const TRADE_ACTIVITY_TYPES: readonly string[] = [ActivityType.BUY, ActivityType.SELL];
+const TRANSFER_ACTIVITY_TYPES: readonly string[] = [
+  ActivityType.TRANSFER_IN,
+  ActivityType.TRANSFER_OUT,
+];
+const MOBILE_ACTIVITY_TYPES: readonly string[] = [
+  ActivityType.BUY,
+  ActivityType.SELL,
+  ActivityType.DEPOSIT,
+  ActivityType.WITHDRAWAL,
+  ActivityType.INTEREST,
+  ActivityType.DIVIDEND,
+  ActivityType.SPLIT,
+  ActivityType.TRANSFER_IN,
+  ActivityType.TRANSFER_OUT,
+  ActivityType.FEE,
+  ActivityType.TAX,
+  ActivityType.CREDIT,
+  ActivityType.ADJUSTMENT,
+];
+const CASH_AMOUNT_ACTIVITY_TYPES: readonly string[] = [
+  ActivityType.DEPOSIT,
+  ActivityType.WITHDRAWAL,
+  ActivityType.TRANSFER_IN,
+  ActivityType.TRANSFER_OUT,
+  ActivityType.CREDIT,
+];
+const INCOME_ACTIVITY_TYPES: readonly string[] = [ActivityType.DIVIDEND, ActivityType.INTEREST];
+
 /**
  * Validates transfer-specific fields that the Zod schema can't enforce
  * (transferActivitySchema lives inside a discriminatedUnion which doesn't support superRefine).
@@ -57,7 +95,7 @@ export interface TransferValidationError {
 export function validateTransferFields(
   input: TransferValidationInput,
 ): TransferValidationError | null {
-  const isTransfer = ["TRANSFER_IN", "TRANSFER_OUT"].includes(input.activityType);
+  const isTransfer = TRANSFER_ACTIVITY_TYPES.includes(input.activityType);
   if (!isTransfer) return null;
 
   const mode = input.transferMode ?? "cash";
@@ -95,7 +133,7 @@ export function validateTransferFields(
  */
 function validateTradeFields(data: Record<string, unknown>): TransferValidationError | null {
   const activityType = data.activityType as string;
-  if (!["BUY", "SELL"].includes(activityType)) return null;
+  if (!TRADE_ACTIVITY_TYPES.includes(activityType)) return null;
 
   const assetType = (data.assetType as string) ?? "stock";
 
@@ -121,6 +159,46 @@ function validateTradeFields(data: Record<string, unknown>): TransferValidationE
   return null;
 }
 
+function validateAssetBackedIncomeFields(
+  data: Record<string, unknown>,
+): TransferValidationError | null {
+  const activityType = data.activityType as string;
+  const subtype = data.subtype as string | null | undefined;
+  if (!isAssetBackedIncomeSubtype(activityType, subtype)) return null;
+
+  if (!(data.assetId as string)?.trim()) {
+    return {
+      field: "assetId",
+      message:
+        subtype === ACTIVITY_SUBTYPES.STAKING_REWARD
+          ? "Please select a reward asset."
+          : "Please select a symbol.",
+    };
+  }
+  if (!data.quantity || Number(data.quantity) <= 0) {
+    return { field: "quantity", message: "Please enter the received quantity." };
+  }
+  const hasUnitPrice = Number(data.unitPrice) > 0;
+  const hasAmount = Number(data.amount) > 0;
+  if (!hasUnitPrice && !hasAmount) {
+    return { field: "unitPrice", message: "Please enter the income amount or FMV per unit." };
+  }
+
+  return null;
+}
+
+export function applyMobileIncomeUpdateClears(data: Record<string, unknown>, isUpdate: boolean) {
+  if (!isUpdate) return;
+
+  const activityType = typeof data.activityType === "string" ? data.activityType : "";
+  if (activityType !== ActivityType.DIVIDEND && activityType !== ActivityType.INTEREST) return;
+  if (data.subtype) return;
+  if (isAssetBackedIncomeSubtype(activityType, data.subtype as string | null | undefined)) return;
+
+  data.quantity = null;
+  data.unitPrice = null;
+}
+
 function extractErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.trim()) return error;
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -140,28 +218,13 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
   const isValidActivityType = (
     type: string | undefined,
   ): type is NewActivityFormValues["activityType"] => {
-    return type
-      ? [
-          "BUY",
-          "SELL",
-          "DEPOSIT",
-          "WITHDRAWAL",
-          "INTEREST",
-          "DIVIDEND",
-          "SPLIT",
-          "TRANSFER_IN",
-          "TRANSFER_OUT",
-          "FEE",
-          "TAX",
-          "CREDIT",
-          "ADJUSTMENT",
-        ].includes(type)
-      : false;
+    return type ? MOBILE_ACTIVITY_TYPES.includes(type) : false;
   };
 
   // Derive transfer mode from existing activity data
   const isTransferType =
-    activity?.activityType === "TRANSFER_IN" || activity?.activityType === "TRANSFER_OUT";
+    activity?.activityType === ActivityType.TRANSFER_IN ||
+    activity?.activityType === ActivityType.TRANSFER_OUT;
   const isSecurityTransferActivity =
     isTransferType &&
     isSecuritiesTransfer(activity?.activityType ?? "", activity?.assetSymbol, activity?.assetId);
@@ -191,6 +254,7 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
           : undefined,
     fee: activity?.fee ? Number(activity.fee) : 0,
     comment: activity?.comment ?? null,
+    subtype: activity?.subtype ?? null,
     assetId:
       isTransferType && !isSecurityTransferActivity
         ? undefined
@@ -203,13 +267,13 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
           return date;
         })(),
     currency: activity?.currency ?? "",
-    quoteMode: activity?.assetQuoteMode === "MANUAL" ? "MANUAL" : "MARKET",
+    quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
     exchangeMic: activity?.exchangeMic,
     showCurrencySelect: false,
     ...(isTransferType && {
       transferMode: initialTransferMode,
       isExternal: true,
-      direction: activity?.activityType === "TRANSFER_IN" ? "in" : "out",
+      direction: activity?.activityType === ActivityType.TRANSFER_IN ? "in" : "out",
       toAccountId: "",
     }),
     // Option defaults when editing an option activity
@@ -272,13 +336,23 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
         ...submitData
       } = data as any;
       const account = accounts.find((a) => a.value === submitData.accountId);
-      const isTransferActivity = ["TRANSFER_IN", "TRANSFER_OUT"].includes(submitData.activityType);
+      const isTransferActivity = TRANSFER_ACTIVITY_TYPES.includes(submitData.activityType);
       const isSecuritiesTransfer = isTransferActivity && (_tm ?? "cash") === "securities";
+      const isAssetBackedIncome = isAssetBackedIncomeSubtype(
+        submitData.activityType,
+        submitData.subtype,
+      );
 
       // Validate trade fields (assetId for stocks, option fields for options)
       const tradeError = validateTradeFields(data as any);
       if (tradeError) {
         form.setError(tradeError.field as any, { message: tradeError.message });
+        return;
+      }
+
+      const assetIncomeError = validateAssetBackedIncomeFields(submitData);
+      if (assetIncomeError) {
+        form.setError(assetIncomeError.field as any, { message: assetIncomeError.message });
         return;
       }
 
@@ -401,7 +475,11 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
 
       // For non-symbol activities (cash deposits, withdrawals, etc.) and cash transfers:
       // Clear assetId so backend generates CASH:{currency}
-      if (!isSymbolRequired(submitData.activityType) && !isSecuritiesTransfer) {
+      if (
+        !isSymbolRequired(submitData.activityType) &&
+        !isSecuritiesTransfer &&
+        !isAssetBackedIncome
+      ) {
         delete (submitData as Record<string, unknown>).assetId;
         delete (submitData as Record<string, unknown>).quantity;
         delete (submitData as Record<string, unknown>).unitPrice;
@@ -409,6 +487,7 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
           submitData.currency = account.currency;
         }
       }
+      applyMobileIncomeUpdateClears(submitData, Boolean(id));
 
       if ("quoteMode" in submitData && submitData.quoteMode === QuoteMode.MANUAL && account) {
         submitData.currency = submitData.currency ?? account.currency;
@@ -420,10 +499,17 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
       }
 
       if (id) {
+        const wasAssetBackedIncome = isAssetBackedIncomeSubtype(
+          activity?.activityType ?? "",
+          activity?.subtype,
+        );
+        const currentAssetId =
+          wasAssetBackedIncome && !isAssetBackedIncome ? undefined : activity?.assetId;
+
         await updateActivityMutation.mutateAsync({
           id,
           ...submitData,
-          currentAssetId: activity?.assetId,
+          currentAssetId,
         } as NewActivityFormValues & { id: string; currentAssetId?: string });
       } else {
         await addActivityMutation.mutateAsync(submitData);
@@ -466,24 +552,26 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
         const activityType = form.watch("activityType");
         const assetType = (form.getValues() as any).assetType ?? "stock";
         const baseFields = ["accountId", "activityDate"];
-        if (["BUY", "SELL"].includes(activityType ?? "")) {
+        if (TRADE_ACTIVITY_TYPES.includes(activityType ?? "")) {
           // Options: validate underlying instead of assetId (OCC built at submit)
           if (assetType === "option") {
             return [...baseFields, "underlyingSymbol", "quantity", "unitPrice", "fee"];
           }
           return [...baseFields, "assetId", "quantity", "unitPrice", "fee"];
         }
-        if (
-          ["DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "CREDIT"].includes(
-            activityType ?? "",
-          )
-        ) {
+        if (CASH_AMOUNT_ACTIVITY_TYPES.includes(activityType ?? "")) {
           return [...baseFields, "amount", "fee"];
         }
-        if (["DIVIDEND", "INTEREST"].includes(activityType ?? "")) {
-          return [...baseFields, "assetId", "amount"];
+        if (INCOME_ACTIVITY_TYPES.includes(activityType ?? "")) {
+          const subtype = form.getValues("subtype");
+          if (isAssetBackedIncomeSubtype(activityType ?? "", subtype)) {
+            return [...baseFields, "assetId", "quantity", "unitPrice", "amount"];
+          }
+          return activityType === ActivityType.DIVIDEND
+            ? [...baseFields, "assetId", "amount"]
+            : [...baseFields, "amount"];
         }
-        if (activityType === "ADJUSTMENT") {
+        if (activityType === ActivityType.ADJUSTMENT) {
           return [...baseFields, "assetId"];
         }
         return ["amount", ...baseFields];

@@ -1,9 +1,11 @@
-import { ActivityType } from "./constants";
+import { ACTIVITY_SUBTYPES, ActivityType } from "./constants";
 import {
   isCashActivity,
   isCashTransfer,
   isIncomeActivity,
   isAssetBackedIncomeActivity,
+  isAssetBackedIncomeSubtype,
+  isAssetIdentityRequired,
   needsImportAssetResolution,
   calculateActivityValue,
   formatSplitRatio,
@@ -66,6 +68,29 @@ describe("Activity Utilities", () => {
     it("should return false for non-income types", () => {
       expect(isAssetBackedIncomeActivity(ActivityType.BUY, "AAPL", "AAPL")).toBe(false);
       expect(isAssetBackedIncomeActivity(ActivityType.DEPOSIT, "SOL", "SOL")).toBe(false);
+    });
+  });
+
+  describe("isAssetBackedIncomeSubtype", () => {
+    it("identifies calculation subtypes that carry asset quantities", () => {
+      expect(
+        isAssetBackedIncomeSubtype(ActivityType.INTEREST, ACTIVITY_SUBTYPES.STAKING_REWARD),
+      ).toBe(true);
+      expect(isAssetBackedIncomeSubtype(ActivityType.DIVIDEND, ACTIVITY_SUBTYPES.DRIP)).toBe(true);
+      expect(
+        isAssetBackedIncomeSubtype(ActivityType.DIVIDEND, ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND),
+      ).toBe(true);
+      expect(isAssetBackedIncomeSubtype(ActivityType.INTEREST, null)).toBe(false);
+      expect(isAssetBackedIncomeSubtype(ActivityType.DIVIDEND, null)).toBe(false);
+    });
+  });
+
+  describe("isAssetIdentityRequired", () => {
+    it("requires assets for staking rewards even though interest is normally cash-like", () => {
+      expect(isAssetIdentityRequired(ActivityType.INTEREST, ACTIVITY_SUBTYPES.STAKING_REWARD)).toBe(
+        true,
+      );
+      expect(isAssetIdentityRequired(ActivityType.INTEREST, null)).toBe(false);
     });
   });
 
@@ -160,6 +185,36 @@ describe("Activity Utilities", () => {
 
       // 300 - 3 = 297
       expect(calculateActivityValue(activity)).toBe(297);
+    });
+
+    it("should derive staking reward value from quantity and FMV when amount is empty", () => {
+      const activity = createActivity({
+        activityType: ActivityType.INTEREST,
+        subtype: ACTIVITY_SUBTYPES.STAKING_REWARD,
+        quantity: "0.01",
+        unitPrice: "200",
+        amount: "0",
+        fee: "0",
+        assetSymbol: "SOL",
+        assetId: "SOL",
+      });
+
+      expect(calculateActivityValue(activity)).toBe(2);
+    });
+
+    it("should derive dividend in kind value from quantity and FMV when amount is empty", () => {
+      const activity = createActivity({
+        activityType: ActivityType.DIVIDEND,
+        subtype: ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND,
+        quantity: "2",
+        unitPrice: "50",
+        amount: "0",
+        fee: "0",
+        assetSymbol: "AAPL",
+        assetId: "AAPL",
+      });
+
+      expect(calculateActivityValue(activity)).toBe(100);
     });
 
     it("should calculate WITHDRAWAL activity value correctly", () => {

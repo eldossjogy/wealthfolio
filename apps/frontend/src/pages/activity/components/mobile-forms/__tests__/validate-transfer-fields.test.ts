@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { validateTransferFields, type TransferValidationInput } from "../mobile-activity-form";
+import {
+  applyMobileIncomeUpdateClears,
+  validateTransferFields,
+  type TransferValidationInput,
+} from "../mobile-activity-form";
 
 const base: TransferValidationInput = {
   activityType: "TRANSFER_OUT",
@@ -228,5 +232,56 @@ describe("validateTransferFields", () => {
       });
       expect(outResult).toEqual(inResult);
     });
+  });
+});
+
+describe("applyMobileIncomeUpdateClears", () => {
+  it("sends explicit clears when an existing staking reward is switched back to cash interest", () => {
+    const data: Record<string, unknown> = {
+      activityType: "INTEREST",
+      subtype: null,
+    };
+
+    applyMobileIncomeUpdateClears(data, true);
+
+    expect(data.quantity).toBeNull();
+    expect(data.unitPrice).toBeNull();
+  });
+
+  it("sends explicit clears when an existing dividend in kind is switched back to cash dividend", () => {
+    const data: Record<string, unknown> = {
+      activityType: "DIVIDEND",
+      subtype: null,
+      assetId: "AAPL",
+    };
+
+    applyMobileIncomeUpdateClears(data, true);
+
+    expect(data.quantity).toBeNull();
+    expect(data.unitPrice).toBeNull();
+    expect(data.assetId).toBe("AAPL");
+  });
+
+  it("does not clear asset-backed income or creates", () => {
+    const stakingUpdate: Record<string, unknown> = {
+      activityType: "INTEREST",
+      subtype: "STAKING_REWARD",
+      quantity: 0.01,
+      unitPrice: 200,
+    };
+    const cashCreate: Record<string, unknown> = {
+      activityType: "INTEREST",
+      subtype: null,
+      quantity: undefined,
+      unitPrice: undefined,
+    };
+
+    applyMobileIncomeUpdateClears(stakingUpdate, true);
+    applyMobileIncomeUpdateClears(cashCreate, false);
+
+    expect(stakingUpdate.quantity).toBe(0.01);
+    expect(stakingUpdate.unitPrice).toBe(200);
+    expect(cashCreate.quantity).toBeUndefined();
+    expect(cashCreate.unitPrice).toBeUndefined();
   });
 });
