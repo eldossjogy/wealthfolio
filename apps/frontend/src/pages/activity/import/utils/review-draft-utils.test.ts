@@ -6,7 +6,7 @@ import {
   hasNonZeroValue,
   resolveCashActivityFields,
 } from "./review-draft-utils";
-import { ActivityType } from "@/lib/constants";
+import { ACTIVITY_SUBTYPES, ActivityType } from "@/lib/constants";
 
 describe("parseNumericValue", () => {
   const auto = "auto";
@@ -172,6 +172,18 @@ describe("resolveCashActivityFields", () => {
     it("should not swap when unit price is present (real qty * price)", () => {
       const result = resolveCashActivityFields(ActivityType.DIVIDEND, "10", undefined, "5.00");
       expect(result.quantity).toBe("10");
+      expect(result.amount).toBeUndefined();
+    });
+
+    it("should not swap staking reward quantity into cash amount", () => {
+      const result = resolveCashActivityFields(
+        ActivityType.INTEREST,
+        "0.25",
+        undefined,
+        undefined,
+        ACTIVITY_SUBTYPES.STAKING_REWARD,
+      );
+      expect(result.quantity).toBe("0.25");
       expect(result.amount).toBeUndefined();
     });
 

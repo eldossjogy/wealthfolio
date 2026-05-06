@@ -975,7 +975,7 @@ export function SelectCell<TData>({
     if (valueRenderer) {
       // Don't wrap in data-slot="grid-cell-content" - let valueRenderer control its own styling
       // This prevents line-clamp from truncating badges/custom renderers
-      return valueRenderer(value, selectedOption);
+      return valueRenderer(value, selectedOption, cell.row.original);
     }
 
     return (

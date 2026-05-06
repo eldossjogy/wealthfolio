@@ -7,7 +7,7 @@
 //! - Stable calculator that only understands primitives
 
 use crate::activities::activities_constants::*;
-use crate::activities::Activity;
+use crate::activities::{Activity, NewActivity};
 use crate::Result;
 use rust_decimal::Decimal;
 
@@ -43,9 +43,9 @@ impl ActivityCompiler for DefaultActivityCompiler {
 
         // Use effective_type() to respect user overrides
         let activity_type = activity.effective_type();
-        let subtype = activity.subtype.as_deref();
+        let subtype = NewActivity::canonicalize_subtype(activity.subtype.as_deref());
 
-        match (activity_type, subtype) {
+        match (activity_type, subtype.as_deref()) {
             // DRIP: Dividend + Buy
             (ACTIVITY_TYPE_DIVIDEND, Some(ACTIVITY_SUBTYPE_DRIP)) => {
                 Ok(self.compile_drip(activity))
@@ -56,7 +56,7 @@ impl ActivityCompiler for DefaultActivityCompiler {
                 Ok(self.compile_staking_reward(activity))
             }
 
-            // Dividend in Kind: Dividend + Add Holding (different asset)
+            // Dividend in Kind: Dividend + Buy
             (ACTIVITY_TYPE_DIVIDEND, Some(ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND)) => {
                 Ok(self.compile_dividend_in_kind(activity))
             }
@@ -87,31 +87,7 @@ impl DefaultActivityCompiler {
     ///
     /// Net cash effect: ~0 (dividend received = purchase cost)
     fn compile_drip(&self, activity: &Activity) -> Vec<Activity> {
-        // Leg 1: DIVIDEND (income recognition)
-        let mut dividend_leg = activity.clone();
-        dividend_leg.id = format!("{}:dividend", activity.id);
-        dividend_leg.subtype = None; // Clear subtype for calculator
-        dividend_leg.quantity = None;
-        dividend_leg.unit_price = None;
-        // if amount is missing, derive from qty * unit_price
-        // if provided, amount stays as-is for income tracking
-        if dividend_leg.amount.is_none() {
-            let qty = activity.quantity.unwrap_or(Decimal::ZERO);
-            let price = activity.unit_price.unwrap_or(Decimal::ZERO);
-            dividend_leg.amount = Some(qty * price);
-        }
-
-        // Leg 2: BUY (share acquisition)
-        let mut buy_leg = activity.clone();
-        buy_leg.id = format!("{}:buy", activity.id);
-        buy_leg.activity_type = ACTIVITY_TYPE_BUY.to_string();
-        buy_leg.activity_type_override = None;
-        buy_leg.subtype = None;
-        // quantity and unit_price stay as-is
-        buy_leg.amount = None; // BUY computes from qty * price
-        buy_leg.fee = Some(Decimal::ZERO); // Fee already in dividend leg
-
-        vec![dividend_leg, buy_leg]
+        self.compile_asset_income(activity, ACTIVITY_TYPE_DIVIDEND, "dividend")
     }
 
     /// Staking Reward: One stored row → INTEREST + BUY
@@ -129,66 +105,69 @@ impl DefaultActivityCompiler {
     ///
     /// Net cash effect: 0
     fn compile_staking_reward(&self, activity: &Activity) -> Vec<Activity> {
-        // Leg 1: INTEREST (income recognition)
-        let mut interest_leg = activity.clone();
-        interest_leg.id = format!("{}:interest", activity.id);
-        interest_leg.subtype = None;
-        interest_leg.quantity = None;
-        interest_leg.unit_price = None;
-        // amount stays for income tracking
-
-        // Leg 2: BUY (token acquisition)
-        let mut buy_leg = activity.clone();
-        buy_leg.id = format!("{}:buy", activity.id);
-        buy_leg.activity_type = ACTIVITY_TYPE_BUY.to_string();
-        buy_leg.activity_type_override = None;
-        buy_leg.subtype = None;
-        buy_leg.amount = None;
-        buy_leg.fee = Some(Decimal::ZERO);
-
-        vec![interest_leg, buy_leg]
+        self.compile_asset_income(activity, ACTIVITY_TYPE_INTEREST, "interest")
     }
 
-    /// Dividend in Kind: Stock dividend where you receive a different asset
+    /// Dividend in Kind: asset dividend where you receive additional units of the same asset
     ///
     /// Stored:
     ///   activity_type = DIVIDEND, subtype = DIVIDEND_IN_KIND
-    ///   asset_id = the asset that pays the dividend
-    ///   metadata.received_asset_id = the asset received
-    ///   quantity = shares received of the different asset
+    ///   asset_id = the asset that pays the dividend and is received
+    ///   quantity = shares received
     ///   unit_price = FMV at receipt
     ///   amount = value of shares received
     ///
     /// Compiled:
     ///   1. DIVIDEND: income recognition
-    ///   2. TRANSFER_IN (internal): receive different asset (cost basis from FMV, no portfolio-boundary contribution)
+    ///   2. BUY: share acquisition at FMV
     fn compile_dividend_in_kind(&self, activity: &Activity) -> Vec<Activity> {
-        // Get the received asset ID from metadata
-        let received_asset_id = activity
-            .get_meta::<String>("received_asset_id")
-            .or_else(|| activity.asset_id.clone());
+        self.compile_asset_income(activity, ACTIVITY_TYPE_DIVIDEND, "dividend")
+    }
 
-        // Leg 1: DIVIDEND (income recognition from the paying asset)
-        let mut dividend_leg = activity.clone();
-        dividend_leg.id = format!("{}:dividend", activity.id);
-        dividend_leg.subtype = None;
-        dividend_leg.quantity = None;
-        dividend_leg.unit_price = None;
+    fn compile_asset_income(
+        &self,
+        activity: &Activity,
+        income_activity_type: &str,
+        income_id_suffix: &str,
+    ) -> Vec<Activity> {
+        let quantity = activity.quantity.unwrap_or(Decimal::ZERO);
+        let derived_amount = activity.unit_price.map(|unit_price| quantity * unit_price);
+        let income_amount = activity
+            .amount
+            .filter(|amount| !amount.is_zero())
+            .or(derived_amount)
+            .or(activity.amount);
+        let acquisition_unit_price = income_amount
+            .and_then(|amount| {
+                if quantity.is_zero() {
+                    None
+                } else {
+                    Some(amount / quantity)
+                }
+            })
+            .or(activity.unit_price);
 
-        // Leg 2: TRANSFER_IN (receive the different asset)
-        let mut transfer_in_leg = activity.clone();
-        transfer_in_leg.id = format!("{}:transfer_in", activity.id);
-        transfer_in_leg.activity_type = ACTIVITY_TYPE_TRANSFER_IN.to_string();
-        transfer_in_leg.activity_type_override = None;
-        transfer_in_leg.subtype = None;
-        transfer_in_leg.asset_id = received_asset_id;
-        // quantity and unit_price define the cost basis
-        transfer_in_leg.amount = None;
-        transfer_in_leg.fee = Some(Decimal::ZERO);
-        // Strip metadata from the generated leg: dividend-in-kind is income, not a portfolio-boundary contribution.
-        transfer_in_leg.metadata = None;
+        // Leg 1: income recognition
+        let mut income_leg = activity.clone();
+        income_leg.id = format!("{}:{}", activity.id, income_id_suffix);
+        income_leg.activity_type = income_activity_type.to_string();
+        income_leg.activity_type_override = None;
+        income_leg.subtype = None;
+        income_leg.quantity = None;
+        income_leg.unit_price = None;
+        income_leg.amount = income_amount;
 
-        vec![dividend_leg, transfer_in_leg]
+        // Leg 2: BUY (asset acquisition at recognized income value)
+        let mut buy_leg = activity.clone();
+        buy_leg.id = format!("{}:buy", activity.id);
+        buy_leg.activity_type = ACTIVITY_TYPE_BUY.to_string();
+        buy_leg.activity_type_override = None;
+        buy_leg.subtype = None;
+        buy_leg.unit_price = acquisition_unit_price;
+        buy_leg.amount = None;
+        buy_leg.fee = Some(Decimal::ZERO);
+
+        vec![income_leg, buy_leg]
     }
 }
 
@@ -417,18 +396,91 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_staking_reward_derives_amount_when_missing() {
+        let compiler = DefaultActivityCompiler::new();
+        let mut activity = create_test_activity();
+        activity.activity_type = ACTIVITY_TYPE_INTEREST.to_string();
+        activity.subtype = Some(ACTIVITY_SUBTYPE_STAKING_REWARD.to_string());
+        activity.asset_id = Some("ETH".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = Some(dec!(2000));
+        activity.amount = None;
+
+        let result = compiler.compile(&activity).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].activity_type, ACTIVITY_TYPE_INTEREST);
+        assert_eq!(result[0].amount, Some(dec!(20)));
+        assert_eq!(result[1].activity_type, ACTIVITY_TYPE_BUY);
+        assert_eq!(result[1].quantity, Some(dec!(0.01)));
+        assert_eq!(result[1].unit_price, Some(dec!(2000)));
+        assert!(result[1].amount.is_none());
+    }
+
+    #[test]
+    fn test_compile_asset_backed_income_accepts_case_insensitive_subtype() {
+        let compiler = DefaultActivityCompiler::new();
+        let mut activity = create_test_activity();
+        activity.activity_type = ACTIVITY_TYPE_INTEREST.to_string();
+        activity.subtype = Some("staking_reward".to_string());
+        activity.asset_id = Some("ETH".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = Some(dec!(2000));
+        activity.amount = None;
+
+        let result = compiler.compile(&activity).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].activity_type, ACTIVITY_TYPE_INTEREST);
+        assert_eq!(result[1].activity_type, ACTIVITY_TYPE_BUY);
+    }
+
+    #[test]
+    fn test_compile_staking_reward_derives_amount_when_explicit_amount_is_zero() {
+        let compiler = DefaultActivityCompiler::new();
+        let mut activity = create_test_activity();
+        activity.activity_type = ACTIVITY_TYPE_INTEREST.to_string();
+        activity.subtype = Some(ACTIVITY_SUBTYPE_STAKING_REWARD.to_string());
+        activity.asset_id = Some("ETH".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = Some(dec!(2000));
+        activity.amount = Some(dec!(0));
+
+        let result = compiler.compile(&activity).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].amount, Some(dec!(20)));
+        assert_eq!(result[1].unit_price, Some(dec!(2000)));
+    }
+
+    #[test]
+    fn test_compile_staking_reward_derives_unit_price_when_missing() {
+        let compiler = DefaultActivityCompiler::new();
+        let mut activity = create_test_activity();
+        activity.activity_type = ACTIVITY_TYPE_INTEREST.to_string();
+        activity.subtype = Some(ACTIVITY_SUBTYPE_STAKING_REWARD.to_string());
+        activity.asset_id = Some("ETH".to_string());
+        activity.quantity = Some(dec!(0.01));
+        activity.unit_price = None;
+        activity.amount = Some(dec!(20));
+
+        let result = compiler.compile(&activity).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].amount, Some(dec!(20)));
+        assert_eq!(result[1].unit_price, Some(dec!(2000)));
+    }
+
+    #[test]
     fn test_compile_dividend_in_kind_produces_two_legs() {
         let compiler = DefaultActivityCompiler::new();
         let mut activity = create_test_activity();
         activity.activity_type = ACTIVITY_TYPE_DIVIDEND.to_string();
         activity.subtype = Some(ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND.to_string());
-        activity.asset_id = Some("PARENT_CO".to_string());
-        activity.quantity = Some(dec!(10)); // shares of spinoff received
+        activity.asset_id = Some("AAPL".to_string());
+        activity.quantity = Some(dec!(10)); // shares received
         activity.unit_price = Some(dec!(25)); // FMV at receipt
         activity.amount = Some(dec!(250)); // Value
-        activity.metadata = Some(serde_json::json!({
-            "received_asset_id": "SPINOFF_CO"
-        }));
 
         let result = compiler.compile(&activity).unwrap();
 
@@ -438,34 +490,36 @@ mod tests {
         assert_eq!(result[0].id, "test-1:dividend");
         assert_eq!(result[0].activity_type, ACTIVITY_TYPE_DIVIDEND);
         assert!(result[0].subtype.is_none());
-        assert_eq!(result[0].asset_id, Some("PARENT_CO".to_string()));
+        assert_eq!(result[0].asset_id, Some("AAPL".to_string()));
         assert_eq!(result[0].amount, Some(dec!(250)));
 
-        // Second leg: TRANSFER_IN (internal)
-        assert_eq!(result[1].id, "test-1:transfer_in");
-        assert_eq!(result[1].activity_type, ACTIVITY_TYPE_TRANSFER_IN);
+        // Second leg: BUY
+        assert_eq!(result[1].id, "test-1:buy");
+        assert_eq!(result[1].activity_type, ACTIVITY_TYPE_BUY);
         assert!(result[1].subtype.is_none());
-        assert_eq!(result[1].asset_id, Some("SPINOFF_CO".to_string()));
+        assert_eq!(result[1].asset_id, Some("AAPL".to_string()));
         assert_eq!(result[1].quantity, Some(dec!(10)));
         assert_eq!(result[1].unit_price, Some(dec!(25)));
         assert!(result[1].amount.is_none());
-        assert!(result[1].metadata.is_none());
     }
 
     #[test]
-    fn test_compile_dividend_in_kind_fallback_to_same_asset() {
+    fn test_compile_dividend_in_kind_derives_amount_when_missing() {
         let compiler = DefaultActivityCompiler::new();
         let mut activity = create_test_activity();
         activity.activity_type = ACTIVITY_TYPE_DIVIDEND.to_string();
         activity.subtype = Some(ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND.to_string());
         activity.asset_id = Some("AAPL".to_string());
-        // No metadata with received_asset_id
+        activity.quantity = Some(dec!(4));
+        activity.unit_price = Some(dec!(12.50));
+        activity.amount = None;
 
         let result = compiler.compile(&activity).unwrap();
 
         assert_eq!(result.len(), 2);
-        // TRANSFER_IN should fall back to the original asset_id
+        assert_eq!(result[0].amount, Some(dec!(50.00)));
         assert_eq!(result[1].asset_id, Some("AAPL".to_string()));
+        assert_eq!(result[1].unit_price, Some(dec!(12.50)));
     }
 
     #[test]

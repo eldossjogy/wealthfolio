@@ -27,6 +27,9 @@ import { searchTicker } from "@/adapters";
 import { CreateCustomAssetDialog } from "@/components/create-custom-asset-dialog";
 import { useSettingsContext } from "@/lib/settings-provider";
 
+const UNIT_PRICE_HELP_TEXT =
+  "For buys and sells, enter the trade price. For staking rewards and in-kind dividends, enter the fair market value per unit at receipt; it sets income amount and cost basis.";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -298,8 +301,12 @@ function useImportReviewColumns({
           cell: {
             variant: "select",
             options: activityTypeOptions,
-            valueRenderer: (value: string) => (
-              <ActivityTypeBadge type={value as ActivityType} className="text-xs font-normal" />
+            valueRenderer: (value: string, _option, rowData) => (
+              <ActivityTypeBadge
+                type={value as ActivityType}
+                subtype={(rowData as { subtype?: string } | undefined)?.subtype}
+                className="text-xs font-normal"
+              />
             ),
           },
         },
@@ -399,7 +406,10 @@ function useImportReviewColumns({
         header: "Price",
         size: 120,
         enableSorting: false,
-        meta: { cell: { variant: "number", step: 0.000001, valueType: "string" } },
+        meta: {
+          helpText: UNIT_PRICE_HELP_TEXT,
+          cell: { variant: "number", step: 0.000001, valueType: "string" },
+        },
       },
       // 10. Amount
       {

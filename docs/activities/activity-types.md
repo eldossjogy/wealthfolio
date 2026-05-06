@@ -207,12 +207,12 @@ calculation.
 
 **Purpose**: Cash dividend paid into the account.
 
-| Impact               | Description                                      |
-| -------------------- | ------------------------------------------------ |
-| **Cash**             | Increases by `amount - fee` in activity currency |
-| **Holdings**         | No change (unless DRIP subtype)                  |
-| **Cost Basis**       | No change                                        |
-| **Net Contribution** | No change (income, not new capital)              |
+| Impact               | Description                                         |
+| -------------------- | --------------------------------------------------- |
+| **Cash**             | Increases by `amount - fee` in activity currency    |
+| **Holdings**         | No change (unless DRIP or DIVIDEND_IN_KIND subtype) |
+| **Cost Basis**       | No change                                           |
+| **Net Contribution** | No change (income, not new capital)                 |
 
 **Required Fields**: `asset`, `amount`, `currency` **Optional Fields**: `fee`,
 `quantity` (for per-share tracking)
@@ -362,7 +362,7 @@ The compiler expands these into canonical activity postings.
 | `QUALIFIED`         | Qualified dividend (tax classification)                        | DIVIDEND (pass-through)     |
 | `ORDINARY`          | Ordinary dividend (tax classification)                         | DIVIDEND (pass-through)     |
 | `RETURN_OF_CAPITAL` | Return of capital (reduces cost basis)                         | DIVIDEND (special handling) |
-| `DIVIDEND_IN_KIND`  | Dividend paid in different asset (e.g., spinoff shares)        | DIVIDEND + TRANSFER_IN      |
+| `DIVIDEND_IN_KIND`  | Dividend paid as additional units of the same asset            | DIVIDEND + BUY              |
 
 #### DRIP Expansion
 
@@ -396,21 +396,17 @@ The compiler expands these into canonical activity postings.
 {
   "activity_type": "DIVIDEND",
   "subtype": "DIVIDEND_IN_KIND",
-  "asset": { "id": "PARENT_CO" },
+  "asset": { "id": "AAPL" },
   "amount": 250,
-  "quantity": 10, // shares of spinoff received
-  "unit_price": 25, // FMV at receipt
-  "metadata": {
-    "received_asset_id": "SPINOFF_CO"
-  }
+  "quantity": 10, // shares received
+  "unit_price": 25 // FMV at receipt
 }
 ```
 
 **Compiled Postings**:
 
-1. **DIVIDEND**: `amount = $250` (income recognition from PARENT_CO)
-2. **TRANSFER_IN**: `asset = SPINOFF_CO, quantity = 10, unit_price = $25`
-   (receive spinoff shares)
+1. **DIVIDEND**: `amount = $250` (income recognition)
+2. **BUY**: `asset = AAPL, quantity = 10, unit_price = $25` (share acquisition)
 
 ---
 
@@ -465,7 +461,6 @@ Activities support a `metadata` JSON field for additional context:
   "flow": {
     "is_external": true
   },
-  "received_asset_id": "SPINOFF_CO",
   "split_ratio": "2:1",
   "source": {
     "broker": "Schwab",
@@ -476,13 +471,12 @@ Activities support a `metadata` JSON field for additional context:
 
 ### Key Metadata Fields
 
-| Field                  | Type    | Used By          | Description                                     |
-| ---------------------- | ------- | ---------------- | ----------------------------------------------- |
-| `flow.is_external`     | boolean | TRANSFER_IN/OUT  | Marks transfer as crossing portfolio boundary   |
-| `received_asset_id`    | string  | DIVIDEND_IN_KIND | Asset ID received (different from paying asset) |
-| `split_ratio`          | string  | SPLIT            | Human-readable split ratio (e.g., "2:1")        |
-| `source.broker`        | string  | All              | Original broker name                            |
-| `source.original_type` | string  | All              | Raw activity type from provider                 |
+| Field                  | Type    | Used By         | Description                                   |
+| ---------------------- | ------- | --------------- | --------------------------------------------- |
+| `flow.is_external`     | boolean | TRANSFER_IN/OUT | Marks transfer as crossing portfolio boundary |
+| `split_ratio`          | string  | SPLIT           | Human-readable split ratio (e.g., "2:1")      |
+| `source.broker`        | string  | All             | Original broker name                          |
+| `source.original_type` | string  | All             | Raw activity type from provider               |
 
 ---
 

@@ -224,20 +224,20 @@ export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType];
 
 // Array of all activity types for iteration
 export const ACTIVITY_TYPES = [
-  "BUY",
-  "SELL",
-  "SPLIT",
-  "DIVIDEND",
-  "INTEREST",
-  "DEPOSIT",
-  "WITHDRAWAL",
-  "TRANSFER_IN",
-  "TRANSFER_OUT",
-  "FEE",
-  "TAX",
-  "CREDIT",
-  "ADJUSTMENT",
-  "UNKNOWN",
+  ActivityType.BUY,
+  ActivityType.SELL,
+  ActivityType.SPLIT,
+  ActivityType.DIVIDEND,
+  ActivityType.INTEREST,
+  ActivityType.DEPOSIT,
+  ActivityType.WITHDRAWAL,
+  ActivityType.TRANSFER_IN,
+  ActivityType.TRANSFER_OUT,
+  ActivityType.FEE,
+  ActivityType.TAX,
+  ActivityType.CREDIT,
+  ActivityType.ADJUSTMENT,
+  ActivityType.UNKNOWN,
 ] as const;
 
 export const TRADING_ACTIVITY_TYPES = [
@@ -306,12 +306,11 @@ export const ActivityStatus = {
 export type ActivityStatus = (typeof ActivityStatus)[keyof typeof ActivityStatus];
 
 // Subtypes that affect calculations (compiler expansion or flow classification)
-// Other subtypes are just labels - the backend accepts any string value
 export const ACTIVITY_SUBTYPES = {
   // DIVIDEND subtypes
   // DRIP: cash dividend → immediately reinvested as BUY of same ticker
   DRIP: "DRIP",
-  // DIVIDEND_IN_KIND: dividend paid in asset (not cash), e.g., spinoff shares
+  // DIVIDEND_IN_KIND: dividend paid as additional units of the same asset
   DIVIDEND_IN_KIND: "DIVIDEND_IN_KIND",
 
   // INTEREST subtypes - STAKING_REWARD expands to INTEREST + BUY
@@ -324,18 +323,23 @@ export const ACTIVITY_SUBTYPES = {
   REBATE: "REBATE",
   // REFUND: internal flow (fee correction/reversal, no net_contribution change)
   REFUND: "REFUND",
+
+  // ADJUSTMENT subtypes
+  // OPTION_EXPIRY: removes option lots with no cash effect
+  OPTION_EXPIRY: "OPTION_EXPIRY",
 } as const;
 
 export type ActivitySubtype = (typeof ACTIVITY_SUBTYPES)[keyof typeof ACTIVITY_SUBTYPES];
 
 // Display names for subtypes
 export const SUBTYPE_DISPLAY_NAMES: Record<string, string> = {
-  DRIP: "Dividend Reinvested (DRIP)",
-  DIVIDEND_IN_KIND: "Dividend in Kind",
-  STAKING_REWARD: "Staking Reward",
-  BONUS: "Bonus",
-  REBATE: "Trading Rebate",
-  REFUND: "Fee Refund",
+  [ACTIVITY_SUBTYPES.DRIP]: "Dividend Reinvested (DRIP)",
+  [ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND]: "Dividend in Kind",
+  [ACTIVITY_SUBTYPES.STAKING_REWARD]: "Staking Reward",
+  [ACTIVITY_SUBTYPES.BONUS]: "Bonus",
+  [ACTIVITY_SUBTYPES.REBATE]: "Trading Rebate",
+  [ACTIVITY_SUBTYPES.REFUND]: "Fee Refund",
+  [ACTIVITY_SUBTYPES.OPTION_EXPIRY]: "Option Expiry",
 };
 
 // Suggested subtypes per activity type
@@ -347,6 +351,7 @@ export const SUBTYPES_BY_ACTIVITY_TYPE: Record<string, string[]> = {
     ACTIVITY_SUBTYPES.REBATE,
     ACTIVITY_SUBTYPES.REFUND,
   ],
+  [ActivityType.ADJUSTMENT]: [ACTIVITY_SUBTYPES.OPTION_EXPIRY],
 };
 
 // Asset kinds for behavior classification

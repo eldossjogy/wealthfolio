@@ -1,6 +1,12 @@
-import { isCashActivity, isCashTransfer, isIncomeActivity } from "@/lib/activity-utils";
+import {
+  isAssetBackedIncomeSubtype,
+  isAssetIdentityRequired,
+  isCashActivity,
+  isCashTransfer,
+  isIncomeActivity,
+} from "@/lib/activity-utils";
 import { buildAssetResolutionInput, normalizeOptionalString } from "@/lib/asset-resolution-input";
-import { ACTIVITY_SUBTYPES, ActivityType } from "@/lib/constants";
+import { ActivityType, SUBTYPES_BY_ACTIVITY_TYPE } from "@/lib/constants";
 import type { Account } from "@/lib/types";
 import { normalizeDecimalString, parseLocalDateTime, toPayloadNumber } from "@/lib/utils";
 import type {
@@ -22,17 +28,28 @@ const isTransferActivity = (activityType: string | undefined): boolean => {
   return activityType === ActivityType.TRANSFER_IN || activityType === ActivityType.TRANSFER_OUT;
 };
 
-/** Subtypes where amount = quantity × unitPrice (DRIP, DIVIDEND_IN_KIND, STAKING_REWARD). */
-const isAssetBackedSubtype = (subtype: string | null | undefined): boolean =>
-  subtype === ACTIVITY_SUBTYPES.DRIP ||
-  subtype === ACTIVITY_SUBTYPES.DIVIDEND_IN_KIND ||
-  subtype === ACTIVITY_SUBTYPES.STAKING_REWARD;
+const isSubtypeAllowedForActivityType = (
+  activityType: string | undefined,
+  subtype: string | null | undefined,
+): boolean => {
+  if (!subtype) {
+    return true;
+  }
+  return (SUBTYPES_BY_ACTIVITY_TYPE[activityType ?? ""] ?? []).includes(subtype);
+};
 
-const isAlwaysCashActivity = (activityType: string | undefined): boolean => {
+const isAlwaysCashActivity = (
+  activityType: string | undefined,
+  subtype?: string | null,
+): boolean => {
   if (!activityType) {
     return false;
   }
-  return isCashActivity(activityType) && !isTransferActivity(activityType);
+  return (
+    isCashActivity(activityType) &&
+    !isTransferActivity(activityType) &&
+    !isAssetBackedIncomeSubtype(activityType, subtype)
+  );
 };
 
 /**
@@ -95,7 +112,7 @@ export function resolveAssetIdForTransaction(
   _fallbackCurrency: string,
 ): string | undefined {
   // For cash activities, don't return an assetId - backend will generate CASH:{currency}
-  if (isAlwaysCashActivity(transaction.activityType)) {
+  if (isAlwaysCashActivity(transaction.activityType, transaction.subtype)) {
     return undefined;
   }
 
@@ -158,7 +175,7 @@ function applyCashDefaults(
   resolveTransactionCurrency: TransactionUpdateParams["resolveTransactionCurrency"],
   fallbackCurrency: string,
 ): LocalTransaction {
-  if (!isAlwaysCashActivity(transaction.activityType)) {
+  if (!isAlwaysCashActivity(transaction.activityType, transaction.subtype)) {
     return transaction;
   }
   const derivedCurrency = resolveTransactionCurrency(transaction) ?? fallbackCurrency;
@@ -234,7 +251,11 @@ export function applyTransactionUpdate(params: TransactionUpdateParams): LocalTr
   } else if (field === "quantity") {
     const newQty = normalizedDecimalOrNull(value);
     updated = { ...updated, quantity: newQty };
-    if (isAssetBackedSubtype(updated.subtype) && newQty != null && updated.unitPrice != null) {
+    if (
+      isAssetBackedIncomeSubtype(updated.activityType, updated.subtype) &&
+      newQty != null &&
+      updated.unitPrice != null
+    ) {
       const computedAmount = getAssetBackedAmount(newQty, updated.unitPrice);
       if (computedAmount != null) {
         updated = { ...updated, amount: computedAmount };
@@ -246,9 +267,10 @@ export function applyTransactionUpdate(params: TransactionUpdateParams): LocalTr
     updated = { ...updated, unitPrice: newUnitPrice };
     if (
       newUnitPrice != null &&
-      (isAlwaysCashActivity(updated.activityType) || isIncomeActivity(updated.activityType))
+      (isAlwaysCashActivity(updated.activityType, updated.subtype) ||
+        isIncomeActivity(updated.activityType))
     ) {
-      if (isAssetBackedSubtype(updated.subtype)) {
+      if (isAssetBackedIncomeSubtype(updated.activityType, updated.subtype)) {
         const computedAmount = getAssetBackedAmount(updated.quantity, newUnitPrice);
         if (computedAmount != null) {
           updated = { ...updated, amount: computedAmount };
@@ -290,7 +312,16 @@ export function applyTransactionUpdate(params: TransactionUpdateParams): LocalTr
       }
     }
   } else if (field === "activityType") {
-    updated = { ...updated, activityType: value as ActivityType };
+    const nextActivityType = value as ActivityType;
+    const wasAssetBacked = isAssetBackedIncomeSubtype(updated.activityType, updated.subtype);
+    const nextSubtype = isSubtypeAllowedForActivityType(nextActivityType, updated.subtype)
+      ? updated.subtype
+      : undefined;
+
+    updated = { ...updated, activityType: nextActivityType, subtype: nextSubtype };
+    if (wasAssetBacked && !isAssetBackedIncomeSubtype(nextActivityType, nextSubtype)) {
+      updated = { ...updated, quantity: null, unitPrice: null };
+    }
     updated = applyCashDefaults(updated, resolveTransactionCurrency, fallbackCurrency);
     updated = applySplitDefaults(updated);
   } else if (field === "accountId") {
@@ -314,14 +345,28 @@ export function applyTransactionUpdate(params: TransactionUpdateParams): LocalTr
   } else if (field === "fxRate") {
     updated = { ...updated, fxRate: normalizeDecimalString(value) };
   } else if (field === "subtype") {
+    const wasAssetBacked = isAssetBackedIncomeSubtype(updated.activityType, updated.subtype);
     const newSubtype = typeof value === "string" && value ? value : undefined;
     updated = { ...updated, subtype: newSubtype };
-    if (isAssetBackedSubtype(newSubtype) && updated.quantity != null && updated.unitPrice != null) {
+    if (
+      isAssetBackedIncomeSubtype(updated.activityType, newSubtype) &&
+      updated.assetSymbol === "CASH"
+    ) {
+      updated = { ...updated, assetSymbol: "", assetId: "" };
+    }
+    if (
+      isAssetBackedIncomeSubtype(updated.activityType, newSubtype) &&
+      updated.quantity != null &&
+      updated.unitPrice != null
+    ) {
       const computedAmount = getAssetBackedAmount(updated.quantity, updated.unitPrice);
       if (computedAmount != null) {
         updated = { ...updated, amount: computedAmount };
       }
+    } else if (wasAssetBacked) {
+      updated = { ...updated, quantity: null, unitPrice: null };
     }
+    updated = applyCashDefaults(updated, resolveTransactionCurrency, fallbackCurrency);
   } else if (field === "isExternal") {
     // isExternal flag for TRANSFER_IN/TRANSFER_OUT (stored in metadata.flow.is_external)
     updated = { ...updated, isExternal: Boolean(value) };
@@ -422,7 +467,7 @@ export function buildSavePayload(
     const assetSymbol = (transaction.assetSymbol || "").trim();
     const isCash = isTransfer
       ? isCashTransfer(transaction.activityType, assetSymbol) || !assetSymbol
-      : isAlwaysCashActivity(transaction.activityType);
+      : isAlwaysCashActivity(transaction.activityType, transaction.subtype);
     // For assets not in our lookup (new assets), send undefined currency to let the backend
     // derive it from the asset and properly register the FX pair if needed.
     // Only use account currency fallback for cash activities where the currency is deterministic.
@@ -502,7 +547,10 @@ export function buildSavePayload(
       creates.push(createPayload);
     } else {
       // Build UPDATE payload
-      const updatePayload: ActivityUpdatePayload = { ...basePayload };
+      const updatePayload: ActivityUpdatePayload = {
+        ...basePayload,
+        subtype: transaction.subtype ?? "",
+      };
 
       if (!isCash) {
         const currentSymbol = (transaction.assetSymbol || "").trim().toUpperCase();
@@ -640,14 +688,36 @@ function validateTransaction(transaction: LocalTransaction): TransactionValidati
     });
   }
 
-  // Non-cash activities require a symbol
-  if (!isCashActivity(transaction.activityType)) {
+  // Non-cash and asset-backed income activities require a symbol
+  if (isAssetIdentityRequired(transaction.activityType, transaction.subtype)) {
     const hasSymbol = transaction.assetSymbol?.trim() || transaction.assetId?.trim();
     if (!hasSymbol) {
       errors.push({
         transactionId: transaction.id,
         field: "assetSymbol",
         message: "Symbol is required for this activity type",
+      });
+    }
+  }
+
+  if (isAssetBackedIncomeSubtype(transaction.activityType, transaction.subtype)) {
+    const quantity = transaction.quantity != null ? Number.parseFloat(transaction.quantity) : NaN;
+    const unitPrice =
+      transaction.unitPrice != null ? Number.parseFloat(transaction.unitPrice) : NaN;
+    const amount = transaction.amount != null ? Number.parseFloat(transaction.amount) : NaN;
+
+    if (!(quantity > 0)) {
+      errors.push({
+        transactionId: transaction.id,
+        field: "quantity",
+        message: "Received quantity is required",
+      });
+    }
+    if (!(unitPrice > 0) && !(amount > 0)) {
+      errors.push({
+        transactionId: transaction.id,
+        field: "unitPrice",
+        message: "Either income amount or FMV per unit is required",
       });
     }
   }

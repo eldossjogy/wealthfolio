@@ -37,6 +37,12 @@ vi.mock("../fields", () => ({
       <input data-testid={`input-${name}`} name={name} type="number" id={name} />
     </div>
   ),
+  QuantityInput: ({ name, label }: { name: string; label: string }) => (
+    <div>
+      <label htmlFor={name}>{label}</label>
+      <input data-testid={`input-${name}`} name={name} type="number" id={name} />
+    </div>
+  ),
   NotesInput: ({ name, label }: { name: string; label: string }) => (
     <div>
       <label htmlFor={name}>{label}</label>
@@ -89,7 +95,43 @@ vi.mock("@wealthfolio/ui/components/ui/icons", () => ({
     Check: () => <span data-testid="check-icon">Check</span>,
     Plus: () => <span data-testid="plus-icon">Plus</span>,
     MinusCircle: () => <span data-testid="minus-icon">Minus</span>,
+    ChevronDown: () => <span data-testid="chevron-down-icon" />,
+    Circle: () => <span data-testid="circle-icon" />,
   },
+}));
+
+vi.mock("@wealthfolio/ui/components/ui/animated-toggle-group", () => ({
+  AnimatedToggleGroup: ({
+    items,
+    value,
+    onValueChange,
+  }: {
+    items: { value: string; label: string }[];
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }) => (
+    <div data-testid="animated-toggle-group">
+      {items.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          aria-pressed={value === item.value}
+          onClick={() => onValueChange?.(item.value)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
+vi.mock("@wealthfolio/ui/components/ui/radio-group", () => ({
+  RadioGroup: ({ children }: { children: React.ReactNode }) => (
+    <div role="radiogroup">{children}</div>
+  ),
+  RadioGroupItem: ({ value, id }: { value: string; id: string }) => (
+    <input type="radio" value={value} id={id} readOnly />
+  ),
 }));
 
 const mockAccounts: AccountSelectOption[] = [

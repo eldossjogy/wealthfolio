@@ -1,5 +1,5 @@
 import { expect, Page, test } from "@playwright/test";
-import { BASE_URL, completeOnboardingIfNeeded, loginIfNeeded } from "./helpers";
+import { BASE_URL, TEST_PASSWORD, completeOnboardingIfNeeded, waitForSyncToast } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -72,18 +72,21 @@ test.describe("Symbol Mapping Validation", () => {
       await page.waitForTimeout(500);
     }
 
-    const assetRow = page.getByRole("row").filter({ hasText: ASSET_SYMBOL }).first();
-    await expect(assetRow).toBeVisible({ timeout: 10000 });
-
-    const actionsBtn = assetRow.getByRole("button", { name: "Open actions" });
+    await waitForSyncToast(page, 60_000);
 
     // The table can re-render (quote updates) causing the dropdown to close before the click lands.
-    // toPass() retries the whole sequence automatically until it succeeds.
+    // Retry opening the menu and clicking Edit as one atomic sequence so the menuitem cannot detach
+    // between a visibility assertion and a later click.
     await expect(async () => {
+      const assetRow = page.getByRole("row").filter({ hasText: ASSET_SYMBOL }).first();
+      await expect(assetRow).toBeVisible({ timeout: 3000 });
+      const actionsBtn = assetRow.getByRole("button", { name: "Open actions" });
       await actionsBtn.click();
-      await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible({ timeout: 2000 });
-    }).toPass({ timeout: 15000 });
-    await page.getByRole("menuitem", { name: "Edit" }).click();
+      const editItem = page.getByRole("menuitem", { name: "Edit" });
+      await expect(editItem).toBeVisible({ timeout: 2000 });
+      await editItem.click();
+      await expect(page.getByRole("dialog").first()).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 30_000 });
 
     const editSheet = page.getByRole("dialog").first();
     await expect(editSheet).toBeVisible({ timeout: 5000 });
@@ -220,8 +223,27 @@ test.describe("Symbol Mapping Validation", () => {
 
   test("0. Setup: login and create test asset", async () => {
     test.setTimeout(180000);
+
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+
+    const loginInput = page.getByPlaceholder("Enter your password");
+    const continueButton = page.getByRole("button", { name: "Continue" });
+    const dashboardHeading = page.getByRole("heading", { name: "Dashboard" });
+    const accountsHeading = page.getByRole("heading", { name: "Accounts" });
+
+    await expect(
+      loginInput.or(continueButton).or(dashboardHeading).or(accountsHeading),
+    ).toBeVisible({ timeout: 120000 });
+
+    if (await loginInput.isVisible()) {
+      await loginInput.fill(TEST_PASSWORD);
+      await page.getByRole("button", { name: "Sign In" }).click();
+      await expect(continueButton.or(dashboardHeading).or(accountsHeading)).toBeVisible({
+        timeout: 30000,
+      });
+    }
+
     await completeOnboardingIfNeeded(page);
-    await loginIfNeeded(page);
     await ensureAssetExists();
   });
 

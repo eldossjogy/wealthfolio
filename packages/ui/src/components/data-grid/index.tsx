@@ -1,3 +1,5 @@
+import type {} from "./data-grid-types";
+
 // Re-export types from the types directory
 export type {
   BooleanFilterOperator,

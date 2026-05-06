@@ -62,7 +62,9 @@ pub fn classify_flow_for_scope(activity: &Activity, scope: PerformanceScope) -> 
     if effective_type == ACTIVITY_TYPE_CREDIT {
         return match activity.subtype.as_deref() {
             // BONUS is external (new money entering portfolio)
-            Some(ACTIVITY_SUBTYPE_BONUS) => FlowType::External,
+            Some(subtype) if subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_BONUS) => {
+                FlowType::External
+            }
             // REBATE, REFUND, and other subtypes are internal
             // (corrections/refunds of existing transactions, not new money)
             _ => FlowType::Internal,
@@ -168,6 +170,13 @@ mod tests {
     fn test_credit_bonus_is_external() {
         let mut activity = create_test_activity("CREDIT");
         activity.subtype = Some("BONUS".to_string());
+        assert_eq!(classify_flow(&activity), FlowType::External);
+    }
+
+    #[test]
+    fn test_credit_bonus_subtype_is_case_insensitive() {
+        let mut activity = create_test_activity("CREDIT");
+        activity.subtype = Some("bonus".to_string());
         assert_eq!(classify_flow(&activity), FlowType::External);
     }
 

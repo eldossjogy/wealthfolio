@@ -333,6 +333,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
         self.writer
             .exec_tx(move |tx| -> Result<Activity> {
                 let mut activity_to_update = activity_db_owned;
+                let subtype_patch = activity_update_owned.subtype.clone();
                 let existing = activities::table
                     .select(ActivityDB::as_select())
                     .find(&activity_id_owned)
@@ -393,9 +394,11 @@ impl ActivityRepositoryTrait for ActivityRepository {
                 if activity_to_update.source_type.is_none() {
                     activity_to_update.source_type = source_type;
                 }
-                if activity_to_update.subtype.is_none() {
-                    activity_to_update.subtype = subtype;
-                }
+                activity_to_update.subtype = match subtype_patch {
+                    Some(value) if value.trim().is_empty() => None,
+                    Some(value) => Some(value),
+                    None => subtype,
+                };
                 if activity_to_update.settlement_date.is_none() {
                     activity_to_update.settlement_date = settlement_date;
                 }
@@ -638,6 +641,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
                 for update in updates {
                     update.validate()?;
                     let update_owned = update.clone();
+                    let subtype_patch = update_owned.subtype.clone();
                     let mut activity_db: ActivityDB = update.into();
                     let existing = activities::table
                         .select(ActivityDB::as_select())
@@ -694,9 +698,11 @@ impl ActivityRepositoryTrait for ActivityRepository {
                     if activity_db.source_type.is_none() {
                         activity_db.source_type = source_type;
                     }
-                    if activity_db.subtype.is_none() {
-                        activity_db.subtype = subtype;
-                    }
+                    activity_db.subtype = match subtype_patch {
+                        Some(value) if value.trim().is_empty() => None,
+                        Some(value) => Some(value),
+                        None => subtype,
+                    };
                     if activity_db.settlement_date.is_none() {
                         activity_db.settlement_date = settlement_date;
                     }
@@ -1322,7 +1328,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
 
         // For income reporting, we need to handle different subtypes:
         // - Regular DIVIDEND/INTEREST: use the `amount` field directly
-        // - STAKING_REWARD/DRIP/DIVIDEND_IN_KIND subtypes: if amount is 0, calculate from:
+        // - Valid asset-backed income pairs: if amount is 0, calculate from:
         //   1. quantity * unit_price (if unit_price is available)
         //   2. quantity * market_price from quotes table (fallback)
         let account_filter = match account_id {
@@ -1341,7 +1347,10 @@ impl ActivityRepositoryTrait for ActivityRepository {
              a.account_id,
              acc.name as account_name,
              CASE
-                 WHEN a.subtype IN ('STAKING_REWARD', 'DRIP', 'DIVIDEND_IN_KIND')
+                 WHEN (
+                       (a.activity_type = 'INTEREST' AND UPPER(a.subtype) = 'STAKING_REWARD')
+                       OR (a.activity_type = 'DIVIDEND' AND UPPER(a.subtype) IN ('DRIP', 'DIVIDEND_IN_KIND'))
+                      )
                       AND (a.amount IS NULL OR CAST(a.amount AS REAL) = 0)
                  THEN CASE
                      WHEN a.unit_price IS NOT NULL AND CAST(a.unit_price AS REAL) > 0
@@ -2008,6 +2017,50 @@ mod tests {
             .expect("insert transfer activity");
     }
 
+    fn insert_activity_with_subtype(
+        conn: &mut SqliteConnection,
+        id: &str,
+        account_id: &str,
+        activity_type: &str,
+        asset_id: Option<&str>,
+        subtype: Option<&str>,
+    ) {
+        let activity = ActivityDB {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            asset_id: asset_id.map(str::to_string),
+            activity_type: activity_type.to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: subtype.map(str::to_string),
+            status: "POSTED".to_string(),
+            activity_date: "2024-01-15T00:00:00+00:00".to_string(),
+            settlement_date: None,
+            quantity: Some("1".to_string()),
+            unit_price: Some("100".to_string()),
+            amount: Some("100".to_string()),
+            fee: Some("0".to_string()),
+            currency: "USD".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None,
+            source_system: Some("MANUAL".to_string()),
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: Some(format!("{id}-idempotency")),
+            import_run_id: None,
+            is_user_modified: 0,
+            needs_review: 0,
+            created_at: "2024-01-15T00:00:00+00:00".to_string(),
+            updated_at: "2024-01-15T00:00:00+00:00".to_string(),
+        };
+
+        diesel::insert_into(activities::table)
+            .values(&activity)
+            .execute(conn)
+            .expect("insert activity with subtype");
+    }
+
     fn activity_metadata(conn: &mut SqliteConnection, id: &str) -> serde_json::Value {
         let metadata: Option<String> = activities::table
             .filter(activities::id.eq(id))
@@ -2024,6 +2077,93 @@ mod tests {
             .select(activities::is_user_modified)
             .first(conn)
             .expect("activity is_user_modified")
+    }
+
+    #[tokio::test]
+    async fn update_activity_empty_subtype_clears_existing_subtype() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "acc-subtype");
+        insert_activity_with_subtype(
+            &mut conn,
+            "activity-subtype",
+            "acc-subtype",
+            "DIVIDEND",
+            None,
+            Some("DRIP"),
+        );
+
+        let updated = repo
+            .update_activity(ActivityUpdate {
+                id: "activity-subtype".to_string(),
+                account_id: "acc-subtype".to_string(),
+                asset: None,
+                activity_type: "DIVIDEND".to_string(),
+                subtype: Some(String::new()),
+                activity_date: "2024-01-15".to_string(),
+                quantity: None,
+                unit_price: None,
+                currency: "USD".to_string(),
+                fee: None,
+                amount: None,
+                status: None,
+                notes: None,
+                fx_rate: None,
+                metadata: None,
+            })
+            .await
+            .expect("update activity");
+
+        assert_eq!(updated.subtype, None);
+    }
+
+    #[tokio::test]
+    async fn income_report_derives_asset_backed_amount_only_for_valid_type_subtype_pair() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "acc-income");
+        insert_activity_with_subtype(
+            &mut conn,
+            "valid-staking",
+            "acc-income",
+            "INTEREST",
+            None,
+            Some("STAKING_REWARD"),
+        );
+        insert_activity_with_subtype(
+            &mut conn,
+            "metadata-only",
+            "acc-income",
+            "DIVIDEND",
+            None,
+            Some("STAKING_REWARD"),
+        );
+
+        diesel::sql_query(
+            "UPDATE activities SET amount = '0', quantity = '2', unit_price = '50' \
+             WHERE id IN ('valid-staking', 'metadata-only')",
+        )
+        .execute(&mut conn)
+        .expect("zero income amounts");
+
+        let rows = repo
+            .get_income_activities_data(Some("acc-income"))
+            .expect("income data");
+        let staking_amount = rows
+            .iter()
+            .find(|row| row.income_type == "INTEREST")
+            .map(|row| row.amount);
+        let metadata_amount = rows
+            .iter()
+            .find(|row| row.income_type == "DIVIDEND")
+            .map(|row| row.amount);
+
+        assert_eq!(staking_amount, Some(Decimal::new(100, 0)));
+        assert_eq!(metadata_amount, Some(Decimal::ZERO));
     }
 
     /// Regression: re-linking the same (account_id, context_kind, source_system) must preserve the row `id`

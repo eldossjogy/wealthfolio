@@ -34,6 +34,7 @@ export function DataGridColumnHeader<TData, TValue>({
     : typeof column.columnDef.header === "string"
       ? column.columnDef.header
       : column.id;
+  const helpText = column.columnDef.meta?.helpText;
 
   const isAnyColumnResizing = table.getState().columnSizingInfo.isResizingColumn;
 
@@ -110,6 +111,16 @@ export function DataGridColumnHeader<TData, TValue>({
               </Tooltip>
             )}
             <span className="truncate">{label}</span>
+            {helpText && (
+              <Tooltip delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <Icons.Info className="text-muted-foreground/70 hover:text-foreground size-3.5 shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs text-xs">
+                  {helpText}
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
           <Icons.ChevronDown className="text-muted-foreground shrink-0" />
         </DropdownMenuTrigger>

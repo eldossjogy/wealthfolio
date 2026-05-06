@@ -2599,6 +2599,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_split_added_after_snapshots_restarts_from_earliest_activity() {
+        let base = Arc::new(RwLock::new("USD".to_string()));
+
+        let mut account_repo = MockAccountRepository::new();
+        let acc = create_test_account("acc1", "USD", "Test Account");
+        account_repo.add_account(acc.clone());
+        let account_repo = Arc::new(account_repo);
+
+        let d1 = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        let split_date = NaiveDate::from_ymd_opt(2025, 4, 29).unwrap();
+
+        let deposit = create_test_activity(
+            "dep1",
+            &acc.id,
+            Some("CASH:USD"),
+            "DEPOSIT",
+            d1,
+            None,
+            None,
+            Some(dec!(10000)),
+            "USD",
+        );
+
+        let buy = create_test_activity(
+            "buy1",
+            &acc.id,
+            Some("HDV"),
+            "BUY",
+            d1,
+            Some(dec!(10)),
+            Some(dec!(100)),
+            Some(dec!(1000)),
+            "USD",
+        );
+
+        let split = create_test_activity(
+            "split1",
+            &acc.id,
+            Some("HDV"),
+            "SPLIT",
+            split_date,
+            None,
+            None,
+            Some(dec!(5)),
+            "USD",
+        );
+
+        let fx = Arc::new(MockFxService::new());
+        let snapshot_repo = Arc::new(MockSnapshotRepository::new());
+        let asset_repo = Arc::new(MockAssetRepository::new());
+
+        let initial_activity_repo = Arc::new(MockActivityRepositoryWithData::new(vec![
+            deposit.clone(),
+            buy.clone(),
+        ]));
+        let initial_svc = SnapshotService::new(
+            base.clone(),
+            account_repo.clone(),
+            initial_activity_repo,
+            snapshot_repo.clone(),
+            asset_repo.clone(),
+            fx.clone(),
+        );
+
+        initial_svc
+            .recalculate_holdings_snapshots(
+                Some(std::slice::from_ref(&acc.id)),
+                SnapshotRecalcMode::Full,
+            )
+            .await
+            .unwrap();
+
+        let seeded = snapshot_repo
+            .get_latest_snapshot_before_date(&acc.id, split_date.pred_opt().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(seeded.positions.get("HDV").unwrap().quantity, dec!(10));
+
+        let split_activity_repo = Arc::new(MockActivityRepositoryWithData::new(vec![
+            deposit, buy, split,
+        ]));
+        let split_svc = SnapshotService::new(
+            base,
+            account_repo,
+            split_activity_repo,
+            snapshot_repo.clone(),
+            asset_repo,
+            fx,
+        );
+
+        split_svc
+            .recalculate_holdings_snapshots(
+                Some(std::slice::from_ref(&acc.id)),
+                SnapshotRecalcMode::SinceDate(split_date),
+            )
+            .await
+            .unwrap();
+
+        let split_frame = snapshot_repo
+            .get_snapshots_by_account(&acc.id, Some(split_date), Some(split_date))
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let pos = split_frame.positions.get("HDV").unwrap();
+        assert_eq!(
+            pos.quantity,
+            dec!(50),
+            "Backdated split recalc should not seed from pre-split snapshots"
+        );
+        assert_eq!(pos.total_cost_basis, dec!(1000));
+        assert_eq!(pos.average_cost, dec!(20));
+    }
+
+    #[tokio::test]
     async fn test_split_multi_account_no_double_counting() {
         // Regression: when the same asset is held in multiple accounts, sync_splits inserts
         // one SPLIT activity per account. calculate_split_factors must deduplicate by date so

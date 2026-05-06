@@ -1,5 +1,9 @@
 import { searchTicker } from "@/adapters";
-import { isCashActivity, isSymbolRequired } from "@/lib/activity-utils";
+import {
+  isAssetBackedIncomeSubtype,
+  isAssetIdentityRequired,
+  isCashActivity,
+} from "@/lib/activity-utils";
 import {
   ActivityStatus,
   ActivityType,
@@ -33,6 +37,9 @@ const STATUS_DISPLAY: Record<
 const isTransferActivity = (activityType: string | undefined): boolean => {
   return activityType === ActivityType.TRANSFER_IN || activityType === ActivityType.TRANSFER_OUT;
 };
+
+const UNIT_PRICE_HELP_TEXT =
+  "For buys and sells, enter the trade price. For staking rewards and in-kind dividends, enter the fair market value per unit at receipt; it sets income amount and cost basis.";
 
 interface UseActivityColumnsOptions {
   accounts: Account[];
@@ -169,8 +176,12 @@ export function useActivityColumns({
           cell: {
             variant: "select",
             options: activityTypeOptions,
-            valueRenderer: (value: string) => (
-              <ActivityTypeBadge type={value as ActivityType} className="text-xs font-normal" />
+            valueRenderer: (value: string, _option, rowData) => (
+              <ActivityTypeBadge
+                type={value as ActivityType}
+                subtype={(rowData as LocalTransaction | undefined)?.subtype}
+                className="text-xs font-normal"
+              />
             ),
           },
         },
@@ -236,7 +247,9 @@ export function useActivityColumns({
             isDisabled: (rowData: unknown) => {
               const row = rowData as LocalTransaction;
               return (
-                isCashActivity(row.activityType ?? "") && !isTransferActivity(row.activityType)
+                isCashActivity(row.activityType ?? "") &&
+                !isAssetBackedIncomeSubtype(row.activityType ?? "", row.subtype) &&
+                !isTransferActivity(row.activityType)
               );
             },
             getDisplayContext: (rowData: unknown) => {
@@ -258,7 +271,7 @@ export function useActivityColumns({
             },
             isClearable: (rowData: unknown) => {
               const row = rowData as LocalTransaction;
-              return !isSymbolRequired(row.activityType ?? "");
+              return !isAssetIdentityRequired(row.activityType ?? "", row.subtype);
             },
             onSearch: handleSymbolSearch,
             onSelect: onSymbolSelect
@@ -309,7 +322,10 @@ export function useActivityColumns({
         header: "Price",
         size: 120,
         enableSorting: false,
-        meta: { cell: { variant: "number", step: 0.000001, valueType: "string" } },
+        meta: {
+          helpText: UNIT_PRICE_HELP_TEXT,
+          cell: { variant: "number", step: 0.000001, valueType: "string" },
+        },
       },
       // 10. Amount (most important money column)
       {

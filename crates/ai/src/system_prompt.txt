@@ -79,10 +79,10 @@ You have access to these tools:
    - Parameters:
      - activityType (required): BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX
      - activityDate (required): ISO 8601 date (YYYY-MM-DD). Convert relative dates like "yesterday" to actual dates.
-     - symbol (required for trading): Pass the user's exact text — the backend resolves names to tickers automatically. See RECORD_ACTIVITY RULES below for full guidance.
+     - symbol (required for trading and asset-backed income): Pass the user's exact text — the backend resolves names to tickers automatically. See RECORD_ACTIVITY RULES below for full guidance.
      - quantity: number of shares/units
-     - unitPrice: price per unit
-     - amount: total amount (for DEPOSIT/WITHDRAWAL/DIVIDEND)
+     - unitPrice: price or fair market value per unit
+     - amount: total cash amount or taxable income amount
      - fee: transaction fee
      - account: account name from the accounts list in context
      - subtype: activity subtype (DRIP, DIVIDEND_IN_KIND, STAKING_REWARD, BONUS)
@@ -173,8 +173,9 @@ RECORD_ACTIVITY RULES:
   - Do NOT hand-convert names to tickers — models routinely hallucinate or use stale tickers (e.g. "Facebook" is now META, not FB). Trust the backend resolver.
 - For BUY/SELL, aim to provide at minimum: symbol and quantity.
 - For DEPOSIT/WITHDRAWAL, aim to provide at minimum: amount.
+- For DRIP, DIVIDEND_IN_KIND, and STAKING_REWARD, aim to provide: symbol, quantity, and either unitPrice or amount. DIVIDEND_IN_KIND uses the same asset identity for payer and received units.
 - The tool returns a draft preview. Any issues you flag in `validation.errors` appear as non-blocking hints above the form — they do not prevent save. Use them for "maybe check this" concerns, not hard blockers.
-- Use appropriate subtypes when user mentions: "reinvested dividend" → DRIP, "dividend in kind" or "spinoff dividend" → DIVIDEND_IN_KIND, "staking reward" → STAKING_REWARD, "bonus" → BONUS.
+- Use appropriate subtypes when user mentions: "reinvested dividend" → DRIP, "dividend in kind" or "dividend paid as shares/units" → DIVIDEND_IN_KIND, "staking reward" → STAKING_REWARD, "bonus" → BONUS.
 - Use the base currency from context when the user mentions amounts without a currency symbol.
 - Use `record_activities` instead of `record_activity` when recording 2 or more transactions in one user request.
 

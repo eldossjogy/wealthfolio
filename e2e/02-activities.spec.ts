@@ -70,8 +70,10 @@ test.describe("Activity Creation Tests", () => {
         currency: "USD",
         symbol: "MSFT",
         amount: 15,
-        notes: "Dividend with no subtype",
-        subtype: "None",
+        quantity: 0.1,
+        unitPrice: 150,
+        notes: "Dividend in kind",
+        subtype: "In kind",
       },
       transfer: {
         fromAccount: "Test USD Account",
@@ -312,10 +314,12 @@ test.describe("Activity Creation Tests", () => {
   }
 
   async function selectSubtype(subtype: string) {
-    const subtypeSelect = page.getByTestId("subtype-select");
-    await expect(subtypeSelect).toBeVisible({ timeout: 5000 });
-    await subtypeSelect.click();
-    await page.getByRole("option", { name: subtype }).click();
+    const subtypeLabel = subtype === "None" ? "Cash" : subtype;
+    const dialog = page.getByRole("dialog", { name: "Add Activity" });
+    const subtypeRadio = dialog.getByRole("radio", { name: subtypeLabel, exact: true });
+    await expect(subtypeRadio).toBeVisible({ timeout: 5000 });
+    await subtypeRadio.click();
+    await expect(subtypeRadio).toBeChecked();
   }
 
   async function fillFxRate(rate: number) {
@@ -603,16 +607,26 @@ test.describe("Activity Creation Tests", () => {
     await selectAccount(dividend.account, dividend.currency);
     await searchAndSelectSymbol(dividend.symbol);
     await selectDate();
-    await fillAmount(dividend.amount);
 
-    // Expand advanced options and select subtype
-    await expandAdvancedOptions();
+    // Subtype is now a main form radio group, not an advanced select.
     await selectSubtype(dividend.subtype);
+    await page.getByTestId("received-quantity-input").fill(String(dividend.quantity));
+    await page.getByTestId("received-quantity-input").blur();
+    await page.getByTestId("fmv-per-unit-input").fill(String(dividend.unitPrice));
+    await page.getByTestId("fmv-per-unit-input").blur();
+    await fillAmount(dividend.amount, "dividend-amount-input");
 
     await fillNotes(dividend.notes);
 
     await submitActivity("Dividend");
     await verifyActivityInTable("DIVIDEND", dividend.symbol, { amount: dividend.amount });
+    await expect(
+      page
+        .locator("tr")
+        .filter({ hasText: "Dividend in Kind" })
+        .filter({ hasText: dividend.symbol })
+        .first(),
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("10. Create TRANSFER activity", async () => {

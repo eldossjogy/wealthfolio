@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 use wealthfolio_core::accounts::{Account, AccountServiceTrait, NewAccount, TrackingMode};
 use wealthfolio_core::activities::{
     compute_idempotency_key, ActivityRepositoryTrait, ActivityServiceTrait, ActivityUpsert,
-    NewActivity,
+    NewActivity, ACTIVITY_TYPE_BUY, ACTIVITY_TYPE_SELL,
 };
 use wealthfolio_core::assets::{
     build_option_metadata, parse_crypto_pair_symbol, parse_symbol_with_exchange_suffix, AssetKind,
@@ -376,7 +376,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 .unwrap_or_else(|_| Utc::now());
 
             // Collect quote data from BUY/SELL activities with a resolved asset and non-zero price
-            if matches!(act.activity_type.as_str(), "BUY" | "SELL") {
+            if act.activity_type == ACTIVITY_TYPE_BUY || act.activity_type == ACTIVITY_TYPE_SELL {
                 if let (Some(ref aid), Some(price)) = (&asset_id, act.unit_price) {
                     if price > Decimal::ZERO {
                         quote_data.push((

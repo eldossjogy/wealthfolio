@@ -8,8 +8,7 @@ use std::sync::Arc;
 use crate::accounts::{Account, AccountServiceTrait};
 use crate::activities::activities_constants::{
     classify_import_activity, is_cash_symbol, is_garbage_symbol, requires_symbol,
-    ImportSymbolDisposition, ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND, ACTIVITY_SUBTYPE_DRIP,
-    ACTIVITY_SUBTYPE_STAKING_REWARD, ACTIVITY_TYPE_SPLIT, ACTIVITY_TYPE_TRANSFER_IN,
+    ImportSymbolDisposition, ACTIVITY_TYPE_BUY, ACTIVITY_TYPE_SPLIT, ACTIVITY_TYPE_TRANSFER_IN,
     ACTIVITY_TYPE_TRANSFER_OUT, PRICE_BEARING_ACTIVITY_TYPES,
 };
 use crate::activities::activities_errors::ActivityError;
@@ -130,18 +129,118 @@ impl PreparationMode {
     fn allows_live_resolution(self) -> bool {
         matches!(self, Self::Sync)
     }
+
+    fn is_sync(self) -> bool {
+        matches!(self, Self::Sync)
+    }
 }
 
 impl ActivityService {
-    fn is_asset_backed_import_subtype(subtype: Option<&str>) -> bool {
-        subtype
+    fn normalize_new_activity_economic_signs(activity: &mut NewActivity) {
+        activity.quantity = activity.quantity.map(|v| v.abs());
+        activity.unit_price = activity.unit_price.map(|v| v.abs());
+        activity.amount = activity.amount.map(|v| v.abs());
+        activity.fee = activity.fee.map(|v| v.abs());
+    }
+
+    fn hydrate_and_validate_update_against_existing(
+        activity: &mut ActivityUpdate,
+        existing: &Activity,
+    ) -> Result<()> {
+        if activity
+            .subtype
+            .as_deref()
             .map(str::trim)
-            .filter(|subtype| !subtype.is_empty())
-            .is_some_and(|subtype| {
-                subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_DRIP)
-                    || subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_DIVIDEND_IN_KIND)
-                    || subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_STAKING_REWARD)
-            })
+            .is_some_and(|subtype| !subtype.is_empty())
+        {
+            activity.subtype = NewActivity::canonicalize_subtype(activity.subtype.as_deref());
+        }
+
+        let effective_subtype = match activity.subtype.as_deref().map(str::trim) {
+            Some("") => None,
+            Some(subtype) => Some(subtype),
+            None => existing.subtype.as_deref(),
+        };
+        let quantity = activity
+            .quantity
+            .unwrap_or(existing.quantity)
+            .map(|value| value.abs());
+        let unit_price = activity
+            .unit_price
+            .unwrap_or(existing.unit_price)
+            .map(|value| value.abs());
+        let amount = activity
+            .amount
+            .unwrap_or(existing.amount)
+            .map(|value| value.abs());
+
+        NewActivity::validate_asset_backed_income_values(
+            &activity.activity_type,
+            effective_subtype,
+            quantity,
+            unit_price,
+            amount,
+        )?;
+
+        Ok(())
+    }
+
+    fn validate_new_activity_income_values(activity: &NewActivity) -> Result<()> {
+        NewActivity::validate_asset_backed_income_values(
+            &activity.activity_type,
+            activity.subtype.as_deref(),
+            activity.quantity,
+            activity.unit_price,
+            activity.amount,
+        )?;
+
+        Ok(())
+    }
+
+    fn normalize_activity_for_preparation(mut activity: NewActivity) -> NewActivity {
+        activity.subtype = NewActivity::canonicalize_subtype(activity.subtype.as_deref());
+        Self::normalize_new_activity_economic_signs(&mut activity);
+        activity
+    }
+
+    fn downgrade_unresolvable_sync_asset_income(activity: &mut NewActivity) {
+        let should_derive_amount = activity.amount.is_none_or(|amount| amount.is_zero())
+            && activity
+                .quantity
+                .is_some_and(|quantity| quantity.is_sign_positive() && !quantity.is_zero())
+            && activity
+                .unit_price
+                .is_some_and(|unit_price| unit_price.is_sign_positive() && !unit_price.is_zero());
+
+        if should_derive_amount {
+            if let (Some(quantity), Some(unit_price)) = (activity.quantity, activity.unit_price) {
+                activity.amount = Some(quantity * unit_price);
+            }
+        }
+
+        activity.subtype = None;
+    }
+
+    fn sync_asset_income_needs_downgrade(
+        activity: &NewActivity,
+        resolved_asset_id: Option<&str>,
+    ) -> bool {
+        if !NewActivity::is_asset_backed_income_subtype(
+            &activity.activity_type,
+            activity.subtype.as_deref(),
+        ) {
+            return false;
+        }
+
+        resolved_asset_id.is_none()
+            || NewActivity::validate_asset_backed_income_values(
+                &activity.activity_type,
+                activity.subtype.as_deref(),
+                activity.quantity,
+                activity.unit_price,
+                activity.amount,
+            )
+            .is_err()
     }
 
     fn classify_import_symbol_disposition(
@@ -151,7 +250,7 @@ impl ActivityService {
         quantity: Option<Decimal>,
         unit_price: Option<Decimal>,
     ) -> ImportSymbolDisposition {
-        if Self::is_asset_backed_import_subtype(subtype) {
+        if NewActivity::is_asset_backed_income_subtype(activity_type, subtype) {
             ImportSymbolDisposition::ResolveAsset
         } else {
             classify_import_activity(activity_type, symbol, quantity, unit_price)
@@ -159,7 +258,8 @@ impl ActivityService {
     }
 
     fn requires_asset_identity(activity_type: &str, subtype: Option<&str>) -> bool {
-        requires_symbol(activity_type) || Self::is_asset_backed_import_subtype(subtype)
+        requires_symbol(activity_type)
+            || NewActivity::is_asset_backed_income_subtype(activity_type, subtype)
     }
 
     fn has_valid_split_ratio(amount: Option<Decimal>) -> bool {
@@ -1320,11 +1420,14 @@ impl ActivityService {
     }
 
     async fn prepare_new_activity(&self, mut activity: NewActivity) -> Result<NewActivity> {
+        activity.subtype = NewActivity::canonicalize_subtype(activity.subtype.as_deref());
+        Self::normalize_new_activity_economic_signs(&mut activity);
         let account: Account = self.account_service.get_account(&activity.account_id)?;
         let base_ccy = self.account_service.get_base_currency().unwrap_or_default();
         let account_currency = resolve_currency(&[&account.currency, &base_ccy]);
 
         let currency = resolve_currency(&[&activity.currency, &account_currency, &base_ccy]);
+        Self::validate_new_activity_income_values(&activity)?;
 
         if activity.activity_type == ACTIVITY_TYPE_SPLIT {
             activity.amount = activity.amount.map(|v| v.abs());
@@ -2406,6 +2509,44 @@ impl ActivityService {
         }
     }
 
+    fn normalize_import_activity_subtype(activity: &mut ActivityImport) {
+        activity.subtype = NewActivity::canonicalize_subtype(activity.subtype.as_deref());
+        if activity
+            .subtype
+            .as_deref()
+            .is_some_and(|subtype| subtype.eq_ignore_ascii_case(&activity.activity_type))
+        {
+            activity.subtype = None;
+        }
+    }
+
+    fn validate_import_asset_backed_income_values(
+        activity: &ActivityImport,
+    ) -> std::result::Result<(), (String, String)> {
+        let quantity = activity.quantity.map(|value| value.abs());
+        let unit_price = activity.unit_price.map(|value| value.abs());
+        let amount = activity.amount.map(|value| value.abs());
+
+        NewActivity::validate_asset_backed_income_values(
+            &activity.activity_type,
+            activity.subtype.as_deref(),
+            quantity,
+            unit_price,
+            amount,
+        )
+        .map_err(|err| {
+            let message = err.to_string();
+            let field = if message.contains("positive quantity") {
+                "quantity"
+            } else if message.contains("Income amount") {
+                "amount"
+            } else {
+                "unitPrice"
+            };
+            (field.to_string(), message)
+        })
+    }
+
     async fn check_activities_import_for_account(
         &self,
         account_id: String,
@@ -2463,8 +2604,20 @@ impl ActivityService {
                 activity.account_id = Some(account_id.clone());
             }
             self.hydrate_import_activity_from_asset_id(&mut activity);
+            Self::normalize_import_activity_subtype(&mut activity);
 
             let symbol = activity.symbol.trim().to_string();
+
+            if let Err((field, message)) =
+                Self::validate_import_asset_backed_income_values(&activity)
+            {
+                activity.is_valid = false;
+                let mut errors = std::collections::HashMap::new();
+                errors.insert(field, vec![message]);
+                activity.errors = Some(errors);
+                activities_with_status.push(activity);
+                continue;
+            }
 
             match Self::classify_import_symbol_disposition(
                 &activity.activity_type,
@@ -2815,6 +2968,8 @@ impl ActivityService {
     /// - CashMovement: clears symbol, exchange_mic, quote_ccy, instrument_type
     /// - SPLIT: falls back to `account_currency` when currency is missing or invalid
     fn normalize_for_insert(activity: &mut ActivityImport, account_currency: &str) {
+        Self::normalize_import_activity_subtype(activity);
+
         if Self::classify_import_symbol_disposition(
             &activity.activity_type,
             activity.subtype.as_deref(),
@@ -2926,10 +3081,11 @@ impl ActivityServiceTrait for ActivityService {
     }
 
     /// Updates an existing activity
-    async fn update_activity(&self, activity: ActivityUpdate) -> Result<Activity> {
+    async fn update_activity(&self, mut activity: ActivityUpdate) -> Result<Activity> {
         // Get the existing activity BEFORE the update to capture old account_id and asset_id
         // This ensures we emit events for both old and new locations if they changed
         let existing = self.activity_repository.get_activity(&activity.id)?;
+        Self::hydrate_and_validate_update_against_existing(&mut activity, &existing)?;
 
         let prepared = self.prepare_update_activity(activity).await?;
         let updated = self.activity_repository.update_activity(prepared).await?;
@@ -3099,6 +3255,7 @@ impl ActivityServiceTrait for ActivityService {
 
         // For updates: capture OLD values before preparing the update
         for update_request in request.updates {
+            let mut update_request = update_request;
             let target_id = update_request.id.clone();
             // Get the existing activity to capture old account_id and asset_id
             match self.activity_repository.get_activity(&target_id) {
@@ -3108,6 +3265,17 @@ impl ActivityServiceTrait for ActivityService {
                         old_asset_ids.insert(asset_id.clone());
                     }
                     old_currencies.insert(existing.currency.clone());
+                    if let Err(err) = Self::hydrate_and_validate_update_against_existing(
+                        &mut update_request,
+                        &existing,
+                    ) {
+                        errors.push(ActivityBulkMutationError {
+                            id: Some(target_id),
+                            action: "update".to_string(),
+                            message: err.to_string(),
+                        });
+                        continue;
+                    }
                 }
                 Err(_) => {
                     // Activity doesn't exist - will fail during prepare_update_activity
@@ -3301,7 +3469,7 @@ impl ActivityServiceTrait for ActivityService {
                 id: None,
                 date: "2000-01-01".to_string(),
                 symbol: candidate.symbol.clone(),
-                activity_type: "BUY".to_string(),
+                activity_type: ACTIVITY_TYPE_BUY.to_string(),
                 quantity: Some(Decimal::ONE),
                 unit_price: Some(Decimal::ONE),
                 currency: candidate.currency.clone().unwrap_or_default(),
@@ -3551,6 +3719,14 @@ impl ActivityServiceTrait for ActivityService {
                 has_validation_errors = true;
                 continue;
             }
+            if let Err((field, message)) =
+                Self::validate_import_asset_backed_income_values(activity)
+            {
+                activity.is_valid = false;
+                Self::add_activity_error(activity, &field, &message);
+                has_validation_errors = true;
+                continue;
+            }
             if let ImportSymbolDisposition::NeedsReview(message) = &symbol_disposition {
                 Self::add_activity_error(activity, "symbol", message);
                 activity.is_valid = false;
@@ -3647,6 +3823,8 @@ impl ActivityServiceTrait for ActivityService {
             .collect();
 
         for (new_act, src) in new_activities.iter_mut().zip(source_slice.iter()) {
+            new_act.subtype = NewActivity::canonicalize_subtype(new_act.subtype.as_deref());
+            Self::normalize_new_activity_economic_signs(new_act);
             new_act.idempotency_key = Self::build_import_idempotency_key(src, &new_act.account_id);
         }
 
@@ -4218,6 +4396,11 @@ impl ActivityService {
             return Ok(PrepareActivitiesResult::default());
         }
 
+        let activities: Vec<NewActivity> = activities
+            .into_iter()
+            .map(Self::normalize_activity_for_preparation)
+            .collect();
+
         let mut result = PrepareActivitiesResult::default();
         let base_ccy = self.account_service.get_base_currency().unwrap_or_default();
         let account_currency = resolve_currency(&[&account.currency, &base_ccy]);
@@ -4254,8 +4437,23 @@ impl ActivityService {
         let mut asset_specs: Vec<AssetSpec> = Vec::new();
         let mut activity_asset_map: Vec<Option<String>> = Vec::with_capacity(activities.len());
         let mut quote_ccy_cache: QuoteCcyCache = HashMap::new();
+        let mut sync_review_indices: HashSet<usize> = HashSet::new();
 
         for (idx, activity) in activities.iter().enumerate() {
+            if let Err(e) = activity.validate() {
+                if mode.is_sync() {
+                    warn!(
+                        "Broker sync activity at index {} failed validation and will be imported for review: {}",
+                        idx, e
+                    );
+                    sync_review_indices.insert(idx);
+                } else {
+                    result.errors.push((idx, e.to_string()));
+                    activity_asset_map.push(None);
+                    continue;
+                }
+            }
+
             match self
                 .build_asset_spec(
                     activity,
@@ -4277,7 +4475,15 @@ impl ActivityService {
                     activity_asset_map.push(None);
                 }
                 Err(e) => {
-                    result.errors.push((idx, e.to_string()));
+                    if mode.is_sync() {
+                        warn!(
+                            "Broker sync activity at index {} could not resolve an asset and will be imported for review: {}",
+                            idx, e
+                        );
+                        sync_review_indices.insert(idx);
+                    } else {
+                        result.errors.push((idx, e.to_string()));
+                    }
                     activity_asset_map.push(None);
                 }
             }
@@ -4395,8 +4601,23 @@ impl ActivityService {
 
             // Validate the activity
             if let Err(e) = activity.validate() {
-                result.errors.push((idx, e.to_string()));
-                continue;
+                if mode.is_sync() {
+                    warn!(
+                        "Broker sync activity at index {} failed final validation and will be imported for review: {}",
+                        idx, e
+                    );
+                    sync_review_indices.insert(idx);
+                } else {
+                    result.errors.push((idx, e.to_string()));
+                    continue;
+                }
+            }
+
+            if mode.is_sync()
+                && Self::sync_asset_income_needs_downgrade(&activity, resolved_asset_id.as_deref())
+            {
+                Self::downgrade_unresolvable_sync_asset_income(&mut activity);
+                sync_review_indices.insert(idx);
             }
 
             // Update activity's asset with resolved asset_id
@@ -4462,7 +4683,21 @@ impl ActivityService {
             activity.amount = activity.amount.map(|v| v.abs());
             activity.fee = activity.fee.map(|v| v.abs());
 
-            Self::validate_split_ratio(&activity.activity_type, activity.amount)?;
+            if let Err(e) = Self::validate_split_ratio(&activity.activity_type, activity.amount) {
+                if mode.is_sync() {
+                    warn!(
+                        "Broker sync activity at index {} has invalid split data and will be imported for review: {}",
+                        idx, e
+                    );
+                    sync_review_indices.insert(idx);
+                } else {
+                    return Err(e);
+                }
+            }
+
+            if mode.is_sync() && sync_review_indices.contains(&idx) {
+                activity.needs_review = Some(true);
+            }
 
             // Securities transfers derive monetary value from quantity × unit_price;
             // never persist an inbound `amount` for them when unit_price is present

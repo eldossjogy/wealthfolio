@@ -8,16 +8,21 @@ import {
   type CarouselApi,
 } from "@wealthfolio/ui/components/ui/carousel";
 import { Icons, type IconName } from "@wealthfolio/ui/components/ui/icons";
+import { ActivityType as CanonicalActivityType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 export type PrimaryActivityType =
-  | "BUY"
-  | "SELL"
-  | "DEPOSIT"
-  | "WITHDRAWAL"
-  | "DIVIDEND"
+  | typeof CanonicalActivityType.BUY
+  | typeof CanonicalActivityType.SELL
+  | typeof CanonicalActivityType.DEPOSIT
+  | typeof CanonicalActivityType.WITHDRAWAL
+  | typeof CanonicalActivityType.DIVIDEND
   | "TRANSFER";
-export type SecondaryActivityType = "SPLIT" | "FEE" | "INTEREST" | "TAX";
+export type SecondaryActivityType =
+  | typeof CanonicalActivityType.SPLIT
+  | typeof CanonicalActivityType.FEE
+  | typeof CanonicalActivityType.INTEREST
+  | typeof CanonicalActivityType.TAX;
 export type ActivityType = PrimaryActivityType | SecondaryActivityType;
 
 interface ActivityTypeConfig<T extends string> {
@@ -27,19 +32,19 @@ interface ActivityTypeConfig<T extends string> {
 }
 
 const PRIMARY_ACTIVITY_TYPES: ActivityTypeConfig<PrimaryActivityType>[] = [
-  { value: "BUY", label: "Buy", icon: "TrendingUp" },
-  { value: "SELL", label: "Sell", icon: "TrendingDown" },
-  { value: "DEPOSIT", label: "Deposit", icon: "ArrowDownLeft" },
-  { value: "WITHDRAWAL", label: "Withdrawal", icon: "ArrowUpRight" },
-  { value: "DIVIDEND", label: "Dividend", icon: "Coins" },
+  { value: CanonicalActivityType.BUY, label: "Buy", icon: "TrendingUp" },
+  { value: CanonicalActivityType.SELL, label: "Sell", icon: "TrendingDown" },
+  { value: CanonicalActivityType.DEPOSIT, label: "Deposit", icon: "ArrowDownLeft" },
+  { value: CanonicalActivityType.WITHDRAWAL, label: "Withdrawal", icon: "ArrowUpRight" },
+  { value: CanonicalActivityType.DIVIDEND, label: "Dividend", icon: "Coins" },
   { value: "TRANSFER", label: "Transfer", icon: "ArrowLeftRight" },
 ];
 
 const SECONDARY_ACTIVITY_TYPES: ActivityTypeConfig<SecondaryActivityType>[] = [
-  { value: "SPLIT", label: "Split", icon: "Split" },
-  { value: "FEE", label: "Fee", icon: "Receipt" },
-  { value: "INTEREST", label: "Interest", icon: "Percent" },
-  { value: "TAX", label: "Tax", icon: "ReceiptText" },
+  { value: CanonicalActivityType.SPLIT, label: "Split", icon: "Split" },
+  { value: CanonicalActivityType.FEE, label: "Fee", icon: "Receipt" },
+  { value: CanonicalActivityType.INTEREST, label: "Interest", icon: "Percent" },
+  { value: CanonicalActivityType.TAX, label: "Tax", icon: "ReceiptText" },
 ];
 
 const ALL_ACTIVITY_TYPES = [...PRIMARY_ACTIVITY_TYPES, ...SECONDARY_ACTIVITY_TYPES];
