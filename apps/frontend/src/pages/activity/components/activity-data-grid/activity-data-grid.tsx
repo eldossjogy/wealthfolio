@@ -62,6 +62,15 @@ function shouldApplyResolvedActivityCurrency(result: SymbolSearchResult): boolea
   return !result.currency?.trim() || result.currencySource === "exchange_inferred";
 }
 
+const ACTIVITY_GRID_COLUMN_VISIBILITY_KEY = "activity-datagrid-column-visibility";
+
+const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
+  subtype: true,
+  isExternal: true,
+  instrumentType: false,
+  activityStatus: false,
+};
+
 /**
  * Activity data grid component with inline editing, bulk operations, and optimistic updates
  */
@@ -94,15 +103,10 @@ export function ActivityDataGrid({
     resetChangeState,
   } = useActivityGridState({ activities });
 
-  // Persist column visibility preferences
+  // Persist column visibility preferences.
   const [columnVisibility, setColumnVisibility] = usePersistentState<VisibilityState>(
-    "activity-datagrid-column-visibility",
-    {
-      subtype: true,
-      isExternal: true,
-      instrumentType: false,
-      activityStatus: false,
-    },
+    ACTIVITY_GRID_COLUMN_VISIBILITY_KEY,
+    DEFAULT_COLUMN_VISIBILITY,
   );
 
   const { assets } = useAssets();

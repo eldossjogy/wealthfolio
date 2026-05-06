@@ -53,7 +53,11 @@ export type CellOpts =
       /** Static options or function to get options dynamically based on row data */
       options: CellSelectOption[] | ((rowData: unknown) => CellSelectOption[]);
       /** Custom renderer for the selected value in display mode */
-      valueRenderer?: (value: string, option?: CellSelectOption) => React.ReactNode;
+      valueRenderer?: (
+        value: string,
+        option?: CellSelectOption,
+        rowData?: unknown,
+      ) => React.ReactNode;
       /** Whether to allow clearing the selection (adds empty option) */
       allowEmpty?: boolean;
       /** Label for the empty option (default: "None") */
@@ -116,6 +120,7 @@ declare module "@tanstack/react-table" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData extends RowData, TValue> {
     label?: string;
+    helpText?: string;
     cell?: CellOpts;
   }
 

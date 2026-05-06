@@ -192,7 +192,11 @@ export const ActivityTableMobile = ({
 
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Type</span>
-                  <ActivityTypeBadge type={activity.activityType} className="text-xs font-normal" />
+                  <ActivityTypeBadge
+                    type={activity.activityType}
+                    subtype={activity.subtype}
+                    className="text-xs font-normal"
+                  />
                 </div>
 
                 {/* Quantity (if applicable) */}
