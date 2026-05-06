@@ -1536,6 +1536,74 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn test_quote_mode_change_resets_sync_state() {
+        let before = test_market_asset();
+        let after = Asset {
+            quote_mode: QuoteMode::Manual,
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_quote_ccy_change_resets_sync_state() {
+        let before = test_market_asset();
+        let after = Asset {
+            quote_ccy: "EUR".to_string(),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_instrument_type_change_resets_sync_state() {
+        let before = test_market_asset();
+        let after = Asset {
+            instrument_type: Some(InstrumentType::Bond),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_instrument_symbol_change_resets_sync_state() {
+        let before = test_market_asset();
+        let after = Asset {
+            instrument_symbol: Some("MSFT".to_string()),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
+    #[test]
+    fn test_instrument_exchange_mic_change_resets_sync_state() {
+        let before = Asset {
+            instrument_exchange_mic: Some("XNAS".to_string()),
+            ..test_market_asset()
+        };
+        let after = Asset {
+            instrument_exchange_mic: Some("XLON".to_string()),
+            ..before.clone()
+        };
+
+        assert!(AssetService::should_reset_sync_state_after_profile_change(
+            &before, &after
+        ));
+    }
+
     fn test_market_asset() -> Asset {
         Asset {
             id: "asset-1".to_string(),

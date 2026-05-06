@@ -578,6 +578,10 @@ mod tests {
             Ok(())
         }
 
+        async fn reset_sync_state_for_profile_change(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
         async fn get_providers_info(&self) -> Result<Vec<ProviderInfo>> {
             Ok(vec![])
         }

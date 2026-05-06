@@ -1075,6 +1075,10 @@ pub mod test_env {
             Ok(())
         }
 
+        async fn reset_sync_state_for_profile_change(&self, _asset_id: &str) -> CoreResult<()> {
+            Ok(())
+        }
+
         async fn get_providers_info(&self) -> CoreResult<Vec<ProviderInfo>> {
             Ok(Vec::new())
         }

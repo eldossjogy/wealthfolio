@@ -401,10 +401,12 @@ pub trait QuoteServiceTrait: Send + Sync {
     async fn reset_sync_errors(&self, asset_ids: &[String]) -> Result<()>;
 
     /// Reset stale sync routing/error state after a market identity or provider profile change.
-    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()> {
-        let _ = asset_id;
-        Ok(())
-    }
+    ///
+    /// Implementors must clear `error_count`, `last_error`, and `data_source` on
+    /// the matching `QuoteSyncState` so the next sync re-routes to the asset's
+    /// `preferred_provider`. Note: clearing `data_source` to an empty string is
+    /// the contract — `effective_provider` treats `""` as "no override".
+    async fn reset_sync_state_for_profile_change(&self, asset_id: &str) -> Result<()>;
 
     /// Update position status (active/inactive) based on current holdings.
     async fn update_position_status_from_holdings(
@@ -1569,6 +1571,8 @@ where
         if let Some(mut state) = self.sync_state_store.get_by_asset_id(asset_id)? {
             state.error_count = 0;
             state.last_error = None;
+            // Empty string (not absent) is the contract: `effective_provider`
+            // filters empty `data_source` and falls back to `preferred_provider`.
             state.data_source.clear();
             state.updated_at = Utc::now();
             self.sync_state_store.upsert(&state).await?;

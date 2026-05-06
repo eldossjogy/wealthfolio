@@ -567,6 +567,10 @@ impl QuoteServiceTrait for MockMarketDataRepository {
         Ok(())
     }
 
+    async fn reset_sync_state_for_profile_change(&self, _asset_id: &str) -> Result<()> {
+        Ok(())
+    }
+
     // =========================================================================
     // Provider Settings
     // =========================================================================
