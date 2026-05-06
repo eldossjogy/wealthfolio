@@ -618,6 +618,27 @@ impl SnapshotService {
                 }
             }
 
+            if initial_snapshot_for_acc.is_some() {
+                if let (Some(min_activity_date), Some(split_date)) = (
+                    min_activity_date_for_account,
+                    Self::first_split_date_in_range(
+                        activities_by_account_date,
+                        acc_id,
+                        effective_start_date,
+                        calculation_end_date,
+                    ),
+                ) {
+                    if min_activity_date < effective_start_date {
+                        debug!(
+                            "Account {} has split activity on {} inside recalculation window. Restarting from earliest activity {} so historical lots are split-adjusted.",
+                            acc_id, split_date, min_activity_date
+                        );
+                        effective_start_date = min_activity_date;
+                        initial_snapshot_for_acc = None;
+                    }
+                }
+            }
+
             if effective_start_date <= calculation_end_date {
                 if let Some(snapshot) = initial_snapshot_for_acc {
                     start_keyframes.insert(acc_id.clone(), snapshot);
@@ -659,6 +680,29 @@ impl SnapshotService {
             effective_start_dates,
             overall_min_calc_date,
         ))
+    }
+
+    fn first_split_date_in_range(
+        activities_by_account_date: &ActivitiesByAccount,
+        account_id: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Option<NaiveDate> {
+        use crate::activities::ACTIVITY_TYPE_SPLIT;
+
+        if start_date > end_date {
+            return None;
+        }
+
+        activities_by_account_date
+            .get(account_id)?
+            .range(start_date..=end_date)
+            .find_map(|(date, activities)| {
+                activities
+                    .iter()
+                    .any(|activity| activity.activity_type == ACTIVITY_TYPE_SPLIT)
+                    .then_some(*date)
+            })
     }
 
     // --- Step 7: Calculate daily holdings snapshots (in memory) and identify keyframes ---
