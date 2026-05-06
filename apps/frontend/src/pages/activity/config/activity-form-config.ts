@@ -116,7 +116,8 @@ export const ACTIVITY_FORM_CONFIG: Record<
         unitPrice: absNum(activity?.unitPrice),
         amount: absNum(activity?.amount),
         fee: absNum(activity?.fee) ?? 0,
-        quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
+        quoteMode:
+          activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
         // Advanced options
         currency: activity?.currency,
         fxRate: activity?.fxRate ?? undefined,
@@ -198,7 +199,8 @@ export const ACTIVITY_FORM_CONFIG: Record<
         unitPrice: absNum(activity?.unitPrice),
         amount: absNum(activity?.amount),
         fee: absNum(activity?.fee) ?? 0,
-        quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
+        quoteMode:
+          activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
         // Advanced options
         currency: activity?.currency,
         fxRate: activity?.fxRate ?? undefined,
@@ -386,7 +388,8 @@ export const ACTIVITY_FORM_CONFIG: Record<
         currency: activity?.currency,
         fxRate: activity?.fxRate ?? undefined,
         subtype: activity?.subtype ?? null,
-        quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
+        quoteMode:
+          activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
         exchangeMic: activity?.exchangeMic,
       };
     },
