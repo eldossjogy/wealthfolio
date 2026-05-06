@@ -866,6 +866,9 @@ where
                         no_quote_reason: None,
                     }
                 } else {
+                    // No quote available — flag as stale so any UI surface that
+                    // already filters on `is_stale` keeps treating the row as
+                    // outdated; the contextual message lives in `no_quote_reason`.
                     LatestQuoteSnapshot {
                         quote: None,
                         is_stale: true,
@@ -3164,6 +3167,152 @@ mod tests {
 
         assert_eq!(reason.code, "EXPIRED_OPTION");
         assert_eq!(reason.message, "Option has expired");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_inactive_asset() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: false,
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "INACTIVE");
+        assert_eq!(reason.message, "Asset is inactive");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_matured_bond() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            instrument_type: Some(InstrumentType::Bond),
+            metadata: Some(serde_json::json!({
+                "bond": crate::assets::BondSpec {
+                    maturity_date: Some(NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
+                    coupon_rate: None,
+                    face_value: None,
+                    coupon_frequency: None,
+                    isin: None,
+                }
+            })),
+            ..Default::default()
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), None);
+
+        assert_eq!(reason.code, "MATURED_BOND");
+        assert_eq!(reason.message, "Bond has matured");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_last_error_below_threshold() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: Some(now),
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: 1,
+            last_error: Some("symbol not found".to_string()),
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "LAST_ERROR");
+        assert_eq!(reason.message, "Last sync error: symbol not found");
+    }
+
+    #[test]
+    fn test_no_quote_reason_reports_pending_sync() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let now = Utc::now();
+        let asset = Asset {
+            id: "asset_1".to_string(),
+            quote_mode: QuoteMode::Market,
+            is_active: true,
+            ..Default::default()
+        };
+        let state = QuoteSyncState {
+            asset_id: asset.id.clone(),
+            is_active: true,
+            position_closed_date: None,
+            last_synced_at: None,
+            data_source: "YAHOO".to_string(),
+            sync_priority: 100,
+            error_count: 0,
+            last_error: None,
+            profile_enriched_at: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let reason = TestQuoteService::no_quote_reason(Some(&asset), Some(&state));
+
+        assert_eq!(reason.code, "PENDING_SYNC");
+        assert_eq!(reason.message, "No provider quote has been synced yet");
+    }
+
+    #[test]
+    fn test_no_quote_reason_falls_back_to_no_data() {
+        type TestQuoteService = QuoteService<
+            NoopQuoteStore,
+            MockSyncStateStore,
+            MockProviderSettingsStore,
+            NoopAssetRepository,
+            NoopActivityRepository,
+        >;
+
+        let reason = TestQuoteService::no_quote_reason(None, None);
+
+        assert_eq!(reason.code, "NO_DATA");
+        assert_eq!(reason.message, "No data available from provider yet");
     }
 
     #[test]
