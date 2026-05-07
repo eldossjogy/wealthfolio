@@ -8,6 +8,13 @@ use wealthfolio_core::{
     fx, goals, health, limits, portfolio, quotes, settings, taxonomies,
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
+use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService;
+use wealthfolio_spending::analytics::AnalyticsService;
+use wealthfolio_spending::budget::BudgetService;
+use wealthfolio_spending::cash_activities::CashActivityService;
+use wealthfolio_spending::categorization_rules::CategorizationRulesService;
+use wealthfolio_spending::events::EventsService;
+use wealthfolio_spending::settings::SpendingSettingsService;
 use wealthfolio_storage_sqlite::{
     portfolio::snapshot::SnapshotRepository, sync::AppSyncRepository,
 };
@@ -56,6 +63,13 @@ pub struct ServiceContext {
     pub device_sync_runtime: Arc<DeviceSyncRuntimeState>,
     pub health_service: Arc<health::HealthService>,
     pub custom_provider_service: Arc<wealthfolio_core::custom_provider::CustomProviderService>,
+    pub spending_settings_service: Arc<SpendingSettingsService>,
+    pub cash_activity_service: Arc<CashActivityService>,
+    pub activity_taxonomy_assignment_service: Arc<ActivityTaxonomyAssignmentService>,
+    pub categorization_rules_service: Arc<CategorizationRulesService>,
+    pub events_service: Arc<EventsService>,
+    pub budget_service: Arc<BudgetService>,
+    pub spending_analytics_service: Arc<AnalyticsService>,
 }
 
 impl ServiceContext {
@@ -77,6 +91,34 @@ impl ServiceContext {
 
     pub fn settings_service(&self) -> Arc<dyn settings::SettingsServiceTrait> {
         Arc::clone(&self.settings_service)
+    }
+
+    pub fn spending_settings_service(&self) -> Arc<SpendingSettingsService> {
+        Arc::clone(&self.spending_settings_service)
+    }
+
+    pub fn cash_activity_service(&self) -> Arc<CashActivityService> {
+        Arc::clone(&self.cash_activity_service)
+    }
+
+    pub fn activity_taxonomy_assignment_service(&self) -> Arc<ActivityTaxonomyAssignmentService> {
+        Arc::clone(&self.activity_taxonomy_assignment_service)
+    }
+
+    pub fn categorization_rules_service(&self) -> Arc<CategorizationRulesService> {
+        Arc::clone(&self.categorization_rules_service)
+    }
+
+    pub fn events_service(&self) -> Arc<EventsService> {
+        Arc::clone(&self.events_service)
+    }
+
+    pub fn budget_service(&self) -> Arc<BudgetService> {
+        Arc::clone(&self.budget_service)
+    }
+
+    pub fn spending_analytics_service(&self) -> Arc<AnalyticsService> {
+        Arc::clone(&self.spending_analytics_service)
     }
 
     pub fn account_service(&self) -> Arc<dyn accounts::AccountServiceTrait> {
