@@ -320,6 +320,42 @@ impl SyncStateStore for QuoteSyncStateRepository {
             .await
     }
 
+    async fn mark_inactive_batch(
+        &self,
+        asset_ids: &[String],
+        closed_date: NaiveDate,
+    ) -> Result<()> {
+        if asset_ids.is_empty() {
+            return Ok(());
+        }
+
+        let asset_ids = asset_ids.to_vec();
+        let closed_date_str = closed_date.format("%Y-%m-%d").to_string();
+        let now = Utc::now().to_rfc3339();
+
+        self.writer
+            .exec(move |conn: &mut SqliteConnection| -> Result<()> {
+                for chunk in chunk_for_sqlite(&asset_ids) {
+                    let update = QuoteSyncStateUpdateDB {
+                        position_closed_date: Some(Some(closed_date_str.clone())),
+                        sync_priority: Some(50), // RecentlyClosed priority
+                        updated_at: Some(now.clone()),
+                        ..Default::default()
+                    };
+
+                    diesel::update(
+                        qss_dsl::quote_sync_state.filter(qss_dsl::asset_id.eq_any(chunk)),
+                    )
+                    .set(&update)
+                    .execute(conn)
+                    .map_err(StorageError::from)?;
+                }
+
+                Ok(())
+            })
+            .await
+    }
+
     async fn mark_active(&self, asset_id: &str) -> Result<()> {
         let asset_id_owned = asset_id.to_string();
         let now = Utc::now().to_rfc3339();
@@ -342,6 +378,37 @@ impl SyncStateStore for QuoteSyncStateRepository {
                 .set(&update)
                 .execute(conn)
                 .map_err(StorageError::from)?;
+
+                Ok(())
+            })
+            .await
+    }
+
+    async fn mark_active_batch(&self, asset_ids: &[String]) -> Result<()> {
+        if asset_ids.is_empty() {
+            return Ok(());
+        }
+
+        let asset_ids = asset_ids.to_vec();
+        let now = Utc::now().to_rfc3339();
+
+        self.writer
+            .exec(move |conn: &mut SqliteConnection| -> Result<()> {
+                for chunk in chunk_for_sqlite(&asset_ids) {
+                    let update = QuoteSyncStateUpdateDB {
+                        position_closed_date: Some(None),
+                        sync_priority: Some(100), // Active priority
+                        updated_at: Some(now.clone()),
+                        ..Default::default()
+                    };
+
+                    diesel::update(
+                        qss_dsl::quote_sync_state.filter(qss_dsl::asset_id.eq_any(chunk)),
+                    )
+                    .set(&update)
+                    .execute(conn)
+                    .map_err(StorageError::from)?;
+                }
 
                 Ok(())
             })

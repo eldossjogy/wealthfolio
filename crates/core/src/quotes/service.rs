@@ -1515,7 +1515,8 @@ where
         if !open_asset_ids.is_empty() {
             let open_assets = self.asset_repo.list_by_asset_ids(&open_asset_ids)?;
             let open_sync_states = self.sync_state_store.get_by_asset_ids(&open_asset_ids)?;
-            let mut open_states_to_upsert = Vec::new();
+            let mut open_states_to_mark_active = Vec::new();
+            let mut new_open_states = Vec::new();
             let mut assets_to_reactivate = Vec::new();
 
             for asset in open_assets {
@@ -1524,6 +1525,9 @@ where
                 }
 
                 if !asset.is_active {
+                    // Catalog active state follows actual holdings: a user-hidden asset
+                    // must become selectable again while it is held. Closing the position
+                    // only closes quote sync state; it does not auto-hide the asset.
                     debug!(
                         "Queueing asset {} for reactivation from current holdings before quote sync",
                         asset.id
@@ -1536,17 +1540,16 @@ where
                 }
 
                 match open_sync_states.get(&asset.id).cloned() {
-                    Some(mut state) if !state.is_active || state.position_closed_date.is_some() => {
+                    Some(state) if !state.is_active || state.position_closed_date.is_some() => {
                         debug!("Marking sync state active for open position {}", asset.id);
-                        state.mark_active();
-                        open_states_to_upsert.push(state);
+                        open_states_to_mark_active.push(asset.id.clone());
                     }
                     Some(_) => {}
                     None => {
                         debug!("Creating sync state for open position {}", asset.id);
                         let mut state = QuoteSyncState::new(asset.id.clone(), String::new());
                         state.sync_priority = SyncCategory::Active.default_priority();
-                        open_states_to_upsert.push(state);
+                        new_open_states.push(state);
                     }
                 }
             }
@@ -1557,10 +1560,14 @@ where
                     .await?;
             }
 
-            if !open_states_to_upsert.is_empty() {
+            if !open_states_to_mark_active.is_empty() {
                 self.sync_state_store
-                    .upsert_batch(&open_states_to_upsert)
+                    .mark_active_batch(&open_states_to_mark_active)
                     .await?;
+            }
+
+            if !new_open_states.is_empty() {
+                self.sync_state_store.upsert_batch(&new_open_states).await?;
             }
         }
 
@@ -1579,7 +1586,8 @@ where
 
         let mut marked_active = 0;
         let mut marked_inactive = 0;
-        let mut lifecycle_states_to_upsert = Vec::new();
+        let mut lifecycle_states_to_mark_active = Vec::new();
+        let mut lifecycle_states_to_mark_inactive = Vec::new();
 
         for sync_state in all_sync_states {
             let asset_id = &sync_state.asset_id;
@@ -1608,9 +1616,7 @@ where
                         "Marking asset {} as active (re-opened position, qty={})",
                         asset_id, current_qty
                     );
-                    let mut state = sync_state.clone();
-                    state.mark_active();
-                    lifecycle_states_to_upsert.push(state);
+                    lifecycle_states_to_mark_active.push(asset_id.clone());
                     marked_active += 1;
                 }
                 // If already active, no change needed
@@ -1619,18 +1625,22 @@ where
                 if sync_state.is_active {
                     // Was active, now closed - mark as inactive with today's date
                     debug!("Marking asset {} as inactive (position closed)", asset_id);
-                    let mut state = sync_state.clone();
-                    state.mark_closed(today);
-                    lifecycle_states_to_upsert.push(state);
+                    lifecycle_states_to_mark_inactive.push(asset_id.clone());
                     marked_inactive += 1;
                 }
                 // If already inactive, no change needed (preserve existing closed date)
             }
         }
 
-        if !lifecycle_states_to_upsert.is_empty() {
+        if !lifecycle_states_to_mark_active.is_empty() {
             self.sync_state_store
-                .upsert_batch(&lifecycle_states_to_upsert)
+                .mark_active_batch(&lifecycle_states_to_mark_active)
+                .await?;
+        }
+
+        if !lifecycle_states_to_mark_inactive.is_empty() {
+            self.sync_state_store
+                .mark_inactive_batch(&lifecycle_states_to_mark_inactive, today)
                 .await?;
         }
 

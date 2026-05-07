@@ -287,10 +287,7 @@ fn calculate_targeted_closed_incremental_window(
     inputs: &SyncPlanningInputs,
     fetch_end_date: NaiveDate,
 ) -> Option<(NaiveDate, NaiveDate)> {
-    let end_date = inputs
-        .position_closed_date
-        .map(|closed_date| closed_date.min(fetch_end_date))
-        .unwrap_or(fetch_end_date);
+    let end_date = fetch_end_date;
     let start_date = inputs
         .quote_max
         .map(|quote_max| quote_max - Duration::days(OVERLAP_DAYS))
@@ -2167,7 +2164,7 @@ mod tests {
     }
 
     #[test]
-    fn test_targeted_closed_incremental_window_caps_at_close_date() {
+    fn test_targeted_closed_incremental_window_fetches_through_fetch_end_date() {
         let inputs = SyncPlanningInputs {
             is_active: false,
             position_closed_date: Some(NaiveDate::from_ymd_opt(2026, 2, 15).unwrap()),
@@ -2184,7 +2181,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(start, NaiveDate::from_ymd_opt(2026, 1, 27).unwrap());
-        assert_eq!(end, NaiveDate::from_ymd_opt(2026, 2, 15).unwrap());
+        assert_eq!(end, NaiveDate::from_ymd_opt(2026, 5, 6).unwrap());
     }
 
     #[test]
@@ -2195,7 +2192,7 @@ mod tests {
             activity_min: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             activity_max: Some(NaiveDate::from_ymd_opt(2026, 2, 15).unwrap()),
             quote_min: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            quote_max: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+            quote_max: Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
         };
 
         assert_eq!(

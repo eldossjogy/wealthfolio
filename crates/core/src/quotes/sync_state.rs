@@ -507,8 +507,28 @@ pub trait SyncStateStore: Send + Sync {
     /// Mark asset as inactive (position closed).
     async fn mark_inactive(&self, asset_id: &str, closed_date: NaiveDate) -> Result<()>;
 
+    /// Mark multiple assets as inactive (position closed).
+    async fn mark_inactive_batch(
+        &self,
+        asset_ids: &[String],
+        closed_date: NaiveDate,
+    ) -> Result<()> {
+        for asset_id in asset_ids {
+            self.mark_inactive(asset_id, closed_date).await?;
+        }
+        Ok(())
+    }
+
     /// Mark asset as active.
     async fn mark_active(&self, asset_id: &str) -> Result<()>;
+
+    /// Mark multiple assets as active.
+    async fn mark_active_batch(&self, asset_ids: &[String]) -> Result<()> {
+        for asset_id in asset_ids {
+            self.mark_active(asset_id).await?;
+        }
+        Ok(())
+    }
 
     /// Delete sync state for an asset.
     async fn delete(&self, asset_id: &str) -> Result<()>;

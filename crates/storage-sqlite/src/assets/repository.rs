@@ -519,18 +519,20 @@ impl AssetRepositoryTrait for AssetRepository {
                     .map_err(StorageError::from)?;
 
                 if !orphan_ids.is_empty() {
-                    diesel::update(assets::table.filter(assets::id.eq_any(&orphan_ids)))
-                        .set(assets::is_active.eq(0))
-                        .execute(tx.conn())
-                        .map_err(StorageError::from)?;
+                    for chunk in chunk_for_sqlite(&orphan_ids) {
+                        diesel::update(assets::table.filter(assets::id.eq_any(chunk)))
+                            .set(assets::is_active.eq(0))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
 
-                    let updated_rows = assets::table
-                        .filter(assets::id.eq_any(&orphan_ids))
-                        .select(AssetDB::as_select())
-                        .load::<AssetDB>(tx.conn())
-                        .map_err(StorageError::from)?;
-                    for updated in updated_rows {
-                        tx.update(&updated)?;
+                        let updated_rows = assets::table
+                            .filter(assets::id.eq_any(chunk))
+                            .select(AssetDB::as_select())
+                            .load::<AssetDB>(tx.conn())
+                            .map_err(StorageError::from)?;
+                        for updated in updated_rows {
+                            tx.update(&updated)?;
+                        }
                     }
                 }
 
@@ -717,6 +719,33 @@ mod tests {
         let mut conn = get_connection(&pool).expect("conn");
         for asset_id in &asset_ids {
             assert_eq!(is_active(&mut conn, asset_id), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn orphan_cleanup_handles_more_than_one_sqlite_chunk() {
+        let (pool, writer) = setup_db();
+        let repo = AssetRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        let asset_ids: Vec<String> = (0..(SQLITE_MAX_PARAMS_CHUNK * 2 + 1))
+            .map(|i| format!("orphan-{i}"))
+            .collect();
+
+        for asset_id in &asset_ids {
+            insert_asset(&mut conn, asset_id);
+        }
+        drop(conn);
+
+        let orphan_ids = repo
+            .deactivate_orphaned_investments()
+            .await
+            .expect("cleanup orphans");
+
+        assert_eq!(orphan_ids.len(), asset_ids.len());
+
+        let mut conn = get_connection(&pool).expect("conn");
+        for asset_id in &asset_ids {
+            assert_eq!(is_active(&mut conn, asset_id), 0);
         }
     }
 }
