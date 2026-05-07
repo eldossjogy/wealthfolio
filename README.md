@@ -6,7 +6,7 @@
   <h3 align="center">Wealthfolio</h3>
 
   <p align="center">
-    A Beautiful and Boring Personal Finance Tracker — investments, net worth, spending, and simulations
+    A Beautiful Personal Finance Tracker — investments, net worth, spending, and simulations
     <br />
     <br />
     <a href="https://wealthfolio.app">Website</a>
@@ -32,7 +32,7 @@
     style="width: 250px; height: 55px;" width="250" height="55"
   />
 </a>
-  <a href="https://www.producthunt.com/posts/wealthfolio?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_souce=badge-wealthfolio" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=461640&amp;theme=light" alt="Wealthfolio - A boring, Local first, desktop Investment Tracking app | Product Hunt" class="h-[55px] w-[250px]" width="250" height="55"></a>
+  <a href="https://www.producthunt.com/posts/wealthfolio?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_souce=badge-wealthfolio" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=461640&amp;theme=light" alt="Wealthfolio - A beautiful, local-first personal finance tracker | Product Hunt" class="h-[55px] w-[250px]" width="250" height="55"></a>
 
   <a href="https://trendshift.io/repositories/11701" target="_blank">
   <img src="https://trendshift.io/api/badge/repositories/11701" alt="wealthfolio%2Fwealthfolio | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
@@ -41,9 +41,9 @@
 
 ## Introduction
 
-**Wealthfolio App** is a Beautiful and Boring Personal Finance Tracker —
-investments, net worth, spending, and simulations — with local data storage. No
-subscriptions, no cloud.
+**Wealthfolio App** is a Beautiful Personal Finance Tracker — investments, net
+worth, spending, and simulations — with local data storage. No subscriptions, no
+cloud.
 
 Visit the app website at [Wealthfolio App](https://wealthfolio.app/).
 

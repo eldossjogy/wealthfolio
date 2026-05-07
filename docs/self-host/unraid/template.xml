@@ -29,7 +29,7 @@ Full guide: https://github.com/wealthfolio/wealthfolio/blob/main/docs/self-host/
   <DateInstalled/>
   <DonateText>Buy me a coffee</DonateText>
   <DonateLink>https://www.buymeacoffee.com/afadil</DonateLink>
-  <Description>Wealthfolio is a beautiful and boring local-first investment tracker. Track portfolios across multiple accounts and asset types, import broker activities, set financial goals, and analyse performance — all stored in your own SQLite database with no cloud dependency.</Description>
+  <Description>Wealthfolio is a beautiful, local-first personal finance tracker — investments, net worth, spending, and simulations — all stored in your own SQLite database with no cloud dependency.</Description>
   <Networking>
     <Mode>bridge</Mode>
     <Publish>
