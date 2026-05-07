@@ -425,6 +425,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 source_group_id: act.source_group_id,
                 idempotency_key: Some(idempotency_key),
                 import_run_id: import_run_id.clone(),
+                event_id: None,
             });
         }
 

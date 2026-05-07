@@ -341,6 +341,9 @@ mod tests {
         async fn update_activity(&self, _: ActivityUpdate) -> Result<Activity> {
             unimplemented!()
         }
+        async fn set_activity_event_id(&self, _: &str, _: Option<String>) -> Result<Activity> {
+            unimplemented!()
+        }
         async fn delete_activity(&self, _: String) -> Result<Activity> {
             unimplemented!()
         }

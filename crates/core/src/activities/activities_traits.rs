@@ -39,6 +39,14 @@ pub trait ActivityRepositoryTrait: Send + Sync {
     ) -> Result<ActivitySearchResponse>;
     async fn create_activity(&self, new_activity: NewActivity) -> Result<Activity>;
     async fn update_activity(&self, activity_update: ActivityUpdate) -> Result<Activity>;
+    /// Focused setter for `event_id` only — used by the spending module for inline
+    /// event-assignment without going through the full ActivityUpdate pipeline.
+    /// Pass `None` to clear.
+    async fn set_activity_event_id(
+        &self,
+        activity_id: &str,
+        event_id: Option<String>,
+    ) -> Result<Activity>;
     async fn delete_activity(&self, activity_id: String) -> Result<Activity>;
     /// Pairs two existing transfer activities by writing a shared `source_group_id`
     /// and clearing `metadata.flow.is_external` on both. Order of `activity_a_id` /
