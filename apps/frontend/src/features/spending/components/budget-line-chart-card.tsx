@@ -1,0 +1,432 @@
+import { Link } from "react-router-dom";
+
+import { cn, formatAmount } from "@/lib/utils";
+import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@wealthfolio/ui";
+
+import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
+
+export function BudgetLineChartCard({
+  target,
+  spent,
+  currency,
+  historicalDailyAvg,
+  allocations,
+  spendingBreakdown,
+  categoriesMeta,
+  monthByDay,
+}: {
+  target: number;
+  spent: number;
+  currency: string;
+  historicalDailyAvg: number;
+  allocations: { id: string; categoryId: string; amount: string }[];
+  spendingBreakdown: { categoryId: string; amount: number; count: number }[];
+  categoriesMeta: CategoryMetaMap;
+  monthByDay: { date: string; outflow: number }[];
+}) {
+  const now = new Date();
+  const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" }).toUpperCase();
+  const dayOfMonth = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
+
+  const haveHistory = historicalDailyAvg > 0;
+  const forecast =
+    target > 0
+      ? haveHistory
+        ? spent + historicalDailyAvg * daysRemaining
+        : dayOfMonth > 0
+          ? (spent / dayOfMonth) * daysInMonth
+          : 0
+      : 0;
+
+  if (target <= 0) {
+    return (
+      <div className="w-full">
+        <div className="flex items-baseline justify-between pb-2">
+          <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
+          <span className="text-muted-foreground/70 text-xs">
+            {now.toLocaleString("en-US", { month: "short", year: "numeric" })}
+          </span>
+        </div>
+        <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
+          <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
+          <Link
+            to="/settings/spending/budget"
+            className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+          >
+            Set a budget
+            <Icons.ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const remaining = Math.max(0, target - spent);
+  const overBy = spent - target;
+  const isOver = overBy > 0;
+  const forecastReliable = haveHistory || dayOfMonth >= 7;
+  const forecastDelta = forecast - target;
+  const willOverspend = forecastReliable && forecastDelta > 0;
+
+  const cumulative = (() => {
+    const byDay = new Map<number, number>();
+    for (const b of monthByDay) {
+      const d = parseInt(b.date.split("-")[2], 10);
+      if (Number.isFinite(d)) byDay.set(d, (byDay.get(d) ?? 0) + b.outflow);
+    }
+    let running = 0;
+    const out: { day: number; value: number }[] = [];
+    for (let d = 1; d <= dayOfMonth; d++) {
+      running += byDay.get(d) ?? 0;
+      out.push({ day: d, value: running });
+    }
+    return out;
+  })();
+
+  const paceAtToday = (target * dayOfMonth) / daysInMonth;
+  const gapVsPace = spent - paceAtToday;
+  const aheadOfPace = gapVsPace < 0;
+
+  type Status = "ok" | "warn" | "over";
+  const status: Status = isOver ? "over" : !aheadOfPace ? "warn" : "ok";
+
+  const accents: Record<
+    Status,
+    {
+      lineColor: string;
+      pillBg: string;
+      accent: string;
+      Icon: typeof Icons.AlertCircle;
+      label: string;
+    }
+  > = {
+    over: {
+      lineColor: "#B85544",
+      pillBg: "var(--destructive)",
+      accent: "var(--destructive)",
+      Icon: Icons.AlertTriangle,
+      label: "Over budget",
+    },
+    warn: {
+      lineColor: "#C28B47",
+      pillBg: "#C28B47",
+      accent: "#C28B47",
+      Icon: Icons.AlertCircle,
+      label: "Trending high",
+    },
+    ok: {
+      lineColor: "hsl(73 84% 27%)",
+      pillBg: "hsl(73 84% 27%)",
+      accent: "var(--success)",
+      Icon: Icons.CheckCircle ?? Icons.AlertCircle,
+      label: "On track",
+    },
+  };
+  const a = accents[status];
+  const { Icon } = a;
+
+  const chartW = 320;
+  const chartH = 110;
+  const padL = 0;
+  const padR = 0;
+  const padT = 24;
+  const padB = 14;
+  const innerW = chartW - padL - padR;
+  const innerH = chartH - padT - padB;
+
+  const yMax = Math.max(target, spent, target) * 1.05;
+  const xForDay = (day: number) => padL + ((day - 1) / Math.max(1, daysInMonth - 1)) * innerW;
+  const yForVal = (v: number) => padT + (1 - v / yMax) * innerH;
+
+  const paceX1 = xForDay(1);
+  const paceY1 = yForVal(0);
+  const paceX2 = xForDay(daysInMonth);
+  const paceY2 = yForVal(target);
+
+  const actualPath = cumulative.length
+    ? "M " +
+      cumulative
+        .map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`)
+        .join(" L ")
+    : "";
+
+  const endX = cumulative.length ? xForDay(cumulative[cumulative.length - 1].day) : padL;
+  const endY = cumulative.length ? yForVal(cumulative[cumulative.length - 1].value) : padT + innerH;
+
+  const gapAbs = Math.abs(gapVsPace);
+  const gapLabel = isOver
+    ? `${formatCompactAmount(overBy, currency)} over budget`
+    : aheadOfPace
+      ? `${formatCompactAmount(gapAbs, currency)} under budget`
+      : `${formatCompactAmount(gapAbs, currency)} over pace`;
+
+  const pillLeftPctRaw = (endX / chartW) * 100;
+  const pillLeftPct = Math.min(78, Math.max(8, pillLeftPctRaw - 4));
+  const pillTopPx = Math.max(0, endY - 28);
+
+  const spentByTop = (() => {
+    const m = new Map<string, number>();
+    for (const row of spendingBreakdown) {
+      const meta = categoriesMeta.get(row.categoryId);
+      const topId = meta?.parentId ?? row.categoryId;
+      m.set(topId, (m.get(topId) ?? 0) + row.amount);
+    }
+    return m;
+  })();
+  const rings = allocations
+    .map((al) => {
+      const t = parseFloat(al.amount) || 0;
+      if (t <= 0) return null;
+      const meta = categoriesMeta.get(al.categoryId);
+      const s = spentByTop.get(al.categoryId) ?? 0;
+      return {
+        id: al.id,
+        categoryId: al.categoryId,
+        name: meta?.name ?? al.categoryId,
+        color: meta?.color ?? null,
+        icon: meta?.icon ?? null,
+        target: t,
+        spent: s,
+        pct: s / t,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .sort((x, y) => y.pct - x.pct);
+
+  return (
+    <div className="w-full">
+      <div className="flex items-baseline justify-between pb-2">
+        <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
+        <span className="text-muted-foreground/70 text-xs">{monthLabel}</span>
+      </div>
+      <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0" style={{ color: a.accent }} />
+          <span className="text-foreground text-sm font-semibold">{a.label}</span>
+          <span className="text-muted-foreground/70 ml-auto text-xs tabular-nums">
+            Day {dayOfMonth} of {daysInMonth}
+          </span>
+        </div>
+
+        <div className="mt-3">
+          <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
+            <PrivacyAmount value={isOver ? overBy : remaining} currency={currency} />{" "}
+            <span className="text-muted-foreground/70 text-base font-medium">
+              {isOver ? "over" : "left"}
+            </span>
+          </div>
+          <div className="text-muted-foreground/80 text-xs tabular-nums">
+            Budget <PrivacyAmount value={target} currency={currency} /> this month
+          </div>
+        </div>
+
+        <div className="relative mt-4 w-full">
+          <svg
+            viewBox={`0 0 ${chartW} ${chartH}`}
+            preserveAspectRatio="none"
+            className="block h-[110px] w-full"
+          >
+            <line
+              x1={paceX1}
+              y1={paceY1}
+              x2={paceX2}
+              y2={paceY2}
+              stroke="var(--muted-foreground)"
+              strokeOpacity={0.35}
+              strokeDasharray="3 4"
+              strokeWidth={1.25}
+              vectorEffect="non-scaling-stroke"
+            />
+            {actualPath && (
+              <path
+                d={actualPath}
+                fill="none"
+                stroke={a.lineColor}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {cumulative.length > 0 && (
+              <>
+                <circle cx={endX} cy={endY} r={4.5} fill={a.lineColor} />
+                <circle cx={endX} cy={endY} r={2} fill="white" />
+              </>
+            )}
+          </svg>
+          {cumulative.length > 0 && (
+            <div
+              className="absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums shadow-sm"
+              style={{
+                left: `${pillLeftPct}%`,
+                top: `${pillTopPx}px`,
+                backgroundColor: a.pillBg,
+                color: "white",
+              }}
+            >
+              {gapLabel}
+            </div>
+          )}
+        </div>
+        <div className="text-muted-foreground/70 mt-1 flex justify-between text-[10px] tabular-nums">
+          <span>Day 1</span>
+          <span>Day {daysInMonth}</span>
+        </div>
+
+        <div className="border-border mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
+          <div>
+            <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
+              Spent so far
+            </div>
+            <div className="text-foreground text-sm font-semibold tabular-nums">
+              {formatAmount(spent, currency)}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
+              Forecast
+            </div>
+            <div
+              className={cn(
+                "text-sm font-semibold tabular-nums",
+                forecastReliable
+                  ? willOverspend
+                    ? "text-destructive"
+                    : "text-foreground"
+                  : "text-muted-foreground/60",
+              )}
+            >
+              {forecastReliable ? formatAmount(forecast, currency) : "—"}
+            </div>
+            <div className="text-muted-foreground/60 text-[10px]">
+              {forecastReliable
+                ? haveHistory
+                  ? "vs 90-day avg"
+                  : "at current pace"
+                : "more data needed"}
+            </div>
+          </div>
+        </div>
+
+        <div className="border-border mt-5 border-t pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-muted-foreground/80 text-[11px] font-semibold uppercase tracking-wide">
+              By category
+            </span>
+            <Link
+              to="/settings/spending/budget"
+              className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+            >
+              Manage →
+            </Link>
+          </div>
+          {rings.length === 0 ? (
+            <div className="text-muted-foreground py-2 text-center text-xs">
+              No category budgets set yet.{" "}
+              <Link
+                to="/settings/spending/budget"
+                className="hover:text-foreground underline-offset-4 hover:underline"
+              >
+                Set one
+              </Link>
+            </div>
+          ) : (
+            <div
+              className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1"
+              style={{
+                maskImage: "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
+                WebkitMaskImage:
+                  "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
+              }}
+            >
+              {rings.map((r) => (
+                <BudgetRing key={r.id} ring={r} currency={currency} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BudgetRing({
+  ring,
+  currency,
+}: {
+  ring: {
+    categoryId: string;
+    name: string;
+    color: string | null;
+    icon: string | null;
+    target: number;
+    spent: number;
+    pct: number;
+  };
+  currency: string;
+}) {
+  const { isBalanceHidden } = useBalancePrivacy();
+  const isOver = ring.spent > ring.target;
+  const remaining = ring.target - ring.spent;
+  const ringColor = isOver ? "var(--destructive)" : ring.pct > 0.85 ? "#C28B47" : "var(--success)";
+  const displayAmount = Math.abs(isOver ? ring.spent - ring.target : remaining);
+
+  const size = 56;
+  const stroke = 4;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const fillPct = Math.min(1, ring.pct);
+  const dash = `${c * fillPct} ${c}`;
+
+  return (
+    <Link
+      to={`/spending/transactions?category=${encodeURIComponent(ring.categoryId)}`}
+      className="hover:bg-muted/40 flex shrink-0 flex-col items-center gap-1 rounded-md px-1 py-1 transition-colors"
+      title={`${ring.name}: ${ring.spent.toFixed(2)} / ${ring.target.toFixed(2)}`}
+    >
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size} className="-rotate-90">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={ringColor}
+            strokeOpacity={0.22}
+            strokeWidth={stroke}
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={ringColor}
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={dash}
+          />
+        </svg>
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ color: ring.color ?? ringColor }}
+        >
+          <CategoryIcon icon={ring.icon} fallback={ring.name} className="h-5 w-5" />
+        </div>
+      </div>
+      <div className="text-foreground text-xs font-semibold tabular-nums">
+        {isBalanceHidden ? "••••" : formatCompactAmount(displayAmount, currency)}
+      </div>
+      <div
+        className={cn(
+          "text-[10px] uppercase tracking-wide",
+          isOver ? "text-destructive" : "text-muted-foreground/70",
+        )}
+      >
+        {isOver ? "over" : "left"}
+      </div>
+    </Link>
+  );
+}

@@ -1,0 +1,157 @@
+import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+
+import { QueryKeys } from "@/lib/query-keys";
+import type { Activity } from "@/lib/types";
+import { cn, formatDateISO } from "@/lib/utils";
+import { PrivacyAmount } from "@wealthfolio/ui";
+
+import { getActivityAssignments } from "../adapters/cash-activities";
+import { OUTFLOW_TYPES, type CashActivityType } from "../lib/constants";
+import { CategoryBadge, ReviewPill, type CategoryMetaMap } from "./category-chips";
+
+const SPENDING_TAXONOMY = "spending_categories";
+
+export function RecentActivityCard({
+  activities,
+  categoriesMeta,
+  currency,
+  uncategorizedCount = 0,
+}: {
+  activities: Activity[];
+  categoriesMeta: CategoryMetaMap;
+  currency: string;
+  uncategorizedCount?: number;
+}) {
+  const recent = useMemo(() => {
+    return activities
+      .slice()
+      .sort((a, b) => b.activityDate.localeCompare(a.activityDate))
+      .slice(0, 6);
+  }, [activities]);
+
+  const assignmentQueries = useQueries({
+    queries: recent.map((a) => ({
+      queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "assignments", a.id],
+      queryFn: () => getActivityAssignments(a.id),
+      staleTime: 30_000,
+    })),
+  });
+
+  const badgeByActivityId = useMemo(() => {
+    const out = new Map<
+      string,
+      { name: string; color: string | null; icon: string | null } | null
+    >();
+    recent.forEach((a, i) => {
+      const assignments = assignmentQueries[i]?.data ?? [];
+      const spending = assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
+      if (!spending) {
+        out.set(a.id, null);
+        return;
+      }
+      const meta = categoriesMeta.get(spending.categoryId);
+      const topId = meta?.parentId ?? spending.categoryId;
+      const top = categoriesMeta.get(topId) ?? meta;
+      if (!top) {
+        out.set(a.id, null);
+        return;
+      }
+      out.set(a.id, {
+        name: top.name,
+        color: top.color,
+        icon: meta?.icon ?? top.icon,
+      });
+    });
+    return out;
+  }, [recent, assignmentQueries, categoriesMeta]);
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, typeof recent>();
+    for (const a of recent) {
+      const dateKey = a.activityDate.slice(0, 10);
+      const arr = m.get(dateKey) ?? [];
+      arr.push(a);
+      m.set(dateKey, arr);
+    }
+    return Array.from(m.entries());
+  }, [recent]);
+
+  const dayLabel = (key: string): string => {
+    const today = new Date();
+    const todayKey = formatDateISO(today);
+    const yest = new Date(today);
+    yest.setDate(today.getDate() - 1);
+    const yestKey = formatDateISO(yest);
+    if (key === todayKey) return "Today";
+    if (key === yestKey) return "Yesterday";
+    return new Date(key + "T00:00:00").toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  return (
+    <div className="w-full">
+      <div className="flex items-baseline justify-between pb-2">
+        <h2 className="text-md font-semibold tracking-tight">Recent activity</h2>
+        <Link
+          to={
+            uncategorizedCount > 0
+              ? "/spending/transactions?status=uncategorized"
+              : "/spending/transactions"
+          }
+          className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+        >
+          {uncategorizedCount > 0 ? `View all · ${uncategorizedCount} to tag →` : "View all →"}
+        </Link>
+      </div>
+      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border backdrop-blur-xl">
+        {recent.length === 0 ? (
+          <div className="text-muted-foreground py-6 text-center text-xs">No recent activity.</div>
+        ) : (
+          grouped.map(([dateKey, items], gi) => (
+            <div key={dateKey} className={cn(gi > 0 && "border-border/60 border-t")}>
+              <div className="text-muted-foreground/70 px-4 pt-3 text-[10px] font-semibold uppercase tracking-wide md:px-5">
+                {dayLabel(dateKey)}
+              </div>
+              {items.map((a) => {
+                const payee = (a.notes ?? "").trim();
+                const isOutflow = OUTFLOW_TYPES.includes(a.activityType as CashActivityType);
+                const amount = parseFloat(a.amount ?? "0") || 0;
+                const badge = badgeByActivityId.get(a.id);
+                const needsReview = a.needsReview || (isOutflow && !badge);
+
+                return (
+                  <div key={a.id} className="flex items-center gap-2.5 px-4 py-1.5 md:px-5">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-foreground/90 truncate text-xs font-medium">
+                        {payee || <span className="text-muted-foreground italic">No payee</span>}
+                      </div>
+                    </div>
+                    {badge ? (
+                      <CategoryBadge name={badge.name} color={badge.color} icon={badge.icon} />
+                    ) : needsReview ? (
+                      <ReviewPill label="Uncategorized" />
+                    ) : null}
+                    <div
+                      className={cn(
+                        "shrink-0 text-xs font-semibold tabular-nums",
+                        isOutflow ? "text-foreground" : "text-success",
+                      )}
+                    >
+                      {isOutflow ? "−" : "+"}
+                      <PrivacyAmount value={amount} currency={currency} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

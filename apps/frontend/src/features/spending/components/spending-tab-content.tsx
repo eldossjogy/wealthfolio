@@ -1,0 +1,1060 @@
+import { useMemo, useState, type FC } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  Treemap,
+  XAxis,
+} from "recharts";
+
+import { useTaxonomy } from "@/hooks/use-taxonomies";
+import { useSettingsContext } from "@/lib/settings-provider";
+import type { DateRange, TaxonomyCategory } from "@/lib/types";
+import { cn, formatAmount, formatDateISO } from "@/lib/utils";
+import Balance from "@/pages/dashboard/balance";
+
+import {
+  GainAmount,
+  GainPercent,
+  Icons,
+  IntervalSelector,
+  PrivacyAmount,
+  Skeleton,
+  formatCompactAmount,
+  getInitialIntervalData,
+  usePersistentState,
+  type TimePeriod,
+} from "@wealthfolio/ui";
+
+import { useBudget } from "../hooks/use-budget";
+import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-activities";
+import { useSpendingReport } from "../hooks/use-spending-report";
+import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
+import { BudgetLineChartCard } from "./budget-line-chart-card";
+import { EventsCard } from "./events-card";
+import { RecentActivityCard } from "./recent-activity-card";
+
+const FUTURE_BAR = "#E5E7EB";
+const SPENDING_TAXONOMY = "spending_categories";
+const DEFAULT_INTERVAL: TimePeriod = "1M";
+const INTERVAL_STORAGE_KEY = "spending-interval";
+
+function rangeToReportRequest(range: DateRange | undefined) {
+  const from = range?.from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const to = range?.to ?? new Date();
+  return {
+    startDate: new Date(formatDateISO(from)).toISOString(),
+    endDate: new Date(`${formatDateISO(to)}T23:59:59.999Z`).toISOString(),
+  };
+}
+
+function priorRange(range: DateRange | undefined): DateRange | undefined {
+  if (!range?.from || !range?.to) return undefined;
+  const span = range.to.getTime() - range.from.getTime();
+  if (span <= 0) return undefined;
+  return {
+    from: new Date(range.from.getTime() - span - 24 * 3600 * 1000),
+    to: new Date(range.from.getTime() - 24 * 3600 * 1000),
+  };
+}
+
+export default function SpendingTabContent() {
+  const { settings } = useSettingsContext();
+  const baseCurrency = settings?.baseCurrency ?? "USD";
+
+  const [intervalCode] = usePersistentState<TimePeriod>(INTERVAL_STORAGE_KEY, DEFAULT_INTERVAL);
+  const [activeCode, setActiveCode] = useState<TimePeriod>(intervalCode);
+  const theme: Palette = FOREST_THEME;
+
+  const [whereItWentView, setWhereItWentView] = usePersistentState<"list" | "map">(
+    "spending-v2-where-view",
+    "list",
+  );
+
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(
+    () => getInitialIntervalData(intervalCode).range,
+  );
+  const [selectedIntervalDescription, setSelectedIntervalDescription] = useState<string>(
+    () => getInitialIntervalData(intervalCode).description,
+  );
+
+  const reportReq = useMemo(() => rangeToReportRequest(dateRange), [dateRange]);
+  const priorReportReq = useMemo(() => rangeToReportRequest(priorRange(dateRange)), [dateRange]);
+
+  const { data: report, isLoading } = useSpendingReport(reportReq);
+  const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(priorReportReq);
+  const { data: activities = [] } = useCashActivities({
+    startDate: reportReq.startDate,
+    endDate: reportReq.endDate,
+  });
+  const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
+  const { data: budget } = useBudget();
+  const { data: uncategorizedCount = 0 } = useUncategorizedCount(
+    reportReq.startDate,
+    reportReq.endDate,
+  );
+
+  const monthReportReq = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    return rangeToReportRequest({ from: monthStart, to: now });
+  }, []);
+  const { data: monthReport } = useSpendingReport(monthReportReq);
+
+  const subsActivitiesReq = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(now.getDate() - 90);
+    return rangeToReportRequest({ from: start, to: now });
+  }, []);
+  const { data: subsActivities = [] } = useCashActivities({
+    startDate: subsActivitiesReq.startDate,
+    endDate: subsActivitiesReq.endDate,
+  });
+
+  const historyReportReq = useMemo(() => {
+    const now = new Date();
+    const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const historyEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    return rangeToReportRequest({ from: historyStart, to: historyEnd });
+  }, []);
+  const { data: historyReport } = useSpendingReport(historyReportReq);
+
+  const historicalDailyAvg = useMemo(() => {
+    const total = historyReport?.current.outflow ?? 0;
+    if (total <= 0) return 0;
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    const days = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / (24 * 3600 * 1000)) + 1,
+    );
+    return total / days;
+  }, [historyReport?.current.outflow]);
+
+  const currency = activities[0]?.currency ?? baseCurrency;
+
+  const totalSpending = report?.current.outflow ?? 0;
+  const priorSpending = priorReport?.current.outflow ?? 0;
+  const delta = totalSpending - priorSpending;
+  const deltaPct = priorSpending > 0 ? delta / priorSpending : 0;
+  const gainSign = -delta;
+  const gainPct = -deltaPct;
+
+  const handleIntervalSelect = (
+    code: TimePeriod,
+    description: string,
+    range: DateRange | undefined,
+  ) => {
+    setActiveCode(code);
+    setSelectedIntervalDescription(description);
+    setDateRange(range);
+  };
+
+  const granularity: "day" | "week" | "month" = useMemo(() => {
+    switch (activeCode) {
+      case "1D":
+      case "1W":
+      case "1M":
+        return "day";
+      case "3M":
+      case "6M":
+        return "week";
+      default:
+        return "month";
+    }
+  }, [activeCode]);
+
+  const { barData, avgValue, avgLabel } = useMemo(() => {
+    const buckets = report?.byDay ?? [];
+    if (buckets.length === 0) return { barData: [], avgValue: 0, avgLabel: "avg" };
+    const sorted = buckets.slice().sort((a, b) => a.date.localeCompare(b.date));
+    const today = new Date();
+    const todayKey = formatDateISO(today);
+    const monthLabels = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+
+    const groups = new Map<
+      string,
+      { key: string; label: string; sortKey: string; value: number; future: boolean }
+    >();
+    for (const b of sorted) {
+      const [yStr, mStr, dStr] = b.date.split("-");
+      const year = parseInt(yStr, 10);
+      const month = parseInt(mStr, 10);
+      const day = parseInt(dStr, 10);
+      const date = new Date(year, month - 1, day);
+
+      let key: string;
+      let label: string;
+      let sortKey: string;
+      if (granularity === "day") {
+        key = b.date;
+        label = day === 1 ? `${monthLabels[month - 1]} 1` : String(day);
+        sortKey = b.date;
+      } else if (granularity === "week") {
+        const weekday = (date.getDay() + 6) % 7;
+        const monday = new Date(date);
+        monday.setDate(date.getDate() - weekday);
+        key = formatDateISO(monday);
+        label = `${monthLabels[monday.getMonth()]} ${monday.getDate()}`;
+        sortKey = key;
+      } else {
+        key = `${year}-${mStr}`;
+        label =
+          year !== today.getFullYear()
+            ? `${monthLabels[month - 1]} '${String(year).slice(2)}`
+            : monthLabels[month - 1];
+        sortKey = `${yStr}-${mStr}`;
+      }
+
+      const future = b.date > todayKey;
+      const e =
+        groups.get(key) ??
+        ({ key, label, sortKey, value: 0, future } as {
+          key: string;
+          label: string;
+          sortKey: string;
+          value: number;
+          future: boolean;
+        });
+      e.value += b.outflow;
+      if (!future) e.future = false;
+      groups.set(key, e);
+    }
+    let data = Array.from(groups.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+    if (granularity === "day" && dateRange?.from && dateRange?.to) {
+      const padded = new Map(data.map((d) => [d.key, d]));
+      const cursor = new Date(
+        dateRange.from.getFullYear(),
+        dateRange.from.getMonth(),
+        dateRange.from.getDate(),
+      );
+      const end = new Date(
+        dateRange.to.getFullYear(),
+        dateRange.to.getMonth(),
+        dateRange.to.getDate(),
+      );
+      while (cursor <= end) {
+        const key = formatDateISO(cursor);
+        if (!padded.has(key)) {
+          const day = cursor.getDate();
+          const month = cursor.getMonth();
+          padded.set(key, {
+            key,
+            label: day === 1 ? `${monthLabels[month]} 1` : String(day),
+            sortKey: key,
+            value: 0,
+            future: key > todayKey,
+          });
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      data = Array.from(padded.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    }
+
+    const observed = data.filter((d) => d.value > 0);
+    const avg =
+      observed.length > 0 ? observed.reduce((s, d) => s + d.value, 0) / observed.length : 0;
+    const labelByGranularity =
+      granularity === "day" ? "daily avg" : granularity === "week" ? "weekly avg" : "monthly avg";
+    return { barData: data, avgValue: avg, avgLabel: labelByGranularity };
+  }, [report?.byDay, granularity, dateRange]);
+
+  const categoriesMeta = useMemo(() => {
+    const meta = new Map<
+      string,
+      { name: string; color: string | null; icon: string | null; parentId: string | null }
+    >();
+    (taxonomy.data?.categories ?? []).forEach((c: TaxonomyCategory) => {
+      meta.set(c.id, {
+        name: c.name,
+        color: c.color ?? null,
+        icon: c.icon ?? null,
+        parentId: c.parentId ?? null,
+      });
+    });
+    return meta;
+  }, [taxonomy.data?.categories]);
+
+  const categoryRows = useMemo(() => {
+    if (!report) return [];
+    const topAmounts = new Map<string, { amount: number; subCount: number; txCount: number }>();
+    for (const row of report.spendingBreakdown) {
+      const meta = categoriesMeta.get(row.categoryId);
+      const topId = meta?.parentId ?? row.categoryId;
+      const e = topAmounts.get(topId) ?? { amount: 0, subCount: 0, txCount: 0 };
+      e.amount += row.amount;
+      e.txCount += row.count;
+      if (meta?.parentId) e.subCount += 1;
+      topAmounts.set(topId, e);
+    }
+    const priorAmounts = new Map<string, number>();
+    for (const row of priorReport?.spendingBreakdown ?? []) {
+      const meta = categoriesMeta.get(row.categoryId);
+      const topId = meta?.parentId ?? row.categoryId;
+      priorAmounts.set(topId, (priorAmounts.get(topId) ?? 0) + row.amount);
+    }
+    return Array.from(topAmounts.entries())
+      .sort(([, a], [, b]) => b.amount - a.amount)
+      .map(([id, e]) => {
+        const meta = categoriesMeta.get(id);
+        const priorAmt = priorAmounts.get(id) ?? 0;
+        const d = e.amount - priorAmt;
+        const dPct = priorAmt > 0 ? (d / priorAmt) * 100 : null;
+        return {
+          id,
+          name: meta?.name ?? id,
+          color: meta?.color ?? null,
+          icon: meta?.icon ?? null,
+          amount: e.amount,
+          subCount: e.subCount,
+          txCount: e.txCount,
+          delta: d,
+          deltaPct: dPct,
+        };
+      });
+  }, [report, priorReport, categoriesMeta]);
+
+  const insights = useMemo(() => {
+    const items: { icon: string; title: React.ReactNode; sub: string }[] = [];
+    if (priorSpending > 0 && deltaPct > 0.2) {
+      items.push({
+        icon: "!",
+        title: (
+          <>
+            Spending is <span className="font-semibold">{(deltaPct * 100).toFixed(0)}% above</span>{" "}
+            the prior period.
+          </>
+        ),
+        sub: `${formatAmount(delta, currency)} more than ${formatAmount(priorSpending, currency)}`,
+      });
+    }
+    const uncategorized = categoryRows.find((c) => c.id === "uncategorized");
+    if (uncategorized && uncategorized.txCount > 0) {
+      items.push({
+        icon: "+",
+        title: (
+          <>
+            <span className="font-semibold">{uncategorized.txCount} uncategorized</span>{" "}
+            {uncategorized.txCount === 1 ? "transaction" : "transactions"} totaling{" "}
+            {formatAmount(uncategorized.amount, currency)}.
+          </>
+        ),
+        sub: "Categorize them to improve breakdowns",
+      });
+    }
+    return items;
+  }, [deltaPct, delta, priorSpending, categoryRows, currency]);
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
+          <div>
+            <Balance
+              isLoading={isLoading}
+              targetValue={totalSpending}
+              currency={currency}
+              displayCurrency={true}
+            />
+            <div className="text-md flex space-x-3">
+              {isPriorLoading ? (
+                <div className="flex items-center gap-3 pt-1">
+                  <Skeleton className="h-4 w-24" />
+                  <div className="border-secondary my-1 border-r pr-2" />
+                  <Skeleton className="h-4 w-16" />
+                </div>
+              ) : (
+                <>
+                  <GainAmount
+                    className="lg:text-md text-sm font-light"
+                    value={gainSign}
+                    currency={currency}
+                    displayCurrency={false}
+                  />
+                  <div className="border-secondary my-1 border-r pr-2" />
+                  <GainPercent
+                    className="lg:text-md text-sm font-light"
+                    value={gainPct}
+                    animated={true}
+                  />
+                </>
+              )}
+              {selectedIntervalDescription && (
+                <span className="lg:text-md text-muted-foreground ml-1 text-sm font-light">
+                  {selectedIntervalDescription}
+                </span>
+              )}
+            </div>
+          </div>
+          <CashFlowStrip
+            income={report?.current.income ?? 0}
+            spending={report?.current.outflow ?? 0}
+            currency={currency}
+            isLoading={isLoading}
+          />
+        </div>
+      </div>
+
+      <div
+        className="flex grow flex-col"
+        style={{
+          backgroundImage: `linear-gradient(to top, ${themeBg(theme, 0.3)}, ${themeBg(theme, 0.15)} 50%, transparent 100%)`,
+        }}
+      >
+        <div className="h-[280px]">
+          {isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <Skeleton className="h-full w-full" />
+            </div>
+          ) : barData.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center">
+              <Icons.CreditCard className="text-muted-foreground/30 mb-3 h-12 w-12" />
+              <p className="text-muted-foreground text-sm">No spending in this period</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barData} margin={{ top: 16, right: 24, left: 16, bottom: 8 }}>
+                <defs>
+                  <linearGradient id="spending-bar" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={theme.deep} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={theme.mid} stopOpacity={0.7} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  interval="preserveStartEnd"
+                  minTickGap={granularity === "day" ? 8 : 16}
+                />
+                <Tooltip
+                  cursor={{ fill: "rgba(0,0,0,0.04)" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const p = payload[0].payload as {
+                      key: string;
+                      label: string;
+                      value: number;
+                      future: boolean;
+                    };
+                    return (
+                      <div className="bg-background rounded-md border px-3 py-2 text-xs shadow-sm">
+                        <div className="text-muted-foreground">{p.key}</div>
+                        <div className="text-foreground font-semibold tabular-nums">
+                          {p.future ? "—" : formatAmount(p.value, currency)}
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                {avgValue > 0 && (
+                  <ReferenceLine
+                    y={avgValue}
+                    stroke="var(--muted-foreground)"
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.4}
+                    label={{
+                      value: `${avgLabel} · ${formatAmount(avgValue, currency)}`,
+                      position: "insideTopRight",
+                      offset: 6,
+                      fill: "var(--muted-foreground)",
+                      fontSize: 11,
+                    }}
+                  />
+                )}
+                <Bar
+                  dataKey="value"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                  isAnimationActive={false}
+                >
+                  {barData.map((entry, i) => (
+                    <Cell
+                      key={`cell-${i}`}
+                      fill={entry.future ? FUTURE_BAR : "url(#spending-bar)"}
+                      opacity={entry.future ? 0.7 : 1}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+          <div className="flex w-full justify-center">
+            <IntervalSelector
+              className="pointer-events-auto relative z-20 w-full max-w-screen-sm sm:max-w-screen-md md:max-w-2xl lg:max-w-3xl"
+              onIntervalSelect={handleIntervalSelect}
+              isLoading={isLoading}
+              storageKey={INTERVAL_STORAGE_KEY}
+              defaultValue={DEFAULT_INTERVAL}
+            />
+          </div>
+        </div>
+
+        <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-14 md:px-6 md:pb-6 md:pt-12 lg:px-10 lg:pb-8 lg:pt-14">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-20">
+            <div className="space-y-6 lg:col-span-2">
+              <div className="mb-4 mt-8 w-full lg:mt-0">
+                <div className="flex items-center justify-between pb-2">
+                  <h2 className="text-md font-semibold tracking-tight">Where it went</h2>
+                  <div className="flex items-center gap-3">
+                    <SegmentedToggle
+                      items={[
+                        { value: "list", label: "List" },
+                        { value: "map", label: "Map" },
+                      ]}
+                      value={whereItWentView}
+                      onChange={(v) => setWhereItWentView(v as "list" | "map")}
+                    />
+                    <Link
+                      to="/spending/reports-v2?tab=categories"
+                      className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                    >
+                      View all →
+                    </Link>
+                  </div>
+                </div>
+                {isLoading ? (
+                  <Skeleton className="h-[260px] w-full rounded-lg" />
+                ) : whereItWentView === "map" ? (
+                  <CategoryTreemapMono
+                    rows={categoryRows}
+                    total={totalSpending}
+                    currency={currency}
+                    themeColor={theme.deep}
+                  />
+                ) : (
+                  <CategoryRankedBar
+                    rows={categoryRows}
+                    total={totalSpending}
+                    currency={currency}
+                    themeColor={theme.deep}
+                  />
+                )}
+              </div>
+
+              <RecentActivityCard
+                activities={activities}
+                categoriesMeta={categoriesMeta}
+                currency={currency}
+                uncategorizedCount={uncategorizedCount}
+              />
+            </div>
+
+            <div className="space-y-6 lg:col-span-1">
+              <BudgetLineChartCard
+                target={parseFloat(budget?.config.monthlySpendingTarget ?? "0") || 0}
+                spent={monthReport?.current.outflow ?? 0}
+                currency={budget?.config.currency ?? currency}
+                historicalDailyAvg={historicalDailyAvg}
+                allocations={budget?.allocations ?? []}
+                spendingBreakdown={monthReport?.spendingBreakdown ?? []}
+                categoriesMeta={categoriesMeta}
+                monthByDay={monthReport?.byDay ?? []}
+              />
+
+              {insights.length > 0 && (
+                <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Icons.AlertCircle className="h-4 w-4 shrink-0" style={{ color: theme.deep }} />
+                    <h3 className="text-foreground text-sm font-semibold">Worth a look</h3>
+                    <span className="text-muted-foreground/70 ml-auto text-xs">
+                      {insights.length} {insights.length === 1 ? "signal" : "signals"}
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {insights.map((ins, i) => (
+                      <div key={i} className="flex gap-2 text-xs">
+                        <span
+                          className="w-3 shrink-0 text-base font-bold leading-none"
+                          style={{
+                            color: ins.icon === "!" ? "#C28B47" : theme.deep,
+                          }}
+                        >
+                          {ins.icon}
+                        </span>
+                        <div>
+                          <div className="text-foreground">{ins.title}</div>
+                          <div className="text-muted-foreground/80 mt-0.5">{ins.sub}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <Link
+                    to="/spending/reports-v2?tab=overview"
+                    className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+                  >
+                    See trends
+                    <Icons.ChevronRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              )}
+
+              <EventsCard
+                activities={subsActivities}
+                categoriesMeta={categoriesMeta}
+                theme={theme}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── small inline components ──────────────────────────────────────────────
+
+function SegmentedToggle({
+  items,
+  value,
+  onChange,
+}: {
+  items: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="bg-card/40 border-border/60 inline-flex max-w-full items-center gap-0.5 rounded-full border p-0.5">
+      {items.map((it) => {
+        const active = it.value === value;
+        return (
+          <button
+            key={it.value}
+            type="button"
+            onClick={() => onChange(it.value)}
+            aria-pressed={active}
+            className={cn(
+              "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+              active
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {it.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CashFlowStrip({
+  income,
+  spending,
+  currency,
+  isLoading,
+}: {
+  income: number;
+  spending: number;
+  currency: string;
+  isLoading?: boolean;
+}) {
+  const net = income - spending;
+  const netPositive = net >= 0;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-end gap-6 sm:gap-8">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-1">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-6 w-24" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-end gap-6 sm:gap-8">
+      <KpiStat label="Income" value={income} sign="+" currency={currency} tone="success" />
+      <KpiStat label="Spending" value={spending} sign="−" currency={currency} tone="destructive" />
+      <KpiStat
+        label="Net"
+        value={Math.abs(net)}
+        sign={netPositive ? "+" : "−"}
+        currency={currency}
+        tone={netPositive ? "success" : "destructive"}
+      />
+    </div>
+  );
+}
+
+function KpiStat({
+  label,
+  value,
+  sign,
+  currency,
+  tone,
+}: {
+  label: string;
+  value: number;
+  sign: "+" | "−";
+  currency: string;
+  tone: "success" | "destructive" | "muted";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-success"
+      : tone === "destructive"
+        ? "text-destructive"
+        : "text-foreground";
+  return (
+    <div className="flex flex-col">
+      <span className="text-muted-foreground text-[11px] font-light tracking-wide">{label}</span>
+      <span className={cn("text-sm font-medium tabular-nums", toneClass)}>
+        {sign}
+        {formatCompactAmount(value, currency)}
+      </span>
+    </div>
+  );
+}
+
+// ─── Where it went — Map (treemap) and List variants ──────────────────────
+
+type CategoryRow = {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+  amount: number;
+};
+
+interface CategoryTreemapNodeProps {
+  depth?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+  amount?: number;
+  pct?: number;
+  fill?: string;
+  currency?: string;
+}
+
+interface CategoryTreemapNodeMonoProps extends CategoryTreemapNodeProps {
+  accent?: string | null;
+}
+
+function CategoryTreemapMono({
+  rows,
+  total,
+  currency,
+  themeColor,
+}: {
+  rows: CategoryRow[];
+  total: number;
+  currency: string;
+  themeColor: string;
+}) {
+  const navigate = useNavigate();
+
+  if (rows.length === 0 || total <= 0) {
+    return (
+      <div className="border-border bg-card/40 rounded-lg border p-8 text-center">
+        <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
+      </div>
+    );
+  }
+
+  const top = rows.slice(0, 8);
+  const restAmount = rows.slice(8).reduce((s, r) => s + r.amount, 0);
+  const data: Array<{
+    name: string;
+    amount: number;
+    fill: string;
+    accent: string | null;
+    id: string;
+    pct: number;
+  }> = top.map((r) => ({
+    name: r.name,
+    amount: r.amount,
+    fill: themeColor,
+    accent: r.color,
+    id: r.id,
+    pct: total > 0 ? (r.amount / total) * 100 : 0,
+  }));
+  if (restAmount > 0) {
+    data.push({
+      name: "Other",
+      amount: restAmount,
+      fill: themeColor,
+      accent: null,
+      id: "__other__",
+      pct: total > 0 ? (restAmount / total) * 100 : 0,
+    });
+  }
+
+  return (
+    <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
+      <div className="h-[220px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <Treemap
+            data={data}
+            dataKey="amount"
+            aspectRatio={4 / 3}
+            stroke="transparent"
+            content={
+              (<CategoryTreemapNodeMono currency={currency} />) as unknown as React.ReactElement
+            }
+            isAnimationActive={false}
+            onClick={(node: unknown) => {
+              const id = (node as { id?: string } | null)?.id;
+              if (id && id !== "__other__") {
+                navigate(`/spending/transactions?category=${id}`);
+              }
+            }}
+          >
+            <Tooltip
+              cursor={{ fill: "rgba(0,0,0,0.04)" }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0].payload as { name: string; amount: number; pct: number };
+                return (
+                  <div className="bg-background rounded-md border px-3 py-2 text-xs shadow-sm">
+                    <div className="text-foreground font-semibold">{p.name}</div>
+                    <div className="text-muted-foreground tabular-nums">
+                      {formatAmount(p.amount, currency)} · {p.pct.toFixed(1)}%
+                    </div>
+                  </div>
+                );
+              }}
+            />
+          </Treemap>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
+  depth = 0,
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  name,
+  amount = 0,
+  pct = 0,
+  fill = "#7DB3D9",
+  currency = "USD",
+  accent,
+}) => {
+  if (depth === 0) return null;
+
+  const showName = width > 56 && height > 32;
+  const labelFontSize = Math.max(9.5, Math.min(11.5, Math.min(width, height) * 0.11));
+  const amountFontSize = Math.max(11, Math.min(15, Math.min(width, height) * 0.15));
+  const pctFontSize = 10;
+  const padX = Math.max(10, width * 0.05);
+  const padY = Math.max(10, height * 0.07);
+
+  const fillOpacity = 0.12 + Math.min(0.55, (pct / 30) * 0.55);
+  const dotR = Math.max(2.5, Math.min(4, Math.min(width, height) * 0.04));
+  const showDot = accent && width > 40 && height > 28;
+
+  const amountText = formatAmount(amount, currency);
+  const pctText = `${pct.toFixed(1)}%`;
+  const amountTextW = amountText.length * amountFontSize * 0.58;
+  const pctTextW = pctText.length * pctFontSize * 0.6;
+  const innerW = Math.max(0, width - padX * 2);
+  const showAmount = width > 60 && height > 48;
+  const showPct = showAmount && height > 70 && amountTextW + pctTextW + 8 <= innerW;
+
+  return (
+    <g style={{ cursor: "pointer" }}>
+      <rect
+        x={x + 1}
+        y={y + 1}
+        width={Math.max(0, width - 2)}
+        height={Math.max(0, height - 2)}
+        rx={5}
+        ry={5}
+        fill={fill}
+        fillOpacity={fillOpacity}
+        stroke={fill}
+        strokeOpacity={0.4}
+        strokeWidth={0.75}
+      />
+      {showDot && (
+        <circle cx={x + padX + dotR} cy={y + padY + dotR} r={dotR} fill={accent ?? "transparent"} />
+      )}
+      {showName && (
+        <text
+          x={x + padX + (showDot ? dotR * 2 + 6 : 0)}
+          y={y + padY + labelFontSize - 2}
+          fill="var(--foreground)"
+          className="font-semibold uppercase"
+          style={{ fontSize: labelFontSize, letterSpacing: "0.06em", opacity: 0.7 }}
+        >
+          {truncateForBox(
+            name ?? "",
+            width - padX * 2 - (showDot ? dotR * 2 + 6 : 0),
+            labelFontSize,
+          )}
+        </text>
+      )}
+      {showAmount && (
+        <text
+          x={x + padX}
+          y={y + height - padY}
+          fill="var(--foreground)"
+          className="font-semibold tabular-nums"
+          style={{ fontSize: amountFontSize, opacity: 0.92 }}
+        >
+          {truncateForBox(amountText, innerW - (showPct ? pctTextW + 8 : 0), amountFontSize)}
+        </text>
+      )}
+      {showPct && (
+        <text
+          x={x + width - padX}
+          y={y + height - padY}
+          textAnchor="end"
+          fill="var(--foreground)"
+          className="tabular-nums"
+          style={{ fontSize: pctFontSize, opacity: 0.5 }}
+        >
+          {pctText}
+        </text>
+      )}
+    </g>
+  );
+};
+
+function CategoryRankedBar({
+  rows,
+  total,
+  currency,
+  themeColor,
+}: {
+  rows: CategoryRow[];
+  total: number;
+  currency: string;
+  themeColor: string;
+}) {
+  if (rows.length === 0 || total <= 0) {
+    return (
+      <div className="border-border bg-card/40 rounded-lg border p-8 text-center">
+        <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
+      </div>
+    );
+  }
+  const top = rows.slice(0, 7);
+  const restAmount = rows.slice(7).reduce((s, r) => s + r.amount, 0);
+  const categorizedSum = rows.reduce((s, r) => s + r.amount, 0);
+  const uncategorizedAmount = Math.max(0, total - categorizedSum);
+  const uncategorizedShare = total > 0 ? (uncategorizedAmount / total) * 100 : 0;
+  const segments = [...top];
+  if (restAmount > 0) {
+    segments.push({
+      id: "__other__",
+      name: "Other",
+      amount: restAmount,
+      color: null,
+      icon: null,
+    });
+  }
+
+  return (
+    <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
+      <div className="bg-foreground/10 relative flex h-3 w-full overflow-hidden rounded-full">
+        {segments.map((s, i) => {
+          const share = (s.amount / total) * 100;
+          const color = s.color ?? themeColor;
+          return (
+            <div
+              key={s.id}
+              className="h-full transition-opacity hover:opacity-80"
+              style={{
+                width: `${share}%`,
+                backgroundColor: color,
+                opacity: 0.85 - i * 0.05,
+                borderRight: "1px solid var(--card)",
+              }}
+              title={`${s.name} — ${formatAmount(s.amount, currency)} (${share.toFixed(1)}%)`}
+            />
+          );
+        })}
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {top.map((r, i) => {
+          const share = (r.amount / total) * 100;
+          const color = r.color ?? themeColor;
+          return (
+            <Link
+              key={r.id}
+              to={`/spending/transactions?category=${r.id}`}
+              className="hover:bg-muted/40 group flex items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
+            >
+              <span
+                className="block h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: color, opacity: 0.85 - i * 0.05 }}
+              />
+              <span className="text-foreground/90 min-w-0 flex-1 truncate text-xs font-medium">
+                {r.name}
+              </span>
+              <span className="text-muted-foreground/70 w-12 text-right text-[11px] tabular-nums">
+                {share.toFixed(1)}%
+              </span>
+              <span className="text-foreground w-24 text-right text-xs font-semibold tabular-nums">
+                <PrivacyAmount value={r.amount} currency={currency} />
+              </span>
+            </Link>
+          );
+        })}
+        {uncategorizedAmount > 0.01 && (
+          <Link
+            to="/spending/transactions?status=uncategorized"
+            className="border-border/60 hover:bg-muted/40 mt-1 flex items-center gap-2.5 rounded-md border border-dashed px-2 py-1.5 transition-colors"
+          >
+            <Icons.AlertCircle className="text-muted-foreground h-3 w-3 shrink-0" />
+            <span className="text-foreground/80 min-w-0 flex-1 text-xs font-medium">
+              Uncategorized — review to improve breakdown
+            </span>
+            <span className="text-muted-foreground/70 w-12 text-right text-[11px] tabular-nums">
+              {uncategorizedShare.toFixed(1)}%
+            </span>
+            <span className="text-foreground w-24 text-right text-xs font-semibold tabular-nums">
+              <PrivacyAmount value={uncategorizedAmount} currency={currency} />
+            </span>
+          </Link>
+        )}
+        {restAmount > 0 && (
+          <div className="text-muted-foreground/60 px-1 pt-1 text-[10px]">
+            + {rows.length - 7} more · {formatAmount(restAmount, currency)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function truncateForBox(text: string, boxWidth: number, fontSize: number): string {
+  if (!text) return "";
+  const charW = fontSize * 0.62;
+  const max = Math.max(2, Math.floor(boxWidth / charW));
+  return text.length > max ? text.slice(0, Math.max(1, max - 1)) + "…" : text;
+}
