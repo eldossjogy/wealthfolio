@@ -36,4 +36,4 @@ sudo systemctl enable --now wealthfolio
 ```
 
 Full self-host docs:
-<https://github.com/afadil/wealthfolio/blob/main/docs/self-host/>
+<https://github.com/wealthfolio/wealthfolio/blob/main/docs/self-host/>

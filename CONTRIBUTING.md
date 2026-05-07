@@ -15,7 +15,7 @@ By submitting a pull request, you confirm you have read and agree to
 ### Reporting Bugs
 
 1. Check if the bug has already been reported in
-   [Issues](https://github.com/afadil/wealthfolio/issues)
+   [Issues](https://github.com/wealthfolio/wealthfolio/issues)
 2. If not, create a new issue with:
    - Clear, descriptive title
    - Steps to reproduce
@@ -70,7 +70,7 @@ something together!
 ## Questions?
 
 - Join our [Discord](https://discord.gg/WDMCY6aPWK)
-- Open a [Discussion](https://github.com/afadil/wealthfolio/discussions)
+- Open a [Discussion](https://github.com/wealthfolio/wealthfolio/discussions)
 - Email: hello@wealthfolio.app
 
 ## License

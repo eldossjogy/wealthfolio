@@ -1,12 +1,12 @@
 <div align="center">
-  <a href="https://github.com/afadil/wealthfolio">
+  <a href="https://github.com/wealthfolio/wealthfolio">
     <img src="apps/frontend/public/logo.svg" alt="Logo" width="80" height="80">
   </a>
 
   <h3 align="center">Wealthfolio</h3>
 
   <p align="center">
-    A Beautiful and Boring Desktop Investment Tracker
+    A Beautiful and Boring Personal Finance Tracker — investments, net worth, spending, and simulations
     <br />
     <br />
     <a href="https://wealthfolio.app">Website</a>
@@ -15,7 +15,7 @@
     ·
     <a href="https://x.com/intent/follow?screen_name=WealthfolioApp">Twitter</a>
     ·
-    <a href="https://github.com/afadil/wealthfolio/releases">Releases</a>
+    <a href="https://github.com/wealthfolio/wealthfolio/releases">Releases</a>
   </p>
 </div>
 <div align="center">
@@ -35,14 +35,15 @@
   <a href="https://www.producthunt.com/posts/wealthfolio?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_souce=badge-wealthfolio" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=461640&amp;theme=light" alt="Wealthfolio - A boring, Local first, desktop Investment Tracking app | Product Hunt" class="h-[55px] w-[250px]" width="250" height="55"></a>
 
   <a href="https://trendshift.io/repositories/11701" target="_blank">
-  <img src="https://trendshift.io/api/badge/repositories/11701" alt="afadil%2Fwealthfolio | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <img src="https://trendshift.io/api/badge/repositories/11701" alt="wealthfolio%2Fwealthfolio | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 </div>
 
 ## Introduction
 
-**Wealthfolio App** is a Beautiful and Boring Investment Tracker, with Local
-Data Storage. No Subscriptions, No Cloud.
+**Wealthfolio App** is a Beautiful and Boring Personal Finance Tracker —
+investments, net worth, spending, and simulations — with local data storage. No
+subscriptions, no cloud.
 
 Visit the app website at [Wealthfolio App](https://wealthfolio.app/).
 
@@ -135,7 +136,7 @@ Ensure you have the following installed on your machine:
 1. **Clone the repository**:
 
    ```bash
-   git clone https://github.com/afadil/wealthfolio.git
+   git clone https://github.com/wealthfolio/wealthfolio.git
    cd wealthfolio
    ```
 
@@ -511,7 +512,7 @@ steps and provides an isolated environment with all necessary dependencies.
 
 1. **Clone the repository** (if you haven't already):
    ```bash
-   git clone https://github.com/afadil/wealthfolio.git
+   git clone https://github.com/wealthfolio/wealthfolio.git
    cd wealthfolio
    ```
 2. **Open in VS Code**:
@@ -724,6 +725,6 @@ licensed under AGPL-3.0; trademarks are not granted under that license.
 
 ## 🌟 Star History
 
-## [![Star History Chart](https://api.star-history.com/svg?repos=afadil/wealthfolio&type=Timeline)](https://star-history.com/#afadil/wealthfolio&Date)
+## [![Star History Chart](https://api.star-history.com/svg?repos=wealthfolio/wealthfolio&type=Timeline)](https://star-history.com/#wealthfolio/wealthfolio&Date)
 
 Enjoy managing your wealth with **Wealthfolio**! 🚀

@@ -38,11 +38,11 @@
   "homepage": "https://wealthfolio.app/addons",
   "repository": {
     "type": "git",
-    "url": "https://github.com/afadil/wealthfolio.git",
+    "url": "https://github.com/wealthfolio/wealthfolio.git",
     "directory": "packages/addon-sdk"
   },
   "bugs": {
-    "url": "https://github.com/afadil/wealthfolio/issues"
+    "url": "https://github.com/wealthfolio/wealthfolio/issues"
   },
   "scripts": {
     "build": "tsup && pnpm run build:types",

@@ -6,7 +6,7 @@
   "main": "dist/addon.js",
   "author": "Wealthfolio",
   "license": "MIT",
-  "homepage": "https://github.com/afadil/wealthfolio",
+  "homepage": "https://github.com/wealthfolio/wealthfolio",
   "keywords": [
     "wealthfolio",
     "addon",

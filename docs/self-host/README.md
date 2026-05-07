@@ -17,7 +17,7 @@ Multi-arch (`linux/amd64`, `linux/arm64`), published on every `v*.*.*` tag:
 | ---------- | --------------------------------------------- |
 | Docker Hub | `wealthfolio/wealthfolio:latest` _(primary)_  |
 | Docker Hub | `afadil/wealthfolio:latest` _(legacy mirror)_ |
-| GHCR       | `ghcr.io/afadil/wealthfolio:latest`           |
+| GHCR       | `ghcr.io/wealthfolio/wealthfolio:latest`      |
 
 ```bash
 docker pull wealthfolio/wealthfolio:latest

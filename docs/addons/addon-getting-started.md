@@ -26,7 +26,7 @@ Wealthfolio in addon development mode:
 
 ```bash
 # Clone Wealthfolio repository (if not already done)
-git clone https://github.com/afadil/wealthfolio.git
+git clone https://github.com/wealthfolio/wealthfolio.git
 cd wealthfolio
 
 # Install dependencies
@@ -526,5 +526,5 @@ You now understand:
 Continue with:
 
 - [API Reference](/docs/addons/api-reference) - All available APIs
-- [Examples](https://github.com/afadil/wealthfolio/tree/main/addons/) - Real
+- [Examples](https://github.com/wealthfolio/wealthfolio/tree/main/addons/) - Real
   addon implementations

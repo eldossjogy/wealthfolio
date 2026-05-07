@@ -17,13 +17,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/afadil/wealthfolio.git",
+    "url": "https://github.com/wealthfolio/wealthfolio.git",
     "directory": "packages/addon-dev-tools"
   },
   "bugs": {
-    "url": "https://github.com/afadil/wealthfolio/issues"
+    "url": "https://github.com/wealthfolio/wealthfolio/issues"
   },
-  "homepage": "https://github.com/afadil/wealthfolio/tree/main/packages/addon-dev-tools#readme",
+  "homepage": "https://github.com/wealthfolio/wealthfolio/tree/main/packages/addon-dev-tools#readme",
   "files": [
     "cli.js",
     "dev-server.js",

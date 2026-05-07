@@ -7,7 +7,7 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/afadil/wealthfolio/issues</Support>
+  <Support>https://github.com/wealthfolio/wealthfolio/issues</Support>
   <Project>https://wealthfolio.app</Project>
   <Overview>Wealthfolio is a beautiful, open-source local-first investment and net worth tracker. Track portfolios across multiple accounts and asset types, import broker activities, set financial goals, and analyse performance — all stored in your own SQLite database with no cloud dependency.&#xD;
 &#xD;
@@ -18,11 +18,11 @@ REQUIRED CONFIG:&#xD;
 3. WF_CORS_ALLOW_ORIGINS — the exact URL you'll use to reach the app&#xD;
    (e.g. http://192.168.1.10:8088 or https://wealthfolio.example.com)&#xD;
 &#xD;
-Full guide: https://github.com/afadil/wealthfolio/blob/main/docs/self-host/unraid/README.md</Overview>
+Full guide: https://github.com/wealthfolio/wealthfolio/blob/main/docs/self-host/unraid/README.md</Overview>
   <Category>Productivity: Other:</Category>
   <WebUI>http://[IP]:[PORT:8088]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/afadil/wealthfolio/main/docs/self-host/unraid/template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/afadil/wealthfolio/main/assets/brand/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/wealthfolio/wealthfolio/main/docs/self-host/unraid/template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/wealthfolio/wealthfolio/main/assets/brand/icon.png</Icon>
   <ExtraParams>--user=99:100 --health-cmd="wget --quiet --tries=1 --spider http://127.0.0.1:8088/api/v1/healthz || exit 1" --health-interval=30s --health-timeout=10s --health-retries=3 --health-start-period=15s</ExtraParams>
   <PostArgs/>
   <CPUset/>

@@ -109,7 +109,7 @@ jobs:
 
   prebuild-server-linux:
     # Standalone server tarball for self-hosters (Proxmox LXC, bare metal, systemd).
-    # Tracks: https://github.com/afadil/wealthfolio/issues/563
+    # Tracks: https://github.com/wealthfolio/wealthfolio/issues/563
     # Built on ubuntu-22.04 (glibc 2.35) for forward compatibility with Debian 12+/Ubuntu 22.04+.
     needs: release
     # Run even if some matrix entries in `release` failed (fail-fast is off).
