@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>wealthfolio</Name>
-  <Repository>afadil/wealthfolio:latest</Repository>
-  <Registry>https://hub.docker.com/r/afadil/wealthfolio</Registry>
+  <Repository>wealthfolio/wealthfolio:latest</Repository>
+  <Registry>https://hub.docker.com/r/wealthfolio/wealthfolio</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>

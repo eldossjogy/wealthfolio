@@ -342,11 +342,15 @@ You can either pull the official Docker image or build it yourself locally.
 The latest server build is published to Docker Hub.
 
 ```bash
-docker pull afadil/wealthfolio:latest
+docker pull wealthfolio/wealthfolio:latest
 ```
 
-After pulling, use `afadil/wealthfolio:latest` in the run commands below. If you
-build the image locally, swap the image name back to `wealthfolio`.
+After pulling, use `wealthfolio/wealthfolio:latest` in the run commands below.
+If you build the image locally, swap the image name back to `wealthfolio`.
+
+> **Legacy image:** the same build is also mirrored to `afadil/wealthfolio` so
+> existing `compose.yml` files keep working. New deployments should prefer
+> `wealthfolio/wealthfolio`.
 
 ### Building the Image
 
@@ -401,8 +405,8 @@ See examples below for inline configuration.
 
 ### Running the Container
 
-All examples below use the published image (`afadil/wealthfolio:latest`). If you
-built locally, substitute your local tag (e.g., `wealthfolio`).
+All examples below use the published image (`wealthfolio/wealthfolio:latest`).
+If you built locally, substitute your local tag (e.g., `wealthfolio`).
 
 **Using environment file** (recommended):
 
@@ -412,7 +416,7 @@ docker run --rm -d \
   --env-file .env.docker \
   -p 8088:8088 \
   -v wealthfolio-data:/data \
-  afadil/wealthfolio:latest
+  wealthfolio/wealthfolio:latest
 ```
 
 **Basic usage** (inline environment variables):
@@ -424,7 +428,7 @@ docker run --rm -d \
   -e WF_DB_PATH=/data/wealthfolio.db \
   -p 8088:8088 \
   -v wealthfolio-data:/data \
-  afadil/wealthfolio:latest
+  wealthfolio/wealthfolio:latest
 ```
 
 **Development mode** (with CORS for local Vite dev server):
@@ -437,7 +441,7 @@ docker run --rm -it \
   -e WF_CORS_ALLOW_ORIGINS=http://localhost:1420 \
   -p 8088:8088 \
   -v wealthfolio-data:/data \
-  afadil/wealthfolio:latest
+  wealthfolio/wealthfolio:latest
 ```
 
 **Production with encryption** (recommended):
@@ -450,7 +454,7 @@ docker run --rm -d \
   -e WF_SECRET_KEY=$(openssl rand -base64 32) \
   -p 8088:8088 \
   -v wealthfolio-data:/data \
-  afadil/wealthfolio:latest
+  wealthfolio/wealthfolio:latest
 ```
 
 ### Environment Variables

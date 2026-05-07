@@ -8,7 +8,7 @@
 
 services:
   wealthfolio:
-    image: afadil/wealthfolio:latest
+    image: wealthfolio/wealthfolio:latest
     container_name: wealthfolio
     restart: unless-stopped
     expose:

@@ -13,14 +13,19 @@ pointers per platform.
 
 Multi-arch (`linux/amd64`, `linux/arm64`), published on every `v*.*.*` tag:
 
-| Registry   | Image                               |
-| ---------- | ----------------------------------- |
-| Docker Hub | `afadil/wealthfolio:latest`         |
-| GHCR       | `ghcr.io/afadil/wealthfolio:latest` |
+| Registry   | Image                                         |
+| ---------- | --------------------------------------------- |
+| Docker Hub | `wealthfolio/wealthfolio:latest` _(primary)_  |
+| Docker Hub | `afadil/wealthfolio:latest` _(legacy mirror)_ |
+| GHCR       | `ghcr.io/afadil/wealthfolio:latest`           |
 
 ```bash
-docker pull afadil/wealthfolio:latest
+docker pull wealthfolio/wealthfolio:latest
 ```
+
+Existing deployments that pin `afadil/wealthfolio:latest` keep working — both
+Docker Hub repos receive the same multi-arch build from CI. New deployments
+should prefer `wealthfolio/wealthfolio`.
 
 ## Permissions
 
