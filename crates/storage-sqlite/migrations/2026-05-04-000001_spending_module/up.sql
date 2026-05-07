@@ -1,0 +1,294 @@
+-- Spending Module Migration
+-- Adds optional cash-tracking / expense management on top of existing tables.
+-- Re-uses the taxonomies system (scope='activity') instead of forking a Categories table.
+--
+-- Adds:
+--   - Columns: taxonomies.scope, taxonomy_categories.icon, activities.event_id
+--   - Tables: activity_taxonomy_assignments, event_types, events, categorization_rules,
+--             budget_config, budget_allocations
+--   - Seeds: 'Spending Categories' + 'Income Sources' system taxonomies (scope='activity')
+--           with full category trees ported from PR #494; 7 default event types
+--
+-- Notes on intentional non-additions:
+--   - `accounts` untouched: account names + spending opt-in list cover checking/savings/credit.
+--   - `activities.name` not added: existing `notes` column carries payee/merchant string
+--     (rules pattern-match on it; CSV import maps Description → notes).
+
+-- ============================================================================
+-- 1. EXTEND TAXONOMIES: scope + icon
+-- ============================================================================
+
+ALTER TABLE taxonomies ADD COLUMN scope TEXT NOT NULL DEFAULT 'asset';
+CREATE INDEX ix_taxonomies_scope ON taxonomies(scope);
+
+ALTER TABLE taxonomy_categories ADD COLUMN icon TEXT;
+
+-- ============================================================================
+-- 2. ACTIVITY_TAXONOMY_ASSIGNMENTS (mirrors asset_taxonomy_assignments)
+-- ============================================================================
+
+CREATE TABLE activity_taxonomy_assignments (
+    id TEXT NOT NULL PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    taxonomy_id TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    weight INTEGER NOT NULL DEFAULT 10000,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE CASCADE,
+
+    CHECK (weight >= 0 AND weight <= 10000)
+);
+
+CREATE INDEX ix_activity_taxonomy_assignments_activity ON activity_taxonomy_assignments(activity_id);
+CREATE INDEX ix_activity_taxonomy_assignments_category ON activity_taxonomy_assignments(taxonomy_id, category_id);
+CREATE UNIQUE INDEX ix_activity_taxonomy_assignment_unique ON activity_taxonomy_assignments(activity_id, taxonomy_id, category_id);
+
+-- ============================================================================
+-- 3. EVENT_TYPES (lookup) + EVENTS
+-- ============================================================================
+
+CREATE TABLE event_types (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE events (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    event_type_id TEXT NOT NULL REFERENCES event_types(id) ON DELETE RESTRICT,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX idx_events_event_type ON events(event_type_id);
+CREATE INDEX idx_events_dates ON events(start_date, end_date);
+
+-- ============================================================================
+-- 4. ACTIVITIES.EVENT_ID (FK to events)
+-- ============================================================================
+
+ALTER TABLE activities ADD COLUMN event_id TEXT REFERENCES events(id) ON DELETE SET NULL;
+CREATE INDEX idx_activities_event ON activities(event_id);
+
+-- ============================================================================
+-- 5. CATEGORIZATION_RULES (auto-categorization on create / import)
+--    References taxonomy_categories via composite FK.
+-- ============================================================================
+
+CREATE TABLE categorization_rules (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    match_type TEXT NOT NULL DEFAULT 'contains',  -- 'contains' | 'starts_with' | 'exact' | 'regex'
+    taxonomy_id TEXT,
+    category_id TEXT,
+    activity_type TEXT,                            -- optional: BUY | WITHDRAWAL | DEPOSIT | ...
+    priority INTEGER NOT NULL DEFAULT 0,
+    is_global INTEGER NOT NULL DEFAULT 1,
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+    -- Preset provenance (NULL for user-created rules):
+    --   preset_id        — short slug of the source preset, e.g. "ca", "us"
+    --   preset_rule_key  — stable per-rule key used for diff/update across versions
+    --   preset_version   — preset version installed for this rule
+    --   preset_modified  — flips to 1 when the user edits a preset-sourced rule, so
+    --                      future updates ask before overwriting
+    preset_id TEXT,
+    preset_rule_key TEXT,
+    preset_version TEXT,
+    preset_modified INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_categorization_rules_priority ON categorization_rules(priority DESC);
+CREATE INDEX idx_categorization_rules_category ON categorization_rules(taxonomy_id, category_id);
+CREATE INDEX idx_categorization_rules_account ON categorization_rules(account_id);
+CREATE INDEX idx_categorization_rules_is_global ON categorization_rules(is_global);
+CREATE INDEX idx_categorization_rules_activity_type ON categorization_rules(activity_type);
+-- Used by the preset update flow to look up "the user's installed copy of preset rule X".
+-- NULL preset_id rows (user-created) are excluded from the unique index.
+CREATE UNIQUE INDEX idx_categorization_rules_preset_unique
+  ON categorization_rules(preset_id, preset_rule_key)
+  WHERE preset_id IS NOT NULL;
+
+-- ============================================================================
+-- 6. BUDGET tables
+-- ============================================================================
+
+CREATE TABLE budget_config (
+    id TEXT NOT NULL PRIMARY KEY,
+    monthly_spending_target TEXT NOT NULL DEFAULT '0',
+    monthly_income_target TEXT NOT NULL DEFAULT '0',
+    currency TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE budget_allocations (
+    id TEXT NOT NULL PRIMARY KEY,
+    budget_config_id TEXT NOT NULL,
+    taxonomy_id TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    amount TEXT NOT NULL DEFAULT '0',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+
+    FOREIGN KEY (budget_config_id) REFERENCES budget_config(id) ON DELETE CASCADE,
+    FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE CASCADE,
+
+    UNIQUE (budget_config_id, taxonomy_id, category_id)
+);
+
+CREATE INDEX idx_budget_allocations_config ON budget_allocations(budget_config_id);
+CREATE INDEX idx_budget_allocations_category ON budget_allocations(taxonomy_id, category_id);
+
+-- ============================================================================
+-- 7. SEED: SYSTEM TAXONOMIES with scope='activity'
+-- ============================================================================
+
+INSERT INTO taxonomies (id, name, color, description, is_system, is_single_select, sort_order, scope)
+VALUES
+  ('spending_categories', 'Spending Categories', '#E67E22',
+   'Hierarchical expense categories (Food, Transport, Housing, …) used to classify cash withdrawals and outgoing transfers.',
+   1, 1, 200, 'activity'),
+  ('income_sources', 'Income Sources', '#27AE60',
+   'Income classification (Salary, Dividends, Rental, …) used to classify cash deposits.',
+   1, 1, 210, 'activity');
+
+-- ----------------------------------------------------------------------------
+-- 9a. Spending Categories: TOP LEVEL (parents)
+-- ----------------------------------------------------------------------------
+
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_housing',         'spending_categories', NULL, 'Housing',          'housing',         '#4A90A4', 'Home',           1),
+  ('cat_groceries',       'spending_categories', NULL, 'Groceries',        'groceries',       '#7CB342', 'ShoppingCart',   2),
+  ('cat_food',            'spending_categories', NULL, 'Food & Dining',    'food',            '#E67E22', 'UtensilsCrossed',3),
+  ('cat_transport',       'spending_categories', NULL, 'Transportation',   'transport',       '#3498DB', 'Car',            4),
+  ('cat_shopping',        'spending_categories', NULL, 'Shopping',         'shopping',        '#9B59B6', 'ShoppingBag',    5),
+  ('cat_entertainment',   'spending_categories', NULL, 'Entertainment',    'entertainment',   '#E91E63', 'Film',           6),
+  ('cat_health',          'spending_categories', NULL, 'Health & Wellness','health',          '#27AE60', 'Heart',          7),
+  ('cat_bills',           'spending_categories', NULL, 'Bills & Utilities','bills',           '#F39C12', 'FileText',       8),
+  ('cat_personal',        'spending_categories', NULL, 'Personal Care',    'personal',        '#1ABC9C', 'User',           9),
+  ('cat_education',       'spending_categories', NULL, 'Education',        'education',       '#8E44AD', 'GraduationCap', 10),
+  ('cat_travel',          'spending_categories', NULL, 'Travel',           'travel',          '#00BCD4', 'Plane',         11),
+  ('cat_gifts',           'spending_categories', NULL, 'Gifts & Donations','gifts',           '#E74C3C', 'Gift',          12),
+  ('cat_fees',            'spending_categories', NULL, 'Fees & Charges',   'fees',            '#95A5A6', 'CreditCard',    13),
+  ('cat_other_expense',   'spending_categories', NULL, 'Other Expenses',   'other_expense',   '#7F8C8D', 'MoreHorizontal',99);
+
+-- ----------------------------------------------------------------------------
+-- 9b. Spending Categories: SUBCATEGORIES
+-- ----------------------------------------------------------------------------
+
+-- Housing
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_housing_rent',        'spending_categories', 'cat_housing', 'Rent/Mortgage',         'housing_rent',        '#4A90A4', 'Home',     1),
+  ('cat_housing_utilities',   'spending_categories', 'cat_housing', 'Utilities',             'housing_utilities',   '#4A90A4', 'Lightbulb',2),
+  ('cat_housing_insurance',   'spending_categories', 'cat_housing', 'Home Insurance',        'housing_insurance',   '#4A90A4', 'Shield',   3),
+  ('cat_housing_maintenance', 'spending_categories', 'cat_housing', 'Maintenance & Repairs', 'housing_maintenance', '#4A90A4', 'Wrench',   4),
+  ('cat_housing_furnishing',  'spending_categories', 'cat_housing', 'Furnishing',            'housing_furnishing',  '#4A90A4', 'Sofa',     5);
+
+-- Food & Dining (eating out — Groceries lifted to its own top-level since
+-- modern PFM apps universally treat it as separate from "dining out".)
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_food_restaurants', 'spending_categories', 'cat_food', 'Restaurants',     'food_restaurants', '#E67E22', 'UtensilsCrossed', 1),
+  ('cat_food_coffee',      'spending_categories', 'cat_food', 'Coffee Shops',    'food_coffee',      '#E67E22', 'Coffee',          2),
+  ('cat_food_delivery',    'spending_categories', 'cat_food', 'Food Delivery',   'food_delivery',    '#E67E22', 'Truck',           3),
+  ('cat_food_alcohol',     'spending_categories', 'cat_food', 'Bars & Alcohol',  'food_alcohol',     '#E67E22', 'Wine',            4);
+
+-- Transportation
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_transport_gas',         'spending_categories', 'cat_transport', 'Gas & Fuel',       'transport_gas',         '#3498DB', 'Fuel',          1),
+  ('cat_transport_parking',     'spending_categories', 'cat_transport', 'Parking',          'transport_parking',     '#3498DB', 'ParkingCircle', 2),
+  ('cat_transport_public',      'spending_categories', 'cat_transport', 'Public Transit',   'transport_public',      '#3498DB', 'Train',         3),
+  ('cat_transport_rideshare',   'spending_categories', 'cat_transport', 'Rideshare & Taxi', 'transport_rideshare',   '#3498DB', 'Car',           4),
+  ('cat_transport_maintenance', 'spending_categories', 'cat_transport', 'Car Maintenance',  'transport_maintenance', '#3498DB', 'Wrench',        5),
+  ('cat_transport_insurance',   'spending_categories', 'cat_transport', 'Auto Insurance',   'transport_insurance',   '#3498DB', 'Shield',        6);
+
+-- Shopping
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_shopping_clothing',    'spending_categories', 'cat_shopping', 'Clothing',        'shopping_clothing',    '#9B59B6', 'Shirt',      1),
+  ('cat_shopping_electronics', 'spending_categories', 'cat_shopping', 'Electronics',     'shopping_electronics', '#9B59B6', 'Smartphone', 2),
+  ('cat_shopping_home',        'spending_categories', 'cat_shopping', 'Home Goods',      'shopping_home',        '#9B59B6', 'Home',       3),
+  ('cat_shopping_online',      'spending_categories', 'cat_shopping', 'Online Shopping', 'shopping_online',      '#9B59B6', 'Globe',      4);
+
+-- Entertainment
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_entertainment_streaming', 'spending_categories', 'cat_entertainment', 'Streaming Services',  'entertainment_streaming', '#E91E63', 'Tv',       1),
+  ('cat_entertainment_movies',    'spending_categories', 'cat_entertainment', 'Movies & Events',     'entertainment_movies',    '#E91E63', 'Film',     2),
+  ('cat_entertainment_games',     'spending_categories', 'cat_entertainment', 'Games & Apps',        'entertainment_games',     '#E91E63', 'Gamepad2', 3),
+  ('cat_entertainment_hobbies',   'spending_categories', 'cat_entertainment', 'Hobbies',             'entertainment_hobbies',   '#E91E63', 'Palette',  4),
+  ('cat_entertainment_sports',    'spending_categories', 'cat_entertainment', 'Sports & Recreation', 'entertainment_sports',    '#E91E63', 'Dumbbell', 5);
+
+-- Health & Wellness
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_health_medical',   'spending_categories', 'cat_health', 'Medical',          'health_medical',   '#27AE60', 'Stethoscope', 1),
+  ('cat_health_pharmacy',  'spending_categories', 'cat_health', 'Pharmacy',         'health_pharmacy',  '#27AE60', 'Pill',        2),
+  ('cat_health_dental',    'spending_categories', 'cat_health', 'Dental',           'health_dental',    '#27AE60', 'Smile',       3),
+  ('cat_health_vision',    'spending_categories', 'cat_health', 'Vision',           'health_vision',    '#27AE60', 'Eye',         4),
+  ('cat_health_fitness',   'spending_categories', 'cat_health', 'Gym & Fitness',    'health_fitness',   '#27AE60', 'Dumbbell',    5),
+  ('cat_health_insurance', 'spending_categories', 'cat_health', 'Health Insurance', 'health_insurance', '#27AE60', 'Shield',      6);
+
+-- Bills & Utilities
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_bills_phone',         'spending_categories', 'cat_bills', 'Phone',               'bills_phone',         '#F39C12', 'Smartphone', 1),
+  ('cat_bills_internet',      'spending_categories', 'cat_bills', 'Internet',            'bills_internet',      '#F39C12', 'Wifi',       2),
+  ('cat_bills_subscriptions', 'spending_categories', 'cat_bills', 'Subscriptions',       'bills_subscriptions', '#F39C12', 'Calendar',   3),
+  ('cat_bills_software',      'spending_categories', 'cat_bills', 'Software & Services', 'bills_software',      '#F39C12', 'Code',       4);
+
+-- Fees & Charges
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_fees_bank',     'spending_categories', 'cat_fees', 'Bank Fees',        'fees_bank',     '#95A5A6', 'Building',    1),
+  ('cat_fees_atm',      'spending_categories', 'cat_fees', 'ATM Fees',         'fees_atm',      '#95A5A6', 'Banknote',    2),
+  ('cat_fees_interest', 'spending_categories', 'cat_fees', 'Interest Charges', 'fees_interest', '#95A5A6', 'Percent',     3),
+  ('cat_fees_late',     'spending_categories', 'cat_fees', 'Late Fees',        'fees_late',     '#95A5A6', 'AlertCircle', 4);
+
+-- ----------------------------------------------------------------------------
+-- 9c. Income Sources: TOP LEVEL (parents)
+-- ----------------------------------------------------------------------------
+
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_income_employment',  'income_sources', NULL, 'Employment',        'income_employment',  '#27AE60', 'Briefcase',  1),
+  ('cat_income_selfemploy',  'income_sources', NULL, 'Self-Employment',   'income_selfemploy',  '#2ECC71', 'User',       2),
+  ('cat_income_investment',  'income_sources', NULL, 'Investment Income', 'income_investment',  '#16A085', 'TrendingUp', 3),
+  ('cat_income_other',       'income_sources', NULL, 'Other Income',      'income_other',       '#1ABC9C', 'DollarSign', 4);
+
+-- Income subcategories
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_income_salary',         'income_sources', 'cat_income_employment', 'Salary',         'income_salary',         '#27AE60', 'Briefcase',  1),
+  ('cat_income_bonus',          'income_sources', 'cat_income_employment', 'Bonus',          'income_bonus',          '#27AE60', 'Award',      2),
+  ('cat_income_commission',     'income_sources', 'cat_income_employment', 'Commission',     'income_commission',     '#27AE60', 'Target',     3),
+  ('cat_income_freelance',      'income_sources', 'cat_income_selfemploy', 'Freelance',      'income_freelance',      '#2ECC71', 'Laptop',     1),
+  ('cat_income_business',       'income_sources', 'cat_income_selfemploy', 'Business Income','income_business',       '#2ECC71', 'Building',   2),
+  ('cat_income_dividends',      'income_sources', 'cat_income_investment', 'Dividends',      'income_dividends',      '#16A085', 'PiggyBank',  1),
+  ('cat_income_interest',       'income_sources', 'cat_income_investment', 'Interest',       'income_interest',       '#16A085', 'Percent',    2),
+  ('cat_income_rental',         'income_sources', 'cat_income_investment', 'Rental Income',  'income_rental',         '#16A085', 'Home',       3),
+  ('cat_income_capital_gains',  'income_sources', 'cat_income_investment', 'Capital Gains',  'income_capital_gains',  '#16A085', 'TrendingUp', 4),
+  ('cat_income_gifts',          'income_sources', 'cat_income_other',      'Gifts Received', 'income_gifts',          '#1ABC9C', 'Gift',       1),
+  ('cat_income_refunds',        'income_sources', 'cat_income_other',      'Refunds',        'income_refunds',        '#1ABC9C', 'RotateCcw',  2),
+  ('cat_income_reimbursements', 'income_sources', 'cat_income_other',      'Reimbursements', 'income_reimbursements', '#1ABC9C', 'Receipt',    3),
+  ('cat_income_tax_refund',     'income_sources', 'cat_income_other',      'Tax Refund',     'income_tax_refund',     '#1ABC9C', 'FileText',   4);
+
+-- ============================================================================
+-- 8. SEED: DEFAULT EVENT TYPES
+-- ============================================================================
+
+INSERT INTO event_types (id, name, color) VALUES
+  ('event-type-travel',           'Travel',           '#3b82f6'),
+  ('event-type-holiday',          'Holiday',          '#22c55e'),
+  ('event-type-business',         'Business',         '#f97316'),
+  ('event-type-education',        'Education',        '#8b5cf6'),
+  ('event-type-medical',          'Medical',          '#ef4444'),
+  ('event-type-special-occasion', 'Special Occasion', '#ec4899'),
+  ('event-type-other',            'Other',            '#6b7280');

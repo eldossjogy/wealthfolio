@@ -50,6 +50,7 @@ diesel::table! {
         needs_review -> Integer,
         created_at -> Text,
         updated_at -> Text,
+        event_id -> Nullable<Text>,
     }
 }
 
@@ -463,6 +464,7 @@ diesel::table! {
         sort_order -> Integer,
         created_at -> Text,
         updated_at -> Text,
+        scope -> Text,
     }
 }
 
@@ -476,6 +478,87 @@ diesel::table! {
         color -> Text,
         description -> Nullable<Text>,
         sort_order -> Integer,
+        created_at -> Text,
+        updated_at -> Text,
+        icon -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    activity_taxonomy_assignments (id) {
+        id -> Text,
+        activity_id -> Text,
+        taxonomy_id -> Text,
+        category_id -> Text,
+        weight -> Integer,
+        source -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    event_types (id) {
+        id -> Text,
+        name -> Text,
+        color -> Nullable<Text>,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    events (id) {
+        id -> Text,
+        name -> Text,
+        description -> Nullable<Text>,
+        event_type_id -> Text,
+        start_date -> Text,
+        end_date -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    categorization_rules (id) {
+        id -> Text,
+        name -> Text,
+        pattern -> Text,
+        match_type -> Text,
+        taxonomy_id -> Nullable<Text>,
+        category_id -> Nullable<Text>,
+        activity_type -> Nullable<Text>,
+        priority -> Integer,
+        is_global -> Integer,
+        account_id -> Nullable<Text>,
+        preset_id -> Nullable<Text>,
+        preset_rule_key -> Nullable<Text>,
+        preset_version -> Nullable<Text>,
+        preset_modified -> Integer,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    budget_config (id) {
+        id -> Text,
+        monthly_spending_target -> Text,
+        monthly_income_target -> Text,
+        currency -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    budget_allocations (id) {
+        id -> Text,
+        budget_config_id -> Text,
+        taxonomy_id -> Text,
+        category_id -> Text,
+        amount -> Text,
         created_at -> Text,
         updated_at -> Text,
     }
@@ -496,6 +579,14 @@ diesel::joinable!(goals_allocation -> goals (goal_id));
 diesel::joinable!(import_runs -> accounts (account_id));
 diesel::joinable!(quotes -> assets (asset_id));
 diesel::joinable!(taxonomy_categories -> taxonomies (taxonomy_id));
+diesel::joinable!(activity_taxonomy_assignments -> activities (activity_id));
+diesel::joinable!(activity_taxonomy_assignments -> taxonomies (taxonomy_id));
+diesel::joinable!(activities -> events (event_id));
+diesel::joinable!(events -> event_types (event_type_id));
+diesel::joinable!(categorization_rules -> accounts (account_id));
+diesel::joinable!(categorization_rules -> taxonomies (taxonomy_id));
+diesel::joinable!(budget_allocations -> budget_config (budget_config_id));
+diesel::joinable!(budget_allocations -> taxonomies (taxonomy_id));
 
 diesel::joinable!(import_account_templates -> import_templates (template_id));
 
@@ -533,4 +624,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     sync_table_state,
     taxonomies,
     taxonomy_categories,
+    activity_taxonomy_assignments,
+    event_types,
+    events,
+    categorization_rules,
+    budget_config,
+    budget_allocations,
 );
