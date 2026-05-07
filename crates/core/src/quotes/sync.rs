@@ -125,8 +125,8 @@ fn should_treat_fetch_error_as_non_fatal(
     error: &Error,
     suppress_closed_fetch_errors: bool,
 ) -> bool {
-    if !matches!(category, SyncCategory::NeedsBackfill)
-        && !(matches!(category, SyncCategory::Closed) && suppress_closed_fetch_errors)
+    if !(matches!(category, SyncCategory::NeedsBackfill)
+        || matches!(category, SyncCategory::Closed) && suppress_closed_fetch_errors)
     {
         return false;
     }
