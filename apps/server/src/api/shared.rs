@@ -14,7 +14,10 @@ use serde_json::json;
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     constants::PORTFOLIO_TOTAL_ACCOUNT_ID,
-    portfolio::{snapshot::SnapshotRecalcMode, valuation::ValuationRecalcMode},
+    portfolio::{
+        snapshot::{reconcile_quote_sync_from_latest_total_snapshot, SnapshotRecalcMode},
+        valuation::ValuationRecalcMode,
+    },
     quotes::MarketSyncMode,
 };
 
@@ -132,6 +135,18 @@ pub async fn process_portfolio_job(
 
     // Only perform market sync if the mode requires it
     if config.market_sync_mode.requires_sync() {
+        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+            state.snapshot_service.as_ref(),
+            state.quote_service.as_ref(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "Failed to reconcile quote sync state from latest holdings: {}. Quote sync planning may be affected.",
+                e
+            );
+        }
+
         event_bus.publish(ServerEvent::new(MARKET_SYNC_START));
 
         let sync_start = std::time::Instant::now();
@@ -240,30 +255,17 @@ pub async fn process_portfolio_job(
         return Err(crate::error::ApiError::Anyhow(anyhow!(err_msg)));
     }
 
-    // Update position status from TOTAL snapshot
-    // This derives open/closed position transitions for quote sync planning
-    if let Ok(Some(total_snapshot)) = state
-        .snapshot_service
-        .get_latest_holdings_snapshot(PORTFOLIO_TOTAL_ACCOUNT_ID)
+    // Update position status from TOTAL snapshot for quote sync planning.
+    if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+        state.snapshot_service.as_ref(),
+        state.quote_service.as_ref(),
+    )
+    .await
     {
-        // Extract asset quantities from the TOTAL snapshot
-        let current_holdings: std::collections::HashMap<String, rust_decimal::Decimal> =
-            total_snapshot
-                .positions
-                .iter()
-                .map(|(asset_id, position)| (asset_id.clone(), position.quantity))
-                .collect();
-
-        if let Err(e) = state
-            .quote_service
-            .update_position_status_from_holdings(&current_holdings)
-            .await
-        {
-            tracing::warn!(
-                "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
-                e
-            );
-        }
+        tracing::warn!(
+            "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
+            e
+        );
     }
 
     if !account_ids

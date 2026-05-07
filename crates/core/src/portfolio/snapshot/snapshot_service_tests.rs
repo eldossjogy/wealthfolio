@@ -501,6 +501,18 @@ mod tests {
             Ok(std::collections::HashMap::new())
         }
 
+        fn get_holdings_snapshot_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+        ) -> AppResult<
+            std::collections::HashMap<
+                String,
+                (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>),
+            >,
+        > {
+            Ok(std::collections::HashMap::new())
+        }
+
         fn check_existing_duplicates(
             &self,
             _idempotency_keys: &[String],
@@ -707,6 +719,18 @@ mod tests {
         }
 
         fn get_activity_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+        ) -> AppResult<
+            std::collections::HashMap<
+                String,
+                (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>),
+            >,
+        > {
+            Ok(std::collections::HashMap::new())
+        }
+
+        fn get_holdings_snapshot_bounds_for_assets(
             &self,
             _asset_ids: &[String],
         ) -> AppResult<

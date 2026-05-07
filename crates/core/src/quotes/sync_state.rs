@@ -333,6 +333,10 @@ pub struct SymbolSyncPlan {
     /// When true, delete all non-manual quotes before upserting fresh data.
     /// Set for BackfillHistory mode to remove stale/wrong dates.
     pub purge_provider_quotes: bool,
+    /// When true, tolerate provider "no data" style failures for closed positions.
+    /// Broad history jobs use this to keep old closed/delisted assets best-effort;
+    /// targeted user requests keep errors visible.
+    pub suppress_closed_fetch_errors: bool,
 }
 
 /// Domain model for quote sync state.
@@ -503,8 +507,28 @@ pub trait SyncStateStore: Send + Sync {
     /// Mark asset as inactive (position closed).
     async fn mark_inactive(&self, asset_id: &str, closed_date: NaiveDate) -> Result<()>;
 
+    /// Mark multiple assets as inactive (position closed).
+    async fn mark_inactive_batch(
+        &self,
+        asset_ids: &[String],
+        closed_date: NaiveDate,
+    ) -> Result<()> {
+        for asset_id in asset_ids {
+            self.mark_inactive(asset_id, closed_date).await?;
+        }
+        Ok(())
+    }
+
     /// Mark asset as active.
     async fn mark_active(&self, asset_id: &str) -> Result<()>;
+
+    /// Mark multiple assets as active.
+    async fn mark_active_batch(&self, asset_ids: &[String]) -> Result<()> {
+        for asset_id in asset_ids {
+            self.mark_active(asset_id).await?;
+        }
+        Ok(())
+    }
 
     /// Delete sync state for an asset.
     async fn delete(&self, asset_id: &str) -> Result<()>;

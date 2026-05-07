@@ -3,6 +3,7 @@
 pub mod holdings_calculator;
 pub mod manual_snapshot_service;
 mod positions_model;
+mod quote_sync_reconciliation;
 mod snapshot_model;
 pub mod snapshot_service;
 mod snapshot_traits;
@@ -10,6 +11,7 @@ mod snapshot_traits;
 pub use holdings_calculator::*;
 pub use manual_snapshot_service::*;
 pub use positions_model::*;
+pub use quote_sync_reconciliation::*;
 pub use snapshot_model::*;
 pub use snapshot_service::*;
 pub use snapshot_traits::*;
