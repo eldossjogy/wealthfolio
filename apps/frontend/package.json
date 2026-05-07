@@ -3,6 +3,15 @@
   "private": true,
   "version": "3.3.0",
   "type": "module",
+  "homepage": "https://wealthfolio.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wealthfolio/wealthfolio.git",
+    "directory": "apps/frontend"
+  },
+  "bugs": {
+    "url": "https://github.com/wealthfolio/wealthfolio/issues"
+  },
   "scripts": {
     "dev": "cross-env BUILD_TARGET=web vite",
     "dev:tauri": "cross-env BUILD_TARGET=tauri vite",
