@@ -37,6 +37,12 @@ const settingsSections = [
         subtitle: "Limits by year and account",
         icon: <Icons.TrendingUp className="size-5" />,
       },
+      {
+        title: "Spending Tracker",
+        href: "spending",
+        subtitle: "Enable + pick spending accounts",
+        icon: <Icons.Wallet className="size-5" />,
+      },
     ],
   },
   {
