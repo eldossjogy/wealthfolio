@@ -973,6 +973,18 @@ mod tests {
             Ok(std::collections::HashMap::new())
         }
 
+        fn get_holdings_snapshot_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+        ) -> Result<
+            std::collections::HashMap<
+                String,
+                (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>),
+            >,
+        > {
+            Ok(std::collections::HashMap::new())
+        }
+
         fn check_existing_duplicates(
             &self,
             idempotency_keys: &[String],

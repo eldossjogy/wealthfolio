@@ -8,13 +8,12 @@ use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
-    constants::PORTFOLIO_TOTAL_ACCOUNT_ID,
     portfolio::{
         allocation::{AllocationHoldings, PortfolioAllocations},
         holdings::Holding,
         snapshot::{
-            CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
-            SnapshotRecalcMode, SnapshotSource,
+            reconcile_quote_sync_from_latest_total_snapshot, CashBalanceInput, ManualHoldingInput,
+            ManualSnapshotRequest, ManualSnapshotService, SnapshotRecalcMode, SnapshotSource,
         },
         valuation::{DailyAccountValuation, ValuationRecalcMode},
     },
@@ -270,28 +269,17 @@ pub async fn delete_snapshot_handler(
         tracing::warn!("Failed to recalculate TOTAL snapshots after delete: {}", e);
     }
 
-    // Update position status from TOTAL snapshot for quote sync planning
-    if let Ok(Some(total_snapshot)) = state
-        .snapshot_service
-        .get_latest_holdings_snapshot(PORTFOLIO_TOTAL_ACCOUNT_ID)
+    // Update position status from TOTAL snapshot for quote sync planning.
+    if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+        state.snapshot_service.as_ref(),
+        state.quote_service.as_ref(),
+    )
+    .await
     {
-        let current_holdings: std::collections::HashMap<String, rust_decimal::Decimal> =
-            total_snapshot
-                .positions
-                .iter()
-                .map(|(asset_id, position)| (asset_id.clone(), position.quantity))
-                .collect();
-
-        if let Err(e) = state
-            .quote_service
-            .update_position_status_from_holdings(&current_holdings)
-            .await
-        {
-            tracing::warn!(
-                "Failed to update position status from holdings after delete: {}",
-                e
-            );
-        }
+        tracing::warn!(
+            "Failed to update position status from holdings after delete: {}",
+            e
+        );
     }
 
     // Recalculate valuations for the TOTAL portfolio

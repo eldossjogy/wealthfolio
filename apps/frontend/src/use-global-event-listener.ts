@@ -64,6 +64,10 @@ function getSyncFailures(payload?: MarketSyncCompletePayload | null): [string, s
   return Array.isArray(payload?.failed_syncs) ? payload.failed_syncs : [];
 }
 
+function getSyncSkips(payload?: MarketSyncCompletePayload | null): [string, string][] {
+  return Array.isArray(payload?.skipped_reasons) ? payload.skipped_reasons : [];
+}
+
 const useGlobalEventListener = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -103,6 +107,7 @@ const useGlobalEventListener = () => {
 
     const handleMarketSyncComplete = (event: { payload: MarketSyncCompletePayload | null }) => {
       const failed_syncs = getSyncFailures(event.payload);
+      const skipped_reasons = getSyncSkips(event.payload);
 
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setIdle();
@@ -120,6 +125,16 @@ const useGlobalEventListener = () => {
             label: "View",
             onClick: () => navigateRef.current("/health"),
           },
+        });
+      } else if (skipped_reasons.length > 0) {
+        const [assetId, reason] = skipped_reasons[0];
+        const suffix =
+          skipped_reasons.length === 1
+            ? `${assetId}: ${reason}`
+            : `${skipped_reasons.length} assets skipped`;
+        toast.info("Price update skipped", {
+          description: suffix,
+          duration: 7000,
         });
       }
     };

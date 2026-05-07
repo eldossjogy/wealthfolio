@@ -120,8 +120,8 @@ fn clamp_end_date_for_fetch(
     }
 }
 
-fn should_treat_backfill_error_as_non_fatal(category: &SyncCategory, error: &Error) -> bool {
-    if !matches!(category, SyncCategory::NeedsBackfill) {
+fn should_treat_fetch_error_as_non_fatal(category: &SyncCategory, error: &Error) -> bool {
+    if !matches!(category, SyncCategory::NeedsBackfill | SyncCategory::Closed) {
         return false;
     }
 
@@ -149,6 +149,131 @@ fn format_sync_failure_message(error: &Error, provider_id: Option<&str>) -> Stri
         Some(provider_id) if !provider_id.is_empty() => format!("{}: {}", provider_id, message),
         _ => message,
     }
+}
+
+fn asset_skip_reason(asset: &Asset, allow_inactive: bool) -> Option<AssetSkipReason> {
+    // Only sync market-priced assets (including FX rates for currency conversion)
+    if asset.quote_mode != QuoteMode::Market {
+        return Some(AssetSkipReason::ManualPricing);
+    }
+
+    // Broad/background sync should not fetch prices for inactive catalog assets.
+    // Targeted row-level sync can opt in so users can refresh deactivated assets.
+    if !allow_inactive && !asset.is_active {
+        return Some(AssetSkipReason::Inactive);
+    }
+
+    // Skip matured bonds — price is par, no sync needed
+    if asset.is_bond() {
+        if let Some(spec) = asset.bond_spec() {
+            if let Some(maturity) = spec.maturity_date {
+                if maturity < Utc::now().date_naive() {
+                    return Some(AssetSkipReason::MaturedBond);
+                }
+            }
+        }
+    }
+
+    // Skip expired options — no further quotes available
+    if asset.is_option() {
+        if let Some(spec) = asset.option_spec() {
+            if spec.expiration < Utc::now().date_naive() {
+                return Some(AssetSkipReason::ExpiredOption);
+            }
+        }
+    }
+
+    None
+}
+
+fn is_empty_asset_target(asset_ids: Option<&[String]>) -> bool {
+    asset_ids.is_some_and(|ids| ids.is_empty())
+}
+
+fn is_targeted_asset_sync(asset_ids: Option<&[String]>) -> bool {
+    asset_ids.is_some_and(|ids| !ids.is_empty())
+}
+
+fn should_allow_inactive_assets(mode: SyncMode, targeted_sync: bool) -> bool {
+    targeted_sync
+        || matches!(
+            mode,
+            SyncMode::RefetchRecent { .. } | SyncMode::BackfillHistory { .. }
+        )
+}
+
+fn should_include_closed_positions(mode: SyncMode, targeted_sync: bool) -> bool {
+    targeted_sync
+        || matches!(
+            mode,
+            SyncMode::RefetchRecent { .. } | SyncMode::BackfillHistory { .. }
+        )
+}
+
+fn min_optional_date(left: Option<NaiveDate>, right: Option<NaiveDate>) -> Option<NaiveDate> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(date), None) | (None, Some(date)) => Some(date),
+        (None, None) => None,
+    }
+}
+
+fn max_optional_date(left: Option<NaiveDate>, right: Option<NaiveDate>) -> Option<NaiveDate> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(date), None) | (None, Some(date)) => Some(date),
+        (None, None) => None,
+    }
+}
+
+fn merge_bounds(
+    activity_bounds: Option<(Option<NaiveDate>, Option<NaiveDate>)>,
+    holdings_bounds: Option<(Option<NaiveDate>, Option<NaiveDate>)>,
+) -> (Option<NaiveDate>, Option<NaiveDate>) {
+    let (activity_min, activity_max) = activity_bounds.unwrap_or((None, None));
+    let (holdings_min, holdings_max) = holdings_bounds.unwrap_or((None, None));
+
+    (
+        min_optional_date(activity_min, holdings_min),
+        max_optional_date(activity_max, holdings_max),
+    )
+}
+
+fn has_bounds_reference(bounds: Option<&(Option<NaiveDate>, Option<NaiveDate>)>) -> bool {
+    bounds.is_some_and(|(min_date, max_date)| min_date.is_some() || max_date.is_some())
+}
+
+fn has_historical_reference(
+    asset_id: &str,
+    existing_states: &HashMap<String, QuoteSyncState>,
+    activity_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
+    holdings_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
+) -> bool {
+    existing_states.contains_key(asset_id)
+        || has_bounds_reference(activity_bounds.get(asset_id))
+        || has_bounds_reference(holdings_bounds.get(asset_id))
+}
+
+fn should_allow_inactive_asset(
+    asset_id: &str,
+    mode: SyncMode,
+    targeted_sync: bool,
+    existing_states: &HashMap<String, QuoteSyncState>,
+    activity_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
+    holdings_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
+) -> bool {
+    targeted_sync
+        || (should_allow_inactive_assets(mode, targeted_sync)
+            && has_historical_reference(
+                asset_id,
+                existing_states,
+                activity_bounds,
+                holdings_bounds,
+            ))
+}
+
+fn should_purge_provider_quotes(mode: SyncMode, inputs: &SyncPlanningInputs) -> bool {
+    matches!(mode, SyncMode::BackfillHistory { .. }) && inputs.activity_min.is_some()
 }
 
 // Test helpers - expose lock functions for testing
@@ -336,7 +461,7 @@ pub trait QuoteSyncServiceTrait: Send + Sync {
     /// Force resync of quotes for specific assets using BackfillHistory mode.
     ///
     /// This is a convenience wrapper that calls `sync(SyncMode::BackfillHistory { days: DEFAULT_HISTORY_DAYS }, asset_ids)`.
-    /// If asset_ids is None or empty, resync all syncable assets.
+    /// If asset_ids is None, resync all syncable assets. If asset_ids is empty, sync nothing.
     async fn resync(&self, asset_ids: Option<Vec<String>>) -> Result<SyncResult>;
 
     /// Handle a new activity being created.
@@ -423,6 +548,10 @@ where
             .activity_repo
             .get_activity_bounds_for_assets(&asset_ids)
             .unwrap_or_default();
+        let holdings_bounds = self
+            .activity_repo
+            .get_holdings_snapshot_bounds_for_assets(&asset_ids)
+            .unwrap_or_default();
 
         // Compute quote bounds per provider
         // Group assets by preferred_provider and batch query
@@ -445,50 +574,26 @@ where
             .iter()
             .filter(|a| self.should_sync_asset(a))
             .filter_map(|asset| {
-                self.build_asset_sync_plan(asset, now, &activity_bounds, &quote_bounds)
+                self.build_asset_sync_plan(
+                    asset,
+                    now,
+                    &activity_bounds,
+                    &holdings_bounds,
+                    &quote_bounds,
+                )
             })
             .collect()
     }
 
     /// Check if an asset should be synced.
     fn should_sync_asset(&self, asset: &Asset) -> bool {
-        self.get_skip_reason(asset).is_none()
+        self.get_skip_reason(asset, false).is_none()
     }
 
     /// Get the reason why an asset should be skipped, if any.
     /// Returns None if the asset should be synced.
-    fn get_skip_reason(&self, asset: &Asset) -> Option<AssetSkipReason> {
-        // Only sync market-priced assets (including FX rates for currency conversion)
-        if asset.quote_mode != QuoteMode::Market {
-            return Some(AssetSkipReason::ManualPricing);
-        }
-
-        // Only sync active assets
-        if !asset.is_active {
-            return Some(AssetSkipReason::Inactive);
-        }
-
-        // Skip matured bonds — price is par, no sync needed
-        if asset.is_bond() {
-            if let Some(spec) = asset.bond_spec() {
-                if let Some(maturity) = spec.maturity_date {
-                    if maturity < Utc::now().date_naive() {
-                        return Some(AssetSkipReason::MaturedBond);
-                    }
-                }
-            }
-        }
-
-        // Skip expired options — no further quotes available
-        if asset.is_option() {
-            if let Some(spec) = asset.option_spec() {
-                if spec.expiration < Utc::now().date_naive() {
-                    return Some(AssetSkipReason::ExpiredOption);
-                }
-            }
-        }
-
-        None
+    fn get_skip_reason(&self, asset: &Asset, allow_inactive: bool) -> Option<AssetSkipReason> {
+        asset_skip_reason(asset, allow_inactive)
     }
 
     /// Ensure a matured bond has a par-value quote so it doesn't show as "no data"
@@ -559,6 +664,7 @@ where
         asset: &Asset,
         now: DateTime<Utc>,
         activity_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
+        holdings_bounds: &HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>,
         quote_bounds: &HashMap<String, (NaiveDate, NaiveDate)>,
     ) -> Option<SymbolSyncPlan> {
         let effective_today = effective_market_today(now, asset.instrument_exchange_mic.as_deref());
@@ -571,10 +677,10 @@ where
             .flatten();
 
         // Build SyncPlanningInputs from computed bounds
-        let (activity_min, activity_max) = activity_bounds
-            .get(&asset.id)
-            .copied()
-            .unwrap_or((None, None));
+        let (activity_min, activity_max) = merge_bounds(
+            activity_bounds.get(&asset.id).copied(),
+            holdings_bounds.get(&asset.id).copied(),
+        );
 
         let (quote_min, quote_max) = quote_bounds
             .get(&asset.id)
@@ -582,7 +688,10 @@ where
             .unwrap_or((None, None));
 
         let inputs = SyncPlanningInputs {
-            is_active: state.as_ref().map(|s| s.is_active).unwrap_or(true),
+            is_active: state
+                .as_ref()
+                .map(|s| s.is_active)
+                .unwrap_or(asset.is_active),
             position_closed_date: state.as_ref().and_then(|s| s.position_closed_date),
             activity_min,
             activity_max,
@@ -940,7 +1049,7 @@ where
                 let sync_failure_message =
                     format_sync_failure_message(&error, fetch_error.provider_id.as_deref());
 
-                if should_treat_backfill_error_as_non_fatal(&plan.category, &error) {
+                if should_treat_fetch_error_as_non_fatal(&plan.category, &error) {
                     if let Err(state_err) = self.sync_state_store.update_after_sync(&asset.id).await
                     {
                         warn!(
@@ -1109,6 +1218,9 @@ where
         let activity_bounds = self
             .activity_repo
             .get_activity_bounds_for_assets(&asset_ids)?;
+        let holdings_bounds = self
+            .activity_repo
+            .get_holdings_snapshot_bounds_for_assets(&asset_ids)?;
 
         // Compute quote bounds on-the-fly from quotes table, filtered by provider
         // Group states by data_source to batch quote bounds queries
@@ -1136,10 +1248,10 @@ where
             };
 
             // Build SyncPlanningInputs from computed bounds
-            let (activity_min, activity_max) = activity_bounds
-                .get(&state.asset_id)
-                .copied()
-                .unwrap_or((None, None));
+            let (activity_min, activity_max) = merge_bounds(
+                activity_bounds.get(&state.asset_id).copied(),
+                holdings_bounds.get(&state.asset_id).copied(),
+            );
 
             let (quote_min, quote_max) = quote_bounds_by_source
                 .get(&state.data_source)
@@ -1257,12 +1369,19 @@ where
     }
 
     /// Ensure sync states exist for the given assets.
-    async fn ensure_sync_states_for_assets(&self, assets: &[Asset]) -> Result<()> {
+    async fn ensure_sync_states_for_assets(
+        &self,
+        assets: &[Asset],
+        allow_inactive: bool,
+    ) -> Result<()> {
         debug!("Ensuring sync states for {} assets...", assets.len());
 
         let mut new_states = Vec::new();
 
-        for asset in assets.iter().filter(|a| self.should_sync_asset(a)) {
+        for asset in assets
+            .iter()
+            .filter(|asset| self.get_skip_reason(asset, allow_inactive).is_none())
+        {
             let existing = self.sync_state_store.get_by_asset_id(&asset.id)?;
             if existing.is_none() {
                 // Don't set data_source here - it will be populated after first successful sync
@@ -1287,7 +1406,7 @@ where
     /// Ensure sync states exist for all syncable assets.
     async fn ensure_sync_states_for_all_assets(&self) -> Result<()> {
         let assets = self.asset_repo.list()?;
-        self.ensure_sync_states_for_assets(&assets).await
+        self.ensure_sync_states_for_assets(&assets, false).await
     }
 }
 
@@ -1302,21 +1421,41 @@ where
     async fn sync(&self, mode: SyncMode, asset_ids: Option<Vec<String>>) -> Result<SyncResult> {
         debug!("Starting sync (mode: {}) for {:?}", mode, asset_ids);
 
-        let assets = match asset_ids {
-            Some(ids) if !ids.is_empty() => self.asset_repo.list_by_asset_ids(&ids)?,
-            _ => self.asset_repo.list()?,
+        if is_empty_asset_target(asset_ids.as_deref()) {
+            info!("No asset IDs requested for sync; skipping");
+            return Ok(SyncResult::default());
+        }
+
+        let targeted_sync = is_targeted_asset_sync(asset_ids.as_deref());
+        let include_closed_positions = should_include_closed_positions(mode, targeted_sync);
+        let assets = match asset_ids.as_ref() {
+            Some(ids) => self.asset_repo.list_by_asset_ids(ids)?,
+            None => self.asset_repo.list()?,
         };
 
-        if let Err(e) = self.ensure_sync_states_for_assets(&assets).await {
-            warn!("Failed to ensure sync states: {:?}", e);
-        }
+        let all_asset_ids: Vec<String> = assets.iter().map(|asset| asset.id.clone()).collect();
+        let initial_states = self.sync_state_store.get_by_asset_ids(&all_asset_ids)?;
+        let activity_bounds = self
+            .activity_repo
+            .get_activity_bounds_for_assets(&all_asset_ids)?;
+        let holdings_bounds = self
+            .activity_repo
+            .get_holdings_snapshot_bounds_for_assets(&all_asset_ids)?;
 
         // Initialize result to track skipped assets
         let mut result = SyncResult::default();
         let mut syncable: Vec<&Asset> = Vec::new();
 
         for asset in &assets {
-            if let Some(reason) = self.get_skip_reason(asset) {
+            let allow_inactive_asset = should_allow_inactive_asset(
+                &asset.id,
+                mode,
+                targeted_sync,
+                &initial_states,
+                &activity_bounds,
+                &holdings_bounds,
+            );
+            if let Some(reason) = self.get_skip_reason(asset, allow_inactive_asset) {
                 debug!("Skipping asset {} for sync: {}", asset.id, reason);
                 if matches!(reason, AssetSkipReason::MaturedBond) {
                     self.ensure_matured_bond_par_quote(asset).await;
@@ -1348,10 +1487,20 @@ where
 
         let now = Utc::now();
         let syncable_ids: Vec<String> = syncable.iter().map(|asset| asset.id.clone()).collect();
+        let ensure_state_assets: Vec<Asset> = syncable
+            .iter()
+            .filter(|asset| asset.is_active || targeted_sync)
+            .map(|asset| (*asset).clone())
+            .collect();
+
+        if let Err(e) = self
+            .ensure_sync_states_for_assets(&ensure_state_assets, true)
+            .await
+        {
+            warn!("Failed to ensure sync states: {:?}", e);
+        }
+
         let existing_states = self.sync_state_store.get_by_asset_ids(&syncable_ids)?;
-        let activity_bounds = self
-            .activity_repo
-            .get_activity_bounds_for_assets(&syncable_ids)?;
 
         // Compute quote bounds per provider
         let mut quote_bounds: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
@@ -1394,10 +1543,10 @@ where
             }
 
             // Build SyncPlanningInputs from computed bounds
-            let (activity_min, activity_max) = activity_bounds
-                .get(&asset.id)
-                .copied()
-                .unwrap_or((None, None));
+            let (activity_min, activity_max) = merge_bounds(
+                activity_bounds.get(&asset.id).copied(),
+                holdings_bounds.get(&asset.id).copied(),
+            );
 
             let (quote_min, quote_max) = quote_bounds
                 .get(&asset.id)
@@ -1405,7 +1554,10 @@ where
                 .unwrap_or((None, None));
 
             let inputs = SyncPlanningInputs {
-                is_active: state.as_ref().map(|s| s.is_active).unwrap_or(true),
+                is_active: state
+                    .as_ref()
+                    .map(|s| s.is_active)
+                    .unwrap_or(asset.is_active),
                 position_closed_date: state.as_ref().and_then(|s| s.position_closed_date),
                 activity_min,
                 activity_max,
@@ -1414,19 +1566,33 @@ where
             };
 
             // Determine category for priority
-            let category = determine_sync_category(
+            let mut category = determine_sync_category(
                 &inputs,
                 CLOSED_POSITION_GRACE_PERIOD_DAYS,
                 effective_today,
             );
+            let mut planning_inputs = inputs.clone();
+
+            if matches!(category, SyncCategory::Closed) {
+                if !include_closed_positions {
+                    result.add_skipped(asset.id.clone(), AssetSkipReason::ClosedPosition);
+                    continue;
+                }
+
+                if targeted_sync && matches!(mode, SyncMode::Incremental) {
+                    category = SyncCategory::Active;
+                    planning_inputs.is_active = true;
+                    planning_inputs.position_closed_date = None;
+                }
+            }
 
             if matches!(mode, SyncMode::Incremental)
                 && matches!(category, SyncCategory::NeedsBackfill)
-                && inputs.is_active
+                && planning_inputs.is_active
             {
                 let recent_category = SyncCategory::Active;
                 if let Some((start_date, end_date)) =
-                    calculate_sync_window(&recent_category, &inputs, effective_today)
+                    calculate_sync_window(&recent_category, &planning_inputs, effective_today)
                 {
                     if start_date <= end_date {
                         plans.push(SymbolSyncPlan {
@@ -1448,7 +1614,7 @@ where
                 }
 
                 if let Some((start_date, end_date)) =
-                    calculate_sync_window(&category, &inputs, effective_today)
+                    calculate_sync_window(&category, &planning_inputs, effective_today)
                 {
                     if start_date <= end_date {
                         plans.push(SymbolSyncPlan {
@@ -1468,7 +1634,7 @@ where
             }
 
             let (start_date, end_date) = self.calculate_date_range_for_mode(
-                &inputs,
+                &planning_inputs,
                 mode,
                 effective_today,
                 fetch_end_date,
@@ -1484,7 +1650,7 @@ where
                 data_source,
                 quote_symbol: None,
                 currency: asset.quote_ccy.clone(),
-                purge_provider_quotes: matches!(mode, SyncMode::BackfillHistory { .. }),
+                purge_provider_quotes: should_purge_provider_quotes(mode, &planning_inputs),
             });
         }
 
@@ -1651,7 +1817,7 @@ mod tests {
     #[test]
     fn test_backfill_no_data_error_is_non_fatal() {
         let err = Error::MarketData(MarketDataError::NoData);
-        assert!(should_treat_backfill_error_as_non_fatal(
+        assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
             &err
         ));
@@ -1660,7 +1826,7 @@ mod tests {
     #[test]
     fn test_backfill_not_found_error_is_non_fatal() {
         let err = Error::MarketData(MarketDataError::NotFound("No data found".to_string()));
-        assert!(should_treat_backfill_error_as_non_fatal(
+        assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
             &err
         ));
@@ -1671,16 +1837,25 @@ mod tests {
         let err = Error::MarketData(MarketDataError::ProviderExhausted(
             "All providers failed".to_string(),
         ));
-        assert!(should_treat_backfill_error_as_non_fatal(
+        assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
             &err
         ));
     }
 
     #[test]
-    fn test_non_backfill_no_data_error_remains_fatal() {
+    fn test_closed_history_no_data_error_is_non_fatal() {
         let err = Error::MarketData(MarketDataError::NoData);
-        assert!(!should_treat_backfill_error_as_non_fatal(
+        assert!(should_treat_fetch_error_as_non_fatal(
+            &SyncCategory::Closed,
+            &err
+        ));
+    }
+
+    #[test]
+    fn test_active_no_data_error_remains_fatal() {
+        let err = Error::MarketData(MarketDataError::NoData);
+        assert!(!should_treat_fetch_error_as_non_fatal(
             &SyncCategory::Active,
             &err
         ));
@@ -1951,6 +2126,160 @@ mod tests {
             AssetSkipReason::SyncInProgress.to_string(),
             "Sync already in progress"
         );
+    }
+
+    #[test]
+    fn test_inactive_asset_skipped_for_broad_sync() {
+        let asset = Asset {
+            is_active: false,
+            quote_mode: QuoteMode::Market,
+            kind: AssetKind::Investment,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            asset_skip_reason(&asset, false),
+            Some(AssetSkipReason::Inactive)
+        );
+    }
+
+    #[test]
+    fn test_inactive_asset_allowed_for_targeted_sync() {
+        let asset = Asset {
+            is_active: false,
+            quote_mode: QuoteMode::Market,
+            kind: AssetKind::Investment,
+            ..Default::default()
+        };
+
+        assert_eq!(asset_skip_reason(&asset, true), None);
+    }
+
+    #[test]
+    fn test_empty_asset_target_is_explicit_noop() {
+        let empty_ids: Vec<String> = Vec::new();
+        let targeted_ids = vec!["AAPL".to_string()];
+
+        assert!(!is_empty_asset_target(None));
+        assert!(is_empty_asset_target(Some(&empty_ids)));
+        assert!(!is_empty_asset_target(Some(&targeted_ids)));
+
+        assert!(!is_targeted_asset_sync(None));
+        assert!(!is_targeted_asset_sync(Some(&empty_ids)));
+        assert!(is_targeted_asset_sync(Some(&targeted_ids)));
+    }
+
+    #[test]
+    fn test_activity_and_holdings_bounds_are_merged_for_history_planning() {
+        let activity_min = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+        let activity_max = NaiveDate::from_ymd_opt(2026, 3, 1).unwrap();
+        let holdings_min = NaiveDate::from_ymd_opt(2025, 11, 1).unwrap();
+        let holdings_max = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+
+        assert_eq!(
+            merge_bounds(
+                Some((Some(activity_min), Some(activity_max))),
+                Some((Some(holdings_min), Some(holdings_max))),
+            ),
+            (Some(holdings_min), Some(activity_max))
+        );
+    }
+
+    #[test]
+    fn test_backfill_purge_requires_authoritative_history_start() {
+        let inputs_without_history_start = SyncPlanningInputs {
+            is_active: true,
+            position_closed_date: None,
+            activity_min: None,
+            activity_max: None,
+            quote_min: None,
+            quote_max: None,
+        };
+        let inputs_with_history_start = SyncPlanningInputs {
+            activity_min: Some(NaiveDate::from_ymd_opt(2025, 11, 1).unwrap()),
+            ..inputs_without_history_start.clone()
+        };
+
+        assert!(!should_purge_provider_quotes(
+            SyncMode::BackfillHistory { days: 365 },
+            &inputs_without_history_start
+        ));
+        assert!(should_purge_provider_quotes(
+            SyncMode::BackfillHistory { days: 365 },
+            &inputs_with_history_start
+        ));
+        assert!(!should_purge_provider_quotes(
+            SyncMode::RefetchRecent { days: 30 },
+            &inputs_with_history_start
+        ));
+    }
+
+    #[test]
+    fn test_inactive_asset_policy_is_mode_aware() {
+        assert!(!should_allow_inactive_assets(SyncMode::Incremental, false));
+        assert!(should_allow_inactive_assets(SyncMode::Incremental, true));
+        assert!(should_allow_inactive_assets(
+            SyncMode::RefetchRecent { days: 30 },
+            false
+        ));
+        assert!(should_allow_inactive_assets(
+            SyncMode::BackfillHistory { days: 365 },
+            false
+        ));
+    }
+
+    #[test]
+    fn test_broad_history_allows_inactive_only_with_reference() {
+        let asset_id = "asset_1".to_string();
+        let states = HashMap::new();
+        let activity_bounds = HashMap::new();
+        let empty_holdings_bounds = HashMap::new();
+        let holdings_bounds = HashMap::from([(
+            asset_id.clone(),
+            (Some(NaiveDate::from_ymd_opt(2025, 11, 1).unwrap()), None),
+        )]);
+
+        assert!(!should_allow_inactive_asset(
+            &asset_id,
+            SyncMode::BackfillHistory { days: 365 },
+            false,
+            &states,
+            &activity_bounds,
+            &empty_holdings_bounds,
+        ));
+        assert!(should_allow_inactive_asset(
+            &asset_id,
+            SyncMode::BackfillHistory { days: 365 },
+            false,
+            &states,
+            &activity_bounds,
+            &holdings_bounds,
+        ));
+        assert!(should_allow_inactive_asset(
+            &asset_id,
+            SyncMode::Incremental,
+            true,
+            &states,
+            &activity_bounds,
+            &empty_holdings_bounds,
+        ));
+    }
+
+    #[test]
+    fn test_closed_position_policy_is_mode_aware() {
+        assert!(!should_include_closed_positions(
+            SyncMode::Incremental,
+            false
+        ));
+        assert!(should_include_closed_positions(SyncMode::Incremental, true));
+        assert!(should_include_closed_positions(
+            SyncMode::RefetchRecent { days: 30 },
+            false
+        ));
+        assert!(should_include_closed_positions(
+            SyncMode::BackfillHistory { days: 365 },
+            false
+        ));
     }
 
     // =========================================================================

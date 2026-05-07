@@ -2,6 +2,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::sql_query;
+use diesel::sql_types::{Nullable, Text};
+use diesel::sqlite::Sqlite;
 use diesel::sqlite::SqliteConnection;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
@@ -1526,6 +1529,67 @@ impl ActivityRepositoryTrait for ActivityRepository {
                 });
 
                 result_map.insert(asset_id, (first_date, last_date));
+            }
+        }
+
+        Ok(result_map)
+    }
+
+    fn get_holdings_snapshot_bounds_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>> {
+        if asset_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        #[derive(QueryableByName)]
+        struct HoldingsBoundsRow {
+            #[diesel(sql_type = Text)]
+            asset_id: String,
+            #[diesel(sql_type = Nullable<Text>)]
+            min_date: Option<String>,
+            #[diesel(sql_type = Nullable<Text>)]
+            max_date: Option<String>,
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut result_map: HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)> =
+            HashMap::new();
+
+        for chunk in chunk_for_sqlite(asset_ids) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "SELECT position.key AS asset_id, \
+                        MIN(snapshot.snapshot_date) AS min_date, \
+                        MAX(snapshot.snapshot_date) AS max_date \
+                 FROM holdings_snapshots snapshot \
+                 JOIN accounts account ON account.id = snapshot.account_id \
+                 JOIN json_each(snapshot.positions) position \
+                 WHERE account.is_archived = 0 \
+                   AND position.key IN ({}) \
+                 GROUP BY position.key",
+                placeholders
+            );
+
+            let mut query_builder = Box::new(sql_query(sql)).into_boxed::<Sqlite>();
+            for asset_id in chunk {
+                query_builder = query_builder.bind::<Text, _>(asset_id);
+            }
+
+            let rows: Vec<HoldingsBoundsRow> = query_builder
+                .load::<HoldingsBoundsRow>(&mut conn)
+                .map_err(StorageError::from)?;
+
+            for row in rows {
+                let first_date = row
+                    .min_date
+                    .and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok());
+                let last_date = row
+                    .max_date
+                    .and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok());
+
+                result_map.insert(row.asset_id, (first_date, last_date));
             }
         }
 

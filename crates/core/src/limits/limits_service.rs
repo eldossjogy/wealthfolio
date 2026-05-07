@@ -444,6 +444,12 @@ mod tests {
         ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>> {
             unimplemented!()
         }
+        fn get_holdings_snapshot_bounds_for_assets(
+            &self,
+            _: &[String],
+        ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>> {
+            unimplemented!()
+        }
         fn check_existing_duplicates(&self, _: &[String]) -> Result<HashMap<String, String>> {
             unimplemented!()
         }

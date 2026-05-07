@@ -5,7 +5,9 @@ use std::time::Instant;
 use tauri::{async_runtime::spawn, AppHandle, Emitter, Listener, Manager};
 use wealthfolio_core::constants::PORTFOLIO_TOTAL_ACCOUNT_ID;
 use wealthfolio_core::health::HealthServiceTrait;
-use wealthfolio_core::portfolio::snapshot::SnapshotRecalcMode;
+use wealthfolio_core::portfolio::snapshot::{
+    reconcile_quote_sync_from_latest_total_snapshot, SnapshotRecalcMode,
+};
 use wealthfolio_core::portfolio::valuation::ValuationRecalcMode;
 use wealthfolio_core::quotes::MarketSyncMode;
 
@@ -54,6 +56,19 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                     // Only perform market sync if the mode requires it
                     if market_sync_mode.requires_sync() {
                         let market_data_service = context.quote_service();
+                        let snapshot_service = context.snapshot_service();
+
+                        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+                            snapshot_service.as_ref(),
+                            market_data_service.as_ref(),
+                        )
+                        .await
+                        {
+                            warn!(
+                                "Failed to reconcile quote sync state from latest holdings: {}. Quote sync planning may be affected.",
+                                e
+                            );
+                        }
 
                         // Emit sync start event
                         if let Err(e) = handle_clone.emit(MARKET_SYNC_START, &()) {
@@ -278,29 +293,17 @@ fn handle_portfolio_calculation(
         }
 
         // --- Step 2.5: Update position status from TOTAL snapshot ---
-        // This derives open/closed position transitions for quote sync planning
-        if let Ok(Some(total_snapshot)) =
-            snapshot_service.get_latest_holdings_snapshot(PORTFOLIO_TOTAL_ACCOUNT_ID)
+        let quote_service = context.quote_service();
+        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+            snapshot_service.as_ref(),
+            quote_service.as_ref(),
+        )
+        .await
         {
-            let quote_service = context.quote_service();
-
-            // Extract asset quantities from the TOTAL snapshot
-            let current_holdings: std::collections::HashMap<String, rust_decimal::Decimal> =
-                total_snapshot
-                    .positions
-                    .iter()
-                    .map(|(asset_id, position)| (asset_id.clone(), position.quantity))
-                    .collect();
-
-            if let Err(e) = quote_service
-                .update_position_status_from_holdings(&current_holdings)
-                .await
-            {
-                warn!(
-                    "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
-                    e
-                );
-            }
+            warn!(
+                "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
+                e
+            );
         }
 
         // --- Step 3: Calculate Valuation History ---

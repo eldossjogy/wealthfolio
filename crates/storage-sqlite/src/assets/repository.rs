@@ -463,24 +463,36 @@ impl AssetRepositoryTrait for AssetRepository {
     async fn deactivate_orphaned_investments(&self) -> Result<Vec<String>> {
         self.writer
             .exec_tx(move |tx| -> Result<Vec<String>> {
-                // Find active INVESTMENT assets with zero activities
+                // Find active INVESTMENT assets with no activities and no holdings history in
+                // non-archived accounts.
                 let orphan_ids: Vec<String> = assets::table
                     .select(assets::id)
                     .filter(assets::kind.eq("INVESTMENT"))
                     .filter(assets::is_active.eq(1))
                     .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-                        "id NOT IN (SELECT DISTINCT asset_id FROM activities WHERE asset_id IS NOT NULL)",
+                        r#"
+                        NOT EXISTS (
+                            SELECT 1
+                            FROM activities activity
+                            WHERE activity.asset_id = assets.id
+                        )
+                        AND assets.id NOT IN (
+                            SELECT DISTINCT position.key
+                            FROM holdings_snapshots snapshot
+                            JOIN accounts account ON account.id = snapshot.account_id
+                            JOIN json_each(snapshot.positions) position
+                            WHERE account.is_archived = 0
+                        )
+                        "#,
                     ))
                     .load::<String>(tx.conn())
                     .map_err(StorageError::from)?;
 
                 if !orphan_ids.is_empty() {
-                    diesel::update(
-                        assets::table.filter(assets::id.eq_any(&orphan_ids)),
-                    )
-                    .set(assets::is_active.eq(0))
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
+                    diesel::update(assets::table.filter(assets::id.eq_any(&orphan_ids)))
+                        .set(assets::is_active.eq(0))
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
 
                     let updated_rows = assets::table
                         .filter(assets::id.eq_any(&orphan_ids))

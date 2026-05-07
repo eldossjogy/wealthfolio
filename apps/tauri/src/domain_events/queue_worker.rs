@@ -14,7 +14,9 @@ use tokio::sync::mpsc;
 use wealthfolio_core::constants::PORTFOLIO_TOTAL_ACCOUNT_ID;
 use wealthfolio_core::events::DomainEvent;
 use wealthfolio_core::health::HealthServiceTrait;
-use wealthfolio_core::portfolio::snapshot::SnapshotRecalcMode;
+use wealthfolio_core::portfolio::snapshot::{
+    reconcile_quote_sync_from_latest_total_snapshot, SnapshotRecalcMode,
+};
 use wealthfolio_core::portfolio::valuation::ValuationRecalcMode;
 
 #[cfg(feature = "connect-sync")]
@@ -260,6 +262,19 @@ async fn run_portfolio_job(
     // Only perform market sync if the mode requires it
     if market_sync_mode.requires_sync() {
         let market_data_service = context.quote_service();
+        let snapshot_service = context.snapshot_service();
+
+        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+            snapshot_service.as_ref(),
+            market_data_service.as_ref(),
+        )
+        .await
+        {
+            warn!(
+                "Failed to reconcile quote sync state from latest holdings: {}. Quote sync planning may be affected.",
+                e
+            );
+        }
 
         // Emit sync start event
         if let Err(e) = app_handle.emit(MARKET_SYNC_START, &()) {
@@ -406,27 +421,18 @@ async fn run_portfolio_calculation(
         return;
     }
 
-    // Update position status from TOTAL snapshot
-    if let Ok(Some(total_snapshot)) =
-        snapshot_service.get_latest_holdings_snapshot(PORTFOLIO_TOTAL_ACCOUNT_ID)
+    // Update position status from TOTAL snapshot for quote sync planning.
+    let quote_service = context.quote_service();
+    if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+        snapshot_service.as_ref(),
+        quote_service.as_ref(),
+    )
+    .await
     {
-        let current_holdings: std::collections::HashMap<String, rust_decimal::Decimal> =
-            total_snapshot
-                .positions
-                .iter()
-                .map(|(asset_id, position)| (asset_id.clone(), position.quantity))
-                .collect();
-
-        let quote_service = context.quote_service();
-        if let Err(e) = quote_service
-            .update_position_status_from_holdings(&current_holdings)
-            .await
-        {
-            warn!(
-                "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
-                e
-            );
-        }
+        warn!(
+            "Failed to update position status from holdings: {}. Quote sync planning may be affected.",
+            e
+        );
     }
 
     // Ensure TOTAL is included in valuation calculation

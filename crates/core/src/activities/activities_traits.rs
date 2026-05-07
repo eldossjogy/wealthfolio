@@ -114,6 +114,17 @@ pub trait ActivityRepositoryTrait: Send + Sync {
         asset_ids: &[String],
     ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>>;
 
+    /// Gets the first and last non-archived holdings snapshot dates where each
+    /// asset appears.
+    ///
+    /// Holdings-mode assets can have historical valuation exposure without any
+    /// activity rows, so quote planning must include these bounds too.
+    #[allow(clippy::type_complexity)]
+    fn get_holdings_snapshot_bounds_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>>;
+
     /// Checks for existing activities with the given idempotency keys.
     ///
     /// Returns a map of {idempotency_key: existing_activity_id} for keys that already exist.
