@@ -16,6 +16,30 @@ fn normalize_subtype_for_storage(subtype: Option<String>) -> Option<String> {
 
 /// Helper function to parse a string into a Decimal,
 /// with a fallback for scientific notation by parsing as f64 first.
+/// Parse a datetime stored as TEXT in SQLite, tolerating multiple historical formats.
+///
+/// Priority:
+///   1. RFC3339 / ISO 8601 with timezone (`2026-05-04T08:18:00.000Z`) — what we always write now
+///   2. Naive `YYYY-MM-DD HH:MM:SS[.fff]` (SQLite's default `CURRENT_TIMESTAMP` shape, legacy seed rows) — assume UTC
+///   3. Date-only `YYYY-MM-DD` — midnight UTC (matches the JSON-side `timestamp_format` deserializer)
+///
+/// Returns `None` only when none of the above match; callers fall back to `Utc::now()` and log.
+fn parse_db_datetime(s: &str) -> Option<chrono::DateTime<Utc>> {
+    use chrono::DateTime;
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    for fmt in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(Utc.from_utc_datetime(&naive));
+        }
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?));
+    }
+    None
+}
+
 fn parse_decimal_string_tolerant(value_str: &str, field_name: &str) -> Decimal {
     match Decimal::from_str(value_str) {
         Ok(d) => d,
@@ -101,6 +125,10 @@ pub struct ActivityDB {
     // Audit
     pub created_at: String,
     pub updated_at: String,
+
+    // Spending module: optional FK to events table
+    #[diesel(treat_none_as_null = true)]
+    pub event_id: Option<String>,
 }
 
 /// Model for activity details including related data
@@ -376,8 +404,6 @@ impl From<wealthfolio_core::activities::ImportTemplate> for ImportTemplateDB {
 
 impl From<ActivityDB> for Activity {
     fn from(db: ActivityDB) -> Self {
-        use chrono::DateTime;
-
         // Parse status string to ActivityStatus enum
         let status = match db.status.as_str() {
             "POSTED" => ActivityStatus::Posted,
@@ -406,21 +432,17 @@ impl From<ActivityDB> for Activity {
             status,
 
             // Timing
-            activity_date: DateTime::parse_from_rfc3339(&db.activity_date)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|e| {
-                    log::error!(
-                        "Failed to parse activity_date '{}': {}",
-                        db.activity_date,
-                        e
-                    );
-                    Utc::now()
-                }),
-            settlement_date: db.settlement_date.as_ref().and_then(|s| {
-                DateTime::parse_from_rfc3339(s)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .ok()
+            activity_date: parse_db_datetime(&db.activity_date).unwrap_or_else(|| {
+                log::error!(
+                    "Failed to parse activity_date '{}', falling back to now",
+                    db.activity_date
+                );
+                Utc::now()
             }),
+            settlement_date: db
+                .settlement_date
+                .as_ref()
+                .and_then(|s| parse_db_datetime(s)),
 
             // Quantities
             quantity: db
@@ -461,18 +483,17 @@ impl From<ActivityDB> for Activity {
             needs_review: db.needs_review != 0,
 
             // Audit
-            created_at: chrono::DateTime::parse_from_rfc3339(&db.created_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|e| {
-                    log::error!("Failed to parse created_at '{}': {}", db.created_at, e);
-                    Utc::now()
-                }),
-            updated_at: chrono::DateTime::parse_from_rfc3339(&db.updated_at)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|e| {
-                    log::error!("Failed to parse updated_at '{}': {}", db.updated_at, e);
-                    Utc::now()
-                }),
+            created_at: parse_db_datetime(&db.created_at).unwrap_or_else(|| {
+                log::error!("Failed to parse created_at '{}'", db.created_at);
+                Utc::now()
+            }),
+            updated_at: parse_db_datetime(&db.updated_at).unwrap_or_else(|| {
+                log::error!("Failed to parse updated_at '{}'", db.updated_at);
+                Utc::now()
+            }),
+
+            // Spending
+            event_id: db.event_id,
         }
     }
 }
@@ -562,6 +583,9 @@ impl From<NewActivity> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
+
+            // Spending
+            event_id: domain.event_id,
         }
     }
 }
@@ -651,6 +675,9 @@ impl From<ActivityUpdate> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
+
+            // Spending
+            event_id: domain.event_id.flatten(),
         }
     }
 }
@@ -737,6 +764,9 @@ impl From<ActivityUpsert> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
+
+            // Spending
+            event_id: domain.event_id,
         }
     }
 }

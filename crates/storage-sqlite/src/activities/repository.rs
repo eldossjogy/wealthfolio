@@ -439,6 +439,29 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .await
     }
 
+    async fn set_activity_event_id(
+        &self,
+        activity_id: &str,
+        event_id: Option<String>,
+    ) -> Result<Activity> {
+        let activity_id = activity_id.to_string();
+        self.writer
+            .exec_tx(move |tx| -> Result<Activity> {
+                let now = chrono::Utc::now().to_rfc3339();
+                let updated = diesel::update(activities::table.find(&activity_id))
+                    .set((
+                        activities::event_id.eq(event_id.as_deref()),
+                        activities::updated_at.eq(&now),
+                    ))
+                    .get_result::<ActivityDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+                let activity = Activity::from(updated.clone());
+                tx.update(&updated)?;
+                Ok(activity)
+            })
+            .await
+    }
+
     async fn link_transfer_activities(
         &self,
         activity_a_id: String,
@@ -2101,6 +2124,7 @@ mod tests {
             needs_review: 0,
             created_at: "2024-01-15T00:00:00+00:00".to_string(),
             updated_at: "2024-01-15T00:00:00+00:00".to_string(),
+            event_id: None,
         };
 
         diesel::insert_into(activities::table)
@@ -2633,6 +2657,7 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-1".to_string()),
             import_run_id: None,
+            event_id: None,
         };
 
         let second = ActivityUpsert {
@@ -2657,6 +2682,7 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-2".to_string()),
             import_run_id: None,
+            event_id: None,
         };
 
         let first_result = repo
@@ -2741,6 +2767,7 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-1".to_string()),
             import_run_id: None,
+            event_id: None,
         };
 
         let second = ActivityUpsert {
@@ -2765,6 +2792,7 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-2".to_string()),
             import_run_id: None,
+            event_id: None,
         };
 
         let result = repo

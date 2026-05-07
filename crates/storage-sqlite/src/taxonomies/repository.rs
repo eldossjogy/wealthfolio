@@ -100,6 +100,7 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
                         .format("%Y-%m-%dT%H:%M:%S%.fZ")
                         .to_string(),
                     updated_at: chrono::Utc::now().to_rfc3339(),
+                    scope: taxonomy.scope,
                 };
 
                 diesel::update(taxonomies::table.find(&id))
@@ -212,6 +213,7 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
                         .format("%Y-%m-%dT%H:%M:%S%.fZ")
                         .to_string(),
                     updated_at: chrono::Utc::now().to_rfc3339(),
+                    icon: category.icon,
                 };
 
                 diesel::update(
