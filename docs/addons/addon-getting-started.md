@@ -526,5 +526,5 @@ You now understand:
 Continue with:
 
 - [API Reference](/docs/addons/api-reference) - All available APIs
-- [Examples](https://github.com/wealthfolio/wealthfolio/tree/main/addons/) - Real
-  addon implementations
+- [Examples](https://github.com/wealthfolio/wealthfolio/tree/main/addons/) -
+  Real addon implementations
