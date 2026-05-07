@@ -8193,6 +8193,7 @@ dependencies = [
  "wealthfolio-core",
  "wealthfolio-device-sync",
  "wealthfolio-market-data",
+ "wealthfolio-spending",
  "wealthfolio-storage-sqlite",
  "x25519-dalek",
 ]
@@ -8350,7 +8351,26 @@ dependencies = [
  "wealthfolio-core",
  "wealthfolio-device-sync",
  "wealthfolio-market-data",
+ "wealthfolio-spending",
  "wealthfolio-storage-sqlite",
+]
+
+[[package]]
+name = "wealthfolio-spending"
+version = "3.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "log",
+ "regex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "wealthfolio-core",
 ]
 
 [[package]]
@@ -8377,6 +8397,7 @@ dependencies = [
  "wealthfolio-connect",
  "wealthfolio-core",
  "wealthfolio-device-sync",
+ "wealthfolio-spending",
 ]
 
 [[package]]
