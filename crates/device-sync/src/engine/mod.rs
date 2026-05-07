@@ -71,6 +71,12 @@ fn sync_entity_name(entity: &SyncEntity) -> &'static str {
         SyncEntity::CustomProvider => "custom_provider",
         SyncEntity::CustomTaxonomy => "custom_taxonomy",
         SyncEntity::ImportRun => "import_run",
+        SyncEntity::ActivityTaxonomyAssignment => "activity_taxonomy_assignment",
+        SyncEntity::CategorizationRule => "categorization_rule",
+        SyncEntity::Event => "event",
+        SyncEntity::EventType => "event_type",
+        SyncEntity::BudgetConfig => "budget_config",
+        SyncEntity::BudgetAllocation => "budget_allocation",
     }
 }
 

@@ -65,6 +65,13 @@ pub enum SyncEntity {
     CustomProvider,
     CustomTaxonomy,
     ImportRun,
+    // Spending module (wealthfolio-spending crate)
+    ActivityTaxonomyAssignment,
+    CategorizationRule,
+    Event,
+    EventType,
+    BudgetConfig,
+    BudgetAllocation,
 }
 
 /// Supported sync operations.

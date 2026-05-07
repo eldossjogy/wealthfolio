@@ -480,6 +480,13 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::ImportRun => Some(("import_runs", "id")),
         // CustomTaxonomy uses bundle replay — handled by custom branch in apply_remote_event_lww_tx
         SyncEntity::CustomTaxonomy => None,
+        // Spending module entities
+        SyncEntity::ActivityTaxonomyAssignment => Some(("activity_taxonomy_assignments", "id")),
+        SyncEntity::CategorizationRule => Some(("categorization_rules", "id")),
+        SyncEntity::Event => Some(("events", "id")),
+        SyncEntity::EventType => Some(("event_types", "id")),
+        SyncEntity::BudgetConfig => Some(("budget_config", "id")),
+        SyncEntity::BudgetAllocation => Some(("budget_allocations", "id")),
     }
 }
 
