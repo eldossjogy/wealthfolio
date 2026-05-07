@@ -484,6 +484,14 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_padded_five_char_root() {
+        // Five-character roots leave only a single space of padding, so
+        // a 21-character "GOOGL 260116C00200000" must still normalize.
+        let normalized = normalize_option_symbol("GOOGL 260116C00200000").unwrap();
+        assert_eq!(normalized, "GOOGL260116C00200000");
+    }
+
+    #[test]
     fn test_looks_like_occ_symbol() {
         assert!(looks_like_occ_symbol("AAPL  240119C00195000"));
         assert!(looks_like_occ_symbol("AAPL240119C00195000"));

@@ -374,12 +374,15 @@ pub fn map_broker_activity(
             })
     };
 
-    // Also get option symbol if present
+    // Also get option symbol if present. SnapTrade/Connect sometimes returns
+    // OCC tickers in space-padded form ("BA    260116C00200000"); normalize
+    // to compact form so we don't fragment asset identity per-broker.
     let option_symbol = activity
         .option_symbol
         .as_ref()
         .and_then(|s| s.ticker.clone())
-        .filter(|t| !t.trim().is_empty());
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| wealthfolio_core::utils::occ_symbol::normalize_option_symbol(&t).unwrap_or(t));
     let is_option_activity = option_symbol.is_some() || option_leg_type.is_some();
     // Option contracts are uniquely identified by OCC ticker; adding underlying MIC can fragment identity.
     let exchange_mic = if is_option_activity {
