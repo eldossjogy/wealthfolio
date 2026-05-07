@@ -47,6 +47,7 @@ impl TaxonomyService {
                 color: cat.color.clone(),
                 description: cat.description.clone(),
                 sort_order: current_sort,
+                icon: None,
             });
 
             // Recurse for children
@@ -214,6 +215,7 @@ impl TaxonomyServiceTrait for TaxonomyService {
                 is_system: false,
                 is_single_select: false,
                 sort_order: 0,
+                scope: "asset".to_string(),
             })
             .await?;
 
