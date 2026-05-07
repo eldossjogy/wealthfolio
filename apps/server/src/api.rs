@@ -45,6 +45,7 @@ mod portfolio;
 mod secrets;
 mod settings;
 pub mod shared;
+mod spending;
 #[cfg(feature = "device-sync")]
 mod sync_crypto;
 mod taxonomies;
@@ -108,7 +109,8 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
         .merge(ai_providers::router())
         .merge(ai_chat::router())
         .merge(health::router())
-        .merge(custom_providers::router());
+        .merge(custom_providers::router())
+        .merge(spending::router());
 
     #[cfg(feature = "device-sync")]
     {
