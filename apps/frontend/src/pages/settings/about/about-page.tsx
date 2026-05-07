@@ -114,7 +114,7 @@ export default function AboutSettingsPage() {
                 size="sm"
                 className="inline-flex items-center gap-2"
               >
-                <ExternalLink href="https://github.com/afadil/wealthfolio">
+                <ExternalLink href="https://github.com/wealthfolio/wealthfolio">
                   <Icons.ExternalLink className="h-4 w-4" />
                   GitHub
                 </ExternalLink>
@@ -194,7 +194,7 @@ export default function AboutSettingsPage() {
                 size="sm"
                 className="inline-flex items-center gap-2"
               >
-                <ExternalLink href="https://github.com/afadil/wealthfolio/issues">
+                <ExternalLink href="https://github.com/wealthfolio/wealthfolio/issues">
                   <Icons.AlertCircle className="h-4 w-4" />
                   Report Issue
                 </ExternalLink>

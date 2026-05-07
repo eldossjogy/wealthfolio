@@ -1,6 +1,6 @@
 {
   "name": "@wealthfolio/addon-sdk",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "type": "module",
   "description": "TypeScript SDK for building Wealthfolio addons with enhanced functionality and type safety",
   "main": "dist/index.js",
@@ -38,11 +38,11 @@
   "homepage": "https://wealthfolio.app/addons",
   "repository": {
     "type": "git",
-    "url": "https://github.com/afadil/wealthfolio.git",
+    "url": "https://github.com/wealthfolio/wealthfolio.git",
     "directory": "packages/addon-sdk"
   },
   "bugs": {
-    "url": "https://github.com/afadil/wealthfolio/issues"
+    "url": "https://github.com/wealthfolio/wealthfolio/issues"
   },
   "scripts": {
     "build": "tsup && pnpm run build:types",

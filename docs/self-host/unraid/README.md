@@ -22,7 +22,7 @@ into Unraid (or use the WebTerminal) and run:
 ```bash
 mkdir -p /boot/config/plugins/dockerMan/templates-user
 curl -fsSL \
-  https://raw.githubusercontent.com/afadil/wealthfolio/main/docs/self-host/unraid/template.xml \
+  https://raw.githubusercontent.com/wealthfolio/wealthfolio/main/docs/self-host/unraid/template.xml \
   -o /boot/config/plugins/dockerMan/templates-user/my-wealthfolio.xml
 ```
 

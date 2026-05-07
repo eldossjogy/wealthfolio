@@ -1,6 +1,6 @@
 {
   "name": "@wealthfolio/ui",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "type": "module",
   "description": "Wealthfolio UI components based on shadcn/ui and Tailwind CSS",
   "main": "dist/index.js",
@@ -35,13 +35,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/afadil/wealthfolio.git",
+    "url": "https://github.com/wealthfolio/wealthfolio.git",
     "directory": "packages/ui"
   },
   "bugs": {
-    "url": "https://github.com/afadil/wealthfolio/issues"
+    "url": "https://github.com/wealthfolio/wealthfolio/issues"
   },
-  "homepage": "https://github.com/afadil/wealthfolio/tree/main/packages/ui#readme",
+  "homepage": "https://github.com/wealthfolio/wealthfolio/tree/main/packages/ui#readme",
   "publishConfig": {
     "access": "public"
   },

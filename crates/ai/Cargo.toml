@@ -5,7 +5,7 @@ edition.workspace = true
 description = "AI assistant with LLM orchestration using rig-core for Wealthfolio"
 authors = ["Aziz Fadil"]
 license = "AGPL-3.0"
-repository = "https://github.com/afadil/wealthfolio"
+repository = "https://github.com/wealthfolio/wealthfolio"
 
 [features]
 default = []

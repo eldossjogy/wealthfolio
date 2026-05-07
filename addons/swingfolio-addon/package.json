@@ -1,12 +1,12 @@
 {
   "name": "swingfolio-addon",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "A simple swing stock trading tracker with performance analytics and calendar views",
   "type": "module",
   "main": "dist/addon.js",
   "author": "Wealthfolio",
   "license": "MIT",
-  "homepage": "https://github.com/afadil/wealthfolio",
+  "homepage": "https://github.com/wealthfolio/wealthfolio",
   "keywords": [
     "wealthfolio",
     "addon",

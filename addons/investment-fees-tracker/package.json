@@ -1,12 +1,12 @@
 {
   "name": "investment-fees-tracker-addon",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "An addon for tracking and analyzing investment fees across your portfolio",
   "type": "module",
   "main": "dist/addon.js",
   "author": "Wealthfolio",
   "license": "MIT",
-  "homepage": "https://github.com/afadil/wealthfolio",
+  "homepage": "https://github.com/wealthfolio/wealthfolio",
   "keywords": [
     "wealthfolio",
     "addon",
