@@ -1,0 +1,74 @@
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+
+import { QueryKeys } from "@/lib/query-keys";
+
+import { searchCashActivities } from "../adapters/cash-activities";
+import type {
+  CashActivitySearchRequest,
+  CashActivitySearchResponse,
+  CashActivityWithAssignments,
+} from "../types/cash-activity";
+
+const PAGE_SIZE = 50;
+
+/**
+ * Server-side cash-activity search with infinite scroll. Mirrors the shape of
+ * the main activity page's `useActivitySearch` so the Transactions page can
+ * lean on the same UX pattern (debounced search, load-more, total count).
+ */
+export function useCashActivitySearch(
+  request: Omit<CashActivitySearchRequest, "offset" | "limit">,
+  options: { pageSize?: number; enabled?: boolean } = {},
+) {
+  const pageSize = options.pageSize ?? PAGE_SIZE;
+  const enabled = options.enabled ?? true;
+
+  const stableKey = useMemo(() => JSON.stringify(request), [request]);
+
+  const query = useInfiniteQuery<CashActivitySearchResponse, Error>({
+    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "search", stableKey, pageSize],
+    queryFn: ({ pageParam = 0 }) =>
+      searchCashActivities({
+        ...request,
+        offset: pageParam as number,
+        limit: pageSize,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const fetched = allPages.reduce((sum, p) => sum + p.items.length, 0);
+      return fetched < lastPage.totalCount ? fetched : undefined;
+    },
+    enabled,
+  });
+
+  const items: CashActivityWithAssignments[] = useMemo(
+    () => query.data?.pages.flatMap((p) => p.items) ?? [],
+    [query.data],
+  );
+  const totalCount = query.data?.pages[0]?.totalCount ?? 0;
+
+  return {
+    items,
+    totalCount,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isFetchingNextPage: query.isFetchingNextPage,
+    hasNextPage: query.hasNextPage ?? false,
+    fetchNextPage: query.fetchNextPage,
+    refetch: query.refetch,
+    error: query.error,
+  };
+}
+
+/** Single-page (paginated) variant for grid views — kept for parity with activity hooks. */
+export function useCashActivitySearchPage(
+  request: CashActivitySearchRequest,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<CashActivitySearchResponse, Error>({
+    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "page", JSON.stringify(request)],
+    queryFn: () => searchCashActivities(request),
+    enabled: options.enabled ?? true,
+  });
+}

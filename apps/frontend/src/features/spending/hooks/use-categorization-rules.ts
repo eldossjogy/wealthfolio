@@ -1,0 +1,100 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { QueryKeys } from "@/lib/query-keys";
+
+import {
+  createCategorizationRule,
+  deleteCategorizationRule,
+  importRulePreset,
+  listCategorizationRules,
+  listRulePresets,
+  rerunCategorizationRules,
+  updateCategorizationRule,
+  type ImportPresetResult,
+  type RulePresetSummary,
+} from "../adapters/rules";
+import type {
+  CategorizationRule,
+  NewCategorizationRule,
+  UpdateCategorizationRule,
+} from "../types/rule";
+
+export function useCategorizationRules() {
+  return useQuery<CategorizationRule[], Error>({
+    queryKey: [QueryKeys.SPENDING_RULES],
+    queryFn: listCategorizationRules,
+  });
+}
+
+export function useCategorizationRuleMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES] });
+  };
+
+  const create = useMutation({
+    mutationFn: (rule: NewCategorizationRule) => createCategorizationRule(rule),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Rule created.");
+    },
+    onError: () => toast.error("Failed to create rule."),
+  });
+
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateCategorizationRule }) =>
+      updateCategorizationRule(id, patch),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Rule updated.");
+    },
+    onError: () => toast.error("Failed to update rule."),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteCategorizationRule(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Rule deleted.");
+    },
+    onError: () => toast.error("Failed to delete rule."),
+  });
+
+  const rerun = useMutation({
+    mutationFn: (onlyUncategorized: boolean) => rerunCategorizationRules(onlyUncategorized),
+    onSuccess: (count, onlyUncategorized) => {
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      const verb = onlyUncategorized ? "Categorized" : "Reclassified";
+      toast.success(`${verb} ${count} activit${count === 1 ? "y" : "ies"}.`);
+    },
+    onError: () => toast.error("Failed to re-run rules."),
+  });
+
+  return { create, update, remove, rerun };
+}
+
+export function useRulePresets() {
+  return useQuery<RulePresetSummary[], Error>({
+    queryKey: [QueryKeys.SPENDING_RULES, "presets"],
+    queryFn: listRulePresets,
+  });
+}
+
+export function useImportRulePreset() {
+  const qc = useQueryClient();
+  return useMutation<ImportPresetResult, Error, string>({
+    mutationFn: (presetId: string) => importRulePreset(presetId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES] });
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES, "presets"] });
+      const skipped = result.skippedExisting + result.skippedUnknownCategory;
+      const skippedSuffix = skipped > 0 ? `, ${skipped} skipped` : "";
+      toast.success(
+        `Imported ${result.added} rule${result.added === 1 ? "" : "s"}${skippedSuffix}.`,
+      );
+    },
+    onError: () => toast.error("Failed to import preset."),
+  });
+}
