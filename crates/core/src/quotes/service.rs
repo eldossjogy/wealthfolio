@@ -32,6 +32,7 @@ use crate::assets::{
 };
 use crate::errors::Result;
 use crate::fx::currency::{get_normalization_rule, normalize_currency_code};
+use crate::portfolio::snapshot::is_quantity_significant;
 use crate::secrets::SecretStore;
 
 use wealthfolio_market_data::{exchanges_for_currency, mic_to_exchange_name};
@@ -136,6 +137,10 @@ fn extract_provider_id_from_sync_error(error: &str) -> Option<&'static str> {
     super::constants::MARKET_DATA_PROVIDER_IDS
         .into_iter()
         .find(|provider_id| error.contains(provider_id))
+}
+
+fn has_open_position_quantity(quantity: &rust_decimal::Decimal) -> bool {
+    !quantity.is_zero() && is_quantity_significant(quantity)
 }
 
 fn provider_config_for_symbol_resolution(
@@ -1499,7 +1504,7 @@ where
         let open_asset_ids: Vec<String> = current_holdings
             .iter()
             .filter_map(|(asset_id, quantity)| {
-                if *quantity > Decimal::ZERO {
+                if has_open_position_quantity(quantity) {
                     Some(asset_id.clone())
                 } else {
                     None
@@ -1510,7 +1515,8 @@ where
         if !open_asset_ids.is_empty() {
             let open_assets = self.asset_repo.list_by_asset_ids(&open_asset_ids)?;
             let open_sync_states = self.sync_state_store.get_by_asset_ids(&open_asset_ids)?;
-            let mut states_to_upsert = Vec::new();
+            let mut open_states_to_upsert = Vec::new();
+            let mut assets_to_reactivate = Vec::new();
 
             for asset in open_assets {
                 if asset.kind == AssetKind::Fx {
@@ -1519,10 +1525,10 @@ where
 
                 if !asset.is_active {
                     debug!(
-                        "Reactivating asset {} from current holdings before quote sync",
+                        "Queueing asset {} for reactivation from current holdings before quote sync",
                         asset.id
                     );
-                    self.asset_repo.reactivate(&asset.id).await?;
+                    assets_to_reactivate.push(asset.id.clone());
                 }
 
                 if asset.quote_mode != QuoteMode::Market {
@@ -1533,21 +1539,27 @@ where
                     Some(mut state) if !state.is_active || state.position_closed_date.is_some() => {
                         debug!("Marking sync state active for open position {}", asset.id);
                         state.mark_active();
-                        states_to_upsert.push(state);
+                        open_states_to_upsert.push(state);
                     }
                     Some(_) => {}
                     None => {
                         debug!("Creating sync state for open position {}", asset.id);
                         let mut state = QuoteSyncState::new(asset.id.clone(), String::new());
                         state.sync_priority = SyncCategory::Active.default_priority();
-                        states_to_upsert.push(state);
+                        open_states_to_upsert.push(state);
                     }
                 }
             }
 
-            if !states_to_upsert.is_empty() {
+            if !assets_to_reactivate.is_empty() {
+                self.asset_repo
+                    .reactivate_batch(&assets_to_reactivate)
+                    .await?;
+            }
+
+            if !open_states_to_upsert.is_empty() {
                 self.sync_state_store
-                    .upsert_batch(&states_to_upsert)
+                    .upsert_batch(&open_states_to_upsert)
                     .await?;
             }
         }
@@ -1567,6 +1579,7 @@ where
 
         let mut marked_active = 0;
         let mut marked_inactive = 0;
+        let mut lifecycle_states_to_upsert = Vec::new();
 
         for sync_state in all_sync_states {
             let asset_id = &sync_state.asset_id;
@@ -1585,17 +1598,19 @@ where
                 .get(asset_id)
                 .copied()
                 .unwrap_or(Decimal::ZERO);
-            let has_open_position = current_qty > Decimal::ZERO;
+            let has_open_position = has_open_position_quantity(&current_qty);
 
             if has_open_position {
-                // Asset has an open position
+                // Any non-zero held quantity means the catalog asset must remain usable.
                 if !sync_state.is_active {
                     // Was inactive, now has a position - mark as active (re-opened)
                     debug!(
                         "Marking asset {} as active (re-opened position, qty={})",
                         asset_id, current_qty
                     );
-                    self.sync_state_store.mark_active(asset_id).await?;
+                    let mut state = sync_state.clone();
+                    state.mark_active();
+                    lifecycle_states_to_upsert.push(state);
                     marked_active += 1;
                 }
                 // If already active, no change needed
@@ -1604,11 +1619,19 @@ where
                 if sync_state.is_active {
                     // Was active, now closed - mark as inactive with today's date
                     debug!("Marking asset {} as inactive (position closed)", asset_id);
-                    self.sync_state_store.mark_inactive(asset_id, today).await?;
+                    let mut state = sync_state.clone();
+                    state.mark_closed(today);
+                    lifecycle_states_to_upsert.push(state);
                     marked_inactive += 1;
                 }
                 // If already inactive, no change needed (preserve existing closed date)
             }
+        }
+
+        if !lifecycle_states_to_upsert.is_empty() {
+            self.sync_state_store
+                .upsert_batch(&lifecycle_states_to_upsert)
+                .await?;
         }
 
         if marked_active > 0 || marked_inactive > 0 {
@@ -3239,6 +3262,50 @@ mod tests {
             stored.sync_priority,
             SyncCategory::Active.default_priority()
         );
+    }
+
+    #[tokio::test]
+    async fn test_update_position_status_treats_negative_quantity_as_open() {
+        let asset_id = "asset_1".to_string();
+        let asset = Asset {
+            id: asset_id.clone(),
+            kind: AssetKind::Investment,
+            quote_mode: QuoteMode::Market,
+            is_active: false,
+            ..Default::default()
+        };
+        let reactivated = Arc::new(Mutex::new(Vec::new()));
+        let asset_repo = PositionStatusAssetRepository {
+            assets: HashMap::from([(asset_id.clone(), asset)]),
+            reactivated: Arc::clone(&reactivated),
+            deactivated: Arc::new(Mutex::new(Vec::new())),
+        };
+        let states = Arc::new(Mutex::new(HashMap::new()));
+        let service = QuoteService::new(
+            Arc::new(NoopQuoteStore),
+            Arc::new(MockSyncStateStore {
+                provider_sync_stats: vec![],
+                with_errors: vec![],
+                states: Arc::clone(&states),
+            }),
+            Arc::new(MockProviderSettingsStore { providers: vec![] }),
+            Arc::new(asset_repo),
+            Arc::new(NoopActivityRepository),
+            Arc::new(MockSecretStore),
+        )
+        .await
+        .unwrap();
+        let current_holdings = HashMap::from([(asset_id.clone(), dec!(-1))]);
+
+        service
+            .update_position_status_from_holdings(&current_holdings)
+            .await
+            .unwrap();
+
+        assert_eq!(*reactivated.lock().unwrap(), vec![asset_id.clone()]);
+        let stored = states.lock().unwrap().get(&asset_id).cloned().unwrap();
+        assert!(stored.is_active);
+        assert!(stored.position_closed_date.is_none());
     }
 
     #[tokio::test]

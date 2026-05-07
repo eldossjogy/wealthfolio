@@ -431,6 +431,33 @@ impl AssetRepositoryTrait for AssetRepository {
             .await
     }
 
+    async fn reactivate_batch(&self, asset_ids: &[String]) -> Result<()> {
+        if asset_ids.is_empty() {
+            return Ok(());
+        }
+
+        let asset_ids = asset_ids.to_vec();
+        self.writer
+            .exec_tx(move |tx| -> Result<()> {
+                diesel::update(assets::table.filter(assets::id.eq_any(&asset_ids)))
+                    .set(assets::is_active.eq(1))
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                let updated_rows = assets::table
+                    .filter(assets::id.eq_any(&asset_ids))
+                    .select(AssetDB::as_select())
+                    .load::<AssetDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+                for updated in updated_rows {
+                    tx.update(&updated)?;
+                }
+
+                Ok(())
+            })
+            .await
+    }
+
     async fn copy_user_metadata(&self, source_id: &str, target_id: &str) -> Result<()> {
         let source_id_owned = source_id.to_string();
         let target_id_owned = target_id.to_string();
@@ -464,7 +491,8 @@ impl AssetRepositoryTrait for AssetRepository {
         self.writer
             .exec_tx(move |tx| -> Result<Vec<String>> {
                 // Find active INVESTMENT assets with no activities and no holdings history in
-                // non-archived accounts.
+                // non-archived accounts. Any historical snapshot reference is enough to keep
+                // the asset active because old valuations may still need its quote history.
                 let orphan_ids: Vec<String> = assets::table
                     .select(assets::id)
                     .filter(assets::kind.eq("INVESTMENT"))
@@ -507,5 +535,157 @@ impl AssetRepositoryTrait for AssetRepository {
                 Ok(orphan_ids)
             })
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_pool, get_connection, init, run_migrations, write_actor::spawn_writer};
+    use diesel::r2d2::ConnectionManager;
+    use diesel::sql_query;
+    use diesel::sql_types::Text;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    fn setup_db() -> (Arc<Pool<ConnectionManager<SqliteConnection>>>, WriteHandle) {
+        std::env::set_var("CONNECT_API_URL", "http://test.local");
+        let app_data = tempdir()
+            .expect("tempdir")
+            .keep()
+            .to_string_lossy()
+            .to_string();
+        let db_path = init(&app_data).expect("init db");
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let writer = spawn_writer(pool.as_ref().clone()).expect("spawn writer");
+        (pool, writer)
+    }
+
+    fn insert_asset(conn: &mut SqliteConnection, asset_id: &str) {
+        sql_query(
+            "INSERT INTO assets (
+                id, kind, name, display_code, is_active, quote_mode, quote_ccy,
+                created_at, updated_at
+             ) VALUES (?, 'INVESTMENT', ?, ?, 1, 'MARKET', 'USD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .bind::<Text, _>(asset_id)
+        .bind::<Text, _>(asset_id)
+        .bind::<Text, _>(asset_id)
+        .execute(conn)
+        .expect("insert asset");
+    }
+
+    fn insert_account(conn: &mut SqliteConnection, account_id: &str, archived: bool) {
+        sql_query(format!(
+            "INSERT INTO accounts (id, name, account_type, `group`, currency, is_default, is_active, \
+             created_at, updated_at, platform_id, account_number, meta, provider, provider_account_id, \
+             is_archived, tracking_mode) VALUES ('{}', 'Test', 'cash', NULL, 'USD', 1, 1, \
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL, {}, 'portfolio')",
+            account_id,
+            if archived { 1 } else { 0 }
+        ))
+        .execute(conn)
+        .expect("insert account");
+    }
+
+    fn insert_activity(
+        conn: &mut SqliteConnection,
+        activity_id: &str,
+        account_id: &str,
+        asset_id: &str,
+    ) {
+        sql_query(
+            "INSERT INTO activities (
+                id, account_id, asset_id, activity_type, status, activity_date,
+                quantity, unit_price, amount, fee, currency,
+                is_user_modified, needs_review, created_at, updated_at
+             ) VALUES (?, ?, ?, 'BUY', 'POSTED', '2026-01-01T00:00:00Z',
+                '1', '1', '1', '0', 'USD', 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind::<Text, _>(activity_id)
+        .bind::<Text, _>(account_id)
+        .bind::<Text, _>(asset_id)
+        .execute(conn)
+        .expect("insert activity");
+    }
+
+    fn insert_holdings_snapshot(
+        conn: &mut SqliteConnection,
+        account_id: &str,
+        snapshot_date: &str,
+        positions: &str,
+    ) {
+        let snapshot_id = format!("{}_{}", account_id, snapshot_date);
+        sql_query(
+            "INSERT INTO holdings_snapshots (
+                id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis,
+                net_contribution, calculated_at, net_contribution_base,
+                cash_total_account_currency, cash_total_base_currency, source
+             ) VALUES (?, ?, ?, 'USD', ?, '{}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'CALCULATED')",
+        )
+        .bind::<Text, _>(snapshot_id)
+        .bind::<Text, _>(account_id)
+        .bind::<Text, _>(snapshot_date)
+        .bind::<Text, _>(positions)
+        .execute(conn)
+        .expect("insert holdings snapshot");
+    }
+
+    fn is_active(conn: &mut SqliteConnection, asset_id: &str) -> i32 {
+        assets::table
+            .filter(assets::id.eq(asset_id))
+            .select(assets::is_active)
+            .first(conn)
+            .expect("asset active flag")
+    }
+
+    #[tokio::test]
+    async fn orphan_cleanup_preserves_non_archived_snapshot_history() {
+        let (pool, writer) = setup_db();
+        let repo = AssetRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "acc-open", false);
+        insert_account(&mut conn, "acc-archived", true);
+        for asset_id in [
+            "snapshot_only",
+            "archived_only",
+            "with_activity",
+            "plain_orphan",
+        ] {
+            insert_asset(&mut conn, asset_id);
+        }
+
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-open",
+            "2026-01-01",
+            r#"{"snapshot_only":{"quantity":"0"}}"#,
+        );
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-archived",
+            "2026-01-01",
+            r#"{"archived_only":{"quantity":"5"}}"#,
+        );
+        insert_activity(&mut conn, "activity-1", "acc-open", "with_activity");
+        drop(conn);
+
+        let orphan_ids = repo
+            .deactivate_orphaned_investments()
+            .await
+            .expect("cleanup orphans");
+
+        assert!(!orphan_ids.contains(&"snapshot_only".to_string()));
+        assert!(!orphan_ids.contains(&"with_activity".to_string()));
+        assert!(orphan_ids.contains(&"archived_only".to_string()));
+        assert!(orphan_ids.contains(&"plain_orphan".to_string()));
+
+        let mut conn = get_connection(&pool).expect("conn");
+        assert_eq!(is_active(&mut conn, "snapshot_only"), 1);
+        assert_eq!(is_active(&mut conn, "with_activity"), 1);
+        assert_eq!(is_active(&mut conn, "archived_only"), 0);
+        assert_eq!(is_active(&mut conn, "plain_orphan"), 0);
     }
 }

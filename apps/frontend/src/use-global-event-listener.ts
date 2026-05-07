@@ -126,7 +126,9 @@ const useGlobalEventListener = () => {
             onClick: () => navigateRef.current("/health"),
           },
         });
-      } else if (skipped_reasons.length > 0) {
+      }
+
+      if (skipped_reasons.length > 0) {
         const [assetId, reason] = skipped_reasons[0];
         const suffix =
           skipped_reasons.length === 1

@@ -126,6 +126,9 @@ pub async fn execute_health_fix(
     if action.id == "sync_prices" || action.id == "retry_sync" {
         let asset_ids: Vec<String> = serde_json::from_value(action.payload.clone())
             .map_err(|e| format!("Failed to parse asset IDs: {}", e))?;
+        if asset_ids.is_empty() {
+            return Err("No assets selected for price sync".to_string());
+        }
 
         info!(
             "Syncing market data for {} assets: {:?}",

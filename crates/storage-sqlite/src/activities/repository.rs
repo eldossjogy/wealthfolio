@@ -1568,6 +1568,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
                  JOIN json_each(snapshot.positions) position \
                  WHERE account.is_archived = 0 \
                    AND position.key IN ({}) \
+                   AND CAST(COALESCE(json_extract(position.value, '$.quantity'), '0') AS REAL) <> 0 \
                  GROUP BY position.key",
                 placeholders
             );
@@ -2016,15 +2017,42 @@ mod tests {
     }
 
     fn insert_account(conn: &mut SqliteConnection, account_id: &str) {
+        insert_account_with_archived(conn, account_id, false);
+    }
+
+    fn insert_account_with_archived(conn: &mut SqliteConnection, account_id: &str, archived: bool) {
         diesel::sql_query(format!(
             "INSERT INTO accounts (id, name, account_type, `group`, currency, is_default, is_active, \
              created_at, updated_at, platform_id, account_number, meta, provider, provider_account_id, \
              is_archived, tracking_mode) VALUES ('{}', 'Test', 'cash', NULL, 'USD', 1, 1, \
-             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL, 0, 'portfolio')",
-            account_id
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL, {}, 'portfolio')",
+            account_id,
+            if archived { 1 } else { 0 }
         ))
         .execute(conn)
         .expect("insert account");
+    }
+
+    fn insert_holdings_snapshot(
+        conn: &mut SqliteConnection,
+        account_id: &str,
+        snapshot_date: &str,
+        positions: &str,
+    ) {
+        let snapshot_id = format!("{}_{}", account_id, snapshot_date);
+        sql_query(
+            "INSERT INTO holdings_snapshots (
+                id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis,
+                net_contribution, calculated_at, net_contribution_base,
+                cash_total_account_currency, cash_total_base_currency, source
+             ) VALUES (?, ?, ?, 'USD', ?, '{}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'CALCULATED')",
+        )
+        .bind::<Text, _>(snapshot_id)
+        .bind::<Text, _>(account_id)
+        .bind::<Text, _>(snapshot_date)
+        .bind::<Text, _>(positions)
+        .execute(conn)
+        .expect("insert holdings snapshot");
     }
 
     fn insert_template(conn: &mut SqliteConnection, template_id: &str) {
@@ -2141,6 +2169,67 @@ mod tests {
             .select(activities::is_user_modified)
             .first(conn)
             .expect("activity is_user_modified")
+    }
+
+    #[tokio::test]
+    async fn holdings_snapshot_bounds_ignore_zero_quantity_and_archived_accounts() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-open");
+        insert_account_with_archived(&mut conn, "acc-archived", true);
+
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-open",
+            "2026-01-01",
+            r#"{"AAPL":{"quantity":"3"},"MSFT":{"quantity":"0"}}"#,
+        );
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-open",
+            "2026-02-01",
+            r#"{"AAPL":{"quantity":"0"},"MSFT":{"quantity":"4"}}"#,
+        );
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-open",
+            "2026-03-01",
+            r#"{"AAPL":{"quantity":"2"}}"#,
+        );
+        insert_holdings_snapshot(
+            &mut conn,
+            "acc-archived",
+            "2026-01-01",
+            r#"{"ARCH":{"quantity":"5"}}"#,
+        );
+
+        let asset_ids = vec![
+            "AAPL".to_string(),
+            "MSFT".to_string(),
+            "ARCH".to_string(),
+            "NONE".to_string(),
+        ];
+        let bounds = repo
+            .get_holdings_snapshot_bounds_for_assets(&asset_ids)
+            .expect("holdings bounds");
+
+        assert_eq!(
+            bounds.get("AAPL"),
+            Some(&(
+                Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+            ))
+        );
+        assert_eq!(
+            bounds.get("MSFT"),
+            Some(&(
+                Some(NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()),
+                Some(NaiveDate::from_ymd_opt(2026, 2, 1).unwrap())
+            ))
+        );
+        assert!(!bounds.contains_key("ARCH"));
+        assert!(!bounds.contains_key("NONE"));
     }
 
     #[tokio::test]
