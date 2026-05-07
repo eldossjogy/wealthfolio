@@ -439,18 +439,20 @@ impl AssetRepositoryTrait for AssetRepository {
         let asset_ids = asset_ids.to_vec();
         self.writer
             .exec_tx(move |tx| -> Result<()> {
-                diesel::update(assets::table.filter(assets::id.eq_any(&asset_ids)))
-                    .set(assets::is_active.eq(1))
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
+                for chunk in chunk_for_sqlite(&asset_ids) {
+                    diesel::update(assets::table.filter(assets::id.eq_any(chunk)))
+                        .set(assets::is_active.eq(1))
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
 
-                let updated_rows = assets::table
-                    .filter(assets::id.eq_any(&asset_ids))
-                    .select(AssetDB::as_select())
-                    .load::<AssetDB>(tx.conn())
-                    .map_err(StorageError::from)?;
-                for updated in updated_rows {
-                    tx.update(&updated)?;
+                    let updated_rows = assets::table
+                        .filter(assets::id.eq_any(chunk))
+                        .select(AssetDB::as_select())
+                        .load::<AssetDB>(tx.conn())
+                        .map_err(StorageError::from)?;
+                    for updated in updated_rows {
+                        tx.update(&updated)?;
+                    }
                 }
 
                 Ok(())
@@ -542,6 +544,7 @@ impl AssetRepositoryTrait for AssetRepository {
 mod tests {
     use super::*;
     use crate::db::{create_pool, get_connection, init, run_migrations, write_actor::spawn_writer};
+    use crate::utils::SQLITE_MAX_PARAMS_CHUNK;
     use diesel::r2d2::ConnectionManager;
     use diesel::sql_query;
     use diesel::sql_types::Text;
@@ -687,5 +690,33 @@ mod tests {
         assert_eq!(is_active(&mut conn, "with_activity"), 1);
         assert_eq!(is_active(&mut conn, "archived_only"), 0);
         assert_eq!(is_active(&mut conn, "plain_orphan"), 0);
+    }
+
+    #[tokio::test]
+    async fn reactivate_batch_handles_more_than_one_sqlite_chunk() {
+        let (pool, writer) = setup_db();
+        let repo = AssetRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        let asset_ids: Vec<String> = (0..(SQLITE_MAX_PARAMS_CHUNK * 2 + 1))
+            .map(|i| format!("asset-{i}"))
+            .collect();
+
+        for asset_id in &asset_ids {
+            insert_asset(&mut conn, asset_id);
+            diesel::update(assets::table.filter(assets::id.eq(asset_id)))
+                .set(assets::is_active.eq(0))
+                .execute(&mut conn)
+                .expect("deactivate asset");
+        }
+        drop(conn);
+
+        repo.reactivate_batch(&asset_ids)
+            .await
+            .expect("reactivate assets");
+
+        let mut conn = get_connection(&pool).expect("conn");
+        for asset_id in &asset_ids {
+            assert_eq!(is_active(&mut conn, asset_id), 1);
+        }
     }
 }

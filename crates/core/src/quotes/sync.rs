@@ -120,8 +120,14 @@ fn clamp_end_date_for_fetch(
     }
 }
 
-fn should_treat_fetch_error_as_non_fatal(category: &SyncCategory, error: &Error) -> bool {
-    if !matches!(category, SyncCategory::NeedsBackfill | SyncCategory::Closed) {
+fn should_treat_fetch_error_as_non_fatal(
+    category: &SyncCategory,
+    error: &Error,
+    suppress_closed_fetch_errors: bool,
+) -> bool {
+    if !matches!(category, SyncCategory::NeedsBackfill)
+        && !(matches!(category, SyncCategory::Closed) && suppress_closed_fetch_errors)
+    {
         return false;
     }
 
@@ -280,7 +286,7 @@ fn should_purge_provider_quotes(mode: SyncMode, inputs: &SyncPlanningInputs) -> 
 fn calculate_targeted_closed_incremental_window(
     inputs: &SyncPlanningInputs,
     fetch_end_date: NaiveDate,
-) -> (NaiveDate, NaiveDate) {
+) -> Option<(NaiveDate, NaiveDate)> {
     let end_date = inputs
         .position_closed_date
         .map(|closed_date| closed_date.min(fetch_end_date))
@@ -295,7 +301,11 @@ fn calculate_targeted_closed_incremental_window(
         })
         .unwrap_or_else(|| end_date - Duration::days(MIN_SYNC_LOOKBACK_DAYS));
 
-    (start_date, end_date)
+    if start_date > end_date {
+        None
+    } else {
+        Some((start_date, end_date))
+    }
 }
 
 // Test helpers - expose lock functions for testing
@@ -357,6 +367,8 @@ pub enum AssetSkipReason {
     SyncInProgress,
     /// Too many consecutive sync failures (exceeds MAX_SYNC_ERRORS).
     TooManyErrors,
+    /// No fetchable quote window remains for the requested sync.
+    NoQuoteWindow,
     /// Bond has matured — price is par, no further sync needed.
     MaturedBond,
     /// Option has expired — no further quotes available.
@@ -373,6 +385,7 @@ impl std::fmt::Display for AssetSkipReason {
             AssetSkipReason::NotFound => write!(f, "Asset not found"),
             AssetSkipReason::SyncInProgress => write!(f, "Sync already in progress"),
             AssetSkipReason::TooManyErrors => write!(f, "Too many consecutive sync failures"),
+            AssetSkipReason::NoQuoteWindow => write!(f, "No quote refresh needed"),
             AssetSkipReason::MaturedBond => write!(f, "Bond has matured (price is par)"),
             AssetSkipReason::ExpiredOption => write!(f, "Option has expired"),
         }
@@ -941,7 +954,11 @@ where
                 let sync_failure_message =
                     format_sync_failure_message(&error, fetch_error.provider_id.as_deref());
 
-                if should_treat_fetch_error_as_non_fatal(&plan.category, &error) {
+                if should_treat_fetch_error_as_non_fatal(
+                    &plan.category,
+                    &error,
+                    plan.suppress_closed_fetch_errors,
+                ) {
                     if let Err(state_err) = self.sync_state_store.update_after_sync(&asset.id).await
                     {
                         warn!(
@@ -1189,6 +1206,7 @@ where
                             quote_symbol: None,
                             currency: asset.quote_ccy.clone(),
                             purge_provider_quotes: false,
+                            suppress_closed_fetch_errors: false,
                         });
                     }
                 }
@@ -1216,6 +1234,7 @@ where
                             quote_symbol: None,
                             currency: asset.quote_ccy.clone(),
                             purge_provider_quotes: false,
+                            suppress_closed_fetch_errors: false,
                         });
                     }
                 }
@@ -1252,6 +1271,7 @@ where
                 quote_symbol: None,
                 currency: asset.quote_ccy.clone(),
                 purge_provider_quotes: false,
+                suppress_closed_fetch_errors: false,
             });
         }
 
@@ -1493,6 +1513,7 @@ where
                             quote_symbol: None,
                             currency: asset.quote_ccy.clone(),
                             purge_provider_quotes: false,
+                            suppress_closed_fetch_errors: false,
                         });
                     }
                 }
@@ -1511,6 +1532,7 @@ where
                             quote_symbol: None,
                             currency: asset.quote_ccy.clone(),
                             purge_provider_quotes: false,
+                            suppress_closed_fetch_errors: false,
                         });
                     }
                 }
@@ -1518,7 +1540,13 @@ where
             }
 
             let (start_date, end_date) = if targeted_closed_incremental {
-                calculate_targeted_closed_incremental_window(&planning_inputs, fetch_end_date)
+                let Some(window) =
+                    calculate_targeted_closed_incremental_window(&planning_inputs, fetch_end_date)
+                else {
+                    result.add_skipped(asset.id.clone(), AssetSkipReason::NoQuoteWindow);
+                    continue;
+                };
+                window
             } else {
                 self.calculate_date_range_for_mode(
                     &planning_inputs,
@@ -1539,6 +1567,8 @@ where
                 quote_symbol: None,
                 currency: asset.quote_ccy.clone(),
                 purge_provider_quotes: should_purge_provider_quotes(mode, &planning_inputs),
+                suppress_closed_fetch_errors: matches!(category, SyncCategory::Closed)
+                    && !targeted_sync,
             });
         }
 
@@ -1722,7 +1752,8 @@ mod tests {
         let err = Error::MarketData(MarketDataError::NoData);
         assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
-            &err
+            &err,
+            false
         ));
     }
 
@@ -1731,7 +1762,8 @@ mod tests {
         let err = Error::MarketData(MarketDataError::NotFound("No data found".to_string()));
         assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
-            &err
+            &err,
+            false
         ));
     }
 
@@ -1742,7 +1774,8 @@ mod tests {
         ));
         assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::NeedsBackfill,
-            &err
+            &err,
+            false
         ));
     }
 
@@ -1751,7 +1784,18 @@ mod tests {
         let err = Error::MarketData(MarketDataError::NoData);
         assert!(should_treat_fetch_error_as_non_fatal(
             &SyncCategory::Closed,
-            &err
+            &err,
+            true
+        ));
+    }
+
+    #[test]
+    fn test_targeted_closed_history_no_data_error_remains_fatal() {
+        let err = Error::MarketData(MarketDataError::NoData);
+        assert!(!should_treat_fetch_error_as_non_fatal(
+            &SyncCategory::Closed,
+            &err,
+            false
         ));
     }
 
@@ -1760,7 +1804,8 @@ mod tests {
         let err = Error::MarketData(MarketDataError::NoData);
         assert!(!should_treat_fetch_error_as_non_fatal(
             &SyncCategory::Active,
-            &err
+            &err,
+            true
         ));
     }
 
@@ -2029,6 +2074,10 @@ mod tests {
             AssetSkipReason::SyncInProgress.to_string(),
             "Sync already in progress"
         );
+        assert_eq!(
+            AssetSkipReason::NoQuoteWindow.to_string(),
+            "No quote refresh needed"
+        );
     }
 
     #[test]
@@ -2131,10 +2180,31 @@ mod tests {
         let (start, end) = calculate_targeted_closed_incremental_window(
             &inputs,
             NaiveDate::from_ymd_opt(2026, 5, 6).unwrap(),
-        );
+        )
+        .unwrap();
 
         assert_eq!(start, NaiveDate::from_ymd_opt(2026, 1, 27).unwrap());
         assert_eq!(end, NaiveDate::from_ymd_opt(2026, 2, 15).unwrap());
+    }
+
+    #[test]
+    fn test_targeted_closed_incremental_window_returns_none_when_already_current() {
+        let inputs = SyncPlanningInputs {
+            is_active: false,
+            position_closed_date: Some(NaiveDate::from_ymd_opt(2026, 2, 15).unwrap()),
+            activity_min: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            activity_max: Some(NaiveDate::from_ymd_opt(2026, 2, 15).unwrap()),
+            quote_min: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            quote_max: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+        };
+
+        assert_eq!(
+            calculate_targeted_closed_incremental_window(
+                &inputs,
+                NaiveDate::from_ymd_opt(2026, 5, 6).unwrap(),
+            ),
+            None
+        );
     }
 
     #[test]

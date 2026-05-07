@@ -333,6 +333,10 @@ pub struct SymbolSyncPlan {
     /// When true, delete all non-manual quotes before upserting fresh data.
     /// Set for BackfillHistory mode to remove stale/wrong dates.
     pub purge_provider_quotes: bool,
+    /// When true, tolerate provider "no data" style failures for closed positions.
+    /// Broad history jobs use this to keep old closed/delisted assets best-effort;
+    /// targeted user requests keep errors visible.
+    pub suppress_closed_fetch_errors: bool,
 }
 
 /// Domain model for quote sync state.
