@@ -42,6 +42,7 @@ pub mod limits;
 pub mod market_data;
 pub mod portfolio;
 pub mod settings;
+pub mod spending;
 pub mod sync;
 pub mod taxonomies;
 
