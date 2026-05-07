@@ -27,6 +27,7 @@ import type {
   NewTaxonomyCategory,
   Taxonomy,
   TaxonomyCategory,
+  TaxonomyScope,
   TaxonomyWithCategories,
 } from "@/lib/types";
 
@@ -34,11 +35,24 @@ import type {
 // Taxonomy Queries
 // ============================================================================
 
-export function useTaxonomies() {
-  return useQuery<Taxonomy[], Error>({
+/**
+ * Fetch taxonomies, optionally filtered by scope.
+ * - scope="asset" (default for legacy rows): asset classifications shown in Settings → Classifications
+ * - scope="activity": spending categories / income sources shown in Spending → Categories
+ */
+export function useTaxonomies(options?: { scope?: TaxonomyScope }) {
+  const query = useQuery<Taxonomy[], Error>({
     queryKey: [QueryKeys.TAXONOMIES],
     queryFn: getTaxonomies,
   });
+
+  if (options?.scope) {
+    return {
+      ...query,
+      data: query.data?.filter((t) => (t.scope ?? "asset") === options.scope),
+    };
+  }
+  return query;
 }
 
 export function useTaxonomy(id: string | null) {

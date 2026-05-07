@@ -170,7 +170,14 @@ export const ActivityTable = ({
           const isOptionActivity = instrumentType === "OPTION";
           const parsedOption = isOptionActivity ? parseOccSymbol(symbol) : null;
 
-          const displaySymbol = isCash ? "Cash" : parsedOption ? parsedOption.underlying : symbol;
+          // For cash activities, surface the payee/merchant from notes when available
+          // (e.g., "AMAZON*MARKETPLACE" instead of just "Cash").
+          const cashPayee = isCash ? (row.original.comment ?? "").trim() : "";
+          const displaySymbol = isCash
+            ? cashPayee || "Cash"
+            : parsedOption
+              ? parsedOption.underlying
+              : symbol;
           const avatarSymbol = isCash ? "$CASH" : symbol;
           const normalizedSymbol = (parsedOption?.underlying ?? symbol).trim().toUpperCase();
           const shouldShowExchange =
@@ -200,7 +207,11 @@ export const ActivityTable = ({
                   ) : null}
                 </span>
                 <span className="text-muted-foreground truncate text-xs font-light">
-                  {isCash ? String(currency) : (optionSubtitle ?? String(assetName ?? currency))}
+                  {isCash
+                    ? cashPayee
+                      ? `Cash · ${String(currency)}`
+                      : String(currency)
+                    : (optionSubtitle ?? String(assetName ?? currency))}
                 </span>
               </div>
             </div>

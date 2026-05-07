@@ -116,6 +116,9 @@ export interface Activity {
   notes?: string;
   metadata?: Record<string, unknown>;
 
+  /** Optional spending event tag (cash activities). */
+  eventId?: string | null;
+
   // Source identity
   sourceSystem?: string; // SNAPTRADE, PLAID, MANUAL, CSV
   sourceRecordId?: string;
@@ -1426,6 +1429,8 @@ export interface NetWorthConfig {
 /**
  * Taxonomy - a classification system (e.g., "Asset Classes", "Regions", "Industries")
  */
+export type TaxonomyScope = "asset" | "activity";
+
 export interface Taxonomy {
   id: string;
   name: string;
@@ -1436,6 +1441,8 @@ export interface Taxonomy {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** What entity kind this taxonomy classifies. Defaults to "asset" for backwards compat. */
+  scope: TaxonomyScope;
 }
 
 /**
@@ -1452,6 +1459,8 @@ export interface TaxonomyCategory {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** Optional Lucide icon name for UI display (used by spending categories). */
+  icon?: string | null;
 }
 
 /**
@@ -1487,6 +1496,7 @@ export interface NewTaxonomy {
   isSystem: boolean;
   isSingleSelect: boolean;
   sortOrder: number;
+  scope?: TaxonomyScope;
 }
 
 /**
@@ -1501,6 +1511,7 @@ export interface NewTaxonomyCategory {
   color: string;
   description?: string | null;
   sortOrder: number;
+  icon?: string | null;
 }
 
 /**
