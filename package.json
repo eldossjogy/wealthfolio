@@ -13,6 +13,7 @@
     "dev:tauri": "pnpm --filter frontend dev:tauri",
     "dev:addons": "pnpm --filter frontend dev:addons",
     "dev:web": "node scripts/dev-web.mjs",
+    "dev:web:log": "node scripts/dev-web.mjs --file-log",
     "build": "pnpm --filter frontend build",
     "build:tauri": "pnpm --filter frontend build:tauri",
     "build:types": "pnpm -r run build:types",

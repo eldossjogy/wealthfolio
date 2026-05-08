@@ -1,6 +1,9 @@
 # Claude worktrees
 .claude/
 
+# Local hidden directories
+.*
+
 # Build outputs
 dist/
 coverage/
