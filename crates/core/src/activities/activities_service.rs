@@ -3495,6 +3495,7 @@ impl ActivityServiceTrait for ActivityService {
                 asset_id: None,
                 isin: candidate.isin.clone(),
                 force_import: false,
+                is_external: None,
             })
             .collect();
 

@@ -3713,6 +3713,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -3794,6 +3795,7 @@ mod tests {
                 asset_id: None,
                 isin: Some("ca82509l1076".to_string()),
                 force_import: false,
+                is_external: None,
             },
             ActivityImport {
                 id: None,
@@ -3825,6 +3827,7 @@ mod tests {
                 asset_id: None,
                 isin: Some("CA82509L1077".to_string()),
                 force_import: false,
+                is_external: None,
             },
         ];
 
@@ -3960,6 +3963,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4030,6 +4034,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4094,6 +4099,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4164,6 +4170,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4242,6 +4249,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4310,6 +4318,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4374,6 +4383,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4444,6 +4454,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4510,6 +4521,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4576,6 +4588,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4642,6 +4655,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4705,6 +4719,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4766,6 +4781,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4832,6 +4848,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4907,6 +4924,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -4977,6 +4995,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5047,6 +5066,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5115,6 +5135,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5180,6 +5201,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let transfer_in = ActivityImport {
@@ -5212,6 +5234,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5475,6 +5498,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5546,6 +5570,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5679,6 +5704,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: true,
+            is_external: None,
         };
 
         let result = activity_service
@@ -5767,6 +5793,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         // First row: normal import. Second row: identical but force_import=true.
@@ -5776,6 +5803,7 @@ mod tests {
                 ActivityImport {
                     line_number: Some(2),
                     force_import: true,
+                    is_external: None,
                     ..base
                 },
             ])
@@ -5860,6 +5888,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: true, // flag set but no duplicate exists
+            is_external: None,
         };
 
         let result = activity_service
@@ -6224,6 +6253,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -6289,6 +6319,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -6354,6 +6385,7 @@ mod tests {
                 asset_id: None,
                 isin: None,
                 force_import: false,
+                is_external: None,
             };
 
             let result = activity_service
@@ -6431,6 +6463,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -6509,6 +6542,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -6575,6 +6609,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service
@@ -6650,6 +6685,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
+            is_external: None,
         };
 
         let result = activity_service

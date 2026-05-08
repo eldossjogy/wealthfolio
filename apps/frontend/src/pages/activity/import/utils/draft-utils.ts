@@ -536,5 +536,6 @@ export function draftToActivityImport(draft: DraftActivity): ActivityImport {
     isDraft: false,
     comment: draft.comment,
     forceImport: draft.forceImport ?? false,
+    isExternal: draft.isExternal,
   };
 }
