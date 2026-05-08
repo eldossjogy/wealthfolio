@@ -378,6 +378,7 @@ pub fn run() {
             commands::spending::get_activity_assignments,
             commands::spending::assign_activity_category,
             commands::spending::unassign_activity_category,
+            commands::spending::bulk_assign_categories,
             commands::spending::list_categorization_rules,
             commands::spending::create_categorization_rule,
             commands::spending::update_categorization_rule,

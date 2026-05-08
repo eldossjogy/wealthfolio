@@ -70,6 +70,24 @@ export const unassignActivityCategory = async (
   }
 };
 
+export interface BulkCategoryAssignment {
+  activityId: string;
+  taxonomyId: string;
+  categoryId: string;
+}
+
+/** Atomic batch — all rows committed in a single DB transaction. */
+export const bulkAssignCategories = async (
+  items: BulkCategoryAssignment[],
+): Promise<ActivityTaxonomyAssignment[]> => {
+  try {
+    return await invoke<ActivityTaxonomyAssignment[]>("bulk_assign_categories", { items });
+  } catch (error) {
+    logger.error("Error bulk-assigning categories.");
+    throw error;
+  }
+};
+
 export const setActivityEvent = async (
   activityId: string,
   eventId: string | null,

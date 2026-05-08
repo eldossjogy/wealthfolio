@@ -23,6 +23,16 @@ pub trait ActivityTaxonomyAssignmentRepositoryTrait: Send + Sync {
         new_assignment: NewActivityTaxonomyAssignment,
     ) -> Result<ActivityTaxonomyAssignment>;
 
+    /// Bulk variant of `assign_single` semantics: for each item, clear existing
+    /// assignments tying its `activity_id` to its `taxonomy_id`, then insert the
+    /// new one. All work happens inside a single DB transaction — atomic across
+    /// the batch. Powers bulk-categorize on the transactions page and the AI
+    /// "Apply N selected" widget action.
+    async fn assign_many_single_select(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>>;
+
     /// Remove a single assignment by id.
     async fn delete(&self, id: &str) -> Result<()>;
 

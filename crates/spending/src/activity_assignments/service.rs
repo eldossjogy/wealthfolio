@@ -62,4 +62,40 @@ impl ActivityTaxonomyAssignmentService {
     ) -> Result<ActivityTaxonomyAssignment> {
         self.repo.upsert(new_assignment).await
     }
+
+    /// Bulk single-select assignment. Each item replaces any existing assignment
+    /// for its (`activity_id`, `taxonomy_id`) pair. Atomic across the batch.
+    /// Source is hardcoded to `"manual"` — caller intent for v1 is "user explicitly
+    /// confirmed these" (whether via bulk-select on the transactions page or via
+    /// the AI proposal widget).
+    pub async fn assign_many_single_select(
+        &self,
+        items: &[BulkCategoryAssignment],
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let news: Vec<NewActivityTaxonomyAssignment> = items
+            .iter()
+            .map(|item| NewActivityTaxonomyAssignment {
+                id: None,
+                activity_id: item.activity_id.clone(),
+                taxonomy_id: item.taxonomy_id.clone(),
+                category_id: item.category_id.clone(),
+                weight: 10_000,
+                source: "manual".to_string(),
+            })
+            .collect();
+        self.repo.assign_many_single_select(news).await
+    }
+}
+
+/// Lightweight input for the bulk-assign service method. Doesn't carry weight
+/// or source — those default to `10_000` and `"manual"`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkCategoryAssignment {
+    pub activity_id: String,
+    pub taxonomy_id: String,
+    pub category_id: String,
 }

@@ -168,6 +168,75 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
             .map_err(|e| anyhow::anyhow!(e))
     }
 
+    async fn assign_many_single_select(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let inserted_dbs: Vec<ActivityTaxonomyAssignmentDB> = self
+            .writer
+            .exec_tx(move |tx| {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    // 1. Clear any existing assignment for (activity_id, taxonomy_id).
+                    let existing_ids: Vec<String> = activity_taxonomy_assignments::table
+                        .filter(activity_taxonomy_assignments::activity_id.eq(&item.activity_id))
+                        .filter(activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id))
+                        .select(activity_taxonomy_assignments::id)
+                        .load::<String>(tx.conn())
+                        .map_err(StorageError::from)?;
+
+                    diesel::delete(
+                        activity_taxonomy_assignments::table
+                            .filter(
+                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
+                            )
+                            .filter(
+                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
+                            ),
+                    )
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                    for old_id in &existing_ids {
+                        tx.delete::<ActivityTaxonomyAssignmentDB>(old_id.clone());
+                    }
+
+                    // 2. Insert the new assignment.
+                    let row = NewActivityTaxonomyAssignmentDB {
+                        id: item.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        activity_id: item.activity_id,
+                        taxonomy_id: item.taxonomy_id,
+                        category_id: item.category_id,
+                        weight: item.weight,
+                        source: item.source,
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    };
+
+                    let inserted = diesel::insert_into(activity_taxonomy_assignments::table)
+                        .values(&row)
+                        .returning(ActivityTaxonomyAssignmentDB::as_returning())
+                        .get_result::<ActivityTaxonomyAssignmentDB>(tx.conn())
+                        .map_err(StorageError::from)?;
+
+                    tx.update(&inserted)?;
+                    out.push(inserted);
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(inserted_dbs
+            .into_iter()
+            .map(ActivityTaxonomyAssignment::from)
+            .collect())
+    }
+
     async fn delete(&self, id: &str) -> Result<()> {
         let id = id.to_string();
         self.writer

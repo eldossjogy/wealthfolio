@@ -6,11 +6,13 @@ import type { Activity } from "@/lib/types";
 
 import {
   assignActivityCategory,
+  bulkAssignCategories,
   getActivityAssignments,
   listCashActivities,
   searchCashActivities,
   setActivityEvent,
   unassignActivityCategory,
+  type BulkCategoryAssignment,
 } from "../adapters/cash-activities";
 import type { ActivityTaxonomyAssignment, CashActivityFilter } from "../types/cash-activity";
 
@@ -66,6 +68,18 @@ export function useAssignActivityCategory() {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
     },
     onError: () => toast.error("Failed to set category."),
+  });
+}
+
+export function useBulkAssignCategories() {
+  const queryClient = useQueryClient();
+  return useMutation<ActivityTaxonomyAssignment[], Error, BulkCategoryAssignment[]>({
+    mutationFn: (items: BulkCategoryAssignment[]) => bulkAssignCategories(items),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+    },
+    onError: () => toast.error("Failed to apply categories."),
   });
 }
 

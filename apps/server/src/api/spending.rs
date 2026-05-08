@@ -111,6 +111,17 @@ async fn unassign_activity_category(
     Ok(())
 }
 
+async fn bulk_assign_categories(
+    State(state): State<Arc<AppState>>,
+    Json(items): Json<Vec<wealthfolio_spending::activity_assignments::BulkCategoryAssignment>>,
+) -> ApiResult<Json<Vec<ActivityTaxonomyAssignment>>> {
+    let result = state
+        .activity_taxonomy_assignment_service
+        .assign_many_single_select(&items)
+        .await?;
+    Ok(Json(result))
+}
+
 async fn list_categorization_rules(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<CategorizationRule>>> {
@@ -312,6 +323,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/v1/spending/activities/:activity_id/assignments/:taxonomy_id",
             delete(unassign_activity_category),
+        )
+        .route(
+            "/v1/spending/assignments/bulk",
+            post(bulk_assign_categories),
         )
         .route(
             "/v1/spending/rules",

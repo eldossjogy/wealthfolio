@@ -4,7 +4,9 @@ use crate::context::ServiceContext;
 use log::debug;
 use tauri::State;
 use wealthfolio_core::activities::Activity;
-use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment;
+use wealthfolio_spending::activity_assignments::{
+    ActivityTaxonomyAssignment, BulkCategoryAssignment,
+};
 use wealthfolio_spending::analytics::{
     EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest, SpendingSummary,
 };
@@ -122,6 +124,21 @@ pub async fn unassign_activity_category(
         .unassign(&activity_id, &taxonomy_id)
         .await
         .map_err(|e| format!("Failed to clear activity category: {}", e))
+}
+
+/// Atomic batch assign — used by bulk-categorize on the transactions page and
+/// by the AI proposal widget. Each item replaces any existing single-select
+/// assignment for its (activity_id, taxonomy_id) pair.
+#[tauri::command]
+pub async fn bulk_assign_categories(
+    items: Vec<BulkCategoryAssignment>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<Vec<ActivityTaxonomyAssignment>, String> {
+    state
+        .activity_taxonomy_assignment_service()
+        .assign_many_single_select(&items)
+        .await
+        .map_err(|e| format!("Failed to bulk assign categories: {}", e))
 }
 
 #[tauri::command]

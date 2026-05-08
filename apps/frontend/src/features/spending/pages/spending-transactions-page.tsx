@@ -47,6 +47,7 @@ import {
 import { useCashActivitySearch } from "../hooks/use-cash-activity-search";
 import {
   useAssignActivityCategory,
+  useBulkAssignCategories,
   useSetActivityEvent,
   useUnassignActivityCategory,
 } from "../hooks/use-cash-activities";
@@ -121,6 +122,7 @@ export default function SpendingTransactionsPage() {
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
   const assignMutation = useAssignActivityCategory();
+  const bulkAssignMutation = useBulkAssignCategories();
   const unassignMutation = useUnassignActivityCategory();
   const setEventMutation = useSetActivityEvent();
 
@@ -302,20 +304,22 @@ export default function SpendingTransactionsPage() {
     onError: () => toast.error("Failed to delete activities."),
   });
 
-  // Bulk handlers — Promise.allSettled so partial failures are reported
+  // Atomic bulk categorize — single transaction via bulk_assign_categories.
   const handleBulkCategorize = useCallback(
     async (taxonomyId: string, categoryId: string) => {
       const ids = Array.from(selectedRowIds);
-      const results = await Promise.allSettled(
-        ids.map((activityId) => assignMutation.mutateAsync({ activityId, taxonomyId, categoryId })),
-      );
-      const ok = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results.length - ok;
-      if (ok > 0) toast.success(`Categorized ${ok} ${pluralizeActivity(ok)}.`);
-      if (failed > 0) toast.error(`Failed to categorize ${failed}.`);
+      if (ids.length === 0) return;
+      try {
+        const result = await bulkAssignMutation.mutateAsync(
+          ids.map((activityId) => ({ activityId, taxonomyId, categoryId })),
+        );
+        toast.success(`Categorized ${result.length} ${pluralizeActivity(result.length)}.`);
+      } catch {
+        // Hook already toasts on error.
+      }
       setSelectedRowIds(new Set());
     },
-    [selectedRowIds, assignMutation],
+    [selectedRowIds, bulkAssignMutation],
   );
 
   const handleBulkSetEvent = useCallback(

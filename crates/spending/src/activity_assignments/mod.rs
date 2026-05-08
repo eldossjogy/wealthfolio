@@ -6,5 +6,5 @@ pub mod service;
 pub mod traits;
 
 pub use model::{ActivityTaxonomyAssignment, NewActivityTaxonomyAssignment};
-pub use service::ActivityTaxonomyAssignmentService;
+pub use service::{ActivityTaxonomyAssignmentService, BulkCategoryAssignment};
 pub use traits::ActivityTaxonomyAssignmentRepositoryTrait;
