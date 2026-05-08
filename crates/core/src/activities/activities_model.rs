@@ -1673,7 +1673,9 @@ impl From<ActivityImport> for NewActivity {
 
         // Persist `is_external` as flow metadata so net_contribution and flow classification
         // see this transfer the same way the manual activity form would.
-        let metadata = if import.is_external == Some(true) {
+        let is_transfer = import.activity_type == ACTIVITY_TYPE_TRANSFER_IN
+            || import.activity_type == ACTIVITY_TYPE_TRANSFER_OUT;
+        let metadata = if is_transfer && import.is_external == Some(true) {
             Some(serde_json::json!({ "flow": { "is_external": true } }).to_string())
         } else {
             None

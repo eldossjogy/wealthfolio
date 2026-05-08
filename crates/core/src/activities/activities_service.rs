@@ -3809,9 +3809,9 @@ impl ActivityServiceTrait for ActivityService {
             });
         }
 
-        // ── 4. Convert to NewActivity + link transfer pairs ──────────────────
-        // source_slice keeps the original ActivityImport values so link_imported_transfer_pairs
-        // can match by (date, currency, symbol, amount) using the pre-normalized data.
+        // ── 4. Convert to NewActivity ────────────────────────────────────────
+        // source_slice keeps the original ActivityImport values for idempotency
+        // and later transfer-pair matching using the pre-normalized data.
         let source_slice: Vec<ActivityImport> = import_activities_indexed
             .iter()
             .map(|(_, a)| a.clone())
@@ -3828,8 +3828,6 @@ impl ActivityServiceTrait for ActivityService {
             Self::normalize_new_activity_economic_signs(new_act);
             new_act.idempotency_key = Self::build_import_idempotency_key(src, &new_act.account_id);
         }
-
-        self.link_imported_transfer_pairs(&source_slice, &mut new_activities);
 
         // ── 5. Partition hard duplicates before insert ───────────────────────
         let mut first_index_by_key: HashMap<String, usize> = HashMap::new();
@@ -3933,6 +3931,14 @@ impl ActivityServiceTrait for ActivityService {
                 insertable_new_activities.push(new_activity);
             }
         }
+
+        let insertable_source_slice: Vec<ActivityImport> = insertable_sources
+            .iter()
+            .map(|(_, activity)| activity.clone())
+            .collect();
+        // Link only rows that will be inserted so a duplicate-skipped leg cannot
+        // leave its counterpart with an orphan source_group_id.
+        self.link_imported_transfer_pairs(&insertable_source_slice, &mut insertable_new_activities);
 
         // ── 6. Ensure FX pairs (one batch call) ──────────────────────────────
         let mut fx_pairs: HashSet<(String, String)> = HashSet::new();
