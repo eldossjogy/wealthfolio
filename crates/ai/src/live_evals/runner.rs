@@ -27,6 +27,11 @@ use crate::types::{ChatModelConfig, SendMessageRequest};
 
 const DEFAULT_PROVIDER: &str = "ollama";
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+/// Real-LLM evals are flaky (network, cold-start, transient provider errors).
+/// Retry the full chat turn this many times before declaring the case failed.
+const MAX_ATTEMPTS: u32 = 3;
+/// Backoff between retries — keeps us from hammering a struggling provider.
+const RETRY_BACKOFF_MS: u64 = 750;
 
 #[derive(Debug, Clone)]
 pub struct RunnerConfig {
@@ -89,12 +94,57 @@ pub enum AssertionKind {
     StreamError,
 }
 
-/// Run a single case against the configured provider.
+/// Run a single case against the configured provider, retrying transient
+/// failures up to `MAX_ATTEMPTS` times. Only retries on stream/transport
+/// errors — assertion failures (wrong tool called, missing arg) are
+/// deterministic and NOT retried.
 pub async fn run_case(case: &Case, cfg: &RunnerConfig) -> CaseResult {
+    let mut last: Option<CaseResult> = None;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let result = run_case_once(case, cfg).await;
+
+        if result.passed || !is_transient_failure(&result) {
+            return result;
+        }
+
+        log::warn!(
+            "case `{}` attempt {}/{} failed transiently — retrying after {}ms: {}",
+            case.id,
+            attempt,
+            MAX_ATTEMPTS,
+            RETRY_BACKOFF_MS,
+            result
+                .failures
+                .first()
+                .map(|f| f.message.as_str())
+                .unwrap_or("unknown"),
+        );
+        last = Some(result);
+        if attempt < MAX_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS)).await;
+        }
+    }
+
+    last.expect("loop ran at least once")
+}
+
+/// Returns true if the case failed *only* with stream/transport errors —
+/// the kind worth retrying. Mixed failures (some assertion, some transport)
+/// are treated as deterministic; if the trace is wrong, it'll be wrong on
+/// retry too.
+fn is_transient_failure(result: &CaseResult) -> bool {
+    !result.failures.is_empty()
+        && result
+            .failures
+            .iter()
+            .all(|f| matches!(f.kind, AssertionKind::StreamError))
+}
+
+async fn run_case_once(case: &Case, cfg: &RunnerConfig) -> CaseResult {
     let env = Arc::new(MockEnvironment::new());
     let service = ChatService::new(env, ChatConfig::default());
 
-    // Configure thread provider/model so the chat agent uses what we want.
     let thread = match service.create_thread().await {
         Ok(t) => t,
         Err(e) => {
