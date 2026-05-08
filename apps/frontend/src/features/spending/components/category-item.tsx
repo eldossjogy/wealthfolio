@@ -21,6 +21,7 @@ import {
 import type { TaxonomyCategory } from "@/lib/types";
 
 import { buildCashflowUrl } from "../lib/navigation";
+import { CategoryIcon } from "./category-chips";
 
 export interface CategoryNode extends TaxonomyCategory {
   children?: CategoryNode[];
@@ -78,9 +79,21 @@ export function CategoryItem({
             </Button>
           )}
           {!hasChildren && !isSubcategory && <div className="w-6" />}
-          {category.color && (
-            <div className="h-3 w-3 rounded-full" style={{ backgroundColor: category.color }} />
-          )}
+          <span
+            className={`flex shrink-0 items-center justify-center rounded-full ${
+              isSubcategory ? "h-6 w-6" : "h-7 w-7"
+            }`}
+            style={{
+              backgroundColor: category.color ? `${category.color}1F` : "var(--muted)",
+              color: category.color ?? "var(--muted-foreground)",
+            }}
+          >
+            <CategoryIcon
+              icon={category.icon ?? null}
+              fallback={category.name}
+              className={isSubcategory ? "h-3 w-3" : "h-3.5 w-3.5"}
+            />
+          </span>
           <span className={isSubcategory ? "text-sm" : "font-medium"}>{category.name}</span>
           {activityCount > 0 && (
             <TooltipProvider>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -48,7 +48,6 @@ function buildTree(categories: TaxonomyCategory[]): CategoryNode[] {
 export default function SpendingCategoriesPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") === "income" ? "income" : "expense";
 
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
@@ -56,18 +55,25 @@ export default function SpendingCategoriesPage() {
   const updateCategory = useUpdateCategory();
   const deleteCategory = useDeleteCategory();
 
-  const [activeTab, setActiveTab] = useState<"expense" | "income">(initialTab);
+  // URL is the source of truth for the active tab — no mirrored state, no sync effect.
+  const activeTab: "expense" | "income" =
+    searchParams.get("tab") === "income" ? "income" : "expense";
+
+  const handleTabChange = (value: string) => {
+    setSearchParams(
+      (prev) => {
+        if (prev.get("tab") === value) return prev;
+        const next = new URLSearchParams(prev);
+        next.set("tab", value);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const [visibleModal, setVisibleModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<CategoryNode | undefined>();
   const [parentCategory, setParentCategory] = useState<CategoryNode | undefined>();
-
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (next.get("tab") !== activeTab) {
-      next.set("tab", activeTab);
-      setSearchParams(next, { replace: true });
-    }
-  }, [activeTab, searchParams, setSearchParams]);
 
   const expenseTree = useMemo(
     () => buildTree(spending.data?.categories ?? []),
@@ -126,6 +132,7 @@ export default function SpendingCategoriesPage() {
           ...selectedCategory,
           name: values.name,
           color: values.color ?? selectedCategory.color,
+          icon: values.icon ?? null,
         },
         {
           onSuccess: () => {
@@ -145,6 +152,7 @@ export default function SpendingCategoriesPage() {
           key: slugify(values.name) || `cat_${Date.now()}`,
           color: values.color ?? "#808080",
           sortOrder: 999,
+          icon: values.icon ?? null,
         },
         {
           onSuccess: () => {
@@ -192,15 +200,15 @@ export default function SpendingCategoriesPage() {
           backTo="/settings/spending"
         >
           <Button
-            size="icon"
+            size="sm"
             className="sm:hidden"
             onClick={handleAddCategory}
             aria-label="Add category"
           >
-            <Icons.Plus className="h-4 w-4" />
+            <Icons.Plus className="h-3.5 w-3.5" />
           </Button>
-          <Button className="hidden sm:inline-flex" onClick={handleAddCategory}>
-            <Icons.Plus className="mr-2 h-4 w-4" />
+          <Button size="sm" className="hidden sm:inline-flex" onClick={handleAddCategory}>
+            <Icons.Plus className="mr-2 h-3.5 w-3.5" />
             Add category
           </Button>
         </SettingsHeader>
@@ -225,11 +233,7 @@ export default function SpendingCategoriesPage() {
             </Button>
           </EmptyPlaceholder>
         ) : (
-          <Tabs
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(value as "expense" | "income")}
-            className="w-full"
-          >
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <TabsList className="grid w-full max-w-md grid-cols-2">
               <TabsTrigger value="expense">Expense ({expenseTree.length})</TabsTrigger>
               <TabsTrigger value="income">Income ({incomeTree.length})</TabsTrigger>
