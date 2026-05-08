@@ -14,10 +14,13 @@ import {
 } from "@wealthfolio/ui";
 
 import type { CategoryNode } from "./category-item";
+import { ColorPicker } from "./color-picker";
+import { IconPicker } from "./icon-picker";
 
 const categorySchema = z.object({
   name: z.string().min(1, "Name is required"),
   color: z.string().optional(),
+  icon: z.string().nullable().optional(),
 });
 
 export type CategoryFormValues = z.infer<typeof categorySchema>;
@@ -56,8 +59,11 @@ export function CategoryForm({
     defaultValues: {
       name: category?.name ?? "",
       color: category?.color ?? parentCategory?.color ?? PRESET_COLORS[0],
+      icon: category?.icon ?? parentCategory?.icon ?? null,
     },
   });
+
+  const colorValue = form.watch("color");
 
   return (
     <Form {...form}>
@@ -77,25 +83,48 @@ export function CategoryForm({
         />
         <FormField
           control={form.control}
+          name="icon"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Icon</FormLabel>
+              <FormControl>
+                <IconPicker
+                  value={field.value ?? null}
+                  onChange={(v) => field.onChange(v)}
+                  accent={colorValue}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
           name="color"
           render={({ field }) => (
             <FormItem>
               <FormLabel>Color</FormLabel>
               <FormControl>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {PRESET_COLORS.map((color) => (
                     <button
                       key={color}
                       type="button"
                       className={`h-8 w-8 rounded-full border-2 transition-transform hover:scale-110 ${
-                        field.value === color
+                        field.value?.toLowerCase() === color
                           ? "border-foreground ring-2 ring-offset-2"
                           : "border-transparent"
                       }`}
                       style={{ backgroundColor: color }}
                       onClick={() => field.onChange(color)}
+                      aria-label={`Use color ${color}`}
                     />
                   ))}
+                  <ColorPicker
+                    value={field.value}
+                    onChange={(c) => field.onChange(c)}
+                    presets={PRESET_COLORS}
+                  />
                 </div>
               </FormControl>
               <FormMessage />
