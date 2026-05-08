@@ -71,7 +71,7 @@ export default function SpendingTabContent() {
   const theme: Palette = FOREST_THEME;
 
   const [whereItWentView, setWhereItWentView] = usePersistentState<"list" | "map">(
-    "spending-v2-where-view",
+    "spending-where-view",
     "list",
   );
 
@@ -527,7 +527,7 @@ export default function SpendingTabContent() {
                       onChange={(v) => setWhereItWentView(v as "list" | "map")}
                     />
                     <Link
-                      to="/spending/reports-v2?tab=categories"
+                      to="/spending/reports?tab=categories"
                       className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
                     >
                       View all →
@@ -601,7 +601,7 @@ export default function SpendingTabContent() {
                     ))}
                   </div>
                   <Link
-                    to="/spending/reports-v2?tab=overview"
+                    to="/spending/reports?tab=overview"
                     className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
                   >
                     See trends

@@ -29,11 +29,11 @@ const LEGACY_TAB_REDIRECTS: Record<string, TabId> = {
   patterns: "overview",
 };
 
-const PERIOD_STORAGE_KEY = "spending-reports-v2-period";
-const COMPARISON_STORAGE_KEY = "spending-reports-v2-comparison";
+const PERIOD_STORAGE_KEY = "spending-reports-period";
+const COMPARISON_STORAGE_KEY = "spending-reports-comparison";
 
 /**
- * Reports page (v2) — tabbed analytics.
+ * Reports page — tabbed analytics.
  *
  * Period + comparison mode are owned by the page and lifted into every tab,
  * so switching tabs preserves "what window am I looking at".
@@ -41,7 +41,7 @@ const COMPARISON_STORAGE_KEY = "spending-reports-v2-comparison";
  * Active tab is reflected in the URL (?tab=…) so deep links from the
  * dashboard can land directly on a specific view.
  */
-export default function SpendingReportsV2Page() {
+export default function SpendingReportsPage() {
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
