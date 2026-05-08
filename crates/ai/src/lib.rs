@@ -6,17 +6,27 @@
 //!
 //! # Architecture
 //!
-//! - `chat`: Main streaming chat service with tool execution loop
-//! - `providers`: Provider catalog and rig-core client factory
-//! - `tools`: Tool registry, schemas, and bounded outputs
-//! - `types`: Shared DTOs/events used by Axum/Tauri + frontend
-//! - `env`: Environment abstraction for services/secrets/config
-//! - `title_generator`: Auto-generates thread titles from user messages
-//! - `eval`: Behavioral evaluation harness (test only)
-//! - `provider_model`: AI provider domain models (catalog, settings, merged views)
-//! - `provider_service`: AI provider service for settings management
-//! - `prompt_template`: Versioned prompt templates
-//! - `prompt_template_service`: Prompt template service
+//! - `chat`: Streaming chat service with tool execution loop. Split into
+//!   `streaming`, `attachments`, `working_context`, `history`, `provider_clients`.
+//! - `providers`: Provider catalog and rig-core client factory.
+//! - `tools`: Tool registry, schemas, and bounded outputs.
+//! - `types`: Shared DTOs/events used by Axum/Tauri + frontend.
+//! - `env`: Environment abstraction for services/secrets/config (`MockEnvironment`
+//!   exposed via the `test-utils` feature).
+//! - `title_generator`: Auto-generates thread titles from user messages.
+//! - `eval`: Mocked-stub agent-flow tests (test-only).
+//! - `live_evals`: Real-LLM behavioral evals — TOML suites driven by the
+//!   `eval` binary against Ollama / cloud providers (feature `test-utils`).
+//! - `provider_model`: AI provider domain models (catalog, settings, merged views).
+//! - `provider_service`: AI provider service for settings management.
+//! - `prompt_template` + `prompt_template_service`: Versioned prompt templates.
+//!
+//! # Running tests vs evals
+//!
+//! - `cargo test -p wealthfolio-ai`              fast, deterministic, no LLM.
+//! - `cargo run -p wealthfolio-ai --bin eval --features eval`
+//!   Drives real model (Ollama by default; cloud via `WF_EVAL_PROVIDER`).
+//!   See `crates/ai/README.md` and `crates/ai/evals/README.md`.
 //!
 //! # Example
 //!
@@ -52,6 +62,8 @@ pub mod env;
 pub mod error;
 #[cfg(test)]
 pub mod eval;
+#[cfg(feature = "test-utils")]
+pub mod live_evals;
 pub mod prompt_template;
 pub mod prompt_template_service;
 pub mod provider_model;
@@ -61,6 +73,10 @@ pub mod stream_hook;
 pub mod title_generator;
 pub mod tools;
 pub mod types;
+
+/// The chat agent's system prompt, baked at compile time. Exposed for
+/// integration tests in `tests/system_prompt.rs` to assert content invariants.
+pub const SYSTEM_PROMPT: &str = include_str!("system_prompt.txt");
 
 // Re-export main types for convenience
 pub use chat::{ChatConfig, ChatService};
