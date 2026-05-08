@@ -626,3 +626,106 @@ export interface ImportCsvMappingOutput extends ImportCsvSubmissionResult {
   /** True when the mapping came from a saved template (no LLM inference). */
   usedSavedProfile?: boolean;
 }
+
+// ============================================================================
+// Propose Transaction Categories tool
+// ============================================================================
+
+export interface ProposeCategoriesArgs {
+  activityIds?: string[];
+  accountIds?: string[];
+  status?: "uncategorized" | "all" | "needs_review";
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  aiProposals?: Array<{
+    activityId: string;
+    categoryKey: string;
+    confidence?: number;
+    reason?: string;
+  }>;
+}
+
+export interface ListCategorizationContextArgs {
+  activityIds?: string[];
+  accountIds?: string[];
+  status?: "uncategorized" | "all" | "needs_review";
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}
+
+export interface ListCategorizationContextOutput {
+  taxonomies: ProposeTaxonomySummary[];
+  examples: ProposeCategoryExample[];
+  unproposed: ProposeCategoryUnproposed[];
+  summary: {
+    total: number;
+    deterministicallyProposed: number;
+    needsAiJudgement: number;
+  };
+}
+
+export interface ProposeCategoryOption {
+  categoryId: string;
+  key: string;
+  name: string;
+  path: string;
+  color: string;
+}
+
+export interface ProposeTaxonomySummary {
+  taxonomyId: string;
+  taxonomyName: string;
+  categories: ProposeCategoryOption[];
+}
+
+export interface ProposeCategoryExample {
+  categoryId: string;
+  categoryPath: string;
+  notes: string;
+}
+
+export interface ProposeCategoryProposal {
+  activityId: string;
+  activityDate: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  taxonomyId: string;
+  categoryId: string;
+  categoryPath: string;
+  confidence: number;
+  source: "rule" | "history" | "ai" | "manual";
+  explanation: string;
+}
+
+export interface ProposeCategoryUnproposed {
+  activityId: string;
+  activityDate: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  reason: string;
+}
+
+export interface ProposeCategoriesSummary {
+  total: number;
+  proposed: number;
+  unproposed: number;
+  avgConfidence: number;
+}
+
+export interface ProposeCategoriesOutput {
+  proposals: ProposeCategoryProposal[];
+  unproposed: ProposeCategoryUnproposed[];
+  summary: ProposeCategoriesSummary;
+  taxonomies: ProposeTaxonomySummary[];
+  examples: ProposeCategoryExample[];
+  /** "draft" when awaiting review, "applied" after the user clicks Apply. */
+  draftStatus?: "draft" | "applied";
+  /** Frontend-applied state, persisted via updateToolResult. */
+  submitted?: boolean;
+  appliedCount?: number;
+  submittedAt?: string;
+}

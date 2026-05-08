@@ -22,9 +22,11 @@ import {
   ActivitiesToolUI,
   AllocationToolUI,
   GoalsToolUI,
+  CategorizationProposalsToolUI,
   HoldingsToolUI,
   ImportCsvToolUI,
   IncomeToolUI,
+  ListCategorizationContextToolUI,
   PerformanceToolUI,
   RecordActivityToolUI,
   RecordActivitiesToolUI,
@@ -222,6 +224,8 @@ function ChatShellInner({ className }: ChatShellProps) {
         <RecordActivityToolUI />
         <RecordActivitiesToolUI />
         <ImportCsvToolUI />
+        <ListCategorizationContextToolUI />
+        <CategorizationProposalsToolUI />
 
         <div className={cn("bg-background flex h-full min-h-0 w-full", className)}>
           {/* Desktop Sidebar */}

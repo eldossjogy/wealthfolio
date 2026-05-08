@@ -435,6 +435,10 @@ pub async fn initialize_context(
         performance_service.clone(),
         income_service.clone(),
         health_service.clone(),
+        taxonomy_service.clone(),
+        cash_activity_service.clone(),
+        activity_taxonomy_assignment_service.clone(),
+        categorization_rules_service.clone(),
     ));
     let ai_chat_service = Arc::new(ChatService::new(ai_environment, ChatConfig::default()));
 

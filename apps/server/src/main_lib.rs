@@ -107,7 +107,8 @@ pub struct AppState {
     pub cash_activity_service: Arc<wealthfolio_spending::cash_activities::CashActivityService>,
     pub activity_taxonomy_assignment_service:
         Arc<wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService>,
-    pub categorization_rules_service: Arc<wealthfolio_spending::categorization_rules::CategorizationRulesService>,
+    pub categorization_rules_service:
+        Arc<wealthfolio_spending::categorization_rules::CategorizationRulesService>,
     pub events_service: Arc<wealthfolio_spending::events::EventsService>,
     pub budget_service: Arc<wealthfolio_spending::budget::BudgetService>,
     pub spending_analytics_service: Arc<wealthfolio_spending::analytics::AnalyticsService>,
@@ -546,6 +547,10 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         performance_service.clone(),
         income_service.clone(),
         health_service.clone(),
+        taxonomy_service.clone(),
+        cash_activity_service.clone(),
+        activity_taxonomy_assignment_service.clone(),
+        categorization_rules_service.clone(),
     ));
     let ai_chat_service = Arc::new(ChatService::new(ai_environment, ChatConfig::default()));
 

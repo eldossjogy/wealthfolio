@@ -19,7 +19,11 @@ use wealthfolio_core::{
     quotes::QuoteServiceTrait,
     secrets::SecretStore,
     settings::SettingsServiceTrait,
+    taxonomies::TaxonomyServiceTrait,
 };
+use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService;
+use wealthfolio_spending::cash_activities::CashActivityService;
+use wealthfolio_spending::categorization_rules::CategorizationRulesService;
 
 use crate::types::ChatRepositoryTrait;
 
@@ -74,9 +78,21 @@ pub trait AiEnvironment: Send + Sync {
 
     /// Get the health service for portfolio health diagnostics.
     fn health_service(&self) -> Arc<dyn HealthServiceTrait>;
+
+    /// Get the taxonomy service for fetching taxonomies and categories.
+    fn taxonomy_service(&self) -> Arc<dyn TaxonomyServiceTrait>;
+
+    /// Get the cash-activity service for spending-tracker reads.
+    fn cash_activity_service(&self) -> Arc<CashActivityService>;
+
+    /// Get the activity-taxonomy-assignment service for category writes.
+    fn activity_taxonomy_assignment_service(&self) -> Arc<ActivityTaxonomyAssignmentService>;
+
+    /// Get the categorization-rules service for the rules-first pass in category proposals.
+    fn categorization_rules_service(&self) -> Arc<CategorizationRulesService>;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_env {
     use super::*;
     use chrono::{DateTime, NaiveDate, Utc};
@@ -1335,6 +1351,29 @@ pub mod test_env {
 
         fn health_service(&self) -> Arc<dyn HealthServiceTrait> {
             self.health_service.clone()
+        }
+
+        fn taxonomy_service(&self) -> Arc<dyn wealthfolio_core::taxonomies::TaxonomyServiceTrait> {
+            unimplemented!("taxonomy_service not used in AI mock environment")
+        }
+
+        fn cash_activity_service(
+            &self,
+        ) -> Arc<wealthfolio_spending::cash_activities::CashActivityService> {
+            unimplemented!("cash_activity_service not used in AI mock environment")
+        }
+
+        fn activity_taxonomy_assignment_service(
+            &self,
+        ) -> Arc<wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService>
+        {
+            unimplemented!("activity_taxonomy_assignment_service not used in AI mock environment")
+        }
+
+        fn categorization_rules_service(
+            &self,
+        ) -> Arc<wealthfolio_spending::categorization_rules::CategorizationRulesService> {
+            unimplemented!("categorization_rules_service not used in AI mock environment")
         }
     }
 
