@@ -5,8 +5,8 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    CategoryBreakdownRow, CategorySpending, DayBucket, EventCategorySpending, EventSpendingSummary,
-    EventSummariesRequest, MonthlyReport, PeriodSummary, ReportRequest, SpendingSummary,
-    SubcategorySpending,
+    CategoryBreakdownRow, CategorySpending, DayBucket, DayCategoryBucket, EventCategorySpending,
+    EventSpendingSummary, EventSummariesRequest, MonthlyReport, PeriodSummary, ReportRequest,
+    SpendingSummary, SubcategorySpending,
 };
 pub use service::AnalyticsService;

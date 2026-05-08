@@ -44,6 +44,22 @@ pub struct DayBucket {
     pub outflow: f64,
 }
 
+/// Per-day, per-category spending row.
+///
+/// Powers daily-granularity sparklines (e.g., the 1-month Categories tab) and
+/// any other widget that needs to know "how much was spent on X on day Y".
+/// The frontend rolls up to top-level categories as needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayCategoryBucket {
+    /// "YYYY-MM-DD"
+    pub date: String,
+    pub taxonomy_id: String,
+    pub category_id: String,
+    pub amount: f64,
+    pub count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonthlyReport {
@@ -52,6 +68,7 @@ pub struct MonthlyReport {
     pub spending_breakdown: Vec<CategoryBreakdownRow>,
     pub income_breakdown: Vec<CategoryBreakdownRow>,
     pub by_day: Vec<DayBucket>,
+    pub by_day_by_category: Vec<DayCategoryBucket>,
 }
 
 // ----------------- SpendingSummary (PR-style; per-period rollup) -----------------

@@ -7,9 +7,9 @@ use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 use wealthfolio_core::taxonomies::TaxonomyServiceTrait;
 
 use super::model::{
-    CategoryBreakdownRow, CategorySpending, DayBucket, EventCategorySpending, EventSpendingSummary,
-    EventSummariesRequest, MonthlyReport, PeriodSummary, ReportRequest, SpendingSummary,
-    SubcategorySpending,
+    CategoryBreakdownRow, CategorySpending, DayBucket, DayCategoryBucket, EventCategorySpending,
+    EventSpendingSummary, EventSummariesRequest, MonthlyReport, PeriodSummary, ReportRequest,
+    SpendingSummary, SubcategorySpending,
 };
 use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
 use crate::events::EventsService;
@@ -57,6 +57,7 @@ impl AnalyticsService {
                 spending_breakdown: vec![],
                 income_breakdown: vec![],
                 by_day: vec![],
+                by_day_by_category: vec![],
             });
         }
         let target_accounts: Vec<String> = match req.account_ids.clone() {
@@ -73,6 +74,7 @@ impl AnalyticsService {
                 spending_breakdown: vec![],
                 income_breakdown: vec![],
                 by_day: vec![],
+                by_day_by_category: vec![],
             });
         }
 
@@ -132,12 +134,16 @@ impl AnalyticsService {
         // Category breakdown — fetch assignments for the activities in scope
         let mut spending_acc: HashMap<(String, String), (f64, usize)> = HashMap::new();
         let mut income_acc: HashMap<(String, String), (f64, usize)> = HashMap::new();
+        // (date, taxonomy_id, category_id) → (amount, count)
+        let mut by_day_cat_acc: HashMap<(String, String, String), (f64, usize)> = HashMap::new();
         for a in &current_acts {
             let amt = a
                 .amount
                 .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
                 .unwrap_or(0.0)
                 .abs();
+            let day = a.activity_date.naive_utc().date();
+            let day_str = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
             let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
             let is_income = INCOME_TYPES.contains(&a.effective_type());
             let is_outflow = OUTFLOW_TYPES.contains(&a.effective_type());
@@ -155,6 +161,16 @@ impl AnalyticsService {
                         .or_insert((0.0, 0));
                     entry.0 += amt;
                     entry.1 += 1;
+                    // Same activity → same (day, taxonomy, category) bucket.
+                    let dc = by_day_cat_acc
+                        .entry((
+                            day_str.clone(),
+                            asg.taxonomy_id.clone(),
+                            asg.category_id.clone(),
+                        ))
+                        .or_insert((0.0, 0));
+                    dc.0 += amt;
+                    dc.1 += 1;
                 }
             }
         }
@@ -193,12 +209,27 @@ impl AnalyticsService {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        let mut by_day_by_category: Vec<DayCategoryBucket> = by_day_cat_acc
+            .into_iter()
+            .map(
+                |((date, taxonomy_id, category_id), (amount, count))| DayCategoryBucket {
+                    date,
+                    taxonomy_id,
+                    category_id,
+                    amount,
+                    count,
+                },
+            )
+            .collect();
+        by_day_by_category.sort_by(|a, b| a.date.cmp(&b.date));
+
         Ok(MonthlyReport {
             current,
             prior,
             spending_breakdown,
             income_breakdown,
             by_day,
+            by_day_by_category,
         })
     }
 }
