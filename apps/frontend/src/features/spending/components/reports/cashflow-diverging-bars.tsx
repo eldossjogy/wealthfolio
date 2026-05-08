@@ -15,10 +15,15 @@ import {
 import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
 import { formatAmount } from "@/lib/utils";
 
-import type { MonthBucket } from "../../hooks/use-monthly-history";
+/** Generic cashflow datum — caller supplies one per bucket (month, week, or day). */
+export interface CashflowPoint {
+  label: string;
+  income: number;
+  outflow: number;
+}
 
 interface CashflowDivergingBarsProps {
-  months: MonthBucket[];
+  points: CashflowPoint[];
   currency: string;
   isLoading: boolean;
 }
@@ -44,22 +49,18 @@ interface CashflowDatum {
  * with discrete monthly data (no implied between-point values that an area
  * chart would draw via splines).
  */
-export function CashflowDivergingBars({ months, currency, isLoading }: CashflowDivergingBarsProps) {
+export function CashflowDivergingBars({ points, currency, isLoading }: CashflowDivergingBarsProps) {
   const data: CashflowDatum[] = useMemo(
     () =>
-      months.map((m) => {
-        const income = m.report?.current.income ?? 0;
-        const spending = m.report?.current.outflow ?? 0;
-        return {
-          label: m.label,
-          income,
-          spending,
-          spendingNeg: -spending,
-          net: income - spending,
-          hasData: !!m.report,
-        };
-      }),
-    [months],
+      points.map((p) => ({
+        label: p.label,
+        income: p.income,
+        spending: p.outflow,
+        spendingNeg: -p.outflow,
+        net: p.income - p.outflow,
+        hasData: p.income > 0 || p.outflow > 0,
+      })),
+    [points],
   );
 
   // Drop leading months with no data so the chart starts where the user

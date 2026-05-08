@@ -13,7 +13,7 @@ import {
   type ReportsRange,
 } from "../../../lib/reports-period";
 
-import { CashflowDivergingBars } from "../cashflow-diverging-bars";
+import { CashflowDivergingBars, type CashflowPoint } from "../cashflow-diverging-bars";
 import { BudgetStatusHero, CashflowHero, PeriodSummaryHero } from "../hero-strip";
 import { NotableChangesCard } from "../notable-changes-card";
 import { SpendingRhythmHeatmap } from "../spending-rhythm-heatmap";
@@ -68,6 +68,25 @@ export function OverviewTab({ range, comparison, currency }: OverviewTabProps) {
   }, []);
   const { data: heatmapActivities = [] } = useCashActivities(heatmapRequest);
 
+  // Adaptive cashflow buckets: short windows render daily bars from the
+  // current report's per-day totals; longer windows aggregate monthly via
+  // the parallel monthly-history queries.
+  const useDaily = range.days <= 35;
+  const cashflowPoints: CashflowPoint[] = useMemo(() => {
+    if (useDaily) {
+      return (currentReport?.byDay ?? []).map((b) => ({
+        label: b.date.slice(8), // day-of-month
+        income: b.income,
+        outflow: b.outflow,
+      }));
+    }
+    return months.map((m) => ({
+      label: m.label,
+      income: m.report?.current.income ?? 0,
+      outflow: m.report?.current.outflow ?? 0,
+    }));
+  }, [useDaily, currentReport, months]);
+
   return (
     <div className="space-y-6">
       {/* Hero strip — at-a-glance period status (3-card layout). */}
@@ -92,7 +111,11 @@ export function OverviewTab({ range, comparison, currency }: OverviewTabProps) {
       </div>
 
       <Section title="Cashflow over time" subtitle="Income above · spending below · net line">
-        <CashflowDivergingBars months={months} currency={currency} isLoading={isHistoryLoading} />
+        <CashflowDivergingBars
+          points={cashflowPoints}
+          currency={currency}
+          isLoading={useDaily ? isCurrentLoading : isHistoryLoading}
+        />
       </Section>
 
       <div className="grid gap-6 lg:grid-cols-2">

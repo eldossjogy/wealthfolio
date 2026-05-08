@@ -4,6 +4,7 @@ import { Icons, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
+import { CategoryIcon } from "../category-chips";
 import type { BudgetAllocation } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
 
@@ -24,6 +25,7 @@ interface NodeRow {
   id: string;
   name: string;
   color: string | null;
+  icon: string | null;
   parentId: string | null;
   /** Spent in current period. */
   spent: number;
@@ -89,9 +91,8 @@ export function CategoryHierarchyTable({
         <thead>
           <tr className="border-border/60 text-muted-foreground/80 border-b text-[11px] uppercase tracking-wide">
             <th className="px-3 py-2 text-left font-medium">Category</th>
-            <th className="px-3 py-2 text-right font-medium">Budgeted</th>
-            <th className="px-3 py-2 text-right font-medium">Spent</th>
-            <th className="px-3 py-2 text-right font-medium">Balance</th>
+            <th className="px-3 py-2 text-right font-medium">Spent / Budget</th>
+            <th className="px-3 py-2 text-left font-medium">Progress</th>
             <th className="px-3 py-2 text-right font-medium">Δ vs prior</th>
           </tr>
         </thead>
@@ -101,29 +102,36 @@ export function CategoryHierarchyTable({
           ))}
         </tbody>
         <tfoot>
-          <tr className="border-border/60 border-t text-sm font-semibold">
+          <tr className="border-border/60 border-t text-sm font-medium">
             <td className="px-3 py-2.5">Total</td>
-            <td className="px-3 py-2.5 text-right tabular-nums">
-              {formatAmount(totals.budgeted, currency)}
+            <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+              <span className="text-foreground font-medium">
+                −{formatAmount(totals.spent, currency)}
+              </span>
+              {totals.budgeted > 0 && (
+                <span className="text-muted-foreground/70 ml-1">
+                  / {formatAmount(totals.budgeted, currency)}
+                </span>
+              )}
             </td>
-            <td className="px-3 py-2.5 text-right tabular-nums">
-              −{formatAmount(totals.spent, currency)}
+            <td className="px-3 py-2.5">
+              {totals.budgeted > 0 ? (
+                <ProgressBar spent={totals.spent} budget={totals.budgeted} />
+              ) : (
+                <span className="text-muted-foreground/50 text-xs">No budget set</span>
+              )}
             </td>
             <td
               className={cn(
-                "px-3 py-2.5 text-right tabular-nums",
-                totals.budgeted - totals.spent >= 0 ? "text-success" : "text-destructive",
+                "px-3 py-2.5 text-right text-xs tabular-nums",
+                totals.priorSpent === 0 || totals.spent - totals.priorSpent === 0
+                  ? "text-muted-foreground/70"
+                  : totals.spent - totals.priorSpent > 0
+                    ? "text-destructive"
+                    : "text-success",
               )}
             >
-              {formatAmount(Math.abs(totals.budgeted - totals.spent), currency)}
-            </td>
-            <td
-              className={cn(
-                "px-3 py-2.5 text-right tabular-nums",
-                totals.spent - totals.priorSpent >= 0 ? "text-destructive" : "text-success",
-              )}
-            >
-              {formatDelta(totals.spent - totals.priorSpent, totals.priorSpent, currency)}
+              {formatDelta(totals.spent - totals.priorSpent, totals.priorSpent)}
             </td>
           </tr>
         </tfoot>
@@ -132,20 +140,47 @@ export function CategoryHierarchyTable({
   );
 }
 
+function ProgressBar({ spent, budget }: { spent: number; budget: number }) {
+  if (budget <= 0) return null;
+  const pct = (spent / budget) * 100;
+  const isOver = pct > 100;
+  const isClose = pct >= 85 && !isOver;
+  const fillColor = isOver ? "var(--destructive)" : isClose ? "#C28B47" : "var(--success)";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="bg-foreground/10 relative h-1.5 min-w-[60px] flex-1 overflow-hidden rounded-full">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${Math.min(100, pct)}%`, backgroundColor: fillColor, opacity: 0.65 }}
+        />
+      </div>
+      <span
+        className={cn(
+          "w-10 shrink-0 text-right text-[11px] tabular-nums",
+          isOver ? "text-destructive font-medium" : "text-muted-foreground/80",
+        )}
+      >
+        {pct.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
 function ParentRow({ node, currency }: { node: NodeRow; currency: string }) {
   const [expanded, setExpanded] = useState(false);
   const hasChildren = node.children.length > 0;
-  const balance = node.budgeted - node.spent;
   const delta = node.spent - node.priorSpent;
+  const accent = node.color ?? "var(--muted-foreground)";
+  const tintBg = node.color ? `${node.color}1F` : "var(--muted)";
 
   return (
     <>
       <tr className="border-border/40 hover:bg-muted/30 group cursor-pointer border-b">
-        <td className="px-3 py-2">
+        <td className="px-3 py-2.5">
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="text-foreground flex items-center gap-1.5 text-left text-sm font-medium"
+            className="text-foreground flex items-center gap-2 text-left text-sm font-medium"
             aria-expanded={expanded}
             disabled={!hasChildren}
           >
@@ -157,81 +192,98 @@ function ParentRow({ node, currency }: { node: NodeRow; currency: string }) {
               )}
             />
             <span
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: node.color ?? "var(--muted-foreground)" }}
-            />
-            {node.name}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+              style={{ backgroundColor: tintBg, color: accent }}
+            >
+              <CategoryIcon icon={node.icon} fallback={node.name} className="h-3.5 w-3.5" />
+            </span>
+            <span>{node.name}</span>
           </button>
         </td>
-        <td className="text-foreground/90 px-3 py-2 text-right tabular-nums">
-          {node.budgeted > 0 ? formatAmount(node.budgeted, currency) : "—"}
-        </td>
-        <td className="text-foreground/90 px-3 py-2 text-right tabular-nums">
-          −{formatAmount(node.spent, currency)}
-        </td>
-        <td
-          className={cn(
-            "px-3 py-2 text-right tabular-nums",
-            node.budgeted > 0
-              ? balance >= 0
-                ? "text-success"
-                : "text-destructive"
-              : "text-muted-foreground",
+        <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
+          <span className="text-foreground font-medium">−{formatAmount(node.spent, currency)}</span>
+          {node.budgeted > 0 && (
+            <span className="text-muted-foreground/70 ml-1">
+              / {formatAmount(node.budgeted, currency)}
+            </span>
           )}
-        >
-          {node.budgeted > 0 ? formatAmount(Math.abs(balance), currency) : "—"}
+        </td>
+        <td className="px-3 py-2.5">
+          {node.budgeted > 0 ? (
+            <ProgressBar spent={node.spent} budget={node.budgeted} />
+          ) : (
+            <span className="text-muted-foreground/50 text-xs">No budget set</span>
+          )}
         </td>
         <td
           className={cn(
-            "px-3 py-2 text-right tabular-nums",
-            delta === 0
+            "px-3 py-2.5 text-right text-xs tabular-nums",
+            delta === 0 || node.priorSpent === 0
               ? "text-muted-foreground/70"
               : delta > 0
                 ? "text-destructive"
                 : "text-success",
           )}
         >
-          {formatDelta(delta, node.priorSpent, currency)}
+          {formatDelta(delta, node.priorSpent)}
         </td>
       </tr>
       {expanded &&
-        node.children.map((child) => <ChildRow key={child.id} node={child} currency={currency} />)}
+        node.children.map((child) => (
+          <ChildRow key={child.id} node={child} currency={currency} parentColor={accent} />
+        ))}
     </>
   );
 }
 
-function ChildRow({ node, currency }: { node: NodeRow; currency: string }) {
+function ChildRow({
+  node,
+  currency,
+  parentColor,
+}: {
+  node: NodeRow;
+  currency: string;
+  parentColor: string;
+}) {
   const delta = node.spent - node.priorSpent;
   return (
     <tr className="border-border/30 hover:bg-muted/20 border-b text-[13px]">
-      <td className="text-muted-foreground/90 px-3 py-1.5 pl-9">{node.name}</td>
-      <td className="text-muted-foreground/70 px-3 py-1.5 text-right tabular-nums">—</td>
-      <td className="text-muted-foreground/90 px-3 py-1.5 text-right tabular-nums">
+      <td className="text-muted-foreground/90 px-3 py-1.5 pl-9">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-1 w-1 shrink-0 rounded-full"
+            style={{ backgroundColor: parentColor, opacity: 0.6 }}
+          />
+          <span>{node.name}</span>
+        </div>
+      </td>
+      <td className="text-muted-foreground/90 px-3 py-1.5 text-right text-xs tabular-nums">
         −{formatAmount(node.spent, currency)}
       </td>
-      <td className="text-muted-foreground/70 px-3 py-1.5 text-right tabular-nums">—</td>
+      <td className="px-3 py-1.5"></td>
       <td
         className={cn(
-          "px-3 py-1.5 text-right tabular-nums",
-          delta === 0
+          "px-3 py-1.5 text-right text-xs tabular-nums",
+          delta === 0 || node.priorSpent === 0
             ? "text-muted-foreground/60"
             : delta > 0
               ? "text-destructive"
               : "text-success",
         )}
       >
-        {formatDelta(delta, node.priorSpent, currency)}
+        {formatDelta(delta, node.priorSpent)}
       </td>
     </tr>
   );
 }
 
-function formatDelta(delta: number, baseline: number, currency: string): string {
+function formatDelta(delta: number, baseline: number): string {
   if (delta === 0) return "—";
-  const pct = baseline > 0 ? Math.abs(delta) / baseline : null;
+  // No prior period spend — label as "new" instead of restating current amount.
+  if (baseline === 0) return delta > 0 ? "new" : "—";
+  const pct = (Math.abs(delta) / baseline) * 100;
   const arrow = delta > 0 ? "↑" : "↓";
-  const amount = formatAmount(Math.abs(delta), currency);
-  return pct != null ? `${arrow} ${amount} (${(pct * 100).toFixed(0)}%)` : `${arrow} ${amount}`;
+  return `${arrow} ${pct.toFixed(0)}%`;
 }
 
 // ────────────── tree builder ──────────────
@@ -262,6 +314,7 @@ function buildTree({
         id,
         name: m?.name ?? id,
         color: m?.color ?? null,
+        icon: m?.icon ?? null,
         parentId: m?.parentId ?? null,
         spent: 0,
         priorSpent: 0,
@@ -275,7 +328,11 @@ function buildTree({
 
   for (const r of breakdown) ensureNode(r.categoryId).spent += r.amount;
   for (const r of priorBreakdown) ensureNode(r.categoryId).priorSpent += r.amount;
-  for (const id of allocationByCat.keys()) ensureNode(id);
+  // Only ensure nodes for allocations that target a spending-taxonomy category;
+  // budget allocations pointing at income/other taxonomies must not appear here.
+  for (const id of allocationByCat.keys()) {
+    if (meta.has(id)) ensureNode(id);
+  }
 
   // Roll subcategory amounts up to top-level parent for the parent row totals.
   // This keeps parent.spent = direct + children spend, matching the visual mental model.
@@ -289,6 +346,7 @@ function buildTree({
         id,
         name: base?.name ?? m?.name ?? id,
         color: base?.color ?? m?.color ?? null,
+        icon: base?.icon ?? m?.icon ?? null,
         parentId: null,
         spent: base?.spent ?? 0,
         priorSpent: base?.priorSpent ?? 0,
