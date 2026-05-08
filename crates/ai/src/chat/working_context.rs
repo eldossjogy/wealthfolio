@@ -262,3 +262,85 @@ pub(super) fn user_time_context<E: AiEnvironment + ?Sized>(env: &E) -> UserTimeC
         datetime: now.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ChatMessageContent;
+    use std::collections::HashMap;
+
+    #[test]
+    fn extracts_accounts_from_get_accounts_tool_result() {
+        let mut assistant = ChatMessage::assistant("thread-1");
+        assistant.content = ChatMessageContent::new(vec![
+            ChatMessagePart::ToolCall {
+                tool_call_id: "call-1".to_string(),
+                name: "get_accounts".to_string(),
+                arguments: serde_json::json!({ "displayMode": "compact" }),
+            },
+            ChatMessagePart::ToolResult {
+                tool_call_id: "call-1".to_string(),
+                success: true,
+                data: serde_json::json!({
+                    "accounts": [
+                        { "id": "acct-test", "name": "Test", "currency": "USD" },
+                        { "id": "acct-default", "name": "Default", "currency": "CAD" }
+                    ],
+                    "count": 2
+                }),
+                meta: HashMap::new(),
+                error: None,
+            },
+        ]);
+
+        let context = ChatWorkingContext::from_messages_and_attachments(&[assistant], &[]);
+
+        assert_eq!(context.accounts.len(), 2);
+        assert_eq!(context.accounts[0].name, "Test");
+        let rendered = context.render().unwrap();
+        assert!(rendered.contains("Test: id=acct-test, currency=USD"));
+        assert!(rendered.contains("Do not call tools only to re-fetch"));
+    }
+
+    #[test]
+    fn summarizes_import_and_attachment_metadata() {
+        let mut assistant = ChatMessage::assistant("thread-1");
+        assistant.content = ChatMessageContent::new(vec![
+            ChatMessagePart::ToolCall {
+                tool_call_id: "call-1".to_string(),
+                name: "import_csv".to_string(),
+                arguments: serde_json::json!({ "accountId": "acct-test" }),
+            },
+            ChatMessagePart::ToolResult {
+                tool_call_id: "call-1".to_string(),
+                success: true,
+                data: serde_json::json!({
+                    "totalRows": 52,
+                    "accountId": "acct-test",
+                    "mappingConfidence": "HIGH",
+                    "availableAccounts": [
+                        { "id": "acct-test", "name": "Test", "currency": "USD" }
+                    ]
+                }),
+                meta: HashMap::new(),
+                error: None,
+            },
+        ]);
+        let attachment = MessageAttachment {
+            name: "activities.csv".to_string(),
+            content_type: "text/csv".to_string(),
+            data: "Date,Symbol\n2025-01-01,AAPL".to_string(),
+        };
+
+        let context =
+            ChatWorkingContext::from_messages_and_attachments(&[assistant], &[attachment]);
+        let rendered = context.render().unwrap();
+
+        assert!(rendered.contains("Attachments available this session:"));
+        assert!(rendered.contains("activities.csv (text/csv"));
+        assert!(rendered.contains("Current CSV import:"));
+        assert!(rendered.contains("rows prepared: 52"));
+        assert!(rendered.contains("status: prepared, not imported yet"));
+        assert!(!rendered.contains("2025-01-01,AAPL"));
+    }
+}
