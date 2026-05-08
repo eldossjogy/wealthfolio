@@ -108,13 +108,16 @@ export function RecentActivityCard({
           {uncategorizedCount > 0 ? `View all · ${uncategorizedCount} to tag →` : "View all →"}
         </Link>
       </div>
-      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border backdrop-blur-xl">
+      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
         {recent.length === 0 ? (
-          <div className="text-muted-foreground py-6 text-center text-xs">No recent activity.</div>
+          <div className="text-muted-foreground py-2 text-center text-xs">No recent activity.</div>
         ) : (
           grouped.map(([dateKey, items], gi) => (
-            <div key={dateKey} className={cn(gi > 0 && "border-border/60 border-t")}>
-              <div className="text-muted-foreground/70 px-4 pt-3 text-[10px] font-semibold uppercase tracking-wide md:px-5">
+            <div
+              key={dateKey}
+              className={cn(gi > 0 && "border-border/60 -mx-4 mt-2 border-t pt-2 md:-mx-5")}
+            >
+              <div className="text-muted-foreground/70 px-4 text-[10px] font-semibold uppercase tracking-wide md:px-5">
                 {dayLabel(dateKey)}
               </div>
               {items.map((a) => {
