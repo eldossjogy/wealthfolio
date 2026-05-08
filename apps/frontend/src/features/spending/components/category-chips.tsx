@@ -1,57 +1,7 @@
-import {
-  AlertCircle,
-  Award,
-  Banknote,
-  Briefcase,
-  Building2,
-  Calendar,
-  Car,
-  Code,
-  Coffee,
-  CreditCard,
-  DollarSign,
-  Dumbbell,
-  Eye,
-  FileText,
-  Film,
-  Fuel,
-  Gift,
-  Globe,
-  GraduationCap,
-  Heart,
-  Home,
-  Laptop,
-  type LucideIcon,
-  Palette,
-  ParkingCircle,
-  Percent,
-  PiggyBank,
-  Pill,
-  Plane,
-  Receipt,
-  RotateCcw,
-  Shield,
-  Shirt,
-  ShoppingBag,
-  ShoppingCart,
-  Smartphone,
-  Smile,
-  Sofa,
-  Stethoscope,
-  Target,
-  Train,
-  TrendingUp,
-  Truck,
-  Tv,
-  User,
-  UtensilsCrossed,
-  Wifi,
-  Wine,
-  Wrench,
-} from "lucide-react";
-
 import { cn } from "@/lib/utils";
 import { Icons } from "@wealthfolio/ui";
+
+import { resolveCategoryIcon } from "../lib/category-icons";
 
 export type CategoryMeta = {
   name: string;
@@ -62,73 +12,18 @@ export type CategoryMeta = {
 
 export type CategoryMetaMap = Map<string, CategoryMeta>;
 
-const ICON_REGISTRY: Record<string, LucideIcon> = {
-  AlertCircle,
-  Award,
-  Banknote,
-  Briefcase,
-  Building: Building2,
-  Calendar,
-  Car,
-  Code,
-  Coffee,
-  CreditCard,
-  DollarSign,
-  Dumbbell,
-  Eye,
-  FileText,
-  Film,
-  Fuel,
-  Gift,
-  Globe,
-  GraduationCap,
-  Heart,
-  Home,
-  Laptop,
-  Palette,
-  ParkingCircle,
-  Percent,
-  PiggyBank,
-  Pill,
-  Plane,
-  Receipt,
-  RotateCcw,
-  Shield,
-  Shirt,
-  ShoppingBag,
-  ShoppingCart,
-  Smartphone,
-  Smile,
-  Sofa,
-  Stethoscope,
-  Target,
-  Train,
-  TrendingUp,
-  Truck,
-  Tv,
-  User,
-  UtensilsCrossed,
-  Wifi,
-  Wine,
-  Wrench,
-};
-
 export function CategoryIcon({
   icon,
-  fallback,
+  fallback: _fallback,
   className,
 }: {
   icon: string | null;
-  fallback: string;
+  /** Reserved for future title/aria — currently unused. */
+  fallback?: string;
   className?: string;
 }) {
-  const LucideIconCmp = icon ? ICON_REGISTRY[icon] : undefined;
-  if (LucideIconCmp) return <LucideIconCmp className={cn("h-4 w-4", className)} />;
-  return (
-    <span className={cn("text-[10px] font-semibold uppercase", className)}>
-      {fallback.charAt(0)}
-    </span>
-  );
+  const IconCmp = resolveCategoryIcon(icon);
+  return <IconCmp weight="duotone" className={cn("h-4 w-4", className)} />;
 }
 
 export function CategoryBadge({
