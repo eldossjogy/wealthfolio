@@ -690,6 +690,10 @@ mod tests {
             use crate::activities::ActivityStatus;
             // Extract asset_id before consuming other fields
             let asset_id = new_activity.get_symbol_id().map(|s| s.to_string());
+            let metadata = new_activity
+                .metadata
+                .as_deref()
+                .and_then(|metadata| serde_json::from_str(metadata).ok());
             let activity = Activity {
                 id: new_activity.id.unwrap_or_else(|| "test-id".to_string()),
                 account_id: new_activity.account_id,
@@ -708,7 +712,7 @@ mod tests {
                 currency: new_activity.currency,
                 fx_rate: new_activity.fx_rate,
                 notes: new_activity.notes,
-                metadata: None,
+                metadata,
                 source_system: None,
                 source_record_id: None,
                 source_group_id: new_activity.source_group_id,
@@ -848,6 +852,10 @@ mod tests {
             let mut count = 0usize;
             for new_activity in _activities {
                 let asset_id = new_activity.get_symbol_id().map(|s| s.to_string());
+                let metadata = new_activity
+                    .metadata
+                    .as_deref()
+                    .and_then(|metadata| serde_json::from_str(metadata).ok());
                 stored.push(Activity {
                     id: new_activity.id.unwrap_or_else(|| "test-id".to_string()),
                     account_id: new_activity.account_id,
@@ -868,7 +876,7 @@ mod tests {
                     currency: new_activity.currency,
                     fx_rate: new_activity.fx_rate,
                     notes: new_activity.notes,
-                    metadata: None,
+                    metadata,
                     source_system: None,
                     source_record_id: None,
                     source_group_id: new_activity.source_group_id,
@@ -5153,7 +5161,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_import_links_transfer_pairs_using_offset_local_date() {
+    async fn test_import_links_transfer_pairs_using_offset_local_date_and_clears_external_metadata()
+    {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
         let fx_service = Arc::new(MockFxService::new());
@@ -5201,7 +5210,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
-            is_external: None,
+            is_external: Some(true),
         };
 
         let transfer_in = ActivityImport {
@@ -5234,7 +5243,7 @@ mod tests {
             asset_id: None,
             isin: None,
             force_import: false,
-            is_external: None,
+            is_external: Some(true),
         };
 
         let result = activity_service
@@ -5266,6 +5275,26 @@ mod tests {
         assert_eq!(
             transfer_out_stored.source_group_id, transfer_in_stored.source_group_id,
             "paired transfers should share the same source_group_id"
+        );
+        assert_eq!(
+            transfer_out_stored
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("flow"))
+                .and_then(|flow| flow.get("is_external"))
+                .and_then(|value| value.as_bool()),
+            Some(false),
+            "auto-linked transfer out should be marked internal"
+        );
+        assert_eq!(
+            transfer_in_stored
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("flow"))
+                .and_then(|flow| flow.get("is_external"))
+                .and_then(|value| value.as_bool()),
+            Some(false),
+            "auto-linked transfer in should be marked internal"
         );
     }
 

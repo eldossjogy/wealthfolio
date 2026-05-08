@@ -4813,6 +4813,34 @@ impl ActivityService {
             })
         }
 
+        fn set_transfer_flow_external(
+            metadata: Option<String>,
+            is_external: bool,
+        ) -> Option<String> {
+            let mut value = metadata
+                .and_then(|metadata| serde_json::from_str::<serde_json::Value>(&metadata).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+
+            if !value.is_object() {
+                value = serde_json::json!({});
+            }
+
+            let object = value
+                .as_object_mut()
+                .expect("transfer metadata value should be an object");
+            let flow = object
+                .entry("flow")
+                .or_insert_with(|| serde_json::json!({}));
+            if !flow.is_object() {
+                *flow = serde_json::json!({});
+            }
+            if let Some(flow_object) = flow.as_object_mut() {
+                flow_object.insert("is_external".to_string(), serde_json::json!(is_external));
+            }
+
+            Some(value.to_string())
+        }
+
         let mut transfer_in: HashMap<TransferMatchKey, Vec<usize>> = HashMap::new();
         let mut transfer_out: HashMap<TransferMatchKey, Vec<usize>> = HashMap::new();
 
@@ -4842,9 +4870,13 @@ impl ActivityService {
                     let out_idx = out_indices[i];
                     if let Some(activity) = new_activities.get_mut(in_idx) {
                         activity.source_group_id = Some(group_id.clone());
+                        activity.metadata =
+                            set_transfer_flow_external(activity.metadata.take(), false);
                     }
                     if let Some(activity) = new_activities.get_mut(out_idx) {
                         activity.source_group_id = Some(group_id);
+                        activity.metadata =
+                            set_transfer_flow_external(activity.metadata.take(), false);
                     }
                 }
             }
