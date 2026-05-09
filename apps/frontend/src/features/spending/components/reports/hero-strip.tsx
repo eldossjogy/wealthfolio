@@ -242,113 +242,75 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
     );
   }
 
-  // Half-arc gauge geometry
-  const r = 56;
-  const cx = 70;
-  const cy = 70;
-  const fillPct = Math.min(1, pct);
-  const arcLen = Math.PI * r;
-  const dash = `${fillPct * arcLen} ${arcLen}`;
-  const angle = paceTarget * Math.PI;
-  const tickInner = r - 8;
-  const tickOuter = r + 8;
-  const tx1 = cx - Math.cos(angle) * tickInner;
-  const ty1 = cy - Math.sin(angle) * tickInner;
-  const tx2 = cx - Math.cos(angle) * tickOuter;
-  const ty2 = cy - Math.sin(angle) * tickOuter;
-
   const status = isOver ? "over" : pct >= 0.85 ? "approach" : "ok";
-  const fillStart = status === "over" ? "#B85544" : status === "approach" ? "#C28B47" : "#2A573F";
-  const fillEnd = status === "over" ? "#E89F8C" : status === "approach" ? "#E5B5A0" : "#71A290";
-  const trackOpacity = 0.18;
+  const fillColor =
+    status === "over" ? "var(--destructive)" : status === "approach" ? "#C28B47" : "var(--success)";
+  const statusLabel = isOver ? "Over budget" : pct >= 0.85 ? "Trending high" : "On track";
+
+  // Pace marker position (clamped 0–100% of bar width).
+  const pacePct = Math.min(1, Math.max(0, paceTarget));
+  // Visible bar fill — capped at 100% so it never overshoots the track visually.
+  const fillPct = Math.min(1, pct);
 
   const monthsLabel = monthsInRange === 1 ? "this month" : `${monthsInRange} months`;
-  const gradId = `budget-status-${status}`;
 
   return (
     <HeroSection label={`Budget status · ${monthsLabel}`}>
-      <div className="flex items-center gap-3">
-        <svg viewBox="0 0 140 80" className="h-[80px] w-[140px] shrink-0">
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={fillStart} />
-              <stop offset="100%" stopColor={fillEnd} />
-            </linearGradient>
-          </defs>
-          {/* Track */}
-          <path
-            d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
-            fill="none"
-            stroke={fillStart}
-            strokeOpacity={trackOpacity}
-            strokeWidth={11}
-            strokeLinecap="round"
-          />
-          {/* Filled arc */}
-          <path
-            d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
-            fill="none"
-            stroke={`url(#${gradId})`}
-            strokeWidth={11}
-            strokeLinecap="round"
-            strokeDasharray={dash}
-          />
-          {/* Pace target tick */}
-          <line
-            x1={tx1}
-            y1={ty1}
-            x2={tx2}
-            y2={ty2}
-            stroke="var(--foreground)"
-            strokeOpacity={0.5}
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-        </svg>
-        <div>
-          <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
-            {Math.round(pct * 100)}%
-          </div>
-          <div className="text-muted-foreground/80 text-xs tabular-nums">
-            {formatCompactAmount(spent, currency)} of {formatCompactAmount(target, currency)}
-          </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-foreground text-3xl font-bold tabular-nums tracking-tight">
+          {Math.round(pct * 100)}%
         </div>
+        <span
+          className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+          style={{ backgroundColor: `${fillColor}1F`, color: fillColor }}
+        >
+          {statusLabel}
+        </span>
+      </div>
+      <div className="text-muted-foreground/80 mt-1 text-xs tabular-nums">
+        {formatCompactAmount(spent, currency)} of {formatCompactAmount(target, currency)}
       </div>
 
-      <div className="border-border/40 mt-3 grid grid-cols-2 gap-x-3 gap-y-1 border-t pt-2 text-[11px]">
-        <div className="text-muted-foreground/80">
-          Pace target{" "}
-          <span className="text-foreground font-semibold tabular-nums">
-            {Math.round(paceTarget * 100)}%
-          </span>
-        </div>
+      {/* Horizontal progress with pace marker */}
+      <div className="bg-foreground/10 relative mt-4 h-2 w-full overflow-hidden rounded-full">
         <div
-          className={cn("text-right tabular-nums", isOver ? "text-destructive" : "text-success")}
-        >
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${fillPct * 100}%`,
+            backgroundColor: fillColor,
+            opacity: 0.65,
+          }}
+        />
+        {/* Pace target tick — vertical line on the bar */}
+        <div
+          className="bg-foreground/60 absolute top-0 h-full w-px"
+          style={{ left: `${pacePct * 100}%` }}
+          title={`Pace target ${Math.round(paceTarget * 100)}%`}
+        />
+      </div>
+
+      {/* Compact stat row: remaining/over + forecast vs target */}
+      <div className="text-muted-foreground/80 mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[11px]">
+        <span className={cn("tabular-nums", isOver ? "text-destructive" : "text-success")}>
           {isOver ? "Over by " : "Remaining "}
           <span className="font-semibold">
             {formatCompactAmount(Math.abs(isOver ? overBy : remaining), currency)}
           </span>
-        </div>
-        <div className="text-muted-foreground/80">
-          Forecast{" "}
-          <span className="text-foreground font-semibold tabular-nums">
-            {formatCompactAmount(forecast, currency)}
-          </span>
-        </div>
-        <div
-          className={cn(
-            "text-right tabular-nums",
-            forecast > target ? "text-destructive" : "text-success",
-          )}
+        </span>
+        <span
+          className={cn("tabular-nums", forecast > target ? "text-destructive" : "text-success")}
         >
-          Will{" "}
-          <span className="font-semibold">
-            {forecast > target
-              ? `exceed by ${formatCompactAmount(forecast - target, currency)}`
-              : `end with ${formatCompactAmount(target - forecast, currency)}`}
-          </span>
-        </div>
+          Forecast <span className="font-semibold">{formatCompactAmount(forecast, currency)}</span>
+          {forecast > 0 && (
+            <span className="ml-1">
+              (
+              {forecast > target
+                ? `+${formatCompactAmount(forecast - target, currency)}`
+                : `−${formatCompactAmount(target - forecast, currency)}`}
+              )
+            </span>
+          )}
+        </span>
       </div>
     </HeroSection>
   );
@@ -390,38 +352,61 @@ export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoadin
   const periodLabel = months.length === 1 ? "1 month" : `${months.length} months`;
   const monthlyAvgNet = months.length > 0 ? totals.net / months.length : 0;
 
+  // Width proportions for the income/spent bar — relative to the larger of the
+  // two so the longer bar always reaches the right edge.
+  const denom = Math.max(totals.income, totals.spent, 1);
+  const incomePct = (totals.income / denom) * 100;
+  const spentPct = (totals.spent / denom) * 100;
+  const netLabel = totals.net >= 0 ? "Saved" : "Overspent";
+  const netToneClass = totals.net >= 0 ? "text-success" : "text-destructive";
+
   return (
     <HeroSection label={`Cashflow · ${periodLabel}`}>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <div className="text-success text-base font-semibold tabular-nums">
-          +{formatCompactAmount(totals.income, currency)}
-        </div>
-        <div className="text-destructive text-base font-semibold tabular-nums">
-          −{formatCompactAmount(totals.spent, currency)}
-        </div>
-        <div
-          className={cn(
-            "text-base font-semibold tabular-nums",
-            totals.net >= 0 ? "text-success" : "text-destructive",
-          )}
-        >
+      <div className="flex items-baseline justify-between gap-2">
+        <div className={cn("text-3xl font-bold tabular-nums tracking-tight", netToneClass)}>
           {totals.net >= 0 ? "+" : "−"}
           {formatCompactAmount(Math.abs(totals.net), currency)}
         </div>
+        {totals.income > 0 && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+              totals.net >= 0 ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive",
+            )}
+          >
+            {netLabel} {Math.round(Math.abs(totals.savingsRate) * 100)}%
+          </span>
+        )}
       </div>
-      <div className="text-muted-foreground/70 mt-1 flex flex-wrap gap-x-3 text-[10px] uppercase tracking-wide">
-        <span>Income</span>
-        <span>Spent</span>
-        <span>
-          {totals.net >= 0 ? "Saved" : "Overspent"}
-          {totals.income > 0 && (
-            <span className="ml-1 normal-case">· {Math.round(totals.savingsRate * 100)}%</span>
-          )}
-        </span>
+      <div className="text-muted-foreground/80 mt-1 text-xs">Net {periodLabel.toLowerCase()}</div>
+
+      {/* Income / Spent proportion bars */}
+      <div className="mt-4 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-success w-20 shrink-0 text-[11px] font-semibold tabular-nums">
+            +{formatCompactAmount(totals.income, currency)}
+          </span>
+          <div className="bg-foreground/10 h-1.5 flex-1 overflow-hidden rounded-full">
+            <div
+              className="bg-success/65 h-full rounded-full transition-all"
+              style={{ width: `${incomePct}%` }}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-destructive w-20 shrink-0 text-[11px] font-semibold tabular-nums">
+            −{formatCompactAmount(totals.spent, currency)}
+          </span>
+          <div className="bg-foreground/10 h-1.5 flex-1 overflow-hidden rounded-full">
+            <div
+              className="bg-destructive/65 h-full rounded-full transition-all"
+              style={{ width: `${spentPct}%` }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Secondary stat — non-overlapping with the full Cashflow chart below */}
-      <div className="border-border/40 text-muted-foreground/80 mt-3 border-t pt-2 text-[11px]">
+      <div className="text-muted-foreground/80 mt-3 text-[11px]">
         Avg net ·{" "}
         <span
           className={cn(
