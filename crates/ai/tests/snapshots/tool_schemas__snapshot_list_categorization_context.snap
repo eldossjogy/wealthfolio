@@ -1,0 +1,49 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "list_categorization_context",
+  "parameters": {
+    "properties": {
+      "accountIds": {
+        "description": "OMIT unless the user names a specific account by exact name or ID.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "activityIds": {
+        "description": "Optional explicit set of activity IDs.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "endDate": {
+        "description": "Inclusive ISO 8601 upper bound.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Max rows. Default 30.",
+        "maximum": 50,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "startDate": {
+        "description": "Inclusive ISO 8601 lower bound.",
+        "type": "string"
+      },
+      "status": {
+        "description": "Default: uncategorized.",
+        "enum": [
+          "uncategorized",
+          "all",
+          "needs_review"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

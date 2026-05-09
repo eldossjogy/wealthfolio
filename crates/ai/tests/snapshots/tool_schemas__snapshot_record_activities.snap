@@ -1,0 +1,84 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "record_activities",
+  "parameters": {
+    "properties": {
+      "activities": {
+        "description": "List of activities to record together",
+        "items": {
+          "properties": {
+            "account": {
+              "description": "Account name or ID. Required before calling this tool when the user has multiple accounts. If the user did not specify an account for a row, ask which account first instead of calling this tool with an empty account.",
+              "type": "string"
+            },
+            "activityDate": {
+              "description": "ISO 8601 date (e.g., '2026-01-17'). Parse relative dates to ISO format",
+              "type": "string"
+            },
+            "activityType": {
+              "description": "Activity type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX, CREDIT, ADJUSTMENT",
+              "enum": [
+                "BUY",
+                "SELL",
+                "DIVIDEND",
+                "DEPOSIT",
+                "WITHDRAWAL",
+                "TRANSFER_IN",
+                "TRANSFER_OUT",
+                "INTEREST",
+                "FEE",
+                "SPLIT",
+                "TAX",
+                "CREDIT",
+                "ADJUSTMENT",
+                "UNKNOWN"
+              ],
+              "type": "string"
+            },
+            "amount": {
+              "description": "Total amount for cash-style activities",
+              "type": "number"
+            },
+            "fee": {
+              "description": "Transaction fee (optional)",
+              "type": "number"
+            },
+            "notes": {
+              "description": "Optional notes",
+              "type": "string"
+            },
+            "quantity": {
+              "description": "Number of shares or units. Required for BUY/SELL/SPLIT",
+              "type": "number"
+            },
+            "subtype": {
+              "description": "Activity subtype: DRIP, DIVIDEND_IN_KIND, STAKING_REWARD, BONUS",
+              "type": "string"
+            },
+            "symbol": {
+              "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT",
+              "type": "string"
+            },
+            "unitPrice": {
+              "description": "Price per unit",
+              "type": "number"
+            }
+          },
+          "required": [
+            "activityType",
+            "activityDate"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "activities"
+    ],
+    "type": "object"
+  }
+}

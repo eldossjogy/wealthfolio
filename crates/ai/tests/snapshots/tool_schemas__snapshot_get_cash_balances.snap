@@ -1,0 +1,17 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_cash_balances",
+  "parameters": {
+    "properties": {
+      "accountId": {
+        "description": "Account ID, or 'TOTAL' for all accounts. Default: 'TOTAL'.",
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

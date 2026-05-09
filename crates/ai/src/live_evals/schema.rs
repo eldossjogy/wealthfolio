@@ -119,7 +119,8 @@ pub struct ResponseRubric {
     pub judge_model: Option<String>,
 }
 
-/// Load a single suite TOML file.
+/// Load a single suite TOML file. Requires the `eval` feature (pulls `toml`).
+#[cfg(feature = "eval")]
 pub fn load_suite(path: &Path) -> Result<Suite, SchemaError> {
     let bytes = std::fs::read_to_string(path).map_err(SchemaError::Io)?;
     let mut suite: Suite = toml::from_str(&bytes).map_err(SchemaError::Parse)?;
@@ -132,7 +133,8 @@ pub fn load_suite(path: &Path) -> Result<Suite, SchemaError> {
     Ok(suite)
 }
 
-/// Load every `*.toml` file under `cases_dir`.
+/// Load every `*.toml` file under `cases_dir`. Requires the `eval` feature.
+#[cfg(feature = "eval")]
 pub fn load_all_suites(cases_dir: &Path) -> Result<Vec<Suite>, SchemaError> {
     let mut suites = Vec::new();
     let entries = std::fs::read_dir(cases_dir).map_err(SchemaError::Io)?;
@@ -147,6 +149,7 @@ pub fn load_all_suites(cases_dir: &Path) -> Result<Vec<Suite>, SchemaError> {
     Ok(suites)
 }
 
+#[cfg(feature = "eval")]
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
     #[error("IO error: {0}")]
@@ -155,7 +158,7 @@ pub enum SchemaError {
     Parse(#[from] toml::de::Error),
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "eval"))]
 mod tests {
     use super::*;
 

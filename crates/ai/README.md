@@ -59,9 +59,25 @@ cargo test -p wealthfolio-ai --tests
 
 # A specific test by name substring
 cargo test -p wealthfolio-ai merge_unknown_category_key
+
+# Snapshot tests (gated on test-utils)
+cargo test -p wealthfolio-ai --features test-utils --test tool_schemas
 ```
 
-These run in CI on every commit. Catch:
+### Snapshot tests
+
+`tests/tool_schemas.rs` snapshots every tool's `Tool::definition().parameters`
+JSON via [insta](https://insta.rs). When you intentionally change a tool
+schema:
+
+```bash
+INSTA_UPDATE=always cargo test -p wealthfolio-ai --features test-utils --test tool_schemas
+# Or interactively:
+cargo install cargo-insta
+cargo insta review
+```
+
+These tests run in CI on every commit. Catch:
 
 - Tool `NAME` constants drifting out of `DEFAULT_TOOLS_ALLOWLIST`.
 - Tool JSON schema changes (e.g. `categoryKey` → `category_key`).

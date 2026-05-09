@@ -1,0 +1,38 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_asset_allocation",
+  "parameters": {
+    "properties": {
+      "accountId": {
+        "default": "TOTAL",
+        "description": "Account ID to get allocation for, or 'TOTAL' for all accounts",
+        "type": "string"
+      },
+      "categoryId": {
+        "description": "For drill-down: category ID to show holdings for (use value from previous allocation response)",
+        "type": "string"
+      },
+      "groupBy": {
+        "default": "class",
+        "description": "Grouping: 'class' (Equity/Fixed Income/Cash), 'sector' (Technology/Healthcare/etc), 'region' (North America/Europe/etc), 'risk' (Low/Medium/High), 'security_type' (Stock/ETF/Bond)",
+        "enum": [
+          "class",
+          "sector",
+          "region",
+          "risk",
+          "security_type"
+        ],
+        "type": "string"
+      },
+      "taxonomyId": {
+        "description": "For drill-down: taxonomy ID (use value from previous allocation response)",
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_accounts",
+  "parameters": {
+    "properties": {
+      "displayMode": {
+        "description": "Pass 'compact' when fetching accounts as input for another tool call (e.g., resolving account name before import_csv). Omit when the user directly asked to see their accounts.",
+        "enum": [
+          "full",
+          "compact"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

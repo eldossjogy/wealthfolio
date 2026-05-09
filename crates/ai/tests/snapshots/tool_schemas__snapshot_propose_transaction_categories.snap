@@ -1,0 +1,76 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "propose_transaction_categories",
+  "parameters": {
+    "properties": {
+      "accountIds": {
+        "description": "OMIT unless the user names a specific account by exact name or ID.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "activityIds": {
+        "description": "Optional explicit set of activity IDs to propose for. Overrides filters.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "aiProposals": {
+        "description": "Your inferred categories for the rows returned as `unproposed` from `list_categorization_context`. Each entry: { activityId, categoryKey, confidence (0–1), reason }.",
+        "items": {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "categoryKey": {
+              "type": "string"
+            },
+            "confidence": {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "categoryKey"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "endDate": {
+        "description": "Inclusive ISO 8601 upper bound.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Max rows to propose. Default 30.",
+        "maximum": 50,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "startDate": {
+        "description": "Inclusive ISO 8601 lower bound.",
+        "type": "string"
+      },
+      "status": {
+        "description": "Default: uncategorized.",
+        "enum": [
+          "uncategorized",
+          "all",
+          "needs_review"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

@@ -14,6 +14,11 @@
 
 #![cfg(feature = "test-utils")]
 
-pub mod runner;
 pub mod schema;
 pub mod trace;
+
+// The runner pulls in `regex` and `toml` for case execution; only available
+// under the full `eval` feature (`test-utils` alone gives you the schema +
+// trace types without the runner / loader).
+#[cfg(feature = "eval")]
+pub mod runner;

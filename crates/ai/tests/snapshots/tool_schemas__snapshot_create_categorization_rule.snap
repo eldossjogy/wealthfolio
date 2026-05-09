@@ -1,0 +1,42 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "create_categorization_rule",
+  "parameters": {
+    "properties": {
+      "activityType": {
+        "description": "Optional activity-type narrowing (e.g. WITHDRAWAL). Usually omit.",
+        "type": "string"
+      },
+      "categoryKey": {
+        "description": "Category key from the activity-scope taxonomies (e.g. \"groceries\").",
+        "type": "string"
+      },
+      "matchType": {
+        "description": "Default \"contains\". Use stricter modes only if user asked.",
+        "enum": [
+          "contains",
+          "starts_with",
+          "exact",
+          "regex"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "description": "Short rule name shown in settings. Default: derive from pattern, e.g. \"T&T → Groceries\".",
+        "type": "string"
+      },
+      "pattern": {
+        "description": "Substring/pattern matched against transaction notes (case-insensitive). For \"contains\" matchType use a distinctive merchant fragment (e.g. \"T&T\", \"COBS BREAD\").",
+        "type": "string"
+      }
+    },
+    "required": [
+      "pattern",
+      "categoryKey"
+    ],
+    "type": "object"
+  }
+}

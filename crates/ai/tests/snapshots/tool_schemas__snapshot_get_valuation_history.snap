@@ -1,0 +1,26 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_valuation_history",
+  "parameters": {
+    "properties": {
+      "accountId": {
+        "default": "TOTAL",
+        "description": "Account ID to get valuations for, or 'TOTAL' for all accounts aggregated",
+        "type": "string"
+      },
+      "endDate": {
+        "description": "End date in YYYY-MM-DD format. Defaults to today.",
+        "type": "string"
+      },
+      "startDate": {
+        "description": "Start date in YYYY-MM-DD format. Defaults to 365 days ago.",
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

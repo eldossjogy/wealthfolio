@@ -1,0 +1,28 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_holdings",
+  "parameters": {
+    "properties": {
+      "accountId": {
+        "default": "TOTAL",
+        "description": "Account ID to get holdings for, or 'TOTAL' for all accounts",
+        "type": "string"
+      },
+      "viewMode": {
+        "default": "treemap",
+        "description": "Display mode: 'treemap' for composition chart with daily gains (best for 'how is my portfolio today?'), 'table' for detailed list, 'both' for treemap + table",
+        "enum": [
+          "table",
+          "treemap",
+          "both"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}
