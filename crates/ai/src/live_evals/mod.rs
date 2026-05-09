@@ -3,7 +3,9 @@
 //! asserts on the resulting tool-call trace.
 //!
 //! Distinct from:
-//! - `crate::eval` (singular): deterministic LLM stubs / mocked-agent flows.
+//! - `crate::eval` (singular): assertion helpers (event ordering, guardrails)
+//!   and `GoldenScenario` definitions waiting for a future stub-LLM harness.
+//!   No runner today.
 //! - `crates/ai/tests/`: unit + integration tests (schema/contract checks,
 //!   no LLM at all).
 //!

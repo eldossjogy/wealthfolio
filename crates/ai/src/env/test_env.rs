@@ -11,10 +11,10 @@ use wealthfolio_core::{
     accounts::{Account, AccountServiceTrait, AccountUpdate, NewAccount},
     activities::{
         Activity, ActivityBulkMutationRequest, ActivityBulkMutationResult, ActivityDetails,
-        ActivityImport, ActivitySearchResponse, ActivitySearchResponseMeta,
-        ActivityServiceTrait, ActivityUpdate, BrokerSyncProfileData, ImportAssetCandidate,
-        ImportAssetPreviewItem, ImportMappingData, ImportTemplateData, ImportTemplateScope,
-        NewActivity, SaveBrokerSyncProfileRulesRequest, Sort,
+        ActivityImport, ActivitySearchResponse, ActivitySearchResponseMeta, ActivityServiceTrait,
+        ActivityUpdate, BrokerSyncProfileData, ImportAssetCandidate, ImportAssetPreviewItem,
+        ImportMappingData, ImportTemplateData, ImportTemplateScope, NewActivity,
+        SaveBrokerSyncProfileRulesRequest, Sort,
     },
     assets::{Asset, AssetServiceTrait, ProviderProfile},
     errors::DatabaseError,
@@ -36,9 +36,8 @@ use wealthfolio_core::{
     portfolio::income::{IncomeServiceTrait, IncomeSummary},
     portfolio::performance::{PerformanceMetrics, PerformanceServiceTrait},
     quotes::{
-        LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport,
-        QuoteServiceTrait, QuoteSyncState, SymbolSearchResult, SymbolSyncPlan, SyncMode,
-        SyncResult,
+        LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
+        QuoteSyncState, SymbolSearchResult, SymbolSyncPlan, SyncMode, SyncResult,
     },
     secrets::SecretStore,
     settings::{Settings, SettingsServiceTrait, SettingsUpdate},
@@ -100,9 +99,7 @@ impl AccountServiceTrait for MockAccountService {
             .iter()
             .find(|a| a.id == id)
             .cloned()
-            .ok_or_else(|| {
-                CoreError::Database(DatabaseError::NotFound(format!("Account {}", id)))
-            })
+            .ok_or_else(|| CoreError::Database(DatabaseError::NotFound(format!("Account {}", id))))
     }
 
     fn list_accounts(
@@ -188,10 +185,7 @@ impl ActivityServiceTrait for MockActivityService {
         unimplemented!("MockActivityService::get_activities_by_account_id")
     }
 
-    fn get_activities_by_account_ids(
-        &self,
-        _account_ids: &[String],
-    ) -> CoreResult<Vec<Activity>> {
+    fn get_activities_by_account_ids(&self, _account_ids: &[String]) -> CoreResult<Vec<Activity>> {
         unimplemented!("MockActivityService::get_activities_by_account_ids")
     }
 
@@ -571,8 +565,7 @@ impl GoalServiceTrait for MockGoalService {
         _valuation_map: &AccountValuationMap,
     ) -> CoreResult<PreparedRetirementSimulationInput> {
         Err(CoreError::Unexpected(
-            "MockGoalService::prepare_retirement_simulation_input is not implemented"
-                .to_string(),
+            "MockGoalService::prepare_retirement_simulation_input is not implemented".to_string(),
         ))
     }
 
@@ -847,9 +840,7 @@ impl QuoteServiceTrait for MockQuoteService {
         Ok(Vec::new())
     }
 
-    fn get_all_historical_quotes(
-        &self,
-    ) -> CoreResult<HashMap<String, Vec<(NaiveDate, Quote)>>> {
+    fn get_all_historical_quotes(&self) -> CoreResult<HashMap<String, Vec<(NaiveDate, Quote)>>> {
         Ok(HashMap::new())
     }
 
@@ -1268,8 +1259,7 @@ impl AiEnvironment for MockEnvironment {
 
     fn activity_taxonomy_assignment_service(
         &self,
-    ) -> Arc<wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService>
-    {
+    ) -> Arc<wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService> {
         unimplemented!("activity_taxonomy_assignment_service not used in AI mock environment")
     }
 

@@ -144,5 +144,12 @@ crates/ai/evals/
 |---|---|---|---|
 | Unit tests | `crates/ai/src/**/tests` | No | Pure-function bugs. |
 | Integration tests | `crates/ai/tests/` | No | Schema/allowlist/system-prompt drift. |
-| Mocked-agent tests | `crates/ai/src/eval/` (existing) | No (stubbed) | Tool-call sequencing without spending tokens. |
+| Snapshot tests | `crates/ai/tests/tool_schemas.rs` | No | Silent tool-schema drift (insta). |
 | **Live evals** *(this dir)* | `crates/ai/src/live_evals/` + `evals/cases/` | **Yes** | **Real model drift, prompt regression, fabrication.** |
+
+> `crates/ai/src/eval/` (singular) holds stream-event-ordering and guardrail
+> assertion helpers + `GoldenScenario` definitions, but no harness drives
+> them against a stub LLM today. If you ever need deterministic CI coverage
+> of the agent flow, that's the seam to extend; for now, code-flow regressions
+> are caught by integration + snapshot tests, and behavior regressions by
+> live evals.

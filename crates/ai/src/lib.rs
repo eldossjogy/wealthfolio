@@ -14,7 +14,10 @@
 //! - `env`: Environment abstraction for services/secrets/config (`MockEnvironment`
 //!   exposed via the `test-utils` feature).
 //! - `title_generator`: Auto-generates thread titles from user messages.
-//! - `eval`: Mocked-stub agent-flow tests (test-only).
+//! - `eval`: Stream-event ordering + guardrail assertion helpers and a
+//!   `GoldenScenario` struct (test-only). The harness that would drive
+//!   `ChatService` against a stub LLM is not implemented; the helpers
+//!   sit ready for a future mocked-agent runner.
 //! - `live_evals`: Real-LLM behavioral evals — TOML suites driven by the
 //!   `eval` binary against Ollama / cloud providers (feature `test-utils`).
 //! - `provider_model`: AI provider domain models (catalog, settings, merged views).

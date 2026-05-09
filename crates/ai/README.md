@@ -19,7 +19,9 @@ crates/ai/
 │   │   ├── working_context.rs   "Known App Context" extraction for the preamble
 │   │   └── history.rs           build_user_prompt + build_history
 │   ├── tools/                   Tool implementations (one file per tool)
-│   ├── env.rs                   AiEnvironment trait + MockEnvironment
+│   ├── env/                     AiEnvironment trait + MockEnvironment
+│   │   ├── mod.rs               Trait surface (~95 lines)
+│   │   └── test_env.rs          MockEnvironment (test-utils gated)
 │   ├── providers.rs             Provider catalog + ProviderService
 │   ├── system_prompt.txt        Global agent persona / tool-pair / display rules
 │   ├── live_evals/              Live-model eval harness (test-utils gated)
