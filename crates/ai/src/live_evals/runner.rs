@@ -241,6 +241,25 @@ fn assert_trace(case: &Case, trace: &ToolTrace) -> Vec<AssertionFailure> {
         });
     }
 
+    // Trivial-pass guard: a case with only `forbidden_tools` (no `expected_tools`,
+    // no response rubric) would silently pass when the agent does nothing
+    // (no tool calls = no forbidden tools fired). That's not a passing trace,
+    // it's a model that ignored the prompt. Catch it as a case-design bug.
+    let has_positive_assertion = !case.expected_tools.is_empty()
+        || case.expected_response.is_some()
+        || !case.max_tool_calls.is_empty();
+    if !has_positive_assertion && !case.forbidden_tools.is_empty() && trace.tool_calls.is_empty() {
+        failures.push(AssertionFailure {
+            kind: AssertionKind::ExpectedToolMissing,
+            message: format!(
+                "case has only forbidden_tools and the agent did nothing — \
+                 add at least one `expected_tools` entry to prevent trivial pass. \
+                 Case `{}`",
+                case.id
+            ),
+        });
+    }
+
     // Forbidden tools — any occurrence is a failure.
     for (tool_name, reason) in &case.forbidden_tools {
         if trace.count(tool_name) > 0 {
