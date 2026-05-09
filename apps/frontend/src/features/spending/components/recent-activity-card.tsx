@@ -108,16 +108,18 @@ export function RecentActivityCard({
           {uncategorizedCount > 0 ? `View all · ${uncategorizedCount} to tag →` : "View all →"}
         </Link>
       </div>
-      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
+      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border backdrop-blur-xl">
         {recent.length === 0 ? (
-          <div className="text-muted-foreground py-2 text-center text-xs">No recent activity.</div>
+          <div className="text-muted-foreground px-4 py-6 text-center text-xs md:px-5">
+            No recent activity.
+          </div>
         ) : (
           grouped.map(([dateKey, items], gi) => (
             <div
               key={dateKey}
-              className={cn(gi > 0 && "border-border/60 -mx-4 mt-2 border-t pt-2 md:-mx-5")}
+              className={cn("px-4 py-3 md:px-5", gi > 0 && "border-border/60 border-t")}
             >
-              <div className="text-muted-foreground/70 px-4 text-[10px] font-semibold uppercase tracking-wide md:px-5">
+              <div className="text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-wide">
                 {dayLabel(dateKey)}
               </div>
               {items.map((a) => {
@@ -128,7 +130,7 @@ export function RecentActivityCard({
                 const needsReview = a.needsReview || (isOutflow && !badge);
 
                 return (
-                  <div key={a.id} className="flex items-center gap-2.5 px-4 py-1.5 md:px-5">
+                  <div key={a.id} className="flex items-center gap-2.5 py-1.5">
                     <div className="min-w-0 flex-1">
                       <div className="text-foreground/90 truncate text-xs font-medium">
                         {payee || <span className="text-muted-foreground italic">No payee</span>}
