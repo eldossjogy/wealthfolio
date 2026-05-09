@@ -8,16 +8,13 @@ expression: snapshot
     "properties": {
       "accountId": {
         "default": "TOTAL",
-        "description": "Account ID to get allocation for, or 'TOTAL' for all accounts",
         "type": "string"
       },
       "categoryId": {
-        "description": "For drill-down: category ID to show holdings for (use value from previous allocation response)",
         "type": "string"
       },
       "groupBy": {
         "default": "class",
-        "description": "Grouping: 'class' (Equity/Fixed Income/Cash), 'sector' (Technology/Healthcare/etc), 'region' (North America/Europe/etc), 'risk' (Low/Medium/High), 'security_type' (Stock/ETF/Bond)",
         "enum": [
           "class",
           "sector",
@@ -28,7 +25,6 @@ expression: snapshot
         "type": "string"
       },
       "taxonomyId": {
-        "description": "For drill-down: taxonomy ID (use value from previous allocation response)",
         "type": "string"
       }
     },

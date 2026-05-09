@@ -7,7 +7,6 @@ expression: snapshot
   "parameters": {
     "properties": {
       "accountId": {
-        "description": "Account ID, or 'TOTAL' for all accounts. Default: 'TOTAL'.",
         "type": "string"
       }
     },

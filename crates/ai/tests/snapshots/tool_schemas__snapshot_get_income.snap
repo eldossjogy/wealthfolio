@@ -7,7 +7,6 @@ expression: snapshot
   "parameters": {
     "properties": {
       "period": {
-        "description": "Time period for income summary: YTD (year to date), LAST_YEAR, or TOTAL (all time). Defaults to YTD.",
         "enum": [
           "YTD",
           "LAST_YEAR",

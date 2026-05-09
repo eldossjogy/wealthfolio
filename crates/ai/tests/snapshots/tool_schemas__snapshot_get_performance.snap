@@ -8,12 +8,10 @@ expression: snapshot
     "properties": {
       "accountId": {
         "default": "TOTAL",
-        "description": "Account ID to get performance for, or 'TOTAL' for all accounts",
         "type": "string"
       },
       "period": {
         "default": "YTD",
-        "description": "Time period for performance calculation",
         "enum": [
           "1M",
           "3M",

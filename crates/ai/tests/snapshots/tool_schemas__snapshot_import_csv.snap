@@ -8,7 +8,6 @@ expression: snapshot
     "additionalProperties": false,
     "properties": {
       "accountId": {
-        "description": "Account UUID to assign to all imported activities. If the user mentions an account by name (e.g. 'Joint', 'RRSP'), call get_accounts first to resolve the name to an ID. Pass null only if the user didn't specify an account.",
         "type": [
           "string",
           "null"
@@ -18,7 +17,6 @@ expression: snapshot
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Maps CSV account values to app account IDs. Pass null if using accountId or no mapping needed.",
         "type": [
           "object",
           "null"
@@ -31,39 +29,33 @@ expression: snapshot
           },
           "type": "array"
         },
-        "description": "Maps canonical activity types (BUY, SELL, DIVIDEND, INTEREST, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, SPLIT, FEE, TAX) to CSV values. Common English verbs (Buy/Bought/Purchase, Sell/Sold, Dividend/Div, etc.) are already covered by defaults — you only need to add non-English or broker-specific terms. E.g., {\"BUY\": [\"Achat\", \"Kopen\"], \"DIVIDEND\": [\"Dividende\"]}. Pass null if all CSV values are covered by defaults.",
         "type": [
           "object",
           "null"
         ]
       },
       "csvContent": {
-        "description": "Raw CSV content to parse. Include the full CSV text including headers.",
         "type": "string"
       },
       "dateFormat": {
-        "description": "Date format hint using strftime: \"%Y-%m-%d\", \"%d/%m/%Y\", \"%m/%d/%Y\". Pass null for auto-detection.",
         "type": [
           "string",
           "null"
         ]
       },
       "decimalSeparator": {
-        "description": "Decimal separator: \".\", \",\". Pass null for auto-detection.",
         "type": [
           "string",
           "null"
         ]
       },
       "defaultCurrency": {
-        "description": "Default currency when rows don't specify one (e.g., \"EUR\" for European broker statements).",
         "type": [
           "string",
           "null"
         ]
       },
       "delimiter": {
-        "description": "CSV delimiter: \",\", \";\", \"\\t\". Pass null for auto-detection.",
         "type": [
           "string",
           "null"
@@ -73,21 +65,18 @@ expression: snapshot
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Maps field names to CSV header names. Keys: date, activityType, symbol, quantity, unitPrice, amount, fee, fxRate, subtype, currency, account, comment.",
         "type": [
           "object",
           "null"
         ]
       },
       "skipBottomRows": {
-        "description": "Number of rows to skip at the bottom (totals/disclaimer footer rows). Pass null or 0 if no rows to skip.",
         "type": [
           "integer",
           "null"
         ]
       },
       "skipTopRows": {
-        "description": "Number of NON-HEADER rows to skip at the top (preamble/disclaimer lines BEFORE the column header row). Do NOT count the header row itself — only count text like account names, date ranges, disclaimers that appear before the row with column headers. Example: if rows 1-3 are preamble and row 4 is 'Date,Symbol,Qty,...', pass 3 (not 4). Pass null or 0 if the header is the first row.",
         "type": [
           "integer",
           "null"
@@ -97,14 +86,12 @@ expression: snapshot
         "additionalProperties": {
           "type": "string"
         },
-        "description": "Maps CSV symbol values (tickers OR company names) to canonical tickers. Use your knowledge of public companies to translate names: {\"Cloudflare\": \"NET\", \"Apple Inc\": \"AAPL\"}.",
         "type": [
           "object",
           "null"
         ]
       },
       "thousandsSeparator": {
-        "description": "Thousands separator: \",\", \".\", \" \", \"none\". Pass null for auto-detection.",
         "type": [
           "string",
           "null"

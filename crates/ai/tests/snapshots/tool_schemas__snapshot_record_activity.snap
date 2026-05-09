@@ -7,15 +7,12 @@ expression: snapshot
   "parameters": {
     "properties": {
       "account": {
-        "description": "Account name or ID. Required before calling this tool when the user has multiple accounts. If the user did not specify an account, ask which account first instead of calling this tool with an empty account.",
         "type": "string"
       },
       "activityDate": {
-        "description": "Concrete ISO 8601 date only, e.g. '2026-01-17'. Do not pass relative phrases like 'yesterday', 'today', 'last Friday', or 'next Monday'. Resolve them relative to current local date 2026-05-08 (Friday) in timezone UTC before calling this tool.",
         "type": "string"
       },
       "activityType": {
-        "description": "Activity type: BUY, SELL, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, INTEREST, FEE, SPLIT, TAX, CREDIT, ADJUSTMENT",
         "enum": [
           "BUY",
           "SELL",
@@ -35,31 +32,24 @@ expression: snapshot
         "type": "string"
       },
       "amount": {
-        "description": "Total amount. For DEPOSIT/WITHDRAWAL/DIVIDEND or when quantity*price doesn't apply",
         "type": "number"
       },
       "fee": {
-        "description": "Transaction fee (optional)",
         "type": "number"
       },
       "notes": {
-        "description": "Optional notes for the transaction",
         "type": "string"
       },
       "quantity": {
-        "description": "Number of shares or units. Required for BUY/SELL/SPLIT",
         "type": "number"
       },
       "subtype": {
-        "description": "Activity subtype for semantic variations: DRIP (dividend reinvested), DIVIDEND_IN_KIND (dividend paid in asset), STAKING_REWARD (crypto staking), BONUS (promotional credit)",
         "type": "string"
       },
       "symbol": {
-        "description": "Symbol or ticker (e.g., 'AAPL', 'BTC', 'VTI'). Required for BUY/SELL/DIVIDEND/SPLIT",
         "type": "string"
       },
       "unitPrice": {
-        "description": "Price per unit. If omitted for BUY/SELL, user will need to provide it",
         "type": "number"
       }
     },

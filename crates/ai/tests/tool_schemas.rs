@@ -29,15 +29,39 @@ fn env() -> Arc<MockEnvironment> {
     Arc::new(MockEnvironment::new())
 }
 
-/// Capture name + parameters JSON. Description is intentionally omitted —
-/// it's prose that we want to be able to tweak (typos, phrasing) without
-/// an "I broke the contract" alarm. Schema changes are the dangerous ones.
+/// Capture name + parameters JSON, with `description` fields stripped at
+/// every depth.
+///
+/// We snapshot the *structure* (field names, types, enums, required) not
+/// the prose. Descriptions are intentionally allowed to change — phrasing
+/// tweaks, typo fixes, and the date-dependent text some tool descriptions
+/// embed (e.g. record_activity's `activityDate` includes today's date) all
+/// drift legitimately and shouldn't fail CI.
 async fn schema_snapshot<T: Tool>(tool: T) -> serde_json::Value {
     let def = tool.definition(String::new()).await;
+    let mut params = def.parameters;
+    strip_descriptions(&mut params);
     serde_json::json!({
         "name": def.name,
-        "parameters": def.parameters,
+        "parameters": params,
     })
+}
+
+fn strip_descriptions(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("description");
+            for v in map.values_mut() {
+                strip_descriptions(v);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                strip_descriptions(v);
+            }
+        }
+        _ => {}
+    }
 }
 
 macro_rules! schema_test {
