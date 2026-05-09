@@ -7,9 +7,9 @@ test.describe.configure({ mode: "serial" });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "fixtures");
-const ISSUE_855_CSV = path.join(FIXTURES, "issue-855-symbol-resolution.csv");
+const MULTI_EXCHANGE_CSV = path.join(FIXTURES, "multi-exchange-import.csv");
 
-const IMPORT_ACCOUNT = "Issue 855 EUR Account";
+const IMPORT_ACCOUNT = "Multi-Exchange EUR Account";
 
 async function selectImportAccount(page: Page, accountName: string) {
   const selectorTrigger = page.getByRole("combobox", { name: /Select an account/i });
@@ -76,7 +76,7 @@ test.describe("Issue #855 — symbol resolution and region classification", () =
     await selectImportAccount(page, IMPORT_ACCOUNT);
 
     const fileInput = page.locator('input[type="file"]');
-    await fileInput.setInputFiles(ISSUE_855_CSV);
+    await fileInput.setInputFiles(MULTI_EXCHANGE_CSV);
     await page.waitForTimeout(1000);
 
     await expect(page.getByText("CSV Preview")).toBeVisible({ timeout: 10000 });
