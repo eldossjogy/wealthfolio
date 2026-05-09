@@ -96,9 +96,17 @@ test.describe("Issue #855 — symbol resolution and region classification", () =
   test("2. German XETRA listings of US/NL issuers resolve to XETRA + EUR (not NASDAQ + USD)", async () => {
     test.setTimeout(60000);
 
-    // APC.DE → Apple Inc., XETRA, EUR — not NASDAQ/USD
-    const apc = rowFor(page, "APC");
-    await expect(apc).toContainText(/Apple/i);
+    // APC.DE → Apple Inc., XETRA, EUR — not NASDAQ/USD.
+    // The CSV also contains an APC row on US exchanges, which renders as a
+    // separate review row with the same suffix-stripped symbol. Disambiguate
+    // by the resolved issuer name so the lookup is order-independent.
+    const apc = page
+      .locator("div.grid")
+      .filter({
+        has: page.locator("span.font-mono").filter({ hasText: /^APC$/ }),
+      })
+      .filter({ hasText: /Apple/i })
+      .first();
     await expect(apc).toContainText("XETRA");
     await expect(apc).toContainText("EUR");
     await expect(apc).not.toContainText(/EUR\s*→\s*USD/);
@@ -250,7 +258,10 @@ test.describe("Issue #855 — symbol resolution and region classification", () =
     //  BTC-USD  → crypto
     for (const marker of ["APC", "AAPL", "SAP", "VOD", "SHOP", "BRK.B", "4GLD", "BTC"]) {
       await expect(
-        page.getByRole("row").filter({ hasText: new RegExp(escapeRegex(marker)) }).first(),
+        page
+          .getByRole("row")
+          .filter({ hasText: new RegExp(escapeRegex(marker)) })
+          .first(),
       ).toBeVisible({ timeout: 15000 });
     }
   });
