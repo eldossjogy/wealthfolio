@@ -463,6 +463,26 @@ mod tests {
                 }]);
             }
 
+            if query.eq_ignore_ascii_case("MSF.DE") {
+                return Ok(vec![SymbolSearchResult {
+                    symbol: "MSF".to_string(),
+                    short_name: "Microsoft Corporation".to_string(),
+                    long_name: "Microsoft Corporation".to_string(),
+                    exchange: "NMS".to_string(),
+                    exchange_mic: Some("XNAS".to_string()),
+                    exchange_name: Some("NASDAQ".to_string()),
+                    quote_type: "EQUITY".to_string(),
+                    type_display: "Equity".to_string(),
+                    currency: Some("USD".to_string()),
+                    currency_source: Some("provider".to_string()),
+                    data_source: Some("YAHOO".to_string()),
+                    is_existing: false,
+                    existing_asset_id: None,
+                    index: String::new(),
+                    score: 1.0,
+                }]);
+            }
+
             Ok(vec![])
         }
 
@@ -3923,6 +3943,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_preview_import_assets_returns_backend_review_symbol_for_suffix_mic() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "EUR");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let preview = activity_service
+            .preview_import_assets(vec![ImportAssetCandidate {
+                key: "msf-xetr".to_string(),
+                account_id: "acc-1".to_string(),
+                symbol: "MSF.DE".to_string(),
+                currency: Some("EUR".to_string()),
+                instrument_type: None,
+                quote_ccy: None,
+                quote_mode: None,
+                exchange_mic: None,
+                isin: None,
+            }])
+            .await
+            .expect("preview should succeed");
+
+        assert_eq!(preview.len(), 1);
+        assert_eq!(
+            preview[0].status,
+            ImportAssetPreviewStatus::AutoResolvedNewAsset
+        );
+        assert_eq!(preview[0].review_symbol.as_deref(), Some("MSF.DE"));
+
+        let draft = preview[0].draft.as_ref().expect("draft should be returned");
+        assert_eq!(draft.display_code.as_deref(), Some("MSF"));
+        assert_eq!(draft.instrument_symbol.as_deref(), Some("MSF"));
+        assert_eq!(draft.instrument_exchange_mic.as_deref(), Some("XETR"));
+    }
+
+    #[tokio::test]
     async fn test_check_import_uses_mic_currency_as_quote_ccy_fallback() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
@@ -3991,6 +4058,70 @@ mod tests {
                 .is_some(),
             "Expected MIC fallback warning when quote_ccy is inferred from exchange"
         );
+    }
+
+    #[tokio::test]
+    async fn test_check_import_prefers_symbol_suffix_over_provider_search_exchange() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "EUR");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let import = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "MSF.DE".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(10)),
+            unit_price: Some(dec!(120)),
+            currency: "EUR".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(1200)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: None,
+            exchange_mic: None,
+            quote_ccy: None,
+            instrument_type: None,
+            quote_mode: None,
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+
+        let result = activity_service
+            .check_activities_import(vec![import])
+            .await
+            .expect("import check should succeed");
+
+        assert_eq!(result.len(), 1);
+        let checked = &result[0];
+        assert_eq!(checked.symbol, "MSF");
+        assert_eq!(checked.exchange_mic.as_deref(), Some("XETR"));
+        assert_eq!(checked.quote_ccy.as_deref(), Some("EUR"));
     }
 
     #[tokio::test]

@@ -989,6 +989,8 @@ pub struct ImportAssetPreviewItem {
     pub status: ImportAssetPreviewStatus,
     pub resolution_source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<NewAsset>,

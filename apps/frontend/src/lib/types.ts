@@ -985,6 +985,7 @@ export interface ImportAssetPreviewItem {
   key: string;
   status: ImportAssetPreviewStatus;
   resolutionSource: string;
+  reviewSymbol?: string;
   assetId?: string;
   draft?: NewAsset;
   errors?: Record<string, string[]>;

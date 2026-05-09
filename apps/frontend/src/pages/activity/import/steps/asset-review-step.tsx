@@ -212,7 +212,7 @@ function AutoResolvedRow({
       {/* Col 2: metadata pills OR search input */}
       {isSearchOpen ? (
         <TickerSearchInput
-          defaultValue={asset?.instrumentSymbol || asset?.displayCode || symbol}
+          defaultValue={symbol}
           placeholder="Search by ticker, name or ISIN…"
           onSelectResult={(_sym, result) => onSearch(item, result)}
           className="h-8 w-full py-1 text-xs"
@@ -320,7 +320,7 @@ function ReadyAssetRow({
       {/* Col 2: metadata pills OR search input */}
       {isSearchOpen ? (
         <TickerSearchInput
-          defaultValue={asset?.instrumentSymbol || asset?.displayCode || symbol}
+          defaultValue={symbol}
           placeholder="Search by ticker, name or ISIN…"
           onSelectResult={(_sym, result) => onSearch(item, result)}
           className="h-8 w-full py-1 text-xs"
@@ -441,6 +441,7 @@ export function AssetReviewStep() {
             resolutionSource: "manual_search_existing",
             assetId: result.existingAssetId,
             draft: { ...assetDraft, id: result.existingAssetId },
+            reviewSymbol: undefined,
             errors: undefined,
           });
         }
@@ -457,6 +458,7 @@ export function AssetReviewStep() {
           resolutionSource: "manual_search_new",
           assetId: undefined,
           draft: assetDraft,
+          reviewSymbol: undefined,
           errors: undefined,
         });
       }
@@ -498,6 +500,7 @@ export function AssetReviewStep() {
         resolutionSource: "mark_custom",
         assetId: undefined,
         draft: assetDraft,
+        reviewSymbol: undefined,
         errors: undefined,
       });
     },
@@ -538,6 +541,7 @@ export function AssetReviewStep() {
         resolutionSource: "mark_custom",
         assetId: undefined,
         draft: assetDraft,
+        reviewSymbol: undefined,
         errors: undefined,
       };
     });
@@ -575,6 +579,7 @@ export function AssetReviewStep() {
         resolutionSource: "manual_created",
         assetId: created.id,
         draft: assetDraft,
+        reviewSymbol: undefined,
         errors: undefined,
       });
       setActiveSearchKey(null);
@@ -599,6 +604,7 @@ export function AssetReviewStep() {
         resolutionSource: "manual_edit",
         assetId: undefined,
         draft: payload,
+        reviewSymbol: undefined,
         errors: undefined,
       });
       setActiveSearchKey(null);
@@ -714,7 +720,7 @@ export function AssetReviewStep() {
             <div className="divide-border divide-y">
               {needsFixing.map((item) => {
                 const candidate = candidateMap.get(item.key);
-                const symbol = candidate?.draft.symbol || item.key;
+                const symbol = item.reviewSymbol || candidate?.draft.symbol || item.key;
                 const symbolName = item.draft?.name || candidate?.draft.symbolName;
                 const count = candidate?.count ?? 0;
                 return (
@@ -801,6 +807,7 @@ export function AssetReviewStep() {
                   {sortedItems.map((item) => {
                     const candidate = candidateMap.get(item.key);
                     const symbol =
+                      item.reviewSymbol ||
                       item.draft?.displayCode ||
                       item.draft?.instrumentSymbol ||
                       candidate?.draft.symbol ||
@@ -880,6 +887,7 @@ export function AssetReviewStep() {
               {existingItems.map((item) => {
                 const candidate = candidateMap.get(item.key);
                 const symbol =
+                  item.reviewSymbol ||
                   item.draft?.displayCode ||
                   item.draft?.instrumentSymbol ||
                   candidate?.draft.symbol ||

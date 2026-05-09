@@ -60,6 +60,15 @@ fn yahoo_suffix_for_mic(mic: &str) -> Option<&'static str> {
     None
 }
 
+fn looks_like_isin(value: &str) -> bool {
+    let chars: Vec<char> = value.chars().collect();
+    chars.len() == 12
+        && chars[0].is_ascii_alphabetic()
+        && chars[1].is_ascii_alphabetic()
+        && chars[2..11].iter().all(|c| c.is_ascii_alphanumeric())
+        && chars[11].is_ascii_digit()
+}
+
 /// A TRANSFER_IN/TRANSFER_OUT that moves a security (not cash). The monetary
 /// value of such an activity is always `quantity × unit_price`; the DB column
 /// `amount` must remain NULL so there is a single source of truth and we cannot
@@ -751,6 +760,33 @@ impl ActivityService {
             provider_config: None,
             notes: None,
             metadata: None,
+        })
+    }
+
+    fn import_asset_review_symbol(
+        symbol: &str,
+        exchange_mic: Option<&str>,
+        instrument_type: Option<&str>,
+    ) -> Option<String> {
+        let symbol = symbol.trim();
+        if symbol.is_empty() {
+            return None;
+        }
+
+        let is_equity = instrument_type
+            .map(|value| value.eq_ignore_ascii_case(InstrumentType::Equity.as_db_str()))
+            .unwrap_or(true);
+        if !is_equity || symbol.contains('.') || symbol.contains('=') || looks_like_isin(symbol) {
+            return Some(symbol.to_string());
+        }
+
+        let suffix = exchange_mic
+            .and_then(yahoo_suffix_for_mic)
+            .filter(|suffix| !suffix.is_empty());
+
+        Some(match suffix {
+            Some(suffix) => format!("{symbol}{suffix}"),
+            None => symbol.to_string(),
         })
     }
 
@@ -2318,7 +2354,9 @@ impl ActivityService {
         // Strip Yahoo suffix from symbol (e.g. GOOG.TO → GOOG + XTSE)
         let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&symbol);
 
-        // Get exchange MIC: prefer explicit value, then cache, then suffix-derived
+        // Get exchange MIC: prefer explicit value, then a recognized Yahoo suffix, then live lookup.
+        // If a CSV says MSF.DE, the suffix is the user's venue intent and must not be
+        // overwritten by a provider search result for the US listing.
         let allow_live_resolution = mode.allows_live_resolution();
         let cached_exchange_mic = if allow_live_resolution {
             symbol_mic_cache.get(&symbol).cloned().flatten()
@@ -2328,8 +2366,8 @@ impl ActivityService {
         let exchange_mic = activity
             .get_exchange_mic()
             .map(|s| s.to_string())
-            .or(cached_exchange_mic)
-            .or_else(|| suffix_mic.map(|s| s.to_string()));
+            .or_else(|| suffix_mic.map(|s| s.to_string()))
+            .or(cached_exchange_mic);
 
         // Determine currency
         let currency = if !activity.currency.is_empty() {
@@ -2695,7 +2733,11 @@ impl ActivityService {
                 .or_else(|| symbol_mic_cache.get(&resolution_key).cloned().flatten());
 
             let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&symbol);
-            let resolved_mic = exchange_mic.or_else(|| suffix_mic.map(|s| s.to_string()));
+            let resolved_mic = activity
+                .exchange_mic
+                .clone()
+                .or_else(|| suffix_mic.map(|s| s.to_string()))
+                .or(exchange_mic);
 
             let (inferred_kind, inferred_instrument_type) =
                 self.infer_asset_kind(base_symbol, resolved_mic.as_deref(), None);
@@ -3514,11 +3556,17 @@ impl ActivityServiceTrait for ActivityService {
             .enumerate()
             .map(|(idx, candidate)| {
                 let line_number = (idx + 1) as i32;
+                let candidate_review_symbol = Self::import_asset_review_symbol(
+                    &candidate.symbol,
+                    candidate.exchange_mic.as_deref(),
+                    candidate.instrument_type.as_deref(),
+                );
                 let Some(activity) = validated_by_line.get(&line_number) else {
                     return ImportAssetPreviewItem {
                         key: candidate.key,
                         status: ImportAssetPreviewStatus::NeedsFixing,
                         resolution_source: "missing_preview_result".to_string(),
+                        review_symbol: candidate_review_symbol,
                         asset_id: None,
                         draft: None,
                         errors: Some(HashMap::from([(
@@ -3534,12 +3582,19 @@ impl ActivityServiceTrait for ActivityService {
                     .as_ref()
                     .is_some_and(|errors| !errors.is_empty())
                     || !activity.is_valid;
+                let review_symbol = Self::import_asset_review_symbol(
+                    &activity.symbol,
+                    activity.exchange_mic.as_deref(),
+                    activity.instrument_type.as_deref(),
+                )
+                .or(candidate_review_symbol);
 
                 if has_errors {
                     return ImportAssetPreviewItem {
                         key: candidate.key,
                         status: ImportAssetPreviewStatus::NeedsFixing,
                         resolution_source: "validation_error".to_string(),
+                        review_symbol,
                         asset_id: None,
                         draft: None,
                         errors: activity.errors.clone(),
@@ -3558,6 +3613,7 @@ impl ActivityServiceTrait for ActivityService {
                         key: candidate.key,
                         status: ImportAssetPreviewStatus::ExistingAsset,
                         resolution_source: "existing_asset".to_string(),
+                        review_symbol,
                         asset_id: Some(asset_id),
                         draft,
                         errors: None,
@@ -3588,6 +3644,7 @@ impl ActivityServiceTrait for ActivityService {
                         key: candidate.key,
                         status: ImportAssetPreviewStatus::NeedsFixing,
                         resolution_source: "missing_exchange".to_string(),
+                        review_symbol,
                         asset_id: None,
                         draft: self.build_new_asset_draft_from_import(activity),
                         errors: Some(errors),
@@ -3599,6 +3656,7 @@ impl ActivityServiceTrait for ActivityService {
                     key: candidate.key,
                     status: ImportAssetPreviewStatus::AutoResolvedNewAsset,
                     resolution_source: "provider_resolution".to_string(),
+                    review_symbol,
                     asset_id: None,
                     draft: self.build_new_asset_draft_from_import(activity),
                     errors: None,
