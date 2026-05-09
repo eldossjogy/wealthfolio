@@ -23,8 +23,8 @@ const sections = [
     icon: <Icons.Calendar className="size-4" />,
   },
   {
-    href: "/spending/reports",
-    title: "Reports",
+    href: "/spending/insights",
+    title: "Insights",
     icon: <Icons.BarChart className="size-4" />,
   },
 ];

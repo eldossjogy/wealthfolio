@@ -38,7 +38,7 @@ import TaxonomiesPage from "./pages/settings/taxonomies/taxonomies-page";
 import ConnectSettingsPage from "./pages/settings/wealthfolio-connect/connect-settings-page";
 import SpendingLayout from "./features/spending/pages/spending-layout";
 import SpendingOverviewPage from "./features/spending/pages/spending-overview-page";
-import SpendingReportsPage from "./features/spending/pages/spending-reports-page";
+import SpendingInsightsPage from "./features/spending/pages/spending-insights-page";
 import SpendingEventsVizPage from "./features/spending/pages/spending-events-viz-page";
 import SpendingTransactionsPage from "./features/spending/pages/spending-transactions-page";
 import SpendingSettingsPage from "./pages/settings/spending/spending-settings-page";
@@ -114,7 +114,7 @@ export function AppRoutes() {
           </Route>
           {/* Full-page siblings of /spending — render without the spending sidebar */}
           <Route path="spending/transactions" element={<SpendingTransactionsPage />} />
-          <Route path="spending/reports" element={<SpendingReportsPage />} />
+          <Route path="spending/insights" element={<SpendingInsightsPage />} />
           {/* Dynamic addon routes */}
           {dynamicRoutes.map(({ path, component: Component }) => (
             <Route

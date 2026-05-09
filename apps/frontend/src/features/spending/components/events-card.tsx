@@ -257,7 +257,7 @@ export function EventsCard({
       )}
 
       <Link
-        to={pick.mode === "upcoming" ? "/settings/spending/events" : "/spending/reports?tab=events"}
+        to={pick.mode === "upcoming" ? "/settings/spending/events" : "/spending/insights"}
         className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
       >
         {pick.mode === "upcoming"
