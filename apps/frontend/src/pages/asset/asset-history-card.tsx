@@ -1,7 +1,7 @@
 import HistoryChart from "@/components/history-chart-symbol";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useSyncMarketDataMutation } from "@/hooks/use-sync-market-data";
-import { DateRange, Quote, TimePeriod } from "@/lib/types";
+import { ActivityType, DateRange, Quote, TimePeriod } from "@/lib/types";
 import {
   AmountDisplay,
   Badge,
@@ -10,15 +10,20 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  formatPercent,
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
   Icons,
   IntervalSelector,
-  formatPercent,
+  usePersistentState,
 } from "@wealthfolio/ui";
 import { format, subMonths } from "date-fns";
 import React, { useCallback, useMemo, useState } from "react";
+import {
+  useActivitySearch,
+  UseActivitySearchInfiniteOptions,
+} from "../activity/hooks/use-activity-search";
 import { RefreshQuotesConfirmDialog } from "./refresh-quotes-confirm-dialog";
 
 interface AssetHistoryProps {
@@ -130,6 +135,25 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
     setDateRange(range);
   };
 
+  const [selectedAccounts, _] = usePersistentState<string[]>("activity-filter-accounts", []);
+  const searchOptions = useMemo<UseActivitySearchInfiniteOptions>(
+    () => ({
+      searchQuery: assetId,
+      mode: "infinite",
+      filters: {
+        status: "validated",
+        dateTo: dateRange?.to,
+        dateFrom: dateRange?.from,
+        accountIds: selectedAccounts,
+        activityTypes: [ActivityType.BUY, ActivityType.SELL],
+      },
+      pageSize: Number.MAX_SAFE_INTEGER,
+      sorting: [{ desc: false, id: "date" }],
+    }),
+    [selectedAccounts, dateRange, assetId],
+  );
+  const activityData = useActivitySearch(searchOptions);
+
   return (
     <>
       <RefreshQuotesConfirmDialog
@@ -191,7 +215,10 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
           </CardTitle>
         </CardHeader>
         <CardContent className="relative flex-1 p-0">
-          <HistoryChart data={filteredData} />
+          <HistoryChart
+            data={filteredData}
+            activity={activityData.isLoading ? [] : activityData.data}
+          />
           <IntervalSelector
             onIntervalSelect={handleIntervalSelect}
             className="absolute bottom-2 left-1/2 -translate-x-1/2 transform"
