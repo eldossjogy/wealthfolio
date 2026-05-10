@@ -1,9 +1,10 @@
 import { searchActivities } from "@/adapters";
-import { QueryKeys } from "@/lib/query-keys";
 import { ActivityType } from "@/lib/constants";
+import { QueryKeys } from "@/lib/query-keys";
 import { ActivityDetails, ActivitySearchResponse } from "@/lib/types";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { SortingState } from "@tanstack/react-table";
+import { format } from "date-fns";
 import { useMemo } from "react";
 
 export type ActivityStatusFilter = "all" | "pending" | "validated";
@@ -13,6 +14,8 @@ export interface ActivitySearchFilters {
   activityTypes: ActivityType[];
   instrumentTypes?: string[];
   status?: ActivityStatusFilter;
+  dateFrom?: Date;
+  dateTo?: Date;
 }
 
 interface BaseOptions {
@@ -91,9 +94,18 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       accountIds: filters.accountIds.length > 0 ? filters.accountIds : undefined,
       activityTypes: filters.activityTypes.length > 0 ? filters.activityTypes : undefined,
       instrumentTypes: filters.instrumentTypes?.length ? filters.instrumentTypes : undefined,
+      dateFrom: filters.dateFrom ? format(filters.dateFrom, "yyyy-MM-dd") : undefined,
+      dateTo: filters.dateTo ? format(filters.dateTo, "yyyy-MM-dd") : undefined,
       needsReview,
     } as Record<string, unknown>;
-  }, [filters.accountIds, filters.activityTypes, filters.instrumentTypes, filters.status]);
+  }, [
+    filters.accountIds,
+    filters.activityTypes,
+    filters.instrumentTypes,
+    filters.status,
+    filters.dateFrom,
+    filters.dateTo,
+  ]);
 
   const primarySort =
     sorting.length > 0 && sorting[0]?.id
