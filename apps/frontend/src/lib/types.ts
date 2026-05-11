@@ -43,6 +43,37 @@ export type { HoldingCategoryFilterId } from "./constants";
 
 export type { ActivitySubtype, ImportRequiredField } from "./constants";
 
+export interface Portfolio {
+  id: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortfolioWithAccounts {
+  id: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  accountIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewPortfolio {
+  name: string;
+  description?: string;
+  sortOrder?: number;
+  accountIds: string[];
+}
+
+export type AccountFilter =
+  | { type: "all" }
+  | { type: "account"; accountId: string }
+  | { type: "portfolio"; portfolioId: string };
+
 export interface Account {
   id: string;
   name: string;

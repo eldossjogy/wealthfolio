@@ -69,6 +69,14 @@ export const RUN_ENV: RunEnv = RunEnvs.WEB;
 // Shared domain modules (identical logic for both platforms)
 // ============================================================================
 
+// Portfolio Commands
+export {
+  createPortfolio,
+  deletePortfolio,
+  getPortfolios,
+  updatePortfolioEntry,
+} from "../shared/portfolios";
+
 // Account Commands
 export { createAccount, deleteAccount, getAccounts, updateAccount } from "../shared/accounts";
 
