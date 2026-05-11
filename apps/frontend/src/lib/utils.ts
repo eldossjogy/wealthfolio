@@ -313,19 +313,22 @@ export function formatAmount(
   return getCurrencyFormatter(rawCurrency).format(displayAmount);
 }
 
-export function formatPercent(value: number | null | undefined) {
+export function formatPercent(
+  value: number | null | undefined,
+  options: { digits?: number; signDisplay?: "auto" | "always" | "never" } = {},
+) {
   if (value == null) return "-";
+  const digits = options.digits ?? 2;
   try {
-    // Use Intl.NumberFormat for correct percentage formatting (handles x100 and % sign)
     return new Intl.NumberFormat("en-US", {
       style: "percent",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+      signDisplay: options.signDisplay ?? "auto",
     }).format(value);
   } catch (error) {
     logger.error(`Error formatting percent ${value}: ${error}`);
-    // Fallback to simple string conversion if formatting fails
-    return `${value}%`; // Keep original fallback but it might still be incorrect
+    return `${value}%`;
   }
 }
 

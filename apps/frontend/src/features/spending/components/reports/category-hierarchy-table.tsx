@@ -8,6 +8,8 @@ import { CategoryIcon } from "../category-chips";
 import type { BudgetAllocation } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
 
+export type CategorySort = "spent" | "delta" | "name";
+
 interface CategoryHierarchyTableProps {
   /** Spending breakdown for the current period (flat rows from backend). */
   breakdown: CategoryBreakdownRow[];
@@ -19,6 +21,8 @@ interface CategoryHierarchyTableProps {
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   isLoading: boolean;
+  /** Sort order for top-level rows. Defaults to "spent" (largest first). */
+  sort?: CategorySort;
 }
 
 interface NodeRow {
@@ -51,10 +55,11 @@ export function CategoryHierarchyTable({
   taxonomyCategories,
   currency,
   isLoading,
+  sort = "spent",
 }: CategoryHierarchyTableProps) {
   const tree = useMemo(
-    () => buildTree({ breakdown, priorBreakdown, allocations, taxonomyCategories }),
-    [breakdown, priorBreakdown, allocations, taxonomyCategories],
+    () => buildTree({ breakdown, priorBreakdown, allocations, taxonomyCategories, sort }),
+    [breakdown, priorBreakdown, allocations, taxonomyCategories, sort],
   );
 
   const totals = useMemo(() => {
@@ -293,11 +298,13 @@ function buildTree({
   priorBreakdown,
   allocations,
   taxonomyCategories,
+  sort,
 }: {
   breakdown: CategoryBreakdownRow[];
   priorBreakdown: CategoryBreakdownRow[];
   allocations: BudgetAllocation[];
   taxonomyCategories: TaxonomyCategory[];
+  sort: CategorySort;
 }): NodeRow[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
   const allocationByCat = new Map(
@@ -368,7 +375,15 @@ function buildTree({
     }
   }
 
+  const compare =
+    sort === "name"
+      ? (a: NodeRow, b: NodeRow) => a.name.localeCompare(b.name)
+      : sort === "delta"
+        ? (a: NodeRow, b: NodeRow) =>
+            Math.abs(b.spent - b.priorSpent) - Math.abs(a.spent - a.priorSpent)
+        : (a: NodeRow, b: NodeRow) => b.spent - a.spent;
+
   return Array.from(rolledUp.values())
     .filter((n) => n.spent > 0 || n.priorSpent > 0 || n.budgeted > 0)
-    .sort((a, b) => b.spent - a.spent);
+    .sort(compare);
 }
