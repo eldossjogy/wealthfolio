@@ -182,7 +182,7 @@ impl PortfolioRepositoryTrait for PortfolioRepository {
             .map_err(StorageError::from)?;
 
         let memberships =
-            Self::load_memberships_for_portfolios(&mut conn, &[portfolio.id.clone()])?;
+            Self::load_memberships_for_portfolios(&mut conn, std::slice::from_ref(&portfolio.id))?;
 
         Ok(build_portfolio_with_accounts(portfolio, memberships))
     }

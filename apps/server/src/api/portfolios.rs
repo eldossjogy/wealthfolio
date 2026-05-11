@@ -7,9 +7,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use wealthfolio_core::portfolios::{
-    NewPortfolio, PortfolioServiceTrait, PortfolioUpdate, PortfolioWithAccounts,
-};
+use wealthfolio_core::portfolios::{NewPortfolio, PortfolioUpdate, PortfolioWithAccounts};
 
 async fn list_portfolios(
     State(state): State<Arc<AppState>>,
