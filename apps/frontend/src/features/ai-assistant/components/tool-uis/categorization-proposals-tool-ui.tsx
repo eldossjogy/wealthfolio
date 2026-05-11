@@ -137,6 +137,8 @@ function CategorizationProposalsContentImpl({
   const [rows, setRows] = useState<RowDraft[]>(initialRows);
   const [pickedUnproposedIds, setPickedUnproposedIds] = useState<Set<string>>(new Set());
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [localSubmitted, setLocalSubmitted] = useState(false);
+  const [localAppliedCount, setLocalAppliedCount] = useState<number | null>(null);
 
   useEffect(() => {
     setRows(initialRows);
@@ -148,10 +150,11 @@ function CategorizationProposalsContentImpl({
     [result?.unproposed, pickedUnproposedIds],
   );
 
-  const isSubmitted = result?.submitted === true;
+  const isSubmitted = localSubmitted || result?.submitted === true;
   const selectedCount = rows.filter((r) => r.selected).length;
   const isSubmitting = bulkAssign.isPending;
   const canSubmit = !isSubmitted && !isSubmitting && selectedCount > 0;
+  const appliedCount = localAppliedCount ?? result?.appliedCount ?? 0;
 
   if (isLoading) return <ProposalsLoadingState />;
 
@@ -175,7 +178,16 @@ function CategorizationProposalsContentImpl({
     );
   }
 
-  const summary = result.summary;
+  const summary = result.summary ?? {
+    total: (result.proposals?.length ?? 0) + (result.unproposed?.length ?? 0),
+    proposed: result.proposals?.length ?? 0,
+    unproposed: result.unproposed?.length ?? 0,
+    avgConfidence:
+      (result.proposals?.length ?? 0) > 0
+        ? result.proposals!.reduce((acc, p) => acc + (p.confidence ?? 0), 0) /
+          result.proposals!.length
+        : 0,
+  };
 
   const toggleRow = (activityId: string) => {
     setRows((prev) =>
@@ -222,6 +234,9 @@ function CategorizationProposalsContentImpl({
           categoryId: r.categoryId,
         })),
       );
+
+      setLocalSubmitted(true);
+      setLocalAppliedCount(applied.length);
 
       if (threadId && toolCallId) {
         try {
@@ -439,13 +454,24 @@ function CategorizationProposalsContentImpl({
         )}
 
         {isSubmitted && (
-          <div className="text-muted-foreground px-6 text-xs">
-            Applied {result.appliedCount ?? 0} categor
-            {(result.appliedCount ?? 0) === 1 ? "y" : "ies"}.
+          <div className="px-6">
+            <div className="border-success/30 bg-success/10 flex items-center gap-3 rounded-md border px-3 py-2">
+              <div className="bg-success/20 text-success flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
+                <Icons.Check className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-success text-sm font-medium">
+                  {appliedCount} {appliedCount === 1 ? "transaction" : "transactions"} categorized
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  Categories saved to your transactions.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
-        {!isSubmitted && (
+        {!isSubmitted && rows.length > 0 && (
           <div className="flex items-center justify-end px-6 pt-1">
             <Button onClick={handleSubmit} disabled={!canSubmit}>
               {isSubmitting ? (
