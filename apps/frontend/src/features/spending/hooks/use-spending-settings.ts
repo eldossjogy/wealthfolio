@@ -29,8 +29,14 @@ export function useSpendingSettingsMutation() {
     mutationFn: (update: SpendingSettingsUpdate) => updateSpendingSettings(update),
     onSuccess: (data) => {
       queryClient.setQueryData([QueryKeys.SPENDING_SETTINGS], data);
-      // Invalidate any spending-aware data
+      // Account opt-in changes the universe of cash activities — invalidate every
+      // spending-scoped cache so each view refetches with the new account_ids.
       queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_REPORT] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_CATEGORY_BREAKDOWN] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
       toast.success("Spending settings updated.");
     },
     onError: () => toast.error("Failed to update spending settings."),

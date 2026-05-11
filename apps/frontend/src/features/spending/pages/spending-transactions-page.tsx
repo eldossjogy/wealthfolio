@@ -52,6 +52,7 @@ import {
   useUnassignActivityCategory,
 } from "../hooks/use-cash-activities";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
+import { useSpendingSettings } from "../hooks/use-spending-settings";
 import type { CashActivitySearchRequest, CashActivityStatusFilter } from "../types/cash-activity";
 
 const SPENDING_TAXONOMY = "spending_categories";
@@ -113,10 +114,11 @@ export default function SpendingTransactionsPage() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
   const { accounts = [] } = useAccounts({ filterActive: true });
-  const cashAccounts = useMemo(
-    () => accounts.filter((a: Account) => a.accountType === "CASH"),
-    [accounts],
-  );
+  const { accountIds: spendingAccountIds } = useSpendingSettings();
+  const cashAccounts = useMemo(() => {
+    const includedIds = new Set(spendingAccountIds);
+    return accounts.filter((a: Account) => a.accountType === "CASH" && includedIds.has(a.id));
+  }, [accounts, spendingAccountIds]);
   const { data: events = [] } = useSpendingEvents();
   const { data: eventTypes = [] } = useEventTypes();
   const spending = useTaxonomy(SPENDING_TAXONOMY);
