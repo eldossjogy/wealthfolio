@@ -148,7 +148,13 @@ export default function PortfolioPage() {
 
   return (
     <>
-      <SwipablePage className="pt-0" views={views} defaultView="investments" withPadding={false} />
+      <SwipablePage
+        className="pt-0"
+        views={views}
+        defaultView="investments"
+        withPadding={false}
+        persistKey="dashboard-tab"
+      />
       <AlternativeAssetQuickAddModal
         open={isQuickAddOpen}
         onOpenChange={(open) => {
