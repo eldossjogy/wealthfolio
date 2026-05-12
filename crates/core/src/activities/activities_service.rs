@@ -60,6 +60,14 @@ fn normalize_isin_key(isin: Option<&str>) -> Option<String> {
         .map(|isin| isin.to_uppercase())
 }
 
+fn normalize_import_resolution_key_part(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_uppercase)
+        .unwrap_or_default()
+}
+
 fn import_asset_resolution_key(
     symbol: &str,
     activity_currency: &str,
@@ -68,31 +76,19 @@ fn import_asset_resolution_key(
     quote_ccy: Option<&str>,
     instrument_type: Option<&str>,
     quote_mode: Option<&str>,
+    provider_id: Option<&str>,
+    provider_symbol: Option<&str>,
 ) -> String {
     [
         symbol.trim().to_uppercase(),
         activity_currency.trim().to_uppercase(),
         normalize_isin_key(isin).unwrap_or_default(),
-        exchange_mic
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_uppercase)
-            .unwrap_or_default(),
-        quote_ccy
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_uppercase)
-            .unwrap_or_default(),
-        instrument_type
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_uppercase)
-            .unwrap_or_default(),
-        quote_mode
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_uppercase)
-            .unwrap_or_default(),
+        normalize_import_resolution_key_part(exchange_mic),
+        normalize_import_resolution_key_part(quote_ccy),
+        normalize_import_resolution_key_part(instrument_type),
+        normalize_import_resolution_key_part(quote_mode),
+        normalize_import_resolution_key_part(provider_id),
+        normalize_import_resolution_key_part(provider_symbol),
     ]
     .join("::")
 }
@@ -2453,6 +2449,8 @@ impl ActivityService {
                     a.quote_ccy.as_deref(),
                     a.instrument_type.as_deref(),
                     a.quote_mode.as_deref(),
+                    a.provider_id.as_deref(),
+                    a.provider_symbol.as_deref(),
                 );
                 Some(ImportAssetResolutionInput {
                     key: input_key,
@@ -2582,6 +2580,8 @@ impl ActivityService {
                 activity.quote_ccy.as_deref(),
                 activity.instrument_type.as_deref(),
                 activity.quote_mode.as_deref(),
+                activity.provider_id.as_deref(),
+                activity.provider_symbol.as_deref(),
             );
             let asset_resolution = asset_resolution_cache.get(&resolution_key);
             let resolution_quote_ccy = asset_resolution

@@ -4326,6 +4326,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_check_import_keeps_same_symbol_rows_distinct_by_provider_refs() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service.clone(),
+            fx_service,
+            quote_service,
+        );
+
+        let first = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "XAU".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(100)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(100)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: None,
+            exchange_mic: None,
+            quote_ccy: None,
+            instrument_type: Some("EQUITY".to_string()),
+            quote_mode: Some("MARKET".to_string()),
+            provider_id: Some("METAL_PRICE_API".to_string()),
+            provider_symbol: Some("XAU-1KG".to_string()),
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+        let mut second = first.clone();
+        second.provider_symbol = Some("XAU-OZ".to_string());
+        second.line_number = Some(2);
+
+        let result = activity_service
+            .check_activities_import(vec![first, second])
+            .await
+            .expect("import check should succeed");
+
+        assert_eq!(result.len(), 2);
+
+        let batches = asset_service
+            .resolve_import_asset_input_batches
+            .lock()
+            .unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].len(), 2);
+        assert_ne!(
+            batches[0][0].key, batches[0][1].key,
+            "provider refs must be part of the import asset resolution cache key"
+        );
+        assert_eq!(batches[0][0].provider_symbol.as_deref(), Some("XAU-1KG"));
+        assert_eq!(batches[0][1].provider_symbol.as_deref(), Some("XAU-OZ"));
+    }
+
+    #[tokio::test]
     async fn test_preview_import_assets_keeps_same_symbol_candidates_distinct_by_isin() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
