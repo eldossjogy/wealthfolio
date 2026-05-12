@@ -53,6 +53,8 @@ function buildEditableAssetDraft(
       item.draft?.instrumentSymbol || item.draft?.displayCode || candidateDraft?.symbol,
     instrumentExchangeMic:
       item.draft?.instrumentExchangeMic || candidateDraft?.exchangeMic || undefined,
+    providerId: item.draft?.providerId,
+    providerSymbol: item.draft?.providerSymbol,
     notes: item.draft?.notes,
   };
 }
@@ -86,7 +88,10 @@ function NeedsFixingRow({
     .filter((msg) => !REDUNDANT_ERROR_PATTERNS.some((re) => re.test(msg)));
 
   return (
-    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5">
+    <div
+      className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5"
+      data-testid="asset-review-row"
+    >
       {/* Col 1: avatar + symbol + count */}
       <div className="flex items-center gap-2.5">
         <TickerAvatar symbol={symbol} className="size-7 shrink-0" />
@@ -192,7 +197,10 @@ function AutoResolvedRow({
   const metaPills = [asset?.instrumentType, asset?.quoteCcy, exchangeDisplay].filter(Boolean);
 
   return (
-    <div className="hover:bg-muted/30 grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 transition-colors sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5">
+    <div
+      className="hover:bg-muted/30 grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 transition-colors sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5"
+      data-testid="asset-review-row"
+    >
       {/* Col 1: avatar + symbol + name */}
       <div className="flex items-center gap-2.5">
         <TickerAvatar symbol={symbol} className="size-7 shrink-0" />
@@ -300,7 +308,10 @@ function ReadyAssetRow({
   const metaPills = [asset?.instrumentType, asset?.quoteCcy, exchangeDisplay].filter(Boolean);
 
   return (
-    <div className="hover:bg-muted/30 grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 transition-colors sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5">
+    <div
+      className="hover:bg-muted/30 grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 px-3 py-3 transition-colors sm:grid-cols-[12rem_1fr_auto] sm:px-4 sm:py-3.5"
+      data-testid="asset-review-row"
+    >
       {/* Col 1: avatar + symbol + name */}
       <div className="flex items-center gap-2.5">
         <TickerAvatar symbol={symbol} className="size-7 shrink-0" />
@@ -441,7 +452,7 @@ export function AssetReviewStep() {
             resolutionSource: "manual_search_existing",
             assetId: result.existingAssetId,
             draft: { ...assetDraft, id: result.existingAssetId },
-            reviewSymbol: undefined,
+            reviewSymbol: result.symbol,
             errors: undefined,
           });
         }
@@ -458,7 +469,7 @@ export function AssetReviewStep() {
           resolutionSource: "manual_search_new",
           assetId: undefined,
           draft: assetDraft,
-          reviewSymbol: undefined,
+          reviewSymbol: result.symbol,
           errors: undefined,
         });
       }
@@ -484,6 +495,7 @@ export function AssetReviewStep() {
           score: 0,
           typeDisplay: "Custom Asset",
           dataSource: "MANUAL",
+          quoteMode: "MANUAL",
         },
         fallbackCurrency,
       );
@@ -525,6 +537,7 @@ export function AssetReviewStep() {
           score: 0,
           typeDisplay: "Custom Asset",
           dataSource: "MANUAL",
+          quoteMode: "MANUAL",
         },
         fallbackCurrency,
       );
@@ -567,6 +580,8 @@ export function AssetReviewStep() {
         instrumentType: created.instrumentType || payload.instrumentType,
         instrumentSymbol: created.instrumentSymbol || payload.instrumentSymbol,
         instrumentExchangeMic: created.instrumentExchangeMic || payload.instrumentExchangeMic,
+        providerId: payload.providerId,
+        providerSymbol: payload.providerSymbol,
       };
 
       const nextDrafts = applyAssetResolution(draftActivities, assetDialog.key, assetDraft, {

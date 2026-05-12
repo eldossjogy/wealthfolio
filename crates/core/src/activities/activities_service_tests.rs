@@ -4,8 +4,10 @@ mod tests {
     use crate::activities::activities_model::*;
     use crate::activities::{ActivityRepositoryTrait, ActivityService, ActivityServiceTrait};
     use crate::assets::{
-        Asset, AssetKind, AssetServiceTrait, InstrumentType, ProviderProfile, QuoteMode,
-        UpdateAssetProfile,
+        normalize_quote_ccy_code, parse_crypto_pair_symbol, parse_symbol_with_exchange_suffix,
+        Asset, AssetKind, AssetResolutionInput as ImportAssetResolutionInput,
+        AssetResolutionOutput, AssetServiceTrait, InstrumentType, NewAsset, ProviderProfile,
+        QuoteCcyResolutionSource, QuoteMode, UpdateAssetProfile,
     };
     use crate::errors::{DatabaseError, Error, Result};
     use crate::events::{DomainEvent, MockDomainEventSink};
@@ -103,6 +105,7 @@ mod tests {
     struct MockAssetService {
         assets: Arc<Mutex<Vec<Asset>>>,
         get_asset_by_id_error: Arc<Mutex<Option<String>>>,
+        resolve_import_asset_input_batches: Arc<Mutex<Vec<Vec<ImportAssetResolutionInput>>>>,
     }
 
     impl MockAssetService {
@@ -110,6 +113,7 @@ mod tests {
             Self {
                 assets: Arc::new(Mutex::new(Vec::new())),
                 get_asset_by_id_error: Arc::new(Mutex::new(None)),
+                resolve_import_asset_input_batches: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
@@ -119,6 +123,13 @@ mod tests {
 
         fn set_get_asset_by_id_error(&self, message: &str) {
             *self.get_asset_by_id_error.lock().unwrap() = Some(message.to_string());
+        }
+
+        fn resolve_import_asset_call_count(&self) -> usize {
+            self.resolve_import_asset_input_batches
+                .lock()
+                .unwrap()
+                .len()
         }
     }
 
@@ -218,6 +229,259 @@ mod tests {
             }
 
             Ok(result)
+        }
+
+        async fn resolve_import_asset_inputs(
+            &self,
+            inputs: Vec<ImportAssetResolutionInput>,
+        ) -> Result<Vec<AssetResolutionOutput>> {
+            self.resolve_import_asset_input_batches
+                .lock()
+                .unwrap()
+                .push(inputs.clone());
+            let assets = self.assets.lock().unwrap().clone();
+
+            Ok(inputs
+                .into_iter()
+                .map(|input| {
+                    let source_symbol = input.source_symbol.trim().to_string();
+                    let (base_symbol, suffix_mic) =
+                        parse_symbol_with_exchange_suffix(&source_symbol);
+                    let mut exchange_mic = input
+                        .exchange_mic
+                        .clone()
+                        .or_else(|| suffix_mic.map(str::to_string));
+                    let provider_resolution = if source_symbol.eq_ignore_ascii_case("BRK.B") {
+                        Some((
+                            "BRK.B".to_string(),
+                            "XNYS".to_string(),
+                            "USD".to_string(),
+                            "Berkshire Hathaway Inc.".to_string(),
+                            "BRK-B".to_string(),
+                        ))
+                    } else if source_symbol.eq_ignore_ascii_case("VOD.L") {
+                        Some((
+                            "VOD".to_string(),
+                            "XLON".to_string(),
+                            "GBp".to_string(),
+                            "Vodafone Group Public Limited Company".to_string(),
+                            "VOD.L".to_string(),
+                        ))
+                    } else {
+                        None
+                    };
+                    if exchange_mic.is_none() {
+                        exchange_mic = provider_resolution
+                            .as_ref()
+                            .map(|(_, mic, _, _, _)| mic.clone());
+                    }
+
+                    let mut instrument_type = input.instrument_type.clone().or_else(|| {
+                        if parse_crypto_pair_symbol(base_symbol).is_some()
+                            || matches!(base_symbol.to_uppercase().as_str(), "BTC" | "ETH")
+                        {
+                            Some(InstrumentType::Crypto)
+                        } else if crate::utils::occ_symbol::looks_like_occ_symbol(base_symbol) {
+                            Some(InstrumentType::Option)
+                        } else {
+                            Some(InstrumentType::Equity)
+                        }
+                    });
+                    if matches!(
+                        instrument_type.as_ref(),
+                        Some(InstrumentType::Crypto | InstrumentType::Fx)
+                    ) {
+                        exchange_mic = None;
+                    }
+
+                    let mut canonical_symbol = match instrument_type.as_ref() {
+                        Some(InstrumentType::Crypto) => parse_crypto_pair_symbol(base_symbol)
+                            .map(|(base, _)| base)
+                            .unwrap_or_else(|| base_symbol.to_string()),
+                        Some(InstrumentType::Option) => {
+                            crate::utils::occ_symbol::normalize_option_symbol(base_symbol)
+                                .unwrap_or_else(|| base_symbol.to_string())
+                        }
+                        _ => provider_resolution
+                            .as_ref()
+                            .map(|(symbol, _, _, _, _)| symbol.clone())
+                            .unwrap_or_else(|| base_symbol.to_string()),
+                    };
+
+                    let pair_quote = if instrument_type.as_ref() == Some(&InstrumentType::Crypto) {
+                        parse_crypto_pair_symbol(base_symbol).map(|(_, quote)| quote)
+                    } else {
+                        None
+                    };
+
+                    let existing_asset = input
+                        .asset_id
+                        .as_deref()
+                        .and_then(|id| assets.iter().find(|asset| asset.id == id))
+                        .or_else(|| {
+                            input.isin.as_deref().and_then(|isin| {
+                                let normalized = isin.trim().to_uppercase();
+                                assets.iter().find(|asset| {
+                                    asset
+                                        .metadata
+                                        .as_ref()
+                                        .and_then(|metadata| metadata.get("identifiers"))
+                                        .and_then(|ids| ids.get("isin"))
+                                        .and_then(|value| value.as_str())
+                                        .is_some_and(|asset_isin| {
+                                            asset_isin.eq_ignore_ascii_case(&normalized)
+                                        })
+                                })
+                            })
+                        })
+                        .or_else(|| {
+                            assets.iter().find(|asset| {
+                                asset.instrument_symbol.as_deref().is_some_and(|symbol| {
+                                    symbol.eq_ignore_ascii_case(&canonical_symbol)
+                                }) && instrument_type.as_ref().is_none_or(|itype| {
+                                    asset.instrument_type.as_ref() == Some(itype)
+                                }) && match instrument_type.as_ref() {
+                                    Some(InstrumentType::Crypto | InstrumentType::Fx) => input
+                                        .quote_ccy
+                                        .as_deref()
+                                        .or(pair_quote.as_deref())
+                                        .is_none_or(|quote| {
+                                            asset.quote_ccy.eq_ignore_ascii_case(quote)
+                                        }),
+                                    _ => match (
+                                        exchange_mic.as_deref(),
+                                        asset.instrument_exchange_mic.as_deref(),
+                                    ) {
+                                        (Some(expected), Some(actual)) => {
+                                            actual.eq_ignore_ascii_case(expected)
+                                        }
+                                        (Some(_), _) => false,
+                                        (None, _) => true,
+                                    },
+                                }
+                            })
+                        });
+
+                    if let Some(asset) = existing_asset {
+                        if let Some(symbol) = asset
+                            .instrument_symbol
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|symbol| !symbol.is_empty())
+                        {
+                            canonical_symbol = symbol.to_string();
+                        }
+                        if exchange_mic.is_none() {
+                            exchange_mic = asset.instrument_exchange_mic.clone();
+                        }
+                        if instrument_type.is_none() {
+                            instrument_type = asset.instrument_type.clone();
+                        }
+                    }
+
+                    let explicit_quote_ccy = normalize_quote_ccy_code(input.quote_ccy.as_deref());
+                    let existing_quote_ccy = existing_asset.map(|asset| asset.quote_ccy.clone());
+                    let provider_quote_ccy = provider_resolution
+                        .as_ref()
+                        .map(|(_, _, quote, _, _)| quote.clone());
+                    let mic_quote_ccy = exchange_mic
+                        .as_deref()
+                        .and_then(wealthfolio_market_data::mic_to_currency)
+                        .map(str::to_string);
+                    let activity_quote_ccy = input
+                        .activity_currency
+                        .clone()
+                        .filter(|currency| !currency.trim().is_empty());
+                    let (quote_ccy, quote_ccy_source) = if let Some(quote) = explicit_quote_ccy {
+                        (quote, QuoteCcyResolutionSource::ExplicitInput)
+                    } else if let Some(quote) = existing_quote_ccy {
+                        (quote, QuoteCcyResolutionSource::ExistingAsset)
+                    } else if let Some(quote) = provider_quote_ccy {
+                        (quote, QuoteCcyResolutionSource::ProviderQuote)
+                    } else if let Some(quote) = pair_quote {
+                        (quote, QuoteCcyResolutionSource::ExplicitInput)
+                    } else if let Some(quote) = mic_quote_ccy {
+                        (quote, QuoteCcyResolutionSource::MicFallback)
+                    } else if let Some(quote) = activity_quote_ccy {
+                        (quote, QuoteCcyResolutionSource::TerminalFallback)
+                    } else {
+                        (
+                            input.account_currency.clone(),
+                            QuoteCcyResolutionSource::TerminalFallback,
+                        )
+                    };
+                    let kind = match instrument_type.as_ref() {
+                        Some(InstrumentType::Fx) => AssetKind::Fx,
+                        _ => AssetKind::Investment,
+                    };
+                    let quote_mode = input.quote_mode.unwrap_or(QuoteMode::Market);
+                    let existing_asset_id = existing_asset.map(|asset| asset.id.clone());
+                    let name = existing_asset
+                        .and_then(|asset| asset.name.clone())
+                        .or_else(|| {
+                            provider_resolution
+                                .as_ref()
+                                .map(|(_, _, _, name, _)| name.clone())
+                        })
+                        .or_else(|| Some(canonical_symbol.clone()));
+                    let review_symbol = if instrument_type.as_ref() == Some(&InstrumentType::Equity)
+                    {
+                        exchange_mic
+                            .as_deref()
+                            .and_then(|mic| match mic.to_uppercase().as_str() {
+                                "XETR" => Some(".DE"),
+                                "XTSE" => Some(".TO"),
+                                "XLON" => Some(".L"),
+                                "CXE" => Some(".XC"),
+                                _ => None,
+                            })
+                            .filter(|suffix| !suffix.is_empty())
+                            .map(|suffix| format!("{canonical_symbol}{suffix}"))
+                            .or_else(|| Some(canonical_symbol.clone()))
+                    } else {
+                        Some(canonical_symbol.clone())
+                    };
+                    let draft = existing_asset_id.is_none().then(|| NewAsset {
+                        id: None,
+                        kind: kind.clone(),
+                        name: name.clone(),
+                        display_code: Some(canonical_symbol.clone()),
+                        is_active: true,
+                        quote_mode,
+                        quote_ccy: quote_ccy.clone(),
+                        instrument_type: instrument_type.clone(),
+                        instrument_symbol: Some(canonical_symbol.clone()),
+                        instrument_exchange_mic: exchange_mic.clone(),
+                        provider_config: None,
+                        provider_id: provider_resolution.as_ref().map(|_| "YAHOO".to_string()),
+                        provider_symbol: provider_resolution
+                            .as_ref()
+                            .map(|(_, _, _, _, symbol)| symbol.clone()),
+                        notes: None,
+                        metadata: None,
+                    });
+
+                    AssetResolutionOutput {
+                        key: input.key,
+                        source_symbol,
+                        canonical_symbol: Some(canonical_symbol),
+                        exchange_mic,
+                        quote_ccy: Some(quote_ccy),
+                        quote_ccy_source: Some(quote_ccy_source),
+                        instrument_type,
+                        kind: Some(kind),
+                        provider_id: provider_resolution.as_ref().map(|_| "YAHOO".to_string()),
+                        provider_symbol: provider_resolution
+                            .as_ref()
+                            .map(|(_, _, _, _, symbol)| symbol.clone()),
+                        provider_config: None,
+                        review_symbol,
+                        existing_asset_id,
+                        name,
+                        draft,
+                    }
+                })
+                .collect())
         }
     }
 
@@ -460,6 +724,7 @@ mod tests {
                     existing_asset_id: None,
                     index: String::new(),
                     score: 1.0,
+                    ..Default::default()
                 }]);
             }
 
@@ -480,6 +745,28 @@ mod tests {
                     existing_asset_id: None,
                     index: String::new(),
                     score: 1.0,
+                    ..Default::default()
+                }]);
+            }
+
+            if query.eq_ignore_ascii_case("BRK.B") {
+                return Ok(vec![SymbolSearchResult {
+                    symbol: "BRK.B".to_string(),
+                    short_name: "Berkshire Hathaway Inc.".to_string(),
+                    long_name: "Berkshire Hathaway Inc.".to_string(),
+                    exchange: "NYQ".to_string(),
+                    exchange_mic: Some("XNYS".to_string()),
+                    exchange_name: Some("NYSE".to_string()),
+                    quote_type: "EQUITY".to_string(),
+                    type_display: "Equity".to_string(),
+                    currency: Some("USD".to_string()),
+                    currency_source: Some("provider".to_string()),
+                    data_source: Some("YAHOO".to_string()),
+                    is_existing: false,
+                    existing_asset_id: None,
+                    index: String::new(),
+                    score: 1.0,
+                    ..Default::default()
                 }]);
             }
 
@@ -3729,6 +4016,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -3754,6 +4043,83 @@ mod tests {
         assert_eq!(checked.exchange_mic.as_deref(), Some("XLON"));
         assert_eq!(checked.instrument_type.as_deref(), Some("EQUITY"));
         assert_eq!(checked.quote_ccy.as_deref(), Some("GBp"));
+    }
+
+    #[tokio::test]
+    async fn test_check_import_does_not_resolve_reviewed_assets_again() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "CAD");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service.clone(),
+            fx_service,
+            quote_service,
+        );
+
+        let import = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "ZFL".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(10)),
+            unit_price: Some(dec!(120)),
+            currency: "CAD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(1200)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: Some("BMO Long Federal Bond Index ETF".to_string()),
+            exchange_mic: Some("XTSE".to_string()),
+            quote_ccy: Some("CAD".to_string()),
+            instrument_type: Some("EQUITY".to_string()),
+            quote_mode: Some("MARKET".to_string()),
+            provider_id: Some("YAHOO".to_string()),
+            provider_symbol: Some("ZFL.TO".to_string()),
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: true,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+
+        let result = activity_service
+            .check_activities_import(vec![import])
+            .await
+            .expect("import check should succeed");
+
+        assert_eq!(result.len(), 1);
+        let checked = &result[0];
+        assert!(checked.is_valid);
+        assert_eq!(checked.symbol.as_str(), "ZFL");
+        assert_eq!(
+            checked.symbol_name.as_deref(),
+            Some("BMO Long Federal Bond Index ETF")
+        );
+        assert_eq!(checked.exchange_mic.as_deref(), Some("XTSE"));
+        assert_eq!(checked.quote_ccy.as_deref(), Some("CAD"));
+        assert_eq!(checked.instrument_type.as_deref(), Some("EQUITY"));
+        assert_eq!(
+            asset_service.resolve_import_asset_call_count(),
+            0,
+            "reviewed assets should not go back through import asset resolution"
+        );
     }
 
     #[tokio::test]
@@ -3811,6 +4177,8 @@ mod tests {
                 quote_ccy: None,
                 instrument_type: None,
                 quote_mode: None,
+                provider_id: None,
+                provider_symbol: None,
                 errors: None,
                 warnings: None,
                 duplicate_of_id: None,
@@ -3843,6 +4211,8 @@ mod tests {
                 quote_ccy: None,
                 instrument_type: None,
                 quote_mode: None,
+                provider_id: None,
+                provider_symbol: None,
                 errors: None,
                 warnings: None,
                 duplicate_of_id: None,
@@ -3869,6 +4239,90 @@ mod tests {
         assert_eq!(result[0].exchange_mic.as_deref(), Some("XNYS"));
         assert_eq!(result[1].asset_id.as_deref(), Some("shop-nasdaq"));
         assert_eq!(result[1].exchange_mic.as_deref(), Some("XNAS"));
+    }
+
+    #[tokio::test]
+    async fn test_check_import_keeps_same_symbol_rows_distinct_by_explicit_mic() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "shop-nyse",
+            "SHOP",
+            Some("XNYS"),
+            Some(InstrumentType::Equity),
+            "USD",
+        ));
+        asset_service.add_asset(create_test_asset_with_instrument(
+            "shop-tsx",
+            "SHOP",
+            Some("XTSE"),
+            Some(InstrumentType::Equity),
+            "CAD",
+        ));
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let nyse = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "SHOP".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(100)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(100)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: None,
+            exchange_mic: Some("XNYS".to_string()),
+            quote_ccy: None,
+            instrument_type: None,
+            quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+        let mut tsx = nyse.clone();
+        tsx.exchange_mic = Some("XTSE".to_string());
+        tsx.line_number = Some(2);
+
+        let result = activity_service
+            .check_activities_import(vec![nyse, tsx])
+            .await
+            .expect("import check should succeed");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].asset_id.as_deref(), Some("shop-nyse"));
+        assert_eq!(result[0].exchange_mic.as_deref(), Some("XNYS"));
+        assert_eq!(result[1].asset_id.as_deref(), Some("shop-tsx"));
+        assert_eq!(result[1].exchange_mic.as_deref(), Some("XTSE"));
     }
 
     #[tokio::test]
@@ -3919,6 +4373,8 @@ mod tests {
                     quote_mode: None,
                     exchange_mic: None,
                     isin: Some("ca82509l1076".to_string()),
+                    provider_id: None,
+                    provider_symbol: None,
                 },
                 ImportAssetCandidate {
                     key: "shop-2".to_string(),
@@ -3930,6 +4386,8 @@ mod tests {
                     quote_mode: None,
                     exchange_mic: None,
                     isin: Some("CA82509L1077".to_string()),
+                    provider_id: None,
+                    provider_symbol: None,
                 },
             ])
             .await
@@ -3972,6 +4430,8 @@ mod tests {
                 quote_mode: None,
                 exchange_mic: None,
                 isin: None,
+                provider_id: None,
+                provider_symbol: None,
             }])
             .await
             .expect("preview should succeed");
@@ -3987,6 +4447,51 @@ mod tests {
         assert_eq!(draft.display_code.as_deref(), Some("MSF"));
         assert_eq!(draft.instrument_symbol.as_deref(), Some("MSF"));
         assert_eq!(draft.instrument_exchange_mic.as_deref(), Some("XETR"));
+    }
+
+    #[tokio::test]
+    async fn test_preview_import_assets_preserves_provider_refs() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service.clone(),
+            fx_service,
+            quote_service,
+        );
+
+        activity_service
+            .preview_import_assets(vec![ImportAssetCandidate {
+                key: "custom-provider".to_string(),
+                account_id: "acc-1".to_string(),
+                symbol: "XAU".to_string(),
+                currency: Some("USD".to_string()),
+                instrument_type: Some("EQUITY".to_string()),
+                quote_ccy: Some("USD".to_string()),
+                quote_mode: Some("MARKET".to_string()),
+                exchange_mic: None,
+                isin: None,
+                provider_id: Some("METAL_PRICE_API".to_string()),
+                provider_symbol: Some("XAU-1KG".to_string()),
+            }])
+            .await
+            .expect("preview should succeed");
+
+        let batches = asset_service
+            .resolve_import_asset_input_batches
+            .lock()
+            .unwrap();
+        let input = &batches[0][0];
+        assert_eq!(input.provider_id.as_deref(), Some("METAL_PRICE_API"));
+        assert_eq!(input.provider_symbol.as_deref(), Some("XAU-1KG"));
     }
 
     #[tokio::test]
@@ -4026,6 +4531,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4097,6 +4604,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4122,6 +4631,149 @@ mod tests {
         assert_eq!(checked.symbol, "MSF");
         assert_eq!(checked.exchange_mic.as_deref(), Some("XETR"));
         assert_eq!(checked.quote_ccy.as_deref(), Some("EUR"));
+    }
+
+    #[tokio::test]
+    async fn test_check_import_uses_asset_resolution_quote_ccy() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "GBP");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let import = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "VOD.L".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(10)),
+            unit_price: Some(dec!(70)),
+            currency: "GBp".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(700)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: None,
+            exchange_mic: None,
+            quote_ccy: None,
+            instrument_type: None,
+            quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+
+        let result = activity_service
+            .check_activities_import(vec![import])
+            .await
+            .expect("import check should succeed");
+
+        let checked = &result[0];
+        assert_eq!(checked.symbol, "VOD");
+        assert_eq!(checked.exchange_mic.as_deref(), Some("XLON"));
+        assert_eq!(checked.quote_ccy.as_deref(), Some("GBp"));
+        assert!(
+            checked
+                .warnings
+                .as_ref()
+                .and_then(|w| w.get("_quote_ccy_fallback"))
+                .is_none(),
+            "resolved provider quote currency should not be reported as a MIC fallback"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_import_preserves_share_class_dot_with_provider_result() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let account = create_test_account("acc-1", "USD");
+        account_service.add_account(account);
+
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        );
+
+        let import = ActivityImport {
+            id: None,
+            date: "2024-01-15".to_string(),
+            symbol: "BRK.B".to_string(),
+            activity_type: "BUY".to_string(),
+            quantity: Some(dec!(3)),
+            unit_price: Some(dec!(440)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(1320)),
+            comment: None,
+            account_id: Some("acc-1".to_string()),
+            account_name: None,
+            symbol_name: None,
+            exchange_mic: None,
+            quote_ccy: None,
+            instrument_type: None,
+            quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
+            errors: None,
+            warnings: None,
+            duplicate_of_id: None,
+            duplicate_of_line_number: None,
+            is_draft: false,
+            is_valid: true,
+            line_number: Some(1),
+            fx_rate: None,
+            subtype: None,
+            asset_id: None,
+            isin: None,
+            force_import: false,
+            is_external: None,
+        };
+
+        let result = activity_service
+            .check_activities_import(vec![import])
+            .await
+            .expect("import check should succeed");
+
+        assert_eq!(result.len(), 1);
+        let checked = &result[0];
+        assert_eq!(checked.symbol, "BRK.B");
+        assert_eq!(
+            checked.symbol_name.as_deref(),
+            Some("Berkshire Hathaway Inc.")
+        );
+        assert_eq!(checked.exchange_mic.as_deref(), Some("XNYS"));
+        assert_eq!(checked.quote_ccy.as_deref(), Some("USD"));
     }
 
     #[tokio::test]
@@ -4161,6 +4813,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4226,6 +4880,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4306,6 +4962,8 @@ mod tests {
             fx_rate: None,
             subtype: None,
             quote_mode: Some("MANUAL".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             asset_id: None,
             isin: None,
             force_import: false,
@@ -4385,6 +5043,8 @@ mod tests {
             fx_rate: None,
             subtype: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             asset_id: None,
             isin: None,
             force_import: false,
@@ -4445,6 +5105,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: Some("CRYPTO".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4510,6 +5172,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4581,6 +5245,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4648,6 +5314,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4715,6 +5383,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4782,6 +5452,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4846,6 +5518,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("OPTION".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4908,6 +5582,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -4975,6 +5651,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5051,6 +5729,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5122,6 +5802,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MANUAL".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5193,6 +5875,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5262,6 +5946,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5331,6 +6017,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5364,6 +6052,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5468,6 +6158,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5501,6 +6193,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5633,6 +6327,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5666,6 +6362,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: None,
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -5931,6 +6629,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6003,6 +6703,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6137,6 +6839,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6226,6 +6930,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6321,6 +7027,8 @@ mod tests {
             quote_ccy: Some("GBP".to_string()),
             instrument_type: Some("EQUITY".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6686,6 +7394,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("BOND".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6752,6 +7462,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("BOND".to_string()),
             quote_mode: Some("MANUAL".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6818,6 +7530,8 @@ mod tests {
                 quote_ccy: Some("USD".to_string()),
                 instrument_type: Some(alias.to_string()),
                 quote_mode: Some("MANUAL".to_string()),
+                provider_id: None,
+                provider_symbol: None,
                 errors: None,
                 warnings: None,
                 duplicate_of_id: None,
@@ -6896,6 +7610,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: Some("BOND".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -6975,6 +7691,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("OPTION".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -7042,6 +7760,8 @@ mod tests {
             quote_ccy: Some("USD".to_string()),
             instrument_type: Some("OPTION".to_string()),
             quote_mode: Some("MARKET".to_string()),
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,
@@ -7118,6 +7838,8 @@ mod tests {
             quote_ccy: None,
             instrument_type: Some("OPTION".to_string()),
             quote_mode: None,
+            provider_id: None,
+            provider_symbol: None,
             errors: None,
             warnings: None,
             duplicate_of_id: None,

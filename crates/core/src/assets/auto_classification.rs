@@ -238,6 +238,7 @@ impl ClassificationInput {
     /// For country, handles both:
     /// - Single country (for stocks): `country` = "United States"
     /// - Multiple countries (for ETFs): `countries_json` = `[{"name": "United States", "weight": 0.60}, ...]`
+    ///
     /// Exchange MIC is intentionally not used as a region fallback: trading venue
     /// is not issuer domicile or portfolio exposure.
     pub fn from_provider_profile(
