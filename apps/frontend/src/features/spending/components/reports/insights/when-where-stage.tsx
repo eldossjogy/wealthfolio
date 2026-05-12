@@ -300,7 +300,7 @@ const EventsHeadlineCard: FC<EventsHeadlineCardProps> = ({
 
   return (
     <div className={CARD_CLASS}>
-      <p className="text-foreground max-w-[95%] font-serif text-base font-normal leading-snug tracking-tight md:text-lg">
+      <p className="text-foreground max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg">
         <span className="font-medium">{events.length}</span> tagged event
         {events.length === 1 ? "" : "s"} accounted for{" "}
         <span className="whitespace-nowrap font-medium">
@@ -312,7 +312,7 @@ const EventsHeadlineCard: FC<EventsHeadlineCardProps> = ({
             {" — "}
             <span
               className={cn(
-                "whitespace-nowrap font-medium",
+                "whitespace-nowrap font-serif font-medium",
                 computed.lift > 0 ? "text-destructive" : "text-success",
               )}
             >

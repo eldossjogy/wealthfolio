@@ -116,7 +116,7 @@ const HeadlineCard: FC<HeadlineCardProps> = ({
   return (
     <div className={CARD_CLASS}>
       <div className={LABEL_CLASS}>HEADLINE · {labelPair.combined}</div>
-      <p className="text-foreground mt-3 max-w-[95%] font-serif text-base font-normal leading-snug tracking-tight md:text-lg">
+      <p className="text-foreground mt-3 max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg">
         {buildHeadline({ change, pct, movers, currency })}
       </p>
 
@@ -255,15 +255,15 @@ function buildHeadline({
     return (
       <>
         You spent{" "}
-        <span className={cn("whitespace-nowrap font-medium", directionTone)}>
+        <span className={cn("whitespace-nowrap font-serif font-medium", directionTone)}>
           {formatAmount(Math.abs(change), currency)} {direction}
         </span>{" "}
         this period, but the move is concentrated:{" "}
-        <span className={cn("whitespace-nowrap font-medium", topTone)}>
+        <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
           {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
         </span>{" "}
         while{" "}
-        <span className={cn("whitespace-nowrap font-medium", secTone)}>
+        <span className={cn("whitespace-nowrap font-serif font-medium", secTone)}>
           {second.name} is {secVerb} {formatPercentValue(Math.abs(secPct), { digits: 0 })}
         </span>
         .{totalPctText}
@@ -274,11 +274,11 @@ function buildHeadline({
   return (
     <>
       You spent{" "}
-      <span className={cn("font-semibold", directionTone)}>
+      <span className={cn("font-serif font-semibold", directionTone)}>
         {formatAmount(Math.abs(change), currency)} {direction}
       </span>{" "}
       this period — driven mostly by{" "}
-      <span className={cn("font-semibold", topTone)}>
+      <span className={cn("font-serif font-semibold", topTone)}>
         {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
       </span>
       .{totalPctText}

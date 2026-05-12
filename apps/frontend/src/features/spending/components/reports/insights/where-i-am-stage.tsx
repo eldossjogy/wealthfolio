@@ -164,7 +164,7 @@ const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading
 
       {/* Row 2 — text insight (replaces the redundant "big number" — that fact
           already lives in the Spent card next to it). Serif for editorial feel. */}
-      <p className="text-foreground mt-3 font-serif text-base font-normal leading-snug tracking-tight md:text-lg">
+      <p className="text-foreground mt-3 text-base font-normal leading-snug tracking-tight md:text-lg">
         {pace.narrative}
       </p>
 
@@ -282,11 +282,11 @@ function buildLiveNarrative({
   return (
     <>
       You're{" "}
-      <span className={cn("whitespace-nowrap font-medium", colorClass)}>
+      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
         {formatCompactAmount(Math.abs(diffFromPace), currency)} {direction} pace
       </span>{" "}
       for the period — projected{" "}
-      <span className={cn("whitespace-nowrap font-medium", projColorClass)}>
+      <span className={cn("whitespace-nowrap font-serif font-medium", projColorClass)}>
         {formatCompactAmount(projection, currency)}
       </span>{" "}
       by close ({formatPercentValue(target > 0 ? (projection / target) * 100 : 0, { digits: 0 })} of
@@ -310,12 +310,12 @@ function buildClosedNarrative({
   return (
     <>
       You spent{" "}
-      <span className={cn("whitespace-nowrap font-medium", colorClass)}>
+      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
         {formatCompactAmount(spent, currency)}
       </span>{" "}
       against a {formatCompactAmount(target, currency)} target — {pctText} of budget,{" "}
       {diff > 0 ? "over by" : "under by"}{" "}
-      <span className={cn("whitespace-nowrap font-medium", colorClass)}>
+      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
         {formatCompactAmount(Math.abs(diff), currency)}
       </span>
       .
