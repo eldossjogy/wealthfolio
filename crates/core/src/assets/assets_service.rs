@@ -24,7 +24,8 @@ use crate::errors::{DatabaseError, Error, Result};
 
 // Import mic_to_currency for resolving exchange trading currencies
 use wealthfolio_market_data::{
-    mic_to_currency, yahoo_equity_provider_symbol_to_canonical, InstrumentId as MarketInstrumentId,
+    exchanges_for_currency, mic_to_currency, yahoo_equity_base_to_provider,
+    yahoo_equity_provider_symbol_to_canonical, ExchangeMap, InstrumentId as MarketInstrumentId,
     ProviderId, ProviderInstrument, QuoteContext, ResolverChain, SymbolResolver,
 };
 
@@ -404,33 +405,9 @@ impl AssetService {
     }
 
     fn parse_asset_kind_input(
-        value: Option<&str>,
         symbol: &str,
         exchange_mic: Option<&str>,
     ) -> (AssetKind, Option<InstrumentType>) {
-        if let Some(value) = value {
-            match value.trim().to_uppercase().as_str() {
-                "SECURITY" | "INVESTMENT" | "EQUITY" => {
-                    return (AssetKind::Investment, Some(InstrumentType::Equity));
-                }
-                "CRYPTO" => return (AssetKind::Investment, Some(InstrumentType::Crypto)),
-                "FX_RATE" | "FX" => return (AssetKind::Fx, Some(InstrumentType::Fx)),
-                "OPTION" | "OPT" => return (AssetKind::Investment, Some(InstrumentType::Option)),
-                "BOND" => return (AssetKind::Investment, Some(InstrumentType::Bond)),
-                "COMMODITY" | "CMDTY" | "METAL" => {
-                    return (AssetKind::Investment, Some(InstrumentType::Metal));
-                }
-                "PROPERTY" | "PROP" => return (AssetKind::Property, None),
-                "VEHICLE" | "VEH" => return (AssetKind::Vehicle, None),
-                "COLLECTIBLE" | "COLL" => return (AssetKind::Collectible, None),
-                "PRECIOUS_METAL" | "PREC" => return (AssetKind::PreciousMetal, None),
-                "PRIVATE_EQUITY" | "PEQ" => return (AssetKind::PrivateEquity, None),
-                "LIABILITY" | "LIAB" => return (AssetKind::Liability, None),
-                "OTHER" | "ALT" => return (AssetKind::Other, None),
-                _ => {}
-            }
-        }
-
         let upper_symbol = symbol.trim().to_uppercase();
         if let Some((_base, quote)) = upper_symbol.rsplit_once('-') {
             let quote = quote.trim();
@@ -462,6 +439,63 @@ impl AssetService {
         }
 
         (AssetKind::Investment, Some(InstrumentType::Equity))
+    }
+
+    fn import_provider_search_symbols(
+        source_symbol: &str,
+        canonical_symbol: &str,
+        exchange_mic: Option<&str>,
+        quote_ccy: Option<&str>,
+        instrument_type: Option<&InstrumentType>,
+    ) -> Vec<String> {
+        let source_symbol = source_symbol.trim();
+        if source_symbol.is_empty() {
+            return Vec::new();
+        }
+
+        let mut candidates = Vec::new();
+        let is_unsuffixed_equity = exchange_mic.is_none()
+            && !source_symbol.contains('.')
+            && instrument_type
+                .map(|instrument_type| matches!(instrument_type, InstrumentType::Equity))
+                .unwrap_or(true)
+            && !looks_like_isin(source_symbol);
+
+        if is_unsuffixed_equity {
+            if let Some(quote_ccy) = normalize_quote_ccy_code(quote_ccy) {
+                let exchange_map = ExchangeMap::new();
+                let provider: ProviderId = Cow::Borrowed("YAHOO");
+                let provider_base = yahoo_equity_base_to_provider(canonical_symbol);
+
+                for mic in exchanges_for_currency(&quote_ccy) {
+                    let mic: Cow<'static, str> = Cow::Borrowed(*mic);
+                    let Some(suffix) = exchange_map
+                        .get_suffix(&mic, &provider)
+                        .filter(|suffix| !suffix.is_empty())
+                    else {
+                        continue;
+                    };
+                    let candidate = format!("{provider_base}{suffix}");
+                    if !candidate.eq_ignore_ascii_case(source_symbol)
+                        && !candidates
+                            .iter()
+                            .any(|existing: &String| existing.eq_ignore_ascii_case(&candidate))
+                    {
+                        candidates.push(candidate);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !candidates
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(source_symbol))
+        {
+            candidates.push(source_symbol.to_string());
+        }
+
+        candidates
     }
 
     fn kind_from_instrument_type(instrument_type: &InstrumentType) -> AssetKind {
@@ -1118,6 +1152,17 @@ impl AssetServiceTrait for AssetService {
 
         for input in inputs {
             let source_symbol = input.source_symbol.trim().to_string();
+            let resolution_symbol = if source_symbol.is_empty() {
+                input
+                    .isin
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|isin| !isin.is_empty())
+                    .unwrap_or_default()
+                    .to_string()
+            } else {
+                source_symbol.clone()
+            };
             let terminal_currency = input
                 .activity_currency
                 .as_deref()
@@ -1130,7 +1175,7 @@ impl AssetServiceTrait for AssetService {
                 .unwrap_or("USD")
                 .to_string();
 
-            if source_symbol.is_empty() {
+            if resolution_symbol.is_empty() {
                 outputs.push(AssetResolutionOutput {
                     key: input.key,
                     source_symbol,
@@ -1139,14 +1184,14 @@ impl AssetServiceTrait for AssetService {
                 continue;
             }
 
-            let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&source_symbol);
+            let (base_symbol, suffix_mic) = parse_symbol_with_exchange_suffix(&resolution_symbol);
             let mut exchange_mic = input
                 .exchange_mic
                 .clone()
                 .or_else(|| suffix_mic.map(str::to_string));
             let instrument_type_input = input.instrument_type.clone();
             let (inferred_kind, inferred_instrument_type) =
-                Self::parse_asset_kind_input(None, base_symbol, exchange_mic.as_deref());
+                Self::parse_asset_kind_input(base_symbol, exchange_mic.as_deref());
             let local_instrument_type = instrument_type_input
                 .clone()
                 .or_else(|| inferred_instrument_type.clone());
@@ -1186,7 +1231,7 @@ impl AssetServiceTrait for AssetService {
             let local_existing_asset = local_index.find_for_import_input(
                 input.asset_id.as_deref(),
                 input.isin.as_deref(),
-                &source_symbol,
+                &resolution_symbol,
                 &local_canonical_symbol,
                 local_exchange_mic.as_deref(),
                 local_instrument_type.as_ref(),
@@ -1241,24 +1286,36 @@ impl AssetServiceTrait for AssetService {
             }
 
             let provider_selection_constraints = ImportProviderSelectionConstraints {
-                source_symbol: &source_symbol,
+                source_symbol: &resolution_symbol,
                 canonical_symbol: &local_canonical_symbol,
                 exchange_mic: exchange_mic.as_deref(),
                 quote_ccy: local_quote_ccy,
                 instrument_type: local_instrument_type.as_ref(),
                 instrument_type_is_explicit: instrument_type_input.is_some(),
             };
-            let provider_result = self
-                .quote_service
-                .search_symbol_with_currency(&source_symbol, Some(&terminal_currency))
-                .await
-                .ok()
-                .and_then(|results| {
-                    Self::select_provider_result_for_import(
-                        results,
-                        &provider_selection_constraints,
-                    )
-                });
+            let mut provider_result = None;
+            for search_symbol in Self::import_provider_search_symbols(
+                &resolution_symbol,
+                &local_canonical_symbol,
+                exchange_mic.as_deref(),
+                local_quote_ccy,
+                local_instrument_type.as_ref(),
+            ) {
+                provider_result = self
+                    .quote_service
+                    .search_symbol_with_currency(&search_symbol, Some(&terminal_currency))
+                    .await
+                    .ok()
+                    .and_then(|results| {
+                        Self::select_provider_result_for_import(
+                            results,
+                            &provider_selection_constraints,
+                        )
+                    });
+                if provider_result.is_some() {
+                    break;
+                }
+            }
 
             if exchange_mic.is_none() {
                 exchange_mic = provider_result.as_ref().and_then(|result| {
@@ -3279,16 +3336,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_import_asset_inputs_preserves_exact_symbol_over_account_currency_hint() {
-        let mut nyse = yahoo_search_result("SHOP", "SHOP", "XNYS", "Shopify Inc.", "USD", "SHOP");
-        nyse.score = 1.0;
-        let mut tsx =
-            yahoo_search_result("SHOP.TO", "SHOP", "XTSE", "Shopify Inc.", "CAD", "SHOP.TO");
-        tsx.score = 10_000.0;
-        let service = test_asset_service(
-            Vec::new(),
-            TestQuoteService::default().with_result("SHOP", vec![nyse, tsx]),
-        );
+    async fn test_resolve_import_asset_inputs_uses_currency_suffix_for_unsuffixed_symbol() {
+        let tsx = yahoo_search_result("SHOP.TO", "SHOP", "XTSE", "Shopify Inc.", "CAD", "SHOP.TO");
+        let quote_service = TestQuoteService::default()
+            .with_result("SHOP.TO", vec![tsx])
+            .with_result(
+                "SHOP",
+                vec![yahoo_search_result(
+                    "SHOP",
+                    "SHOP",
+                    "XNYS",
+                    "Shopify Inc.",
+                    "USD",
+                    "SHOP",
+                )],
+            );
+        let search_calls = Arc::clone(&quote_service.search_calls);
+        let service = test_asset_service(Vec::new(), quote_service);
 
         let output = service
             .resolve_import_asset_inputs(vec![import_input("SHOP", "CAD")])
@@ -3297,11 +3361,70 @@ mod tests {
             .pop()
             .unwrap();
 
+        assert_eq!(search_calls.lock().unwrap().as_slice(), ["SHOP.TO"]);
+        assert_eq!(output.canonical_symbol.as_deref(), Some("SHOP"));
+        assert_eq!(output.exchange_mic.as_deref(), Some("XTSE"));
+        assert_eq!(output.quote_ccy.as_deref(), Some("CAD"));
+        assert_eq!(output.provider_symbol.as_deref(), Some("SHOP.TO"));
+        assert_eq!(output.review_symbol.as_deref(), Some("SHOP.TO"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_import_asset_inputs_falls_back_to_raw_unsuffixed_symbol() {
+        let nyse = yahoo_search_result("SHOP", "SHOP", "XNYS", "Shopify Inc.", "USD", "SHOP");
+        let quote_service = TestQuoteService::default().with_result("SHOP", vec![nyse]);
+        let search_calls = Arc::clone(&quote_service.search_calls);
+        let service = test_asset_service(Vec::new(), quote_service);
+
+        let output = service
+            .resolve_import_asset_inputs(vec![import_input("SHOP", "CAD")])
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        assert_eq!(search_calls.lock().unwrap().as_slice(), ["SHOP.TO", "SHOP"]);
         assert_eq!(output.canonical_symbol.as_deref(), Some("SHOP"));
         assert_eq!(output.exchange_mic.as_deref(), Some("XNYS"));
         assert_eq!(output.quote_ccy.as_deref(), Some("USD"));
         assert_eq!(output.provider_symbol.as_deref(), Some("SHOP"));
         assert_eq!(output.review_symbol.as_deref(), Some("SHOP"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_import_asset_inputs_searches_provider_for_isin_only_input() {
+        let isin = "US0378331005";
+        let service = test_asset_service(
+            Vec::new(),
+            TestQuoteService::default().with_result(
+                isin,
+                vec![yahoo_search_result(
+                    "AAPL",
+                    "AAPL",
+                    "XNAS",
+                    "Apple Inc.",
+                    "USD",
+                    "AAPL",
+                )],
+            ),
+        );
+        let mut input = import_input("", "USD");
+        input.key = "isin-only".to_string();
+        input.isin = Some(isin.to_string());
+
+        let output = service
+            .resolve_import_asset_inputs(vec![input])
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        assert_eq!(output.source_symbol, "");
+        assert_eq!(output.canonical_symbol.as_deref(), Some("AAPL"));
+        assert_eq!(output.exchange_mic.as_deref(), Some("XNAS"));
+        assert_eq!(output.quote_ccy.as_deref(), Some("USD"));
+        assert_eq!(output.provider_symbol.as_deref(), Some("AAPL"));
+        assert!(output.draft.is_some());
     }
 
     #[tokio::test]

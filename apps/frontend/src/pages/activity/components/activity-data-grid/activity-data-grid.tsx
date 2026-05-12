@@ -45,13 +45,6 @@ interface ActivityDataGridProps {
   onPageSizeChange: (pageSize: number) => void;
 }
 
-type ProviderAwareSymbolSearchResult = SymbolSearchResult & {
-  canonicalSymbol?: string;
-  canonicalExchangeMic?: string;
-  providerId?: string;
-  providerSymbol?: string;
-};
-
 function shouldApplyResolvedQuoteCurrency(result: SymbolSearchResult): boolean {
   if (result.isExisting || isManualSearchResult(result)) {
     return false;
@@ -211,14 +204,11 @@ export function ActivityDataGrid({
     (rowIndex: number, result: SymbolSearchResult) => {
       latestResolveRequestId.current += 1;
       const requestId = latestResolveRequestId.current;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
 
       // Currency fallback: search result (from exchange) → account → base
       const provisionalCurrency = result.currency;
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
-      const canonicalExchangeMic = providerResult.canonicalExchangeMic || result.exchangeMic;
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
+      const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
       let dirtyId: string | undefined;
 
       setLocalTransactions((prev) => {
@@ -240,8 +230,8 @@ export function ActivityDataGrid({
             pendingAssetKind: result.assetKind,
             pendingQuoteCcy: result.currency,
             pendingInstrumentType: result.quoteType,
-            pendingProviderId: providerResult.providerId,
-            pendingProviderSymbol: providerResult.providerSymbol,
+            pendingProviderId: result.providerId,
+            pendingProviderSymbol: result.providerSymbol,
           };
         }
         return updated;
@@ -258,7 +248,7 @@ export function ActivityDataGrid({
           canonicalSymbol,
           canonicalExchangeMic,
           result.quoteType,
-          providerResult.providerId,
+          result.providerId,
           result.currency,
         ).then((resolved) => {
           if (requestId !== latestResolveRequestId.current) return;
@@ -322,13 +312,10 @@ export function ActivityDataGrid({
     (result: SymbolSearchResult) => {
       const { rowIndex } = customAssetDialog;
       if (rowIndex < 0) return;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
 
       // Update the transaction with the symbol and asset metadata
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
-      const canonicalExchangeMic = providerResult.canonicalExchangeMic || result.exchangeMic;
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
+      const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
       let dirtyId: string | undefined;
       setLocalTransactions((prev) => {
         const updated = [...prev];
@@ -348,8 +335,8 @@ export function ActivityDataGrid({
             pendingAssetKind: result.assetKind,
             pendingQuoteCcy: result.currency,
             pendingInstrumentType: result.quoteType,
-            pendingProviderId: providerResult.providerId,
-            pendingProviderSymbol: providerResult.providerSymbol,
+            pendingProviderId: result.providerId,
+            pendingProviderSymbol: result.providerSymbol,
           };
         }
         return updated;

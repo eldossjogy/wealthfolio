@@ -37,7 +37,7 @@ export function isManualSearchResult(
   return quoteModeFromSearchResult(searchResult) === QuoteMode.MANUAL;
 }
 
-function stripCryptoQuoteSuffix(symbol: string, currencyHint?: string): string {
+export function stripCryptoQuoteSuffix(symbol: string, currencyHint?: string): string {
   const trimmed = symbol.trim().toUpperCase();
   const match = /^(.*)-([A-Z]{3,5})$/.exec(trimmed);
   if (!match) return trimmed;

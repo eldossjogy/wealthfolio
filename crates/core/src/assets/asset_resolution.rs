@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
 
@@ -40,19 +39,6 @@ pub struct AssetResolutionOutput {
     pub existing_asset_id: Option<String>,
     pub name: Option<String>,
     pub draft: Option<NewAsset>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderResolutionFields {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub canonical_symbol: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub canonical_exchange_mic: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_symbol: Option<String>,
 }
 
 fn provider_overrides_for_asset(asset: &Asset) -> Option<ProviderOverrides> {

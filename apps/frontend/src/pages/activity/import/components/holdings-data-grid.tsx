@@ -34,12 +34,6 @@ export interface HoldingsDataGridProps {
   enableSymbolEditing?: boolean;
 }
 
-type ProviderAwareSymbolSearchResult = SymbolSearchResult & {
-  canonicalSymbol?: string;
-  providerId?: string;
-  providerSymbol?: string;
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Column Definitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -165,10 +159,7 @@ export function HoldingsDataGrid({
       if (!row) return;
 
       const currency = result.currency ?? row.currency ?? fallbackCurrency;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
       onSymbolSelect?.(row.rowIndex, canonicalSymbol, result);
 
       // Also update currency from search result
@@ -177,8 +168,8 @@ export function HoldingsDataGrid({
         ...nextRows[rowIndex],
         symbol: canonicalSymbol,
         currency,
-        providerId: providerResult.providerId,
-        providerSymbol: providerResult.providerSymbol,
+        providerId: result.providerId,
+        providerSymbol: result.providerSymbol,
       };
       onDataChange(nextRows);
     },
@@ -198,10 +189,7 @@ export function HoldingsDataGrid({
       if (!row) return;
 
       const currency = result.currency ?? row.currency ?? fallbackCurrency;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
       onSymbolSelect?.(row.rowIndex, canonicalSymbol, result);
 
       const nextRows = [...rows];
@@ -209,8 +197,8 @@ export function HoldingsDataGrid({
         ...nextRows[rowIndex],
         symbol: canonicalSymbol,
         currency,
-        providerId: providerResult.providerId,
-        providerSymbol: providerResult.providerSymbol,
+        providerId: result.providerId,
+        providerSymbol: result.providerSymbol,
       };
       onDataChange(nextRows);
 

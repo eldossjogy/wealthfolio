@@ -222,16 +222,10 @@ export const HoldingsEditMode = ({
         return;
       }
 
-      const providerResult = searchResult as SymbolSearchResult & {
-        canonicalSymbol?: string;
-        canonicalExchangeMic?: string;
-        providerId?: string;
-        providerSymbol?: string;
-      };
-      const canonicalSymbol = (providerResult.canonicalSymbol || searchResult.symbol)
+      const canonicalSymbol = (searchResult.canonicalSymbol || searchResult.symbol)
         .trim()
         .toUpperCase();
-      const canonicalExchangeMic = providerResult.canonicalExchangeMic || searchResult.exchangeMic;
+      const canonicalExchangeMic = searchResult.canonicalExchangeMic || searchResult.exchangeMic;
 
       const newHolding: EditableHolding = {
         assetId,
@@ -245,8 +239,8 @@ export const HoldingsEditMode = ({
         assetKind: searchResult.assetKind,
         quoteCcy: searchResult.currency,
         instrumentType: searchResult.quoteType,
-        providerId: providerResult.providerId,
-        providerSymbol: providerResult.providerSymbol,
+        providerId: searchResult.providerId,
+        providerSymbol: searchResult.providerSymbol,
         isNew: !searchResult.existingAssetId,
       };
       pendingHoldingSharesFocusAssetIdRef.current = assetId;

@@ -2,28 +2,15 @@ import TickerSearchInput from "@/components/ticker-search";
 import { Input } from "@wealthfolio/ui/components/ui/input";
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@wealthfolio/ui";
 import { QuoteMode } from "@/lib/constants";
-import { isManualSearchResult, quoteModeFromSearchResult } from "@/lib/asset-utils";
+import {
+  isManualSearchResult,
+  quoteModeFromSearchResult,
+  stripCryptoQuoteSuffix,
+} from "@/lib/asset-utils";
 import type { SymbolSearchResult } from "@/lib/types";
 import { useRef, useState } from "react";
 import { useFormContext, type FieldPath, type FieldValues } from "react-hook-form";
 import { resolveSymbolQuote } from "@/adapters";
-
-/**
- * Normalize crypto pair symbols (e.g., "BTC-CAD" -> "BTC").
- * Canonical crypto IDs use base symbol + quote currency.
- */
-function stripCryptoQuoteSuffix(symbol: string, currencyHint?: string): string {
-  const trimmed = symbol.trim();
-  const match = /^(.*)-([A-Za-z]{3,5})$/.exec(trimmed);
-  if (!match) return trimmed;
-  const base = match[1]?.trim();
-  const quote = match[2]?.trim().toUpperCase();
-  const hint = currencyHint?.trim().toUpperCase();
-  if (hint && quote && quote !== hint) {
-    return trimmed;
-  }
-  return base || trimmed;
-}
 
 function shouldApplyResolvedQuoteCurrency(searchResult: SymbolSearchResult | undefined): boolean {
   if (!searchResult || searchResult.isExisting || isManualSearchResult(searchResult)) {

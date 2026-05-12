@@ -51,13 +51,6 @@ export interface ImportReviewGridProps {
   gridHeight?: string | number;
 }
 
-type ProviderAwareSymbolSearchResult = SymbolSearchResult & {
-  canonicalSymbol?: string;
-  canonicalExchangeMic?: string;
-  providerId?: string;
-  providerSymbol?: string;
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Status Display Configuration
 // ─────────────────────────────────────────────────────────────────────────────
@@ -604,11 +597,8 @@ export function ImportReviewGrid({
 
       // Currency fallback: search result → current draft currency → fallback
       const currency = result.currency ?? draft.currency ?? fallbackCurrency;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
-      const canonicalExchangeMic = providerResult.canonicalExchangeMic || result.exchangeMic;
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
+      const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
 
       onDraftUpdate(rowIndex, {
         symbol: canonicalSymbol,
@@ -617,8 +607,8 @@ export function ImportReviewGrid({
         quoteCcy: result.currency ?? draft.quoteCcy,
         instrumentType: result.quoteType,
         quoteMode: quoteModeFromSearchResult(result),
-        providerId: providerResult.providerId,
-        providerSymbol: providerResult.providerSymbol,
+        providerId: result.providerId,
+        providerSymbol: result.providerSymbol,
         symbolName: result.longName || result.shortName || draft.symbolName,
         assetId: undefined,
         importAssetKey: undefined,
@@ -643,11 +633,8 @@ export function ImportReviewGrid({
       if (!draft) return;
 
       const currency = result.currency ?? draft.currency ?? fallbackCurrency;
-      const providerResult = result as ProviderAwareSymbolSearchResult;
-      const canonicalSymbol = (providerResult.canonicalSymbol || result.symbol)
-        .trim()
-        .toUpperCase();
-      const canonicalExchangeMic = providerResult.canonicalExchangeMic || result.exchangeMic;
+      const canonicalSymbol = (result.canonicalSymbol || result.symbol).trim().toUpperCase();
+      const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
 
       onDraftUpdate(rowIndex, {
         symbol: canonicalSymbol,
@@ -656,8 +643,8 @@ export function ImportReviewGrid({
         quoteCcy: result.currency ?? draft.quoteCcy,
         instrumentType: result.quoteType,
         quoteMode: quoteModeFromSearchResult(result),
-        providerId: providerResult.providerId,
-        providerSymbol: providerResult.providerSymbol,
+        providerId: result.providerId,
+        providerSymbol: result.providerSymbol,
         symbolName: result.longName || result.shortName || draft.symbolName,
         assetId: undefined,
         importAssetKey: undefined,

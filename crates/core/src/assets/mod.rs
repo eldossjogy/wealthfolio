@@ -30,7 +30,7 @@ pub use asset_id::{
     unknown_dotted_suffix_fallback,
 };
 pub(crate) use asset_resolution::asset_provider_alias_symbols;
-pub use asset_resolution::{AssetResolutionInput, AssetResolutionOutput, ProviderResolutionFields};
+pub use asset_resolution::{AssetResolutionInput, AssetResolutionOutput};
 pub use assets_model::{
     build_asset_metadata, build_option_metadata, canonicalize_market_identity,
     normalize_quote_ccy_code, resolve_quote_ccy_precedence, Asset, AssetKind, AssetMetadata,
