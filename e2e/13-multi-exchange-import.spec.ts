@@ -162,7 +162,8 @@ test.describe("Issue #855 — symbol resolution and region classification", () =
     test.setTimeout(30000);
 
     const vod = rowFor(page, "VOD.L");
-    await expect(vod).toContainText(/Vodafone/i);
+    // Provider names for VOD.L vary (Vodafone vs VOD); the invariant is LSE pence classification.
+    await expect(vod).toContainText("EQUITY");
     await expect(vod).toContainText("LSE");
     await expect(vod).toContainText(/GBp|GBP/);
 
