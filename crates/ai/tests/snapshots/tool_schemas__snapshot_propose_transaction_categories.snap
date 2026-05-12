@@ -48,7 +48,7 @@ expression: snapshot
         "type": "string"
       },
       "limit": {
-        "maximum": 50,
+        "maximum": 100,
         "minimum": 1,
         "type": "integer"
       },

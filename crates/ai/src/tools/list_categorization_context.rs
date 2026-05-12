@@ -115,8 +115,8 @@ impl<E: AiEnvironment + 'static> Tool for ListCategorizationContextTool<E> {
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 50,
-                        "description": "Max rows. Default 30."
+                        "maximum": 100,
+                        "description": "Max rows. Default 100."
                     }
                 }
             }),

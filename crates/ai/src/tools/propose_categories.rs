@@ -26,8 +26,8 @@ use crate::env::AiEnvironment;
 use crate::error::AiError;
 use wealthfolio_spending::cash_activities::{CashActivitySearchRequest, CashActivityStatusFilter};
 
-const DEFAULT_LIMIT: usize = 30;
-const MAX_LIMIT: usize = 50;
+const DEFAULT_LIMIT: usize = 100;
+const MAX_LIMIT: usize = 100;
 const HISTORY_FETCH_LIMIT: usize = 400;
 const EXAMPLES_PER_CATEGORY: usize = 3;
 const MAX_TOTAL_EXAMPLES: usize = 80;
@@ -249,7 +249,7 @@ impl<E: AiEnvironment + 'static> Tool for ProposeCategoriesTool<E> {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": MAX_LIMIT,
-                        "description": "Max rows to propose. Default 30."
+                        "description": "Max rows to propose. Default 100 (also the cap). When the returned `summary.total` equals the limit, more uncategorized rows likely remain — see system prompt for the continuation flow."
                     },
                     "aiProposals": {
                         "type": "array",
