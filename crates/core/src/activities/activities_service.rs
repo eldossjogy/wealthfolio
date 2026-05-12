@@ -68,27 +68,17 @@ fn normalize_import_resolution_key_part(value: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-fn import_asset_resolution_key(
-    symbol: &str,
-    activity_currency: &str,
-    isin: Option<&str>,
-    exchange_mic: Option<&str>,
-    quote_ccy: Option<&str>,
-    instrument_type: Option<&str>,
-    quote_mode: Option<&str>,
-    provider_id: Option<&str>,
-    provider_symbol: Option<&str>,
-) -> String {
+fn import_asset_resolution_key(activity: &ActivityImport, activity_currency: &str) -> String {
     [
-        symbol.trim().to_uppercase(),
+        activity.symbol.trim().to_uppercase(),
         activity_currency.trim().to_uppercase(),
-        normalize_isin_key(isin).unwrap_or_default(),
-        normalize_import_resolution_key_part(exchange_mic),
-        normalize_import_resolution_key_part(quote_ccy),
-        normalize_import_resolution_key_part(instrument_type),
-        normalize_import_resolution_key_part(quote_mode),
-        normalize_import_resolution_key_part(provider_id),
-        normalize_import_resolution_key_part(provider_symbol),
+        normalize_isin_key(activity.isin.as_deref()).unwrap_or_default(),
+        normalize_import_resolution_key_part(activity.exchange_mic.as_deref()),
+        normalize_import_resolution_key_part(activity.quote_ccy.as_deref()),
+        normalize_import_resolution_key_part(activity.instrument_type.as_deref()),
+        normalize_import_resolution_key_part(activity.quote_mode.as_deref()),
+        normalize_import_resolution_key_part(activity.provider_id.as_deref()),
+        normalize_import_resolution_key_part(activity.provider_symbol.as_deref()),
     ]
     .join("::")
 }
@@ -2441,17 +2431,7 @@ impl ActivityService {
                 } else {
                     a.currency.clone()
                 };
-                let input_key = import_asset_resolution_key(
-                    &a.symbol,
-                    &ccy,
-                    a.isin.as_deref(),
-                    a.exchange_mic.as_deref(),
-                    a.quote_ccy.as_deref(),
-                    a.instrument_type.as_deref(),
-                    a.quote_mode.as_deref(),
-                    a.provider_id.as_deref(),
-                    a.provider_symbol.as_deref(),
-                );
+                let input_key = import_asset_resolution_key(a, &ccy);
                 Some(ImportAssetResolutionInput {
                     key: input_key,
                     source_symbol: a.symbol.clone(),
@@ -2572,17 +2552,7 @@ impl ActivityService {
             } else {
                 activity.currency.clone()
             };
-            let resolution_key = import_asset_resolution_key(
-                &activity.symbol,
-                &resolve_ccy,
-                activity.isin.as_deref(),
-                activity.exchange_mic.as_deref(),
-                activity.quote_ccy.as_deref(),
-                activity.instrument_type.as_deref(),
-                activity.quote_mode.as_deref(),
-                activity.provider_id.as_deref(),
-                activity.provider_symbol.as_deref(),
-            );
+            let resolution_key = import_asset_resolution_key(&activity, &resolve_ccy);
             let asset_resolution = asset_resolution_cache.get(&resolution_key);
             let resolution_quote_ccy = asset_resolution
                 .and_then(|output| output.quote_ccy.clone())
