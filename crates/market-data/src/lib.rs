@@ -81,6 +81,7 @@ pub use resolver::{
 pub use provider::alpha_vantage::AlphaVantageProvider;
 pub use provider::boerse_frankfurt::BoerseFrankfurtProvider;
 pub use provider::finnhub::FinnhubProvider;
+pub use provider::fixture::FixtureProvider;
 pub use provider::marketdata_app::MarketDataAppProvider;
 pub use provider::metal_price_api::MetalPriceApiProvider;
 pub use provider::openfigi::OpenFigiProvider;

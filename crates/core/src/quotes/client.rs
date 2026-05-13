@@ -40,9 +40,10 @@ use wealthfolio_market_data::{
     mic_to_currency, mic_to_exchange_name, yahoo_equity_provider_symbol_to_canonical,
     yahoo_exchange_to_mic, yahoo_suffix_to_mic, AlphaVantageProvider,
     AssetProfile as MarketAssetProfile, BoerseFrankfurtProvider, BondQuoteMetadata, ExchangeMap,
-    FinnhubProvider, MarketDataAppProvider, MetalPriceApiProvider, OpenFigiProvider, ProviderId,
-    ProviderRegistry, Quote as MarketQuote, QuoteContext, ResolverChain,
-    SearchResult as MarketSearchResult, SplitEvent, UsTreasuryCalcProvider, YahooProvider,
+    FinnhubProvider, FixtureProvider, MarketDataAppProvider, MetalPriceApiProvider,
+    OpenFigiProvider, ProviderId, ProviderRegistry, Quote as MarketQuote, QuoteContext,
+    ResolverChain, SearchResult as MarketSearchResult, SplitEvent, UsTreasuryCalcProvider,
+    YahooProvider,
 };
 
 /// Market data error types.
@@ -185,6 +186,16 @@ impl MarketDataClient {
     ) -> Result<Option<Arc<dyn wealthfolio_market_data::MarketDataProvider>>> {
         match provider_id {
             DATA_SOURCE_YAHOO => {
+                if matches!(std::env::var("WEALTHFOLIO_E2E").as_deref(), Ok("1")) {
+                    let fixture_dir = std::env::var("WEALTHFOLIO_FIXTURE_DIR").map_err(|_| {
+                        MarketDataClientError::InvalidData(
+                            "WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1"
+                                .to_string(),
+                        )
+                    })?;
+                    return Ok(Some(Arc::new(FixtureProvider::new(fixture_dir))));
+                }
+
                 // Yahoo doesn't need an API key
                 let provider = YahooProvider::new()
                     .await
@@ -236,6 +247,19 @@ impl MarketDataClient {
                 Ok(Some(Arc::new(UsTreasuryCalcProvider::new())))
             }
             DATA_SOURCE_BOERSE_FRANKFURT => {
+                if matches!(std::env::var("WEALTHFOLIO_E2E").as_deref(), Ok("1")) {
+                    let fixture_dir = std::env::var("WEALTHFOLIO_FIXTURE_DIR").map_err(|_| {
+                        MarketDataClientError::InvalidData(
+                            "WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1"
+                                .to_string(),
+                        )
+                    })?;
+                    return Ok(Some(Arc::new(FixtureProvider::new_for_provider(
+                        fixture_dir,
+                        DATA_SOURCE_BOERSE_FRANKFURT,
+                    ))));
+                }
+
                 // European bond pricing via Börse Frankfurt (no API key)
                 Ok(Some(Arc::new(BoerseFrankfurtProvider::new())))
             }
