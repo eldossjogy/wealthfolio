@@ -1,5 +1,6 @@
 import { getExchanges } from "@/adapters";
 import TickerSearchInput from "@/components/ticker-search";
+import { quoteModeFromSearchResult } from "@/lib/asset-utils";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { NewAsset, SymbolSearchResult } from "@/lib/types";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -159,8 +160,11 @@ export function CreateSecurityDialog({
     (_symbol: string, result?: SymbolSearchResult) => {
       if (!result) return;
 
+      const canonicalSymbol = result.canonicalSymbol || result.symbol;
+      const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
+
       setSelectedResult(result);
-      form.setValue("symbol", result.symbol.toUpperCase(), { shouldValidate: true });
+      form.setValue("symbol", canonicalSymbol.toUpperCase(), { shouldValidate: true });
       form.setValue("name", result.longName || result.shortName || "", { shouldValidate: true });
 
       const mappedType = result.quoteType ? mapQuoteTypeToInstrumentType(result.quoteType) : null;
@@ -171,8 +175,8 @@ export function CreateSecurityDialog({
       if (result.currency) {
         form.setValue("quoteCcy", result.currency, { shouldValidate: true });
       }
-      if (result.exchangeMic) {
-        form.setValue("instrumentExchangeMic", normalizeMic(result.exchangeMic));
+      if (canonicalExchangeMic) {
+        form.setValue("instrumentExchangeMic", normalizeMic(canonicalExchangeMic));
       }
 
       // If the type is unrecognized, fall back to manual mode.
@@ -180,8 +184,7 @@ export function CreateSecurityDialog({
       if (!mappedType) {
         form.setValue("quoteMode", "MANUAL");
       } else {
-        const isManual = result.dataSource === "MANUAL";
-        form.setValue("quoteMode", isManual ? "MANUAL" : "MARKET");
+        form.setValue("quoteMode", quoteModeFromSearchResult(result));
       }
     },
     [form],
@@ -189,6 +192,36 @@ export function CreateSecurityDialog({
 
   const handleSubmit = (values: CreateSecurityFormValues) => {
     const kind = values.instrumentType === "FX" ? "FX" : "INVESTMENT";
+    const selectedCanonicalSymbol = selectedResult?.canonicalSymbol || selectedResult?.symbol;
+    const selectedCanonicalMic = normalizeMic(
+      selectedResult?.canonicalExchangeMic || selectedResult?.exchangeMic,
+    );
+    const selectedInstrumentType = selectedResult?.quoteType
+      ? mapQuoteTypeToInstrumentType(selectedResult.quoteType)
+      : null;
+    const initialSymbol = (
+      initialAsset?.instrumentSymbol || initialAsset?.displayCode
+    )?.toUpperCase();
+    const initialMic = normalizeMic(initialAsset?.instrumentExchangeMic);
+    const initialInstrumentType = initialAsset?.instrumentType;
+    const selectedProviderRef =
+      selectedResult &&
+      selectedCanonicalSymbol?.toUpperCase() === values.symbol &&
+      selectedCanonicalMic === normalizeMic(values.instrumentExchangeMic) &&
+      (!selectedInstrumentType || selectedInstrumentType === values.instrumentType)
+        ? {
+            providerId: selectedResult.providerId,
+            providerSymbol: selectedResult.providerSymbol,
+          }
+        : undefined;
+    const initialProviderConfig =
+      !selectedResult &&
+      initialAsset?.providerConfig &&
+      initialSymbol === values.symbol &&
+      initialMic === normalizeMic(values.instrumentExchangeMic) &&
+      (!initialInstrumentType || initialInstrumentType === values.instrumentType)
+        ? initialAsset.providerConfig
+        : undefined;
 
     const payload: NewAsset = {
       kind,
@@ -200,6 +233,9 @@ export function CreateSecurityDialog({
       instrumentType: values.instrumentType,
       instrumentSymbol: values.symbol,
       instrumentExchangeMic: values.instrumentExchangeMic || undefined,
+      providerId: selectedProviderRef?.providerId,
+      providerSymbol: selectedProviderRef?.providerSymbol,
+      providerConfig: selectedProviderRef ? undefined : initialProviderConfig,
       notes: values.notes || undefined,
     };
     onSubmit(payload);
@@ -252,9 +288,11 @@ export function CreateSecurityDialog({
                         {...field}
                         onChange={(e) => {
                           const next = e.target.value.toUpperCase();
+                          const selectedCanonicalSymbol =
+                            selectedResult?.canonicalSymbol || selectedResult?.symbol;
                           if (
                             selectedResult &&
-                            next.trim() !== selectedResult.symbol.toUpperCase()
+                            next.trim() !== selectedCanonicalSymbol?.toUpperCase()
                           ) {
                             setSelectedResult(undefined);
                           }
