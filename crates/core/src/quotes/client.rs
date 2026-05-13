@@ -151,10 +151,19 @@ impl MarketDataClient {
             }
         }
 
-        // Append extra providers (e.g., CustomScraperProvider)
-        for ep in extra_providers {
-            info!("Registered extra provider: {}", ep.id());
-            providers.push(ep);
+        if Self::is_e2e_mode() {
+            if !extra_providers.is_empty() {
+                warn!(
+                    "Skipping {} extra market data provider(s) because WEALTHFOLIO_E2E=1",
+                    extra_providers.len()
+                );
+            }
+        } else {
+            // Append extra providers (e.g., CustomScraperProvider)
+            for ep in extra_providers {
+                info!("Registered extra provider: {}", ep.id());
+                providers.push(ep);
+            }
         }
 
         if providers.is_empty() {
@@ -179,23 +188,62 @@ impl MarketDataClient {
         Ok(Self { registry })
     }
 
+    fn is_e2e_mode() -> bool {
+        matches!(std::env::var("WEALTHFOLIO_E2E").as_deref(), Ok("1"))
+    }
+
+    fn e2e_fixture_dir() -> Result<String> {
+        std::env::var("WEALTHFOLIO_FIXTURE_DIR").map_err(|_| {
+            MarketDataClientError::InvalidData(
+                "WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1".to_string(),
+            )
+            .into()
+        })
+    }
+
+    fn create_e2e_provider(
+        provider_id: &str,
+    ) -> Result<Option<Arc<dyn wealthfolio_market_data::MarketDataProvider>>> {
+        let fixture_dir = Self::e2e_fixture_dir()?;
+
+        match provider_id {
+            DATA_SOURCE_YAHOO => Ok(Some(Arc::new(FixtureProvider::new(fixture_dir)))),
+            DATA_SOURCE_BOERSE_FRANKFURT => Ok(Some(Arc::new(FixtureProvider::new_for_provider(
+                fixture_dir,
+                DATA_SOURCE_BOERSE_FRANKFURT,
+            )))),
+            DATA_SOURCE_MARKET_DATA_APP
+            | DATA_SOURCE_ALPHA_VANTAGE
+            | DATA_SOURCE_METAL_PRICE_API
+            | DATA_SOURCE_FINNHUB
+            | DATA_SOURCE_OPENFIGI
+            | DATA_SOURCE_US_TREASURY_CALC
+            | DATA_SOURCE_CUSTOM_SCRAPER => {
+                warn!(
+                    "Provider {} is disabled because WEALTHFOLIO_E2E=1; add fixture support before using it in e2e",
+                    provider_id
+                );
+                Ok(None)
+            }
+            DATA_SOURCE_MANUAL | DATA_SOURCE_CALCULATED | DATA_SOURCE_BROKER => Ok(None),
+            _ => {
+                warn!("Unknown provider ID: {}", provider_id);
+                Ok(None)
+            }
+        }
+    }
+
     /// Create a provider by ID with its API key.
     async fn create_provider(
         provider_id: &str,
         secret_store: &Arc<dyn SecretStore>,
     ) -> Result<Option<Arc<dyn wealthfolio_market_data::MarketDataProvider>>> {
+        if Self::is_e2e_mode() {
+            return Self::create_e2e_provider(provider_id);
+        }
+
         match provider_id {
             DATA_SOURCE_YAHOO => {
-                if matches!(std::env::var("WEALTHFOLIO_E2E").as_deref(), Ok("1")) {
-                    let fixture_dir = std::env::var("WEALTHFOLIO_FIXTURE_DIR").map_err(|_| {
-                        MarketDataClientError::InvalidData(
-                            "WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1"
-                                .to_string(),
-                        )
-                    })?;
-                    return Ok(Some(Arc::new(FixtureProvider::new(fixture_dir))));
-                }
-
                 // Yahoo doesn't need an API key
                 let provider = YahooProvider::new()
                     .await
@@ -247,19 +295,6 @@ impl MarketDataClient {
                 Ok(Some(Arc::new(UsTreasuryCalcProvider::new())))
             }
             DATA_SOURCE_BOERSE_FRANKFURT => {
-                if matches!(std::env::var("WEALTHFOLIO_E2E").as_deref(), Ok("1")) {
-                    let fixture_dir = std::env::var("WEALTHFOLIO_FIXTURE_DIR").map_err(|_| {
-                        MarketDataClientError::InvalidData(
-                            "WEALTHFOLIO_FIXTURE_DIR must be set when WEALTHFOLIO_E2E=1"
-                                .to_string(),
-                        )
-                    })?;
-                    return Ok(Some(Arc::new(FixtureProvider::new_for_provider(
-                        fixture_dir,
-                        DATA_SOURCE_BOERSE_FRANKFURT,
-                    ))));
-                }
-
                 // European bond pricing via Börse Frankfurt (no API key)
                 Ok(Some(Arc::new(BoerseFrankfurtProvider::new())))
             }

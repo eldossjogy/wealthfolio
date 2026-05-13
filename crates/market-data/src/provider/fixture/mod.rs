@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -28,6 +29,7 @@ const DEFAULT_AS_OF: &str = "2026-05-12";
 pub struct FixtureProvider {
     fixture_dir: PathBuf,
     provider_id: &'static str,
+    catalog: OnceLock<Result<FixtureCatalog, String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -87,12 +89,19 @@ impl FixtureProvider {
         Self {
             fixture_dir: fixture_dir.into(),
             provider_id,
+            catalog: OnceLock::new(),
         }
     }
 
-    fn load_catalog(&self) -> Result<FixtureCatalog, MarketDataError> {
+    fn load_catalog(&self) -> Result<&FixtureCatalog, MarketDataError> {
         let path = self.fixture_dir.join("instruments.json");
-        read_json_file(&path, self.provider_id)
+        match self.catalog.get_or_init(|| read_catalog_file(&path)) {
+            Ok(catalog) => Ok(catalog),
+            Err(message) => Err(MarketDataError::ProviderError {
+                provider: self.provider_id.to_string(),
+                message: message.clone(),
+            }),
+        }
     }
 
     fn as_of_date(&self, catalog: &FixtureCatalog) -> Result<NaiveDate, MarketDataError> {
@@ -117,15 +126,16 @@ impl FixtureProvider {
 
     fn find_instrument_from_catalog(
         &self,
-        catalog: FixtureCatalog,
+        catalog: &FixtureCatalog,
         symbol: &str,
     ) -> Result<FixtureInstrument, MarketDataError> {
         catalog
             .instruments
-            .into_iter()
+            .iter()
             .find(|instrument| {
                 instrument.provider == self.provider_id && instrument.matches_symbol(symbol)
             })
+            .cloned()
             .or_else(|| self.synthetic_fx_instrument(symbol))
             .ok_or_else(|| MarketDataError::SymbolNotFound(symbol.to_string()))
     }
@@ -174,7 +184,7 @@ impl FixtureProvider {
             None
         } else {
             Some(Decimal::from(
-                instrument.base_volume + seed.wrapping_mul(7919) % 1_000_000,
+                instrument.base_volume + (seed.wrapping_mul(7919) % 1_000_000),
             ))
         };
 
@@ -305,19 +315,12 @@ impl FixtureInstrument {
     }
 }
 
-fn read_json_file<T: for<'de> Deserialize<'de>>(
-    path: &Path,
-    provider_id: &str,
-) -> Result<T, MarketDataError> {
-    let contents = fs::read_to_string(path).map_err(|error| MarketDataError::ProviderError {
-        provider: provider_id.to_string(),
-        message: format!("Failed to read fixture {}: {}", path.display(), error),
-    })?;
+fn read_catalog_file(path: &Path) -> Result<FixtureCatalog, String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read fixture {}: {}", path.display(), error))?;
 
-    serde_json::from_str(&contents).map_err(|error| MarketDataError::ProviderError {
-        provider: provider_id.to_string(),
-        message: format!("Failed to parse fixture {}: {}", path.display(), error),
-    })
+    serde_json::from_str(&contents)
+        .map_err(|error| format!("Failed to parse fixture {}: {}", path.display(), error))
 }
 
 fn instrument_symbol(instrument: &ProviderInstrument) -> String {
@@ -551,7 +554,7 @@ impl MarketDataProvider for FixtureProvider {
         let symbol = instrument_symbol(&instrument);
         debug!("Generating latest quote fixture for {}", symbol);
         let catalog = self.load_catalog()?;
-        let as_of = self.as_of_date(&catalog)?;
+        let as_of = self.as_of_date(catalog)?;
         let instrument = self.find_instrument_from_catalog(catalog, &symbol)?;
         Ok(self.quote_for_date(&instrument, latest_trading_date(&instrument, as_of)))
     }
@@ -582,6 +585,10 @@ impl MarketDataProvider for FixtureProvider {
     }
 
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, MarketDataError> {
+        if !self.capabilities().supports_search {
+            return Ok(Vec::new());
+        }
+
         let normalized = query.trim().to_lowercase();
         if normalized.is_empty() {
             return Ok(Vec::new());
@@ -590,7 +597,7 @@ impl MarketDataProvider for FixtureProvider {
         let mut results: Vec<SearchResult> = self
             .load_catalog()?
             .instruments
-            .into_iter()
+            .iter()
             .filter_map(|instrument| {
                 if instrument.provider != self.provider_id || instrument.asset_type == "FX" {
                     return None;
@@ -634,7 +641,7 @@ impl MarketDataProvider for FixtureProvider {
         let mut seen = HashSet::new();
         Ok(catalog
             .splits
-            .into_iter()
+            .iter()
             .filter(|split| {
                 split.date >= start_date
                     && split.date <= end_date

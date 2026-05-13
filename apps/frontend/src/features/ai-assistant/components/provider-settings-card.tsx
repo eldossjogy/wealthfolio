@@ -719,8 +719,8 @@ export function ProviderSettingsCard({
                     <div className="space-y-0.5">
                       <p className="text-sm font-medium">AI data sharing</p>
                       <p className="text-muted-foreground text-xs leading-relaxed">
-                        Enabled AI tools may share relevant portfolio data and attachments with
-                        your selected AI provider when used in chat.
+                        Enabled AI tools may share relevant portfolio data and attachments with your
+                        selected AI provider when used in chat.
                       </p>
                     </div>
                   </div>
