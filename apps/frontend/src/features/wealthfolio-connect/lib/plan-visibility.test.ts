@@ -32,7 +32,10 @@ describe("getDisplayablePlans", () => {
   });
 
   it("does not add Plus when the API omits it", () => {
-    const plans = getDisplayablePlans([plan("basic", true, false), plan("essentials", true, false)]);
+    const plans = getDisplayablePlans([
+      plan("basic", true, false),
+      plan("essentials", true, false),
+    ]);
 
     expect(plans.map((item) => item.id)).toEqual(["basic", "essentials"]);
   });

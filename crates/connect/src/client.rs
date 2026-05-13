@@ -592,6 +592,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
+    type CapturedHeaders = Arc<Mutex<Option<HashMap<String, String>>>>;
+    type TestServer = (String, CapturedHeaders, thread::JoinHandle<()>);
+
     #[test]
     fn test_client_creation() {
         let client = ConnectApiClient::new("https://api.wealthfolio.app", "test-token");
@@ -679,11 +682,7 @@ mod tests {
         status: u16,
         body: &'static str,
         request_id: Option<&'static str>,
-    ) -> (
-        String,
-        Arc<Mutex<Option<HashMap<String, String>>>>,
-        thread::JoinHandle<()>,
-    ) {
+    ) -> TestServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
         let addr = listener.local_addr().expect("listener addr");
         let captured = Arc::new(Mutex::new(None));
