@@ -3087,6 +3087,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_import_asset_inputs_preserves_lse_provider_display_name() {
+        let service = test_asset_service(
+            Vec::new(),
+            TestQuoteService::default().with_result(
+                "VOD.L",
+                vec![yahoo_search_result(
+                    "VOD.L",
+                    "VOD",
+                    "XLON",
+                    "Vodafone Group Public Limited Company",
+                    "GBp",
+                    "VOD.L",
+                )],
+            ),
+        );
+
+        let output = service
+            .resolve_import_asset_inputs(vec![import_input("VOD.L", "GBp")])
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        assert_eq!(output.canonical_symbol.as_deref(), Some("VOD"));
+        assert_eq!(output.exchange_mic.as_deref(), Some("XLON"));
+        assert_eq!(output.quote_ccy.as_deref(), Some("GBp"));
+        assert_eq!(output.provider_id.as_deref(), Some("YAHOO"));
+        assert_eq!(output.provider_symbol.as_deref(), Some("VOD.L"));
+        assert_eq!(output.review_symbol.as_deref(), Some("VOD.L"));
+        assert_eq!(
+            output.name.as_deref(),
+            Some("Vodafone Group Public Limited Company")
+        );
+
+        let draft = output.draft.expect("new LSE asset draft");
+        assert_eq!(
+            draft.name.as_deref(),
+            Some("Vodafone Group Public Limited Company")
+        );
+        assert_eq!(draft.display_code.as_deref(), Some("VOD"));
+        assert_eq!(draft.instrument_symbol.as_deref(), Some("VOD"));
+        assert_eq!(draft.instrument_exchange_mic.as_deref(), Some("XLON"));
+        assert_eq!(draft.provider_config, None);
+        assert_eq!(draft.provider_id.as_deref(), Some("YAHOO"));
+        assert_eq!(draft.provider_symbol.as_deref(), Some("VOD.L"));
+    }
+
+    #[tokio::test]
     async fn test_resolve_import_asset_inputs_preserves_share_class_identity() {
         let mut wrong_display_match = yahoo_search_result(
             "BRK.B",
