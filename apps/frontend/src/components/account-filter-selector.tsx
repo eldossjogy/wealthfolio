@@ -35,7 +35,7 @@ function filterLabel(
 
 export function AccountFilterSelector({ value, onChange, className }: AccountFilterSelectorProps) {
   const [open, setOpen] = useState(false);
-  const { accounts } = useAccounts({ filterActive: true, includeArchived: false });
+  const { accounts } = useAccounts({ filterActive: false, includeArchived: false });
   const { data: portfolios = [] } = usePortfolios();
 
   const label = filterLabel(value, accounts, portfolios);
@@ -91,22 +91,10 @@ export function AccountFilterSelector({ value, onChange, className }: AccountFil
             {portfolios.length > 0 && (
               <CommandGroup heading="Portfolios">
                 {portfolios.map((p) => (
-                  <CommandItem
-                    key={p.id}
-                    value={p.id}
-                    keywords={[p.name]}
-                    onSelect={() => select({ type: "portfolio", portfolioId: p.id })}
-                  >
+                  <CommandItem key={p.id} value={p.id} keywords={[p.name]} disabled>
                     <Icons.Folder className="mr-2 h-4 w-4" />
                     {p.name}
-                    <Icons.Check
-                      className={cn(
-                        "ml-auto h-4 w-4",
-                        value.type === "portfolio" && value.portfolioId === p.id
-                          ? "opacity-100"
-                          : "opacity-0",
-                      )}
-                    />
+                    <span className="text-muted-foreground ml-auto text-xs">Coming soon</span>
                   </CommandItem>
                 ))}
               </CommandGroup>

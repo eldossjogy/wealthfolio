@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel::r2d2::{self, Pool};
 use diesel::sqlite::SqliteConnection;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -203,14 +204,18 @@ impl PortfolioRepositoryTrait for PortfolioRepository {
         let ids: Vec<String> = all_portfolios.iter().map(|p| p.id.clone()).collect();
         let all_memberships = Self::load_memberships_for_portfolios(&mut conn, &ids)?;
 
+        let mut by_portfolio: HashMap<String, Vec<PortfolioAccountDB>> = HashMap::new();
+        for m in all_memberships {
+            by_portfolio
+                .entry(m.portfolio_id.clone())
+                .or_default()
+                .push(m);
+        }
+
         let result = all_portfolios
             .into_iter()
             .map(|p| {
-                let mems: Vec<PortfolioAccountDB> = all_memberships
-                    .iter()
-                    .filter(|m| m.portfolio_id == p.id)
-                    .cloned()
-                    .collect();
+                let mems = by_portfolio.remove(&p.id).unwrap_or_default();
                 build_portfolio_with_accounts(p, mems)
             })
             .collect();

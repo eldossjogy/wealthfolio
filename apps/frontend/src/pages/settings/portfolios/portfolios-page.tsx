@@ -81,6 +81,7 @@ export default function PortfoliosPage() {
         </div>
       )}
 
+      {/* key resets form state when switching between portfolios or opening fresh */}
       <PortfolioDialog
         key={editing?.id ?? "new"}
         open={open}

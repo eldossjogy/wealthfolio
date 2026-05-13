@@ -1,8 +1,3 @@
--- Dev safety: drop old JSON-schema tables from PR #938 prototype if they exist.
--- On a fresh install these tables don't exist, so these are no-ops.
-DROP TABLE IF EXISTS portfolio_accounts;
-DROP TABLE IF EXISTS portfolios;
-
 CREATE TABLE portfolios (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),

@@ -16,6 +16,17 @@ pub async fn get_portfolios(
 }
 
 #[tauri::command]
+pub async fn get_portfolio(
+    portfolio_id: String,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<PortfolioWithAccounts, String> {
+    state
+        .portfolio_service()
+        .get_portfolio(&portfolio_id)
+        .map_err(|e| format!("Failed to load portfolio: {}", e))
+}
+
+#[tauri::command]
 pub async fn create_portfolio(
     portfolio: NewPortfolio,
     state: State<'_, Arc<ServiceContext>>,

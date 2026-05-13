@@ -5,8 +5,18 @@ use super::portfolios_model::{
 };
 use super::portfolios_traits::{PortfolioRepositoryTrait, PortfolioServiceTrait};
 use crate::accounts::AccountRepositoryTrait;
-use crate::errors::{Result, ValidationError};
+use crate::errors::{DatabaseError, Result, ValidationError};
 use crate::Error;
+
+fn map_unique_violation(e: Error) -> Error {
+    if matches!(e, Error::Database(DatabaseError::UniqueViolation(_))) {
+        Error::Validation(ValidationError::InvalidInput(
+            "Portfolio name already exists".to_string(),
+        ))
+    } else {
+        e
+    }
+}
 
 pub struct PortfolioService {
     repository: Arc<dyn PortfolioRepositoryTrait>,
@@ -45,14 +55,20 @@ impl PortfolioServiceTrait for PortfolioService {
         new.name = new.name.trim().to_string();
         new.validate()?;
         self.validate_account_ids_exist(&new.account_ids)?;
-        self.repository.create(new).await
+        self.repository
+            .create(new)
+            .await
+            .map_err(map_unique_violation)
     }
 
     async fn update_portfolio(&self, mut update: PortfolioUpdate) -> Result<PortfolioWithAccounts> {
         update.name = update.name.trim().to_string();
         update.validate()?;
         self.validate_account_ids_exist(&update.account_ids)?;
-        self.repository.update(update).await
+        self.repository
+            .update(update)
+            .await
+            .map_err(map_unique_violation)
     }
 
     async fn delete_portfolio(&self, id: &str) -> Result<()> {
