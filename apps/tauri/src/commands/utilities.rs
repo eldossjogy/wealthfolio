@@ -10,6 +10,8 @@ use crate::context::ServiceContext;
 #[cfg(desktop)]
 use crate::updater::{check_for_update, install_update};
 
+const PENDING_EXPORTS_DIR: &str = "pending-exports";
+
 /// Normalize file path by removing file:// URI prefix if present (iOS/Android compatibility)
 fn normalize_file_path(path: &str) -> String {
     if path.starts_with("file://") {
@@ -129,7 +131,11 @@ pub async fn backup_database_to_pending_export(
         "wealthfolio_backup_{}.db",
         chrono::Local::now().format("%Y%m%d_%H%M%S_%3f")
     );
-    let export_dir = app_data_dir_path.join("pending-exports");
+    let export_dir = app_data_dir_path.join(PENDING_EXPORTS_DIR);
+    if export_dir.exists() {
+        fs::remove_dir_all(&export_dir)
+            .map_err(|e| format!("Failed to clean pending export directory: {}", e))?;
+    }
     fs::create_dir_all(&export_dir)
         .map_err(|e| format!("Failed to create pending export directory: {}", e))?;
 
@@ -143,7 +149,7 @@ pub async fn backup_database_to_pending_export(
         .map_err(|e| format!("Failed to create backup export: {}", e))?;
 
     Ok(BackupExport {
-        relative_path: format!("pending-exports/{}", filename),
+        relative_path: format!("{}/{}", PENDING_EXPORTS_DIR, filename),
         filename,
     })
 }

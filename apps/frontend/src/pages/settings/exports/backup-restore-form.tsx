@@ -42,6 +42,7 @@ export const BackupRestoreForm = () => {
     isRestoring,
     isDeletingWebBackup,
     isLoadingWebBackups,
+    webBackupsError,
     canBackup,
     canRestore,
     webBackups,
@@ -71,6 +72,7 @@ export const BackupRestoreForm = () => {
       backups={webBackups}
       isLoadingBackups={isLoadingWebBackups}
       isDeletingBackup={isDeletingWebBackup}
+      backupListError={webBackupsError}
       onDeleteBackup={deleteWebBackup}
       getDownloadUrl={getWebBackupDownloadUrl}
     />
@@ -149,6 +151,7 @@ interface WebPanelProps {
   backups: DatabaseBackup[];
   isLoadingBackups: boolean;
   isDeletingBackup: boolean;
+  backupListError: string | null;
   onDeleteBackup: (filename: string) => Promise<void>;
   getDownloadUrl: (filename: string) => string;
 }
@@ -188,6 +191,7 @@ const WebBackupPanel = ({
   backups,
   isLoadingBackups,
   isDeletingBackup,
+  backupListError,
   onDeleteBackup,
   getDownloadUrl,
 }: WebPanelProps) => {
@@ -230,6 +234,14 @@ const WebBackupPanel = ({
             <div className="text-muted-foreground flex items-center gap-2 rounded-md border border-dashed p-4 text-sm">
               <Icons.Spinner className="h-4 w-4 animate-spin" />
               Loading backups...
+            </div>
+          ) : backupListError ? (
+            <div className="border-destructive/30 bg-destructive/5 text-destructive flex items-start gap-2 rounded-md border p-4 text-sm">
+              <Icons.AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Could not load backups</p>
+                <p className="mt-1">{backupListError}</p>
+              </div>
             </div>
           ) : backups.length === 0 ? (
             <div className="rounded-md border border-dashed p-6 text-center">

@@ -39,7 +39,6 @@ export const COMMANDS: CommandMap = {
   backup_database: { method: "POST", path: "/utilities/database/backup" },
   list_database_backups: { method: "GET", path: "/utilities/database/backups" },
   delete_database_backup: { method: "DELETE", path: "/utilities/database/backups" },
-  restore_database: { method: "POST", path: "/utilities/database/restore" },
   get_holdings: { method: "GET", path: "/holdings" },
   get_holding: { method: "GET", path: "/holdings/item" },
   get_asset_holdings: { method: "GET", path: "/holdings/by-asset" },
@@ -379,11 +378,6 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "delete_database_backup": {
       const { filename } = payload as { filename: string };
       url += `/${encodeURIComponent(filename)}`;
-      break;
-    }
-    case "restore_database": {
-      const { backupFilePath } = payload as { backupFilePath: string };
-      body = JSON.stringify({ backupFilePath });
       break;
     }
     case "update_settings": {

@@ -30,6 +30,8 @@ export function useBackupRestore() {
     data: webBackups = [],
     isLoading: isLoadingWebBackups,
     isFetching: isFetchingWebBackups,
+    isError: hasWebBackupsError,
+    error: webBackupsError,
   } = useQuery({
     queryKey: [QueryKeys.DATABASE_BACKUPS],
     queryFn: listDatabaseBackups,
@@ -197,6 +199,11 @@ export function useBackupRestore() {
     isDeletingWebBackup,
     isLoadingWebBackups,
     isFetchingWebBackups,
+    webBackupsError: hasWebBackupsError
+      ? webBackupsError instanceof Error
+        ? webBackupsError.message
+        : "Unable to load database backups"
+      : null,
     canBackup: platformMode !== "mobile" || platform?.os === "ios",
     canRestore: platformMode === "desktop" || platform?.os === "ios",
     isIOS: platform?.os === "ios",

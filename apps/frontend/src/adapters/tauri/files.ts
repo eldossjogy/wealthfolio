@@ -132,6 +132,10 @@ export const saveAppDataFileViaPicker = async (
   relativePath: string,
   fileName: string,
 ): Promise<boolean> => {
+  if (!/^pending-exports\/[^/\\]+$/.test(relativePath)) {
+    throw new Error("Only pending export files can be saved with the native file picker");
+  }
+
   let filePath: string | null = null;
   try {
     try {

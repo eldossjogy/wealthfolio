@@ -82,14 +82,10 @@ export interface BackupExport {
 export const backupDatabaseToPendingExport = (): Promise<BackupExport> =>
   Promise.reject(new Error("Pending backup exports are only supported in the Tauri app"));
 
-export const restoreDatabase = async (backupFilePath: string): Promise<void> => {
-  try {
-    await invoke<void>("restore_database", { backupFilePath });
-  } catch (error) {
-    logger.error("Error restoring database.");
-    throw error;
-  }
-};
+export const restoreDatabase = (_backupFilePath: string): Promise<void> =>
+  Promise.reject(
+    new Error("Restore in web mode requires stopping Wealthfolio and replacing app.db"),
+  );
 
 // ============================================================================
 // App Commands

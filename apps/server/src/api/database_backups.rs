@@ -5,7 +5,6 @@ use std::{
 };
 
 use crate::{
-    api::shared::normalize_file_path,
     error::{ApiError, ApiResult},
     main_lib::AppState,
 };
@@ -15,12 +14,12 @@ use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
     response::Response,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use futures::stream;
 use tokio::{fs, io::AsyncReadExt, task};
-use wealthfolio_storage_sqlite::db;
+use wealthfolio_storage_sqlite::{db, is_valid_backup_filename};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,41 +58,11 @@ struct BackupFileResponse {
     modified_at: String,
 }
 
-struct ResolvedBackupPath {
-    requested: PathBuf,
-    canonical: PathBuf,
-}
-
 fn backups_dir(data_root: &str) -> PathBuf {
     StdPath::new(data_root).join("backups")
 }
 
-fn is_valid_backup_filename(filename: &str) -> bool {
-    const PREFIX: &str = "wealthfolio_backup_";
-    const SUFFIX: &str = ".db";
-    const EXPECTED_LEN: usize = PREFIX.len() + "YYYYMMDD_HHMMSS".len() + SUFFIX.len();
-
-    if filename.len() != EXPECTED_LEN
-        || !filename.starts_with(PREFIX)
-        || !filename.ends_with(SUFFIX)
-    {
-        return false;
-    }
-
-    let timestamp = &filename[PREFIX.len()..filename.len() - SUFFIX.len()];
-    if timestamp.as_bytes().get(8) != Some(&b'_') {
-        return false;
-    }
-
-    let compact = timestamp.replace('_', "");
-    if compact.len() != 14 || !compact.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-
-    chrono::NaiveDateTime::parse_from_str(timestamp, "%Y%m%d_%H%M%S").is_ok()
-}
-
-async fn resolve_backup_path(data_root: &str, filename: &str) -> ApiResult<ResolvedBackupPath> {
+async fn resolve_backup_path(data_root: &str, filename: &str) -> ApiResult<PathBuf> {
     if !is_valid_backup_filename(filename) {
         return Err(ApiError::BadRequest("Invalid backup filename".to_string()));
     }
@@ -125,10 +94,7 @@ async fn resolve_backup_path(data_root: &str, filename: &str) -> ApiResult<Resol
         return Err(ApiError::BadRequest("Invalid backup filename".to_string()));
     }
 
-    Ok(ResolvedBackupPath {
-        requested,
-        canonical,
-    })
+    Ok(canonical)
 }
 
 async fn list_backup_files_route(
@@ -187,7 +153,7 @@ async fn download_backup_file_route(
     Path(filename): Path<String>,
 ) -> ApiResult<Response> {
     let backup_path = resolve_backup_path(&state.data_root, &filename).await?;
-    let file = fs::File::open(&backup_path.canonical)
+    let file = fs::File::open(&backup_path)
         .await
         .with_context(|| format!("Failed to open backup file {}", filename))?;
     let body = stream_file(file);
@@ -224,32 +190,9 @@ async fn delete_backup_file_route(
     Path(filename): Path<String>,
 ) -> ApiResult<StatusCode> {
     let backup_path = resolve_backup_path(&state.data_root, &filename).await?;
-    fs::remove_file(&backup_path.requested)
+    fs::remove_file(&backup_path)
         .await
         .with_context(|| format!("Failed to delete backup file {}", filename))?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RestoreBody {
-    #[serde(rename = "backupFilePath")]
-    backup_file_path: String,
-}
-
-async fn restore_database_route(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<RestoreBody>,
-) -> ApiResult<StatusCode> {
-    let data_root = state.data_root.clone();
-    task::spawn_blocking(move || {
-        let normalized_path = normalize_file_path(&body.backup_file_path);
-        db::restore_database_safe(&data_root, &normalized_path)
-            .with_context(|| format!("Failed to restore database from {}", normalized_path))
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to execute restore task: {}", e))??;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -264,7 +207,69 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/utilities/database/backups/{filename}",
-            axum::routing::delete(delete_backup_file_route),
+            delete(delete_backup_file_route),
         )
-        .route("/utilities/database/restore", post(restore_database_route))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn resolve_backup_path_rejects_invalid_filename() {
+        let data_root = tempdir().unwrap();
+
+        let result = resolve_backup_path(
+            data_root.path().to_str().unwrap(),
+            "../wealthfolio_backup_20260514_150409.db",
+        )
+        .await;
+
+        assert!(matches!(result, Err(ApiError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn resolve_backup_path_accepts_valid_backup_inside_backup_dir() {
+        let data_root = tempdir().unwrap();
+        let backup_dir = data_root.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let backup_file = backup_dir.join("wealthfolio_backup_20260514_150409.db");
+        std::fs::write(&backup_file, b"backup").unwrap();
+
+        let resolved = resolve_backup_path(
+            data_root.path().to_str().unwrap(),
+            "wealthfolio_backup_20260514_150409.db",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved, std::fs::canonicalize(backup_file).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolve_backup_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let data_root = tempdir().unwrap();
+        let outside_dir = tempdir().unwrap();
+        let backup_dir = data_root.path().join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let outside_file = outside_dir.path().join("outside.db");
+        std::fs::write(&outside_file, b"not a backup").unwrap();
+        symlink(
+            &outside_file,
+            backup_dir.join("wealthfolio_backup_20260514_150409.db"),
+        )
+        .unwrap();
+
+        let result = resolve_backup_path(
+            data_root.path().to_str().unwrap(),
+            "wealthfolio_backup_20260514_150409.db",
+        )
+        .await;
+
+        assert!(matches!(result, Err(ApiError::BadRequest(_))));
+    }
 }
