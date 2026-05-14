@@ -153,6 +153,15 @@ fn with_request_metadata(
     )
 }
 
+fn fallback_api_error_message(body: &str) -> String {
+    let body = body.trim();
+    if body.is_empty() {
+        "Request failed".to_string()
+    } else {
+        format!("Request failed: {}", body)
+    }
+}
+
 fn details_with_request_metadata(
     details: Option<serde_json::Value>,
     context: &CloudRequestContext,
@@ -453,7 +462,11 @@ impl DeviceSyncClient {
             }
             return Err(DeviceSyncError::api(
                 status.as_u16(),
-                with_request_metadata("Request failed", context, request_id.as_deref()),
+                with_request_metadata(
+                    fallback_api_error_message(&body),
+                    context,
+                    request_id.as_deref(),
+                ),
             ));
         }
 
@@ -507,7 +520,11 @@ impl DeviceSyncClient {
 
         Err(DeviceSyncError::api(
             status.as_u16(),
-            with_request_metadata("Request failed", context, request_id.as_deref()),
+            with_request_metadata(
+                fallback_api_error_message(&body),
+                context,
+                request_id.as_deref(),
+            ),
         ))
     }
 
@@ -1143,7 +1160,7 @@ impl DeviceSyncClient {
                             DeviceSyncError::api(
                                 status.as_u16(),
                                 with_request_metadata(
-                                    "Request failed",
+                                    fallback_api_error_message(&body),
                                     &context,
                                     request_id.as_deref(),
                                 ),
@@ -1646,6 +1663,26 @@ mod tests {
             url.as_str(),
             "https://sync.example.com/api/v1/sync/snapshots/snapshot%2Fsegment%20with%20spaces"
         );
+    }
+
+    #[test]
+    fn fallback_error_preserves_snapshot_validation_body_with_metadata() {
+        let context = CloudRequestContext::new(
+            "GET",
+            "/api/v1/sync/snapshots/not-a-uuid",
+            Some("019bb9fe-f707-71e9-a40d-733575f4f246"),
+        );
+        let body = r#"{"path":["snapshotId"],"message":"Invalid UUID"}"#;
+        let err = DeviceSyncError::api(
+            400,
+            with_request_metadata(
+                fallback_api_error_message(body),
+                &context,
+                Some("server-req-1"),
+            ),
+        );
+
+        assert!(err.is_snapshot_id_validation_error());
     }
 
     #[tokio::test]

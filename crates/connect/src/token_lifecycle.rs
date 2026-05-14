@@ -300,7 +300,7 @@ async fn refresh_access_token(
         let error_message = parsed
             .as_ref()
             .and_then(|value| value.error_description.clone().or(value.error.clone()))
-            .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            .unwrap_or_else(|| fallback_refresh_error_message(status.as_u16(), &body));
         let invalid = is_session_invalid(status.as_u16(), &error_code, &error_message);
         return Err(RefreshRequestError::new(
             invalid,
@@ -323,6 +323,15 @@ async fn refresh_access_token(
             ),
         )
     })
+}
+
+fn fallback_refresh_error_message(status: u16, body: &str) -> String {
+    let body = body.trim();
+    if body.is_empty() {
+        format!("HTTP {}", status)
+    } else {
+        body.to_string()
+    }
 }
 
 fn is_session_invalid(status: u16, error_code: &str, message: &str) -> bool {
@@ -409,5 +418,13 @@ mod tests {
             "Invalid refresh token"
         ));
         assert!(is_session_invalid(401, "", "unauthorized"));
+    }
+
+    #[test]
+    fn fallback_refresh_error_preserves_invalid_session_body() {
+        let message =
+            fallback_refresh_error_message(400, "non-json response: invalid refresh token");
+
+        assert!(is_session_invalid(400, "", &message));
     }
 }
