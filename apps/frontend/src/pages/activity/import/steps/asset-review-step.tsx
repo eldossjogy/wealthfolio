@@ -4,6 +4,7 @@ import { TickerAvatar } from "@/components/ticker-avatar";
 import { CreateSecurityDialog } from "@/pages/asset/create-security-dialog";
 import type { ImportAssetPreviewItem, NewAsset, SymbolSearchResult } from "@/lib/types";
 import { getExchangeDisplayName } from "@/lib/constants";
+import { normalizeCurrency } from "@/lib/utils";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { ProgressIndicator } from "@wealthfolio/ui/components/ui/progress-indicator";
@@ -156,14 +157,6 @@ function NeedsFixingRow({
 }
 
 // ─── Auto-Resolved Row ────────────────────────────────────────────────────────
-
-/** Collapse pence/cent variants to their parent currency for mismatch detection. */
-function normalizeCurrency(c: string): string {
-  const u = c.toUpperCase();
-  if (u === "GBX" || u === "GBP" || u === "GBP") return "GBP";
-  if (u === "ZAC") return "ZAR";
-  return u;
-}
 
 interface AutoResolvedRowProps {
   item: ImportAssetPreviewItem;

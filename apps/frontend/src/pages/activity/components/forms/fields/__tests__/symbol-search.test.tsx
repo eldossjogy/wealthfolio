@@ -148,6 +148,7 @@ function TestForm() {
         <input type="hidden" {...methods.register("assetMetadata.name")} />
         <div data-testid="asset-id">{methods.watch("assetId") ?? ""}</div>
         <div data-testid="exchange-mic">{methods.watch("exchangeMic") ?? ""}</div>
+        <div data-testid="currency">{methods.watch("currency") ?? ""}</div>
         <div data-testid="quote-ccy">{methods.watch("symbolQuoteCcy") ?? ""}</div>
         <div data-testid="asset-name">{methods.watch("assetMetadata.name") ?? ""}</div>
         <div data-testid="quote-mode">{methods.watch("quoteMode") ?? ""}</div>
@@ -233,6 +234,23 @@ describe("SymbolSearch", () => {
     expect(screen.getByTestId("provider-ref")).toHaveTextContent(
       JSON.stringify({ providerId: "YAHOO", providerSymbol: "SHOP.TO" }),
     );
+  });
+
+  it("uses resolved currency over provider search currency for new assets", async () => {
+    resolveSymbolQuoteMock.mockResolvedValue({
+      currency: "USD",
+      price: 140,
+    });
+
+    const user = userEvent.setup();
+    render(<TestForm />);
+
+    await user.click(screen.getByTestId("select-provider-ref"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quote-ccy")).toHaveTextContent("USD");
+      expect(screen.getByTestId("currency")).toHaveTextContent("USD");
+    });
   });
 
   it("uses explicit quote mode instead of data source for existing assets", async () => {

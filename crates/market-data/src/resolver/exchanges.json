@@ -645,7 +645,7 @@
       "mic": "XTAE",
       "name": "TASE",
       "long_name": "Tel Aviv Stock Exchange",
-      "currency": "ILS",
+      "currency": "ILA",
       "timezone": "Asia/Jerusalem",
       "close": [17, 25],
       "yahoo": { "suffix": ".TA", "codes": ["TLV"] }
@@ -728,6 +728,7 @@
     "NOK": ["XOSL"],
     "PLN": ["XWAR"],
     "ILS": ["XTAE"],
+    "ILA": ["XTAE"],
     "ZAR": ["XJSE"],
     "TWD": ["XTAI", "XTAI_OTC"]
   }

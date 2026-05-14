@@ -300,6 +300,11 @@ mod tests {
             Some("GBp")
         );
 
+        assert_eq!(
+            map.get_currency(&Cow::Borrowed("XTAE"), &Cow::Borrowed("YAHOO")),
+            Some("ILA")
+        );
+
         // Cboe UK (Yahoo .XC) - provider reports GBP for this venue
         assert_eq!(
             map.get_suffix(&Cow::Borrowed("CXE"), &Cow::Borrowed("YAHOO")),

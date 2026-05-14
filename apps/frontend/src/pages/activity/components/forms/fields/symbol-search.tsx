@@ -12,24 +12,11 @@ import { useRef, useState } from "react";
 import { useFormContext, type FieldPath, type FieldValues } from "react-hook-form";
 import { resolveSymbolQuote } from "@/adapters";
 
-function shouldApplyResolvedQuoteCurrency(searchResult: SymbolSearchResult | undefined): boolean {
+function canUseResolvedCurrency(searchResult: SymbolSearchResult | undefined): boolean {
   if (!searchResult || searchResult.isExisting || isManualSearchResult(searchResult)) {
     return false;
   }
-  return (
-    !searchResult.currency?.trim() ||
-    searchResult.currencySource === "exchange_inferred" ||
-    !searchResult.currencySource
-  );
-}
-
-function shouldApplyResolvedActivityCurrency(
-  searchResult: SymbolSearchResult | undefined,
-): boolean {
-  if (!searchResult || searchResult.isExisting || isManualSearchResult(searchResult)) {
-    return false;
-  }
-  return !searchResult.currency?.trim() || searchResult.currencySource === "exchange_inferred";
+  return true;
 }
 
 interface SymbolSearchProps<TFieldValues extends FieldValues = FieldValues> {
@@ -88,6 +75,9 @@ export function SymbolSearch<TFieldValues extends FieldValues = FieldValues>({
     const requestId = latestResolveRequestId.current;
     const selectedQuoteMode = quoteModeFromSearchResult(searchResult);
     const isManualAsset = selectedQuoteMode === QuoteMode.MANUAL;
+    const previousCurrency = currencyName
+      ? ((getValues(currencyName) as string | undefined)?.trim() ?? undefined)
+      : undefined;
 
     if (quoteModeName) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -148,14 +138,10 @@ export function SymbolSearch<TFieldValues extends FieldValues = FieldValues>({
       setValue(quoteCcyName, (searchResult?.currency ?? undefined) as any);
     }
 
-    // Background quote resolution: confirm inferred currency and show display quote
-    // For existing assets, currency is already established — never override it
-    // Update activity currency when:
-    // - currency was exchange-inferred (needs provider confirmation)
-    // - search result had no currency at all (e.g., OpenFIGI bonds)
-    const shouldUseResolvedQuoteCurrency = shouldApplyResolvedQuoteCurrency(searchResult);
-    const needsCurrencyConfirmation =
-      currencyName && shouldApplyResolvedActivityCurrency(searchResult);
+    // Background quote resolution confirms selected symbol currency and shows display quote.
+    // Existing assets keep their stored currency.
+    const shouldUseResolvedCurrency = canUseResolvedCurrency(searchResult);
+    const needsCurrencyConfirmation = Boolean(currencyName && shouldUseResolvedCurrency);
 
     if (searchResult) {
       setQuoteDisplay({ price: null, isLoading: true });
@@ -172,19 +158,19 @@ export function SymbolSearch<TFieldValues extends FieldValues = FieldValues>({
           setQuoteDisplay({ price: resolved?.price ?? null, isLoading: false });
 
           const confirmedCurrency = resolved?.currency?.trim();
-          if (confirmedCurrency && quoteCcyName && shouldUseResolvedQuoteCurrency) {
-            // Only replace provisional hints; existing assets and selected pairs already
-            // carry stronger quote-currency identity.
+          if (confirmedCurrency && quoteCcyName && shouldUseResolvedCurrency) {
+            // Resolver output is the source of truth for newly selected market assets.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             setValue(quoteCcyName, confirmedCurrency as any);
           }
 
-          // Update activity currency when:
-          // - provisional (inferred) currency exists and user hasn't changed it
-          // - no currency was known at selection time (e.g., OpenFIGI bonds)
+          // Keep user edits if the activity currency changed after selection.
           if (needsCurrencyConfirmation && confirmedCurrency) {
             const current = getValues(currencyName!);
-            const shouldUpdate = provisionalCurrency ? current === provisionalCurrency : true;
+            const expectedCurrentCurrency = provisionalCurrency || previousCurrency;
+            const shouldUpdate = expectedCurrentCurrency
+              ? current === expectedCurrentCurrency
+              : true;
             if (shouldUpdate) {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               setValue(currencyName!, confirmedCurrency as any, {
