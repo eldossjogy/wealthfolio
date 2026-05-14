@@ -9,6 +9,7 @@ import {
 import { DeleteConfirm } from "@wealthfolio/ui/components/common";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
+import type { DatabaseBackup } from "@/adapters";
 import { useBackupRestore } from "./use-backup-restore";
 
 const desktopNotes = [
@@ -154,12 +155,6 @@ interface WebPanelProps {
   backupListError: string | null;
   onDeleteBackup: (filename: string) => Promise<void>;
   getDownloadUrl: (filename: string) => string;
-}
-
-interface DatabaseBackup {
-  filename: string;
-  sizeBytes: number;
-  modifiedAt: string;
 }
 
 const formatBackupSize = (sizeBytes: number): string => {
