@@ -587,6 +587,10 @@ mod tests {
         let currency = resolver.get_equity_currency(&Some("XLON".into()), &"YAHOO".into());
         assert_eq!(currency.as_deref(), Some("GBp"));
 
+        // Tel Aviv fallback quote unit for listed securities.
+        let currency = resolver.get_equity_currency(&Some("XTAE".into()), &"YAHOO".into());
+        assert_eq!(currency.as_deref(), Some("ILA"));
+
         // No MIC
         let currency = resolver.get_equity_currency(&None, &"YAHOO".into());
         assert!(currency.is_none());

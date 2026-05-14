@@ -22,7 +22,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { useBadgeOverflow } from "../../hooks/use-badge-overflow";
 import { useDebouncedCallback } from "../../hooks/use-debounced-callback";
-import { worldCurrencies } from "../../lib/currencies";
+import { quoteCurrencies } from "../../lib/currencies";
 import { generateId } from "../../lib/id";
 import { cn } from "../../lib/utils";
 import { DataGridCellWrapper } from "./data-grid-cell-wrapper";
@@ -2822,10 +2822,10 @@ export function CurrencyCell<TData>({
 
   const filteredCurrencies = React.useMemo(() => {
     if (!searchQuery.trim()) {
-      return worldCurrencies;
+      return quoteCurrencies;
     }
     const query = searchQuery.toLowerCase();
-    return worldCurrencies.filter(
+    return quoteCurrencies.filter(
       (currency) => currency.value.toLowerCase().includes(query) || currency.label.toLowerCase().includes(query),
     );
   }, [searchQuery]);
