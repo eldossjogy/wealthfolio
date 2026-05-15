@@ -11,9 +11,10 @@ import { PerformanceChartMobile } from "@/components/performance-chart-mobile";
 
 import { PERFORMANCE_CHART_COLORS } from "@/components/performance-chart-colors";
 import { EmptyPlaceholder } from "@wealthfolio/ui/components/ui/empty-placeholder";
+import { useAccounts } from "@/hooks/use-accounts";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import { useIsMobileViewport } from "@/hooks/use-platform";
-import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import { AccountPurpose, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import { DateRange, PerformanceMetrics, ReturnData, TrackedItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
@@ -39,7 +40,7 @@ import {
   Separator,
 } from "@wealthfolio/ui";
 import { subMonths } from "date-fns";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AccountSelector } from "../../components/account-selector";
 import { AccountSelectorMobile } from "../../components/account-selector-mobile";
 import { BenchmarkSymbolSelectorMobile } from "../../components/benchmark-symbol-selector-mobile";
@@ -221,10 +222,51 @@ export default function PerformancePage() {
       to: new Date(),
     },
   );
+  const { accounts, isLoading: isAccountsLoading } = useAccounts({
+    accountPurpose: AccountPurpose.PERFORMANCE,
+  });
 
   // State for mobile dropdown menu
   const [accountSheetOpen, setAccountSheetOpen] = useState(false);
   const [benchmarkSheetOpen, setBenchmarkSheetOpen] = useState(false);
+
+  useEffect(() => {
+    if (isAccountsLoading) {
+      return;
+    }
+    const reportAccountIds = new Set(accounts.map((account) => account.id));
+    setSelectedItems((current) => {
+      const next = current.filter(
+        (item) =>
+          item.type !== "account" ||
+          item.id === PORTFOLIO_ACCOUNT_ID ||
+          reportAccountIds.has(item.id),
+      );
+      if (next.length === current.length) {
+        return current;
+      }
+      return next.length > 0 ? next : [PORTFOLIO_TOTAL];
+    });
+    const selectedItemStillPresent =
+      !selectedItemId ||
+      selectedItems.some(
+        (item) =>
+          item.id === selectedItemId &&
+          (item.type !== "account" ||
+            item.id === PORTFOLIO_ACCOUNT_ID ||
+            reportAccountIds.has(item.id)),
+      );
+    if (!selectedItemStillPresent) {
+      setSelectedItemId(null);
+    }
+  }, [
+    accounts,
+    isAccountsLoading,
+    selectedItemId,
+    selectedItems,
+    setSelectedItemId,
+    setSelectedItems,
+  ]);
 
   // Helper function to sort comparison items (accounts first, then symbols)
   const sortComparisonItems = (items: TrackedItem[]): TrackedItem[] => {
@@ -457,6 +499,7 @@ export default function PerformancePage() {
               variant="button"
               buttonText="Add account"
               includePortfolio={true}
+              accountPurpose={AccountPurpose.PERFORMANCE}
             />
             <BenchmarkSymbolSelector onSelect={handleSymbolSelect} />
           </div>
@@ -469,6 +512,7 @@ export default function PerformancePage() {
             setAccountSheetOpen(false);
           }}
           includePortfolio={true}
+          accountPurpose={AccountPurpose.PERFORMANCE}
           open={accountSheetOpen}
           onOpenChange={setAccountSheetOpen}
           className="hidden"

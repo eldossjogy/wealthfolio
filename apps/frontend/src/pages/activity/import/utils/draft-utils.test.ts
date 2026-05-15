@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVITY_SUBTYPES, ActivityType, ImportFormat } from "@/lib/constants";
+import { ACTIVITY_SUBTYPES, AccountType, ActivityType, ImportFormat } from "@/lib/constants";
 import { createDraftActivities, draftToActivityImport } from "./draft-utils";
 
 const headers = [
@@ -371,5 +371,47 @@ describe("createDraftActivities explicit activity mapping", () => {
     expect(draft.errors.subtype).toBeUndefined();
     expect(draft.subtype).toBe("BUY_TO_OPEN");
     expect(draftToActivityImport(draft).subtype).toBe("BUY_TO_OPEN");
+  });
+
+  it("rejects investment activities for credit card imports", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "BUY", "1000.00", "USD"]],
+      headers,
+      {
+        ...baseMapping,
+        activityMappings: {
+          [ActivityType.BUY]: ["BUY"],
+        },
+      },
+      parseConfig,
+      "card-1",
+      new Set(["card-1"]),
+      new Map([["card-1", AccountType.CREDIT_CARD]]),
+    );
+
+    expect(draft.status).toBe("error");
+    expect(draft.errors.activityType).toContain(
+      "Credit card imports only support charges, payments, refunds, fees, and interest",
+    );
+  });
+
+  it("accepts charges for credit card imports", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "CHARGE", "1000.00", "USD"]],
+      headers,
+      {
+        ...baseMapping,
+        activityMappings: {
+          [ActivityType.WITHDRAWAL]: ["CHARGE"],
+        },
+      },
+      parseConfig,
+      "card-1",
+      new Set(["card-1"]),
+      new Map([["card-1", AccountType.CREDIT_CARD]]),
+    );
+
+    expect(draft.activityType).toBe(ActivityType.WITHDRAWAL);
+    expect(draft.errors.activityType).toBeUndefined();
   });
 });

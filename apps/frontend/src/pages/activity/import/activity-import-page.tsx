@@ -395,6 +395,10 @@ function ImportWizardContent() {
         }
 
         // Activity mode: build draft activities
+        const validAccountIds = new Set((accounts ?? []).map((account) => account.id));
+        const accountTypeById = new Map<string, string>(
+          (accounts ?? []).map((account) => [account.id, account.accountType]),
+        );
         const drafts = createDraftActivities(
           state.parsedRows,
           state.headers,
@@ -412,6 +416,8 @@ function ImportWizardContent() {
             defaultCurrency: state.parseConfig.defaultCurrency,
           },
           state.accountId,
+          validAccountIds,
+          accountTypeById,
         );
         dispatch(setDraftActivities(drafts));
         dispatch({ type: "SET_ASSET_PREVIEW_ITEMS", payload: [] });
@@ -460,6 +466,7 @@ function ImportWizardContent() {
     state.parsedRows,
     state.parseConfig,
     state.draftActivities,
+    accounts,
     isHoldingsMode,
     validateDrafts,
     previewAssets,

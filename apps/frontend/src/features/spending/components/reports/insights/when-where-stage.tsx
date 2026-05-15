@@ -11,7 +11,7 @@ import {
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
-import { OUTFLOW_TYPES, type CashActivityType } from "../../../lib/constants";
+import { getActivitySpendingAmount } from "../../../lib/constants";
 import { FOREST_THEME } from "../../../lib/theme";
 import type { EventSpendingSummary } from "../../../types/event";
 import { formatMonthDay } from "./format";
@@ -23,6 +23,7 @@ const LABEL_CLASS =
 export interface WhenWhereStageProps {
   /** Last 12 weeks of cash activities (for the heatmap). */
   heatmapActivities: Activity[];
+  accountTypeById?: Map<string, string>;
   events: EventSpendingSummary[];
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
@@ -33,6 +34,7 @@ export interface WhenWhereStageProps {
 
 export function WhenWhereStage({
   heatmapActivities,
+  accountTypeById,
   events,
   taxonomyCategories,
   currency,
@@ -41,7 +43,11 @@ export function WhenWhereStage({
 }: WhenWhereStageProps) {
   return (
     <div className="flex flex-col gap-6">
-      <WhenYouSpendCard activities={heatmapActivities} currency={currency} />
+      <WhenYouSpendCard
+        activities={heatmapActivities}
+        accountTypeById={accountTypeById}
+        currency={currency}
+      />
       {events.length > 0 ? (
         <>
           <EventsHeadlineCard
@@ -50,6 +56,7 @@ export function WhenWhereStage({
             rangeStart={rangeStart}
             rangeEnd={rangeEnd}
             heatmapActivities={heatmapActivities}
+            accountTypeById={accountTypeById}
           />
           <div className="grid gap-4 lg:grid-cols-3">
             {events.slice(0, 3).map((event) => (
@@ -59,6 +66,7 @@ export function WhenWhereStage({
                 taxonomyCategories={taxonomyCategories}
                 currency={currency}
                 heatmapActivities={heatmapActivities}
+                accountTypeById={accountTypeById}
               />
             ))}
           </div>
@@ -76,11 +84,19 @@ export function WhenWhereStage({
 
 interface WhenYouSpendCardProps {
   activities: Activity[];
+  accountTypeById?: Map<string, string>;
   currency: string;
 }
 
-const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({ activities, currency }) => {
-  const grid = useMemo(() => buildWeekdayHourGrid(activities), [activities]);
+const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
+  activities,
+  accountTypeById,
+  currency,
+}) => {
+  const grid = useMemo(
+    () => buildWeekdayHourGrid(activities, accountTypeById),
+    [accountTypeById, activities],
+  );
   const accent = FOREST_THEME.deep;
 
   if (activities.length === 0) {
@@ -229,21 +245,33 @@ interface WeekdayHourGrid {
   medians: number[];
 }
 
-function buildWeekdayHourGrid(activities: Activity[]): WeekdayHourGrid {
+function buildWeekdayHourGrid(
+  activities: Activity[],
+  accountTypeById?: Map<string, string>,
+): WeekdayHourGrid {
   const cells: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
   // Per (weekday, dayKey) → daily total. Used to compute the median per weekday.
   const dayTotals = new Map<string, number>();
 
   for (const a of activities) {
-    if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) continue;
+    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (amt === 0) continue;
     const date = new Date(a.activityDate);
     if (isNaN(date.getTime())) continue;
     const weekday = (date.getDay() + 6) % 7; // Mon=0..Sun=6
     const hour = date.getHours();
-    const amt = parseFloat(a.amount ?? "0") || 0;
     cells[weekday][hour] += amt;
     const key = `${weekday}|${date.toISOString().slice(0, 10)}`;
     dayTotals.set(key, (dayTotals.get(key) ?? 0) + amt);
+  }
+
+  for (const row of cells) {
+    for (let i = 0; i < row.length; i++) {
+      if (row[i] < 0) row[i] = 0;
+    }
+  }
+  for (const [key, value] of dayTotals) {
+    if (value <= 0) dayTotals.delete(key);
   }
 
   const max = Math.max(0, ...cells.flat());
@@ -279,6 +307,7 @@ interface EventsHeadlineCardProps {
   rangeEnd: Date;
   /** Used to estimate "normal pace" outside event windows. */
   heatmapActivities: Activity[];
+  accountTypeById?: Map<string, string>;
 }
 
 const EventsHeadlineCard: FC<EventsHeadlineCardProps> = ({
@@ -287,10 +316,11 @@ const EventsHeadlineCard: FC<EventsHeadlineCardProps> = ({
   rangeStart,
   rangeEnd,
   heatmapActivities,
+  accountTypeById,
 }) => {
   const computed = useMemo(
-    () => computeEventsAggregate(events, heatmapActivities),
-    [events, heatmapActivities],
+    () => computeEventsAggregate(events, heatmapActivities, accountTypeById),
+    [accountTypeById, events, heatmapActivities],
   );
 
   const totalSpan = Math.max(1, inclusiveDays(rangeStart, rangeEnd));
@@ -458,6 +488,7 @@ interface EventsAggregate {
 function computeEventsAggregate(
   events: EventSpendingSummary[],
   heatmapActivities: Activity[],
+  accountTypeById?: Map<string, string>,
 ): EventsAggregate {
   let totalSpent = 0;
   let totalEventDays = 0;
@@ -483,14 +514,15 @@ function computeEventsAggregate(
   let baselineDays = 0;
   const baselineDaySeen = new Set<string>();
   for (const a of heatmapActivities) {
-    if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) continue;
+    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (spendingAmount === 0) continue;
     const dayKey = new Date(a.activityDate).toISOString().slice(0, 10);
     if (eventDayKeys.has(dayKey)) continue;
-    baselineTotal += parseFloat(a.amount ?? "0") || 0;
+    baselineTotal += spendingAmount;
     baselineDaySeen.add(dayKey);
   }
   baselineDays = Math.max(1, baselineDaySeen.size);
-  const normalPace = baselineTotal / baselineDays;
+  const normalPace = Math.max(0, baselineTotal) / baselineDays;
   const expected = normalPace * totalEventDays;
   const lift = totalSpent - expected;
 
@@ -605,6 +637,7 @@ interface EventDetailCardProps {
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   heatmapActivities: Activity[];
+  accountTypeById?: Map<string, string>;
 }
 
 const EventDetailCard: FC<EventDetailCardProps> = ({
@@ -612,14 +645,15 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
   taxonomyCategories,
   currency,
   heatmapActivities,
+  accountTypeById,
 }) => {
   const startDate = new Date(event.startDate);
   const endDate = new Date(event.endDate);
   const days = Math.max(1, inclusiveDays(startDate, endDate));
 
   const baseline = useMemo(
-    () => computeBaselinePace(heatmapActivities, [event]),
-    [heatmapActivities, event],
+    () => computeBaselinePace(heatmapActivities, [event], accountTypeById),
+    [accountTypeById, heatmapActivities, event],
   );
 
   const expected = baseline * days;
@@ -805,12 +839,15 @@ function buildEventCategoryRows(
     e.amount += cat.amount;
     byTop.set(topId, e);
   }
-  return Array.from(byTop.values()).sort((a, b) => b.amount - a.amount);
+  return Array.from(byTop.values())
+    .filter((row) => row.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
 }
 
 function computeBaselinePace(
   activities: Activity[],
   excludeEvents: EventSpendingSummary[],
+  accountTypeById?: Map<string, string>,
 ): number {
   const exclude = new Set<string>();
   for (const ev of excludeEvents) {
@@ -823,13 +860,14 @@ function computeBaselinePace(
   let total = 0;
   const seen = new Set<string>();
   for (const a of activities) {
-    if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) continue;
+    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (spendingAmount === 0) continue;
     const dayKey = new Date(a.activityDate).toISOString().slice(0, 10);
     if (exclude.has(dayKey)) continue;
-    total += parseFloat(a.amount ?? "0") || 0;
+    total += spendingAmount;
     seen.add(dayKey);
   }
-  return seen.size === 0 ? 0 : total / seen.size;
+  return seen.size === 0 ? 0 : Math.max(0, total) / seen.size;
 }
 
 function buildEventCaption({

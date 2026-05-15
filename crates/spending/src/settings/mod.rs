@@ -1,7 +1,7 @@
 //! Spending-tracker settings: enable toggle + opted-in account list.
 //! Stored in the existing `app_settings` k/v table:
 //!   - `spending.enabled`         → "true" | "false"
-//!   - `spending.account_ids`     → JSON array of account IDs (CASH accounts opted in)
+//!   - `spending.account_ids`     → JSON array of opted-in spending account IDs
 
 pub mod model;
 pub mod service;

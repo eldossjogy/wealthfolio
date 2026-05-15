@@ -3,10 +3,11 @@ import { useMemo } from "react";
 import type { Activity } from "@/lib/types";
 import { formatAmount, formatDateISO } from "@/lib/utils";
 
-import { OUTFLOW_TYPES, type CashActivityType } from "../../lib/constants";
+import { getActivitySpendingAmount } from "../../lib/constants";
 
 interface SpendingRhythmHeatmapProps {
   activities: Activity[];
+  accountTypeById?: Map<string, string>;
   /** Number of past weeks to show. */
   weeks?: number;
   /** Color used for the densest cell. */
@@ -28,13 +29,14 @@ interface Cell {
  */
 export function SpendingRhythmHeatmap({
   activities,
+  accountTypeById,
   weeks = 12,
   accent = "var(--success)",
   currency,
 }: SpendingRhythmHeatmapProps) {
   const { rows, max, heaviestDay, heaviestDayAvg } = useMemo(
-    () => buildRhythm(activities, weeks),
-    [activities, weeks],
+    () => buildRhythm(activities, weeks, accountTypeById),
+    [accountTypeById, activities, weeks],
   );
 
   return (
@@ -109,7 +111,11 @@ interface RhythmResult {
   heaviestDayAvg: number;
 }
 
-function buildRhythm(activities: Activity[], weeks: number): RhythmResult {
+function buildRhythm(
+  activities: Activity[],
+  weeks: number,
+  accountTypeById?: Map<string, string>,
+): RhythmResult {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const weekday = (today.getDay() + 6) % 7;
@@ -131,10 +137,11 @@ function buildRhythm(activities: Activity[], weeks: number): RhythmResult {
   }
 
   for (const a of activities) {
-    if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) continue;
+    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (spendingAmount === 0) continue;
     const key = formatDateISO(new Date(a.activityDate));
     const cell = cellByKey.get(key);
-    if (cell) cell.amount += parseFloat(a.amount ?? "0") || 0;
+    if (cell) cell.amount += spendingAmount;
   }
 
   let max = 0;
@@ -143,6 +150,7 @@ function buildRhythm(activities: Activity[], weeks: number): RhythmResult {
   for (const row of rows) {
     for (let i = 0; i < row.length; i++) {
       const c = row[i];
+      if (c.amount < 0) c.amount = 0;
       if (c.amount > max) max = c.amount;
       if (c.amount > 0) {
         dayTotals[i] += c.amount;

@@ -14,7 +14,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use wealthfolio_core::{
-    accounts::TrackingMode,
+    accounts::{account_supports_purpose, AccountPurpose, TrackingMode},
     allocation::{AllocationHoldings, PortfolioAllocations},
     holdings::Holding,
     income::IncomeSummary,
@@ -198,7 +198,7 @@ pub async fn get_latest_valuations(
 ) -> Result<Vec<DailyAccountValuation>, String> {
     debug!("Get latest valuations for accounts: {:?}", account_ids);
 
-    let ids_to_process = if account_ids.is_empty() {
+    let ids_to_process: Vec<String> = if account_ids.is_empty() {
         debug!("Input account_ids is empty, fetching active accounts for latest valuations.");
         state
             .account_service()
@@ -243,17 +243,26 @@ pub async fn calculate_accounts_simple_performance(
         account_ids
     );
 
-    let ids_to_process = if account_ids.is_empty() {
+    let ids_to_process: Vec<String> = if account_ids.is_empty() {
         debug!("Input account_ids is empty, fetching active accounts.");
         state
             .account_service()
             .get_active_accounts()
             .map_err(|e| format!("Failed to fetch active accounts: {}", e))?
             .into_iter()
+            .filter(|acc| account_supports_purpose(&acc.account_type, AccountPurpose::Performance))
             .map(|acc| acc.id)
             .collect()
     } else {
-        account_ids
+        let requested = state
+            .account_service()
+            .get_accounts_by_ids(&account_ids)
+            .map_err(|e| format!("Failed to fetch accounts: {}", e))?;
+        requested
+            .into_iter()
+            .filter(|acc| account_supports_purpose(&acc.account_type, AccountPurpose::Performance))
+            .map(|acc| acc.id)
+            .collect()
     };
 
     if ids_to_process.is_empty() {
@@ -305,6 +314,22 @@ pub async fn calculate_performance_history(
         _ => None,
     });
 
+    if item_type == "account" && item_id != wealthfolio_core::constants::PORTFOLIO_TOTAL_ACCOUNT_ID
+    {
+        let account = state
+            .account_service()
+            .get_account(&item_id)
+            .map_err(|e| format!("Failed to fetch account: {}", e))?;
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            return Ok(empty_performance_metrics(
+                &item_id,
+                account.currency,
+                start_date_opt,
+                end_date_opt,
+            ));
+        }
+    }
+
     state
         .performance_service()
         .calculate_performance_history(
@@ -316,6 +341,33 @@ pub async fn calculate_performance_history(
         )
         .await
         .map_err(|e| format!("Failed to calculate performance: {}", e))
+}
+
+fn empty_performance_metrics(
+    id: &str,
+    currency: String,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+) -> PerformanceMetrics {
+    PerformanceMetrics {
+        id: id.to_string(),
+        returns: Vec::new(),
+        period_start_date: start_date,
+        period_end_date: end_date,
+        currency,
+        period_gain: Decimal::ZERO,
+        period_return: Some(Decimal::ZERO),
+        cumulative_twr: Some(Decimal::ZERO),
+        gain_loss_amount: None,
+        annualized_twr: Some(Decimal::ZERO),
+        simple_return: Decimal::ZERO,
+        annualized_simple_return: Decimal::ZERO,
+        cumulative_mwr: Some(Decimal::ZERO),
+        annualized_mwr: Some(Decimal::ZERO),
+        volatility: Decimal::ZERO,
+        max_drawdown: Decimal::ZERO,
+        is_holdings_mode: false,
+    }
 }
 
 /// Calculates performance summary for a given item (account or symbol) over a given date range.
@@ -356,6 +408,22 @@ pub async fn calculate_performance_summary(
         "TRANSACTIONS" => Some(TrackingMode::Transactions),
         _ => None,
     });
+
+    if item_type == "account" && item_id != wealthfolio_core::constants::PORTFOLIO_TOTAL_ACCOUNT_ID
+    {
+        let account = state
+            .account_service()
+            .get_account(&item_id)
+            .map_err(|e| format!("Failed to fetch account: {}", e))?;
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            return Ok(empty_performance_metrics(
+                &item_id,
+                account.currency,
+                start_date_opt,
+                end_date_opt,
+            ));
+        }
+    }
 
     state
         .performance_service()

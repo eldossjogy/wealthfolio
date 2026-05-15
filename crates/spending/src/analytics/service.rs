@@ -3,6 +3,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use wealthfolio_core::accounts::{
+    account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
+};
 use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 use wealthfolio_core::taxonomies::TaxonomyServiceTrait;
 
@@ -12,17 +15,18 @@ use super::model::{
     SpendingSummary, SubcategorySpending,
 };
 use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
+use crate::activity_classification::{
+    activity_abs_amount, classify_activity, SpendingClassification,
+};
 use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
 const INCOME_TAXONOMY: &str = "income_sources";
 
-const INCOME_TYPES: &[&str] = &["DEPOSIT", "TRANSFER_IN", "INTEREST"];
-const OUTFLOW_TYPES: &[&str] = &["WITHDRAWAL", "TRANSFER_OUT", "FEE"];
-
 pub struct AnalyticsService {
     activity_repo: Arc<dyn ActivityRepositoryTrait>,
+    account_repo: Arc<dyn AccountRepositoryTrait>,
     assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
     settings: Arc<SpendingSettingsService>,
     taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
@@ -32,6 +36,7 @@ pub struct AnalyticsService {
 impl AnalyticsService {
     pub fn new(
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
+        account_repo: Arc<dyn AccountRepositoryTrait>,
         assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
         settings: Arc<SpendingSettingsService>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
@@ -39,11 +44,34 @@ impl AnalyticsService {
     ) -> Self {
         Self {
             activity_repo,
+            account_repo,
             assignment_repo,
             settings,
             taxonomy_service,
             events_service,
         }
+    }
+
+    fn resolve_spending_account_types(
+        &self,
+        account_ids: &[String],
+    ) -> Result<(Vec<String>, HashMap<String, String>)> {
+        let accounts = self
+            .account_repo
+            .list(None, Some(false), Some(account_ids))
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let account_types: HashMap<String, String> = accounts
+            .into_iter()
+            .filter(|a| account_supports_purpose(&a.account_type, AccountPurpose::Spending))
+            .map(|a| (a.id, a.account_type))
+            .collect();
+        let spending_account_ids = account_ids
+            .iter()
+            .filter(|id| account_types.contains_key(id.as_str()))
+            .cloned()
+            .collect();
+
+        Ok((spending_account_ids, account_types))
     }
 
     /// Compute a monthly report covering [start_date, end_date].
@@ -67,6 +95,18 @@ impl AnalyticsService {
                 .collect(),
             None => s.account_ids.clone(),
         };
+        if target_accounts.is_empty() {
+            return Ok(MonthlyReport {
+                current: PeriodSummary::default(),
+                prior: PeriodSummary::default(),
+                spending_breakdown: vec![],
+                income_breakdown: vec![],
+                by_day: vec![],
+                by_day_by_category: vec![],
+            });
+        }
+        let (target_accounts, account_types) =
+            self.resolve_spending_account_types(&target_accounts)?;
         if target_accounts.is_empty() {
             return Ok(MonthlyReport {
                 current: PeriodSummary::default(),
@@ -102,32 +142,39 @@ impl AnalyticsService {
             .filter(|a| in_window(a, prior_start, prior_end))
             .collect();
 
-        let current = summarize(&current_acts);
-        let prior = summarize(&prior_acts);
+        let current = summarize(&current_acts, &account_types);
+        let prior = summarize(&prior_acts, &account_types);
 
         // Per-day buckets (current period only)
         let mut by_day_map: HashMap<NaiveDate, (f64, f64)> = HashMap::new();
         for a in &current_acts {
+            let Some(classification) = classification_for(a, &account_types) else {
+                continue;
+            };
+            let amt = activity_abs_amount(a);
+            let income_amount = classification.income_amount(amt);
+            let spending_amount = classification.spending_amount(amt);
+            if income_amount == 0.0 && spending_amount == 0.0 {
+                continue;
+            }
             let d = a.activity_date.naive_utc().date();
             let entry = by_day_map.entry(d).or_insert((0.0, 0.0));
-            let amt = a
-                .amount
-                .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
-                .unwrap_or(0.0)
-                .abs();
-            if INCOME_TYPES.contains(&a.effective_type()) {
-                entry.0 += amt;
-            } else if OUTFLOW_TYPES.contains(&a.effective_type()) {
-                entry.1 += amt;
-            }
+            entry.0 += income_amount;
+            entry.1 += spending_amount;
         }
+        let positive_spending_days: HashSet<String> = by_day_map
+            .iter()
+            .filter(|(_, (_, outflow))| *outflow > 0.0)
+            .map(|(d, _)| format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()))
+            .collect();
         let mut by_day: Vec<DayBucket> = by_day_map
             .into_iter()
             .map(|(d, (income, outflow))| DayBucket {
                 date: format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()),
                 income,
-                outflow,
+                outflow: outflow.max(0.0),
             })
+            .filter(|bucket| bucket.income != 0.0 || bucket.outflow != 0.0)
             .collect();
         by_day.sort_by(|a, b| a.date.cmp(&b.date));
 
@@ -137,29 +184,31 @@ impl AnalyticsService {
         // (date, taxonomy_id, category_id) → (amount, count)
         let mut by_day_cat_acc: HashMap<(String, String, String), (f64, usize)> = HashMap::new();
         for a in &current_acts {
-            let amt = a
-                .amount
-                .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
-                .unwrap_or(0.0)
-                .abs();
+            let Some(classification) = classification_for(a, &account_types) else {
+                continue;
+            };
+            let amt = activity_abs_amount(a);
+            let income_amount = classification.income_amount(amt);
+            let spending_amount = classification.spending_amount(amt);
+            if income_amount == 0.0 && spending_amount == 0.0 {
+                continue;
+            }
             let day = a.activity_date.naive_utc().date();
             let day_str = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
             let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
-            let is_income = INCOME_TYPES.contains(&a.effective_type());
-            let is_outflow = OUTFLOW_TYPES.contains(&a.effective_type());
             for asg in assignments {
-                let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY && is_outflow {
-                    Some(&mut spending_acc)
-                } else if asg.taxonomy_id == INCOME_TAXONOMY && is_income {
-                    Some(&mut income_acc)
+                let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY && spending_amount != 0.0 {
+                    Some((&mut spending_acc, spending_amount))
+                } else if asg.taxonomy_id == INCOME_TAXONOMY && income_amount != 0.0 {
+                    Some((&mut income_acc, income_amount))
                 } else {
                     None
                 };
-                if let Some(b) = bucket {
+                if let Some((b, bucket_amount)) = bucket {
                     let entry = b
                         .entry((asg.taxonomy_id.clone(), asg.category_id.clone()))
                         .or_insert((0.0, 0));
-                    entry.0 += amt;
+                    entry.0 += bucket_amount;
                     entry.1 += 1;
                     // Same activity → same (day, taxonomy, category) bucket.
                     let dc = by_day_cat_acc
@@ -169,7 +218,7 @@ impl AnalyticsService {
                             asg.category_id.clone(),
                         ))
                         .or_insert((0.0, 0));
-                    dc.0 += amt;
+                    dc.0 += bucket_amount;
                     dc.1 += 1;
                 }
             }
@@ -177,6 +226,7 @@ impl AnalyticsService {
 
         let mut spending_breakdown: Vec<CategoryBreakdownRow> = spending_acc
             .into_iter()
+            .filter(|(_, (amount, _))| current.outflow > 0.0 && *amount != 0.0)
             .map(
                 |((taxonomy_id, category_id), (amount, count))| CategoryBreakdownRow {
                     taxonomy_id,
@@ -211,6 +261,10 @@ impl AnalyticsService {
 
         let mut by_day_by_category: Vec<DayCategoryBucket> = by_day_cat_acc
             .into_iter()
+            .filter(|((date, taxonomy_id, _), (amount, _))| {
+                *amount != 0.0
+                    && (taxonomy_id == INCOME_TAXONOMY || positive_spending_days.contains(date))
+            })
             .map(
                 |((date, taxonomy_id, category_id), (amount, count))| DayCategoryBucket {
                     date,
@@ -234,27 +288,39 @@ impl AnalyticsService {
     }
 }
 
-fn summarize(acts: &[&Activity]) -> PeriodSummary {
+fn summarize(acts: &[&Activity], account_types: &HashMap<String, String>) -> PeriodSummary {
     let mut income = 0.0;
     let mut outflow = 0.0;
+    let mut count = 0;
     for a in acts {
-        let amt = a
-            .amount
-            .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
-            .unwrap_or(0.0)
-            .abs();
-        if INCOME_TYPES.contains(&a.effective_type()) {
-            income += amt;
-        } else if OUTFLOW_TYPES.contains(&a.effective_type()) {
-            outflow += amt;
+        let Some(classification) = classification_for(a, account_types) else {
+            continue;
+        };
+        let amt = activity_abs_amount(a);
+        let income_amount = classification.income_amount(amt);
+        let spending_amount = classification.spending_amount(amt);
+        if income_amount == 0.0 && spending_amount == 0.0 {
+            continue;
         }
+        income += income_amount;
+        outflow += spending_amount;
+        count += 1;
     }
     PeriodSummary {
         income,
-        outflow,
-        net: income - outflow,
-        count: acts.len(),
+        outflow: outflow.max(0.0),
+        net: income - outflow.max(0.0),
+        count,
     }
+}
+
+fn classification_for(
+    activity: &Activity,
+    account_types: &HashMap<String, String>,
+) -> Option<SpendingClassification> {
+    account_types
+        .get(&activity.account_id)
+        .map(|account_type| classify_activity(activity, account_type))
 }
 
 // ====================== SpendingSummary (PR-style multi-period rollup) ======================
@@ -273,6 +339,14 @@ impl AnalyticsService {
         let s = self.settings.get().await?;
         let mut out = Vec::with_capacity(4);
         if !s.enabled || s.account_ids.is_empty() {
+            for period in ["TOTAL", "YTD", "LAST_YEAR", "TWO_YEARS_AGO"] {
+                out.push(empty_summary(period));
+            }
+            return Ok(out);
+        }
+        let (target_accounts, account_types) =
+            self.resolve_spending_account_types(&s.account_ids)?;
+        if target_accounts.is_empty() {
             for period in ["TOTAL", "YTD", "LAST_YEAR", "TWO_YEARS_AGO"] {
                 out.push(empty_summary(period));
             }
@@ -300,13 +374,16 @@ impl AnalyticsService {
         // Load all activities for the spending accounts
         let activities = self
             .activity_repo
-            .get_activities_by_account_ids(&s.account_ids)
+            .get_activities_by_account_ids(&target_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         // Pre-load assignments per activity in scope (only for outflow + spending taxonomy)
         let mut assign_by_act: HashMap<String, Option<String>> = HashMap::new();
         for a in &activities {
-            if !OUTFLOW_TYPES.contains(&a.effective_type()) {
+            let Some(classification) = classification_for(a, &account_types) else {
+                continue;
+            };
+            if classification.spending_amount(activity_abs_amount(a)) == 0.0 {
                 continue;
             }
             let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
@@ -367,7 +444,10 @@ impl AnalyticsService {
             let in_window: Vec<&Activity> = activities
                 .iter()
                 .filter(|a| {
-                    if !OUTFLOW_TYPES.contains(&a.effective_type()) {
+                    let Some(classification) = classification_for(a, &account_types) else {
+                        return false;
+                    };
+                    if classification.spending_amount(activity_abs_amount(a)) == 0.0 {
                         return false;
                     }
                     let dt = a.activity_date.naive_utc();
@@ -387,11 +467,163 @@ impl AnalyticsService {
                 &in_window,
                 &assign_by_act,
                 &cat_meta,
+                &account_types,
                 &currency,
             ));
         }
 
         Ok(out)
+    }
+}
+
+fn activity_date_in_window(
+    activity_date: &DateTime<Utc>,
+    start: Option<&DateTime<Utc>>,
+    end: Option<&DateTime<Utc>>,
+) -> bool {
+    start.is_none_or(|start| activity_date >= start) && end.is_none_or(|end| activity_date <= end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use rust_decimal::Decimal;
+    use serde_json::Value;
+    use wealthfolio_core::accounts::account_types;
+    use wealthfolio_core::activities::ActivityStatus;
+
+    fn spending_activity(
+        id: &str,
+        activity_type: &str,
+        amount: i64,
+        category_id: &str,
+        month: u32,
+    ) -> (Activity, (String, Option<String>)) {
+        let activity = Activity {
+            id: id.to_string(),
+            account_id: "card-account".to_string(),
+            asset_id: None,
+            activity_type: activity_type.to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: None,
+            status: ActivityStatus::Posted,
+            activity_date: Utc.with_ymd_and_hms(2024, month, 10, 12, 0, 0).unwrap(),
+            settlement_date: None,
+            quantity: None,
+            unit_price: None,
+            amount: Some(Decimal::new(amount, 0)),
+            fee: None,
+            currency: "USD".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None::<Value>,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+            is_user_modified: false,
+            needs_review: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            event_id: None,
+        };
+
+        (activity, (id.to_string(), Some(category_id.to_string())))
+    }
+
+    fn build_credit_card_summary(activities: &[Activity]) -> SpendingSummary {
+        let activity_refs: Vec<&Activity> = activities.iter().collect();
+        let account_types = HashMap::from([(
+            "card-account".to_string(),
+            account_types::CREDIT_CARD.to_string(),
+        )]);
+        let cat_meta = HashMap::from([
+            (
+                "groceries".to_string(),
+                ("Groceries".to_string(), Some("#1".to_string()), None),
+            ),
+            (
+                "travel".to_string(),
+                ("Travel".to_string(), Some("#2".to_string()), None),
+            ),
+        ]);
+        let assign_by_act = activities
+            .iter()
+            .map(|activity| {
+                let category = if activity.id == "charge" {
+                    "groceries"
+                } else {
+                    "travel"
+                };
+                (activity.id.clone(), Some(category.to_string()))
+            })
+            .collect();
+
+        build_summary(
+            "TOTAL",
+            &activity_refs,
+            &assign_by_act,
+            &cat_meta,
+            &account_types,
+            "USD",
+        )
+    }
+
+    #[test]
+    fn build_summary_preserves_refund_buckets_when_period_stays_positive() {
+        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 200, "groceries", 1);
+        let (refund, _) = spending_activity("refund", "CREDIT", 50, "travel", 2);
+
+        let summary = build_credit_card_summary(&[charge, refund]);
+
+        assert_eq!(summary.total_spending, 150.0);
+        assert_eq!(summary.by_month.get("2024-01"), Some(&200.0));
+        assert_eq!(summary.by_month.get("2024-02"), Some(&-50.0));
+        assert_eq!(summary.by_category["groceries"].amount, 200.0);
+        assert_eq!(summary.by_category["travel"].amount, -50.0);
+        assert_eq!(summary.transaction_count, 1);
+    }
+
+    #[test]
+    fn build_summary_clears_buckets_when_refunds_exceed_charges() {
+        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 100, "groceries", 1);
+        let (refund, _) = spending_activity("refund", "CREDIT", 150, "travel", 2);
+
+        let summary = build_credit_card_summary(&[charge, refund]);
+
+        assert_eq!(summary.total_spending, 0.0);
+        assert!(summary.by_month.is_empty());
+        assert!(summary.by_category.is_empty());
+        assert!(summary.by_account.is_empty());
+        assert_eq!(summary.transaction_count, 0);
+    }
+
+    #[test]
+    fn event_summary_window_filters_activity_dates() {
+        let start = Utc.with_ymd_and_hms(2024, 2, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 2, 29, 23, 59, 59).unwrap();
+        let in_window = Utc.with_ymd_and_hms(2024, 2, 10, 12, 0, 0).unwrap();
+        let before_window = Utc.with_ymd_and_hms(2024, 1, 31, 23, 59, 59).unwrap();
+        let after_window = Utc.with_ymd_and_hms(2024, 3, 1, 0, 0, 0).unwrap();
+
+        assert!(activity_date_in_window(
+            &in_window,
+            Some(&start),
+            Some(&end)
+        ));
+        assert!(!activity_date_in_window(
+            &before_window,
+            Some(&start),
+            Some(&end)
+        ));
+        assert!(!activity_date_in_window(
+            &after_window,
+            Some(&start),
+            Some(&end)
+        ));
     }
 }
 
@@ -417,6 +649,7 @@ fn build_summary(
     activities: &[&Activity],
     assign_by_act: &HashMap<String, Option<String>>,
     cat_meta: &HashMap<String, (String, Option<String>, Option<String>)>,
+    account_types: &HashMap<String, String>,
     currency: &str,
 ) -> SpendingSummary {
     let mut by_month: HashMap<String, f64> = HashMap::new();
@@ -425,18 +658,14 @@ fn build_summary(
     let mut by_subcategory: HashMap<String, SubcategorySpending> = HashMap::new();
     let mut by_month_by_category: HashMap<String, HashMap<String, f64>> = HashMap::new();
     let mut by_month_by_subcategory: HashMap<String, HashMap<String, f64>> = HashMap::new();
-    let mut total = 0.0;
-
     for a in activities {
-        let amt = a
-            .amount
-            .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
-            .unwrap_or(0.0)
-            .abs();
+        let Some(classification) = classification_for(a, account_types) else {
+            continue;
+        };
+        let amt = classification.spending_amount(activity_abs_amount(a));
         if amt == 0.0 {
             continue;
         }
-        total += amt;
         let dt = a.activity_date.naive_utc();
         let month_key = format!("{:04}-{:02}", dt.year(), dt.month());
         *by_month.entry(month_key.clone()).or_insert(0.0) += amt;
@@ -520,11 +749,42 @@ fn build_summary(
             .or_insert(0.0) += amt;
     }
 
+    let total: f64 = by_month.values().sum();
+    if total <= 0.0 {
+        by_month.clear();
+        by_account.clear();
+        by_category.clear();
+        by_subcategory.clear();
+        by_month_by_category.clear();
+        by_month_by_subcategory.clear();
+    } else {
+        retain_nonzero_values(&mut by_month);
+        retain_nonzero_values(&mut by_account);
+        retain_nonzero_nested_values(&mut by_month_by_category);
+        retain_nonzero_nested_values(&mut by_month_by_subcategory);
+        by_category.retain(|_, value| value.amount != 0.0);
+        by_subcategory.retain(|_, value| value.amount != 0.0);
+    }
+
     let n_months = by_month.len() as f64;
     let monthly_average = if n_months > 0.0 {
         total / n_months
     } else {
         0.0
+    };
+    let transaction_count = if total > 0.0 {
+        activities
+            .iter()
+            .filter(|activity| {
+                classification_for(activity, account_types)
+                    .map(|classification| {
+                        classification.spending_amount(activity_abs_amount(activity)) > 0.0
+                    })
+                    .unwrap_or(false)
+            })
+            .count()
+    } else {
+        0
     };
 
     SpendingSummary {
@@ -535,12 +795,23 @@ fn build_summary(
         by_account,
         by_month_by_category,
         by_month_by_subcategory,
-        total_spending: total,
+        total_spending: total.max(0.0),
         currency: currency.to_string(),
         monthly_average,
-        transaction_count: activities.len(),
+        transaction_count,
         yoy_growth: None,
     }
+}
+
+fn retain_nonzero_values(values: &mut HashMap<String, f64>) {
+    values.retain(|_, amount| *amount != 0.0);
+}
+
+fn retain_nonzero_nested_values(values: &mut HashMap<String, HashMap<String, f64>>) {
+    values.retain(|_, inner| {
+        retain_nonzero_values(inner);
+        !inner.is_empty()
+    });
 }
 
 // Helper to silence unused warning when Duration not referenced elsewhere
@@ -554,13 +825,18 @@ fn _silence_duration() {
 impl AnalyticsService {
     /// Compute per-event spending summaries. Each event in the events table is intersected
     /// with the optional date window (events whose date range overlaps with [start, end]).
-    /// Only WITHDRAWAL/TRANSFER_OUT/FEE activities tagged with `event_id` count toward spend.
+    /// Tagged activities count according to account-aware spending classification.
     pub async fn event_spending_summaries(
         &self,
         req: EventSummariesRequest,
     ) -> Result<Vec<EventSpendingSummary>> {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (target_accounts, account_types) =
+            self.resolve_spending_account_types(&s.account_ids)?;
+        if target_accounts.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -578,13 +854,13 @@ impl AnalyticsService {
         let window_start = req
             .start_date
             .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|d| d.with_timezone(&Utc));
+            .map(|s| DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc)))
+            .transpose()?;
         let window_end = req
             .end_date
             .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|d| d.with_timezone(&Utc));
+            .map(|s| DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc)))
+            .transpose()?;
 
         let in_window = |event_start: &str, event_end: &str| -> bool {
             // Events have YYYY-MM-DD date strings; compare lexicographically
@@ -624,12 +900,22 @@ impl AnalyticsService {
         // Load all activities once and index by event_id
         let activities = self
             .activity_repo
-            .get_activities_by_account_ids(&s.account_ids)
+            .get_activities_by_account_ids(&target_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let mut by_event: HashMap<String, Vec<Activity>> = HashMap::new();
         for a in activities {
+            if !activity_date_in_window(
+                &a.activity_date,
+                window_start.as_ref(),
+                window_end.as_ref(),
+            ) {
+                continue;
+            }
             if let Some(eid) = a.event_id.clone() {
-                if !OUTFLOW_TYPES.contains(&a.effective_type()) {
+                let Some(classification) = classification_for(&a, &account_types) else {
+                    continue;
+                };
+                if classification.spending_amount(activity_abs_amount(&a)) == 0.0 {
                     continue;
                 }
                 by_event.entry(eid).or_default().push(a);
@@ -650,11 +936,10 @@ impl AnalyticsService {
             let mut daily: HashMap<String, f64> = HashMap::new();
 
             for a in &acts {
-                let amt = a
-                    .amount
-                    .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
-                    .unwrap_or(0.0)
-                    .abs();
+                let Some(classification) = classification_for(a, &account_types) else {
+                    continue;
+                };
+                let amt = classification.spending_amount(activity_abs_amount(a));
                 if amt == 0.0 {
                     continue;
                 }
@@ -690,6 +975,24 @@ impl AnalyticsService {
                 entry.amount += amt;
                 entry.transaction_count += 1;
             }
+            let transaction_count = acts
+                .iter()
+                .filter(|activity| {
+                    classification_for(activity, &account_types)
+                        .map(|classification| {
+                            classification.spending_amount(activity_abs_amount(activity)) > 0.0
+                        })
+                        .unwrap_or(false)
+                })
+                .count();
+            if total <= 0.0 {
+                total = 0.0;
+                daily.clear();
+                by_category.clear();
+            } else {
+                daily.retain(|_, amount| *amount != 0.0);
+                by_category.retain(|_, value| value.amount != 0.0);
+            }
 
             out.push(EventSpendingSummary {
                 event_id: ev.event.id,
@@ -700,7 +1003,7 @@ impl AnalyticsService {
                 start_date: ev.event.start_date,
                 end_date: ev.event.end_date,
                 total_spending: total,
-                transaction_count: acts.len(),
+                transaction_count: if total > 0.0 { transaction_count } else { 0 },
                 currency: currency.clone(),
                 by_category,
                 daily_spending: daily,

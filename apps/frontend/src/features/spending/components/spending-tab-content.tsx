@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { useTaxonomy } from "@/hooks/use-taxonomies";
+import { useAccounts } from "@/hooks/use-accounts";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { DateRange, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount, formatDateISO } from "@/lib/utils";
@@ -93,6 +94,7 @@ export default function SpendingTabContent() {
   });
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
   const { data: budget } = useBudget();
+  const { accounts = [] } = useAccounts({ filterActive: false });
   const { data: uncategorizedCount = 0 } = useUncategorizedCount(
     reportReq.startDate,
     reportReq.endDate,
@@ -138,6 +140,10 @@ export default function SpendingTabContent() {
   }, [historyReport?.current.outflow]);
 
   const currency = activities[0]?.currency ?? baseCurrency;
+  const accountTypeById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.accountType])),
+    [accounts],
+  );
 
   const totalSpending = report?.current.outflow ?? 0;
   const priorSpending = priorReport?.current.outflow ?? 0;
@@ -331,7 +337,8 @@ export default function SpendingTabContent() {
           delta: d,
           deltaPct: dPct,
         };
-      });
+      })
+      .filter((row) => row.amount > 0);
   }, [report, priorReport, categoriesMeta]);
 
   const insights = useMemo(() => {
@@ -555,6 +562,7 @@ export default function SpendingTabContent() {
 
               <RecentActivityCard
                 activities={activities}
+                accountTypeById={accountTypeById}
                 categoriesMeta={categoriesMeta}
                 currency={currency}
                 uncategorizedCount={uncategorizedCount}
@@ -612,6 +620,7 @@ export default function SpendingTabContent() {
 
               <EventsCard
                 activities={subsActivities}
+                accountTypeById={accountTypeById}
                 categoriesMeta={categoriesMeta}
                 theme={theme}
               />

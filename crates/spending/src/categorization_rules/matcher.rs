@@ -80,6 +80,10 @@ mod tests {
             priority: prio,
             is_global: true,
             account_id: None,
+            preset_id: None,
+            preset_rule_key: None,
+            preset_version: None,
+            preset_modified: false,
             created_at: Utc::now().naive_utc(),
             updated_at: Utc::now().naive_utc(),
         }

@@ -80,12 +80,13 @@ export function SpendingHistoryChart({
       } else {
         filteredSpending = Number(monthlySpendingData.find(([m]) => m === month)?.[1]) || 0;
       }
-      cumulativeTotal += filteredSpending;
+      const netSpending = filteredSpending;
+      cumulativeTotal += netSpending;
       return {
         month,
-        spending: filteredSpending,
+        spending: Math.max(0, netSpending),
         cumulative: cumulativeTotal,
-        previousSpending: Number(previousMonthlySpendingData[index]?.[1]) || 0,
+        previousSpending: Math.max(0, Number(previousMonthlySpendingData[index]?.[1]) || 0),
       };
     });
   }, [
@@ -124,7 +125,7 @@ export function SpendingHistoryChart({
           <ChartContainer
             config={{
               spending: { label: "Spending", color: "var(--chart-1)" },
-              cumulative: { label: "Cumulative Spending", color: "var(--chart-5)" },
+              cumulative: { label: "Net Cumulative", color: "var(--chart-5)" },
               previousSpending: { label: "Previous Period Spending", color: "var(--chart-5)" },
             }}
             className={cn("h-[280px] w-full md:h-[550px]")}
@@ -177,7 +178,7 @@ export function SpendingHistoryChart({
                         name === "previousSpending"
                           ? "Previous"
                           : name === "cumulative"
-                            ? "Cumulative"
+                            ? "Net cumulative"
                             : name === "spending"
                               ? "Spending"
                               : String(name);
@@ -203,9 +204,18 @@ export function SpendingHistoryChart({
                         </>
                       );
                     }}
-                    labelFormatter={(label) =>
-                      format(parseISO(`${label}-01`), isMobile ? "MMM yyyy" : "MMMM yyyy")
-                    }
+                    labelFormatter={(label) => {
+                      const monthLabel =
+                        typeof label === "string"
+                          ? label
+                          : typeof label === "number"
+                            ? label.toString()
+                            : "";
+                      return format(
+                        parseISO(`${monthLabel}-01`),
+                        isMobile ? "MMM yyyy" : "MMMM yyyy",
+                      );
+                    }}
                   />
                 }
               />

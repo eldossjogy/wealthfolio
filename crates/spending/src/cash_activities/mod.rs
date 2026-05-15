@@ -1,6 +1,6 @@
-//! Cash activities — query/list activities on opted-in CASH accounts.
+//! Cash activities — query/list activities on opted-in spending accounts.
 //! CRUD itself stays in core ActivityService; this module provides the spending-aware
-//! filtering surface (only DEPOSIT/WITHDRAWAL/TRANSFER on accounts in spending settings).
+//! filtering surface for cash and credit-card activities in spending settings.
 
 pub mod model;
 pub mod service;
@@ -11,7 +11,7 @@ pub use model::{
 };
 pub use service::CashActivityService;
 
-/// The activity_type values considered "cash activities" by the spending module.
+/// The activity_type values considered spending activities by the spending module.
 pub const CASH_ACTIVITY_TYPES: &[&str] = &[
     "DEPOSIT",
     "WITHDRAWAL",
@@ -19,4 +19,5 @@ pub const CASH_ACTIVITY_TYPES: &[&str] = &[
     "TRANSFER_OUT",
     "FEE",
     "INTEREST",
+    "CREDIT",
 ];

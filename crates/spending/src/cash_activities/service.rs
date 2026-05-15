@@ -2,7 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
+use wealthfolio_core::accounts::{
+    account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
+};
 use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 
 use super::{
@@ -14,13 +18,15 @@ use super::{
     CASH_ACTIVITY_TYPES,
 };
 use crate::activity_assignments::{ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService};
+use crate::activity_classification::{classify_activity, SpendingClassification};
 use crate::settings::SpendingSettingsService;
 
-/// Service for listing/searching cash activities scoped to the user's spending accounts.
+/// Service for listing/searching activities scoped to the user's spending accounts.
 /// Mutation (create/update/delete) goes through the existing core ActivityService;
 /// categorization goes through ActivityTaxonomyAssignmentService.
 pub struct CashActivityService {
     activity_repo: Arc<dyn ActivityRepositoryTrait>,
+    account_repo: Arc<dyn AccountRepositoryTrait>,
     settings: Arc<SpendingSettingsService>,
     assignments: Arc<ActivityTaxonomyAssignmentService>,
 }
@@ -28,11 +34,13 @@ pub struct CashActivityService {
 impl CashActivityService {
     pub fn new(
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
+        account_repo: Arc<dyn AccountRepositoryTrait>,
         settings: Arc<SpendingSettingsService>,
         assignments: Arc<ActivityTaxonomyAssignmentService>,
     ) -> Self {
         Self {
             activity_repo,
+            account_repo,
             settings,
             assignments,
         }
@@ -47,7 +55,8 @@ impl CashActivityService {
             return Ok(Vec::new());
         }
 
-        let target_accounts = self.resolve_target_accounts(filter.account_ids, &s.account_ids);
+        let (target_accounts, account_types) =
+            self.resolve_target_accounts(filter.account_ids, &s.account_ids)?;
         if target_accounts.is_empty() {
             return Ok(Vec::new());
         }
@@ -61,13 +70,13 @@ impl CashActivityService {
             .activity_types
             .unwrap_or_else(|| CASH_ACTIVITY_TYPES.iter().map(|s| s.to_string()).collect());
         activities.retain(|a| allowed_types.iter().any(|t| t == a.effective_type()));
+        retain_classified_cash_activities(&mut activities, &account_types);
 
-        if let Some(start) = filter.start_date.as_deref() {
-            activities.retain(|a| a.activity_date.to_rfc3339().as_str() >= start);
-        }
-        if let Some(end) = filter.end_date.as_deref() {
-            activities.retain(|a| a.activity_date.to_rfc3339().as_str() <= end);
-        }
+        retain_by_date_range(
+            &mut activities,
+            filter.start_date.as_deref(),
+            filter.end_date.as_deref(),
+        )?;
 
         activities.sort_by(|a, b| b.activity_date.cmp(&a.activity_date));
         Ok(activities)
@@ -87,7 +96,8 @@ impl CashActivityService {
             });
         }
 
-        let target_accounts = self.resolve_target_accounts(req.account_ids, &s.account_ids);
+        let (target_accounts, account_types) =
+            self.resolve_target_accounts(req.account_ids, &s.account_ids)?;
         if target_accounts.is_empty() {
             return Ok(CashActivitySearchResponse {
                 items: Vec::new(),
@@ -104,13 +114,13 @@ impl CashActivityService {
             .activity_types
             .unwrap_or_else(|| CASH_ACTIVITY_TYPES.iter().map(|s| s.to_string()).collect());
         activities.retain(|a| allowed_types.iter().any(|t| t == a.effective_type()));
+        retain_classified_cash_activities(&mut activities, &account_types);
 
-        if let Some(start) = req.start_date.as_deref() {
-            activities.retain(|a| a.activity_date.to_rfc3339().as_str() >= start);
-        }
-        if let Some(end) = req.end_date.as_deref() {
-            activities.retain(|a| a.activity_date.to_rfc3339().as_str() <= end);
-        }
+        retain_by_date_range(
+            &mut activities,
+            req.start_date.as_deref(),
+            req.end_date.as_deref(),
+        )?;
 
         if let Some(events) = req.event_ids.as_deref() {
             if !events.is_empty() {
@@ -283,12 +293,53 @@ impl CashActivityService {
         &self,
         requested: Option<Vec<String>>,
         opted_in: &[String],
-    ) -> Vec<String> {
-        match requested {
+    ) -> Result<(Vec<String>, HashMap<String, String>)> {
+        let target_accounts: Vec<String> = match requested {
             Some(ids) => ids.into_iter().filter(|id| opted_in.contains(id)).collect(),
             None => opted_in.to_vec(),
+        };
+        if target_accounts.is_empty() {
+            return Ok((target_accounts, HashMap::new()));
         }
+
+        let accounts = self
+            .account_repo
+            .list(None, Some(false), Some(&target_accounts))
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let account_types: HashMap<String, String> = accounts
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Spending)
+            })
+            .map(|account| (account.id, account.account_type))
+            .collect();
+
+        let target_accounts = target_accounts
+            .into_iter()
+            .filter(|id| account_types.contains_key(id))
+            .collect();
+
+        Ok((target_accounts, account_types))
     }
+}
+
+fn retain_classified_cash_activities(
+    activities: &mut Vec<Activity>,
+    account_types: &HashMap<String, String>,
+) {
+    activities.retain(|activity| {
+        account_types
+            .get(&activity.account_id)
+            .map(|account_type| classify_activity(activity, account_type))
+            .is_some_and(|classification| {
+                matches!(
+                    classification,
+                    SpendingClassification::Income
+                        | SpendingClassification::Expense
+                        | SpendingClassification::ExpenseRefund
+                )
+            })
+    });
 }
 
 fn group_assignments<'a>(
@@ -309,4 +360,63 @@ fn group_assignments_owned(
         map.entry(a.activity_id.clone()).or_default().push(a);
     }
     map
+}
+
+fn retain_by_date_range(
+    activities: &mut Vec<Activity>,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> Result<()> {
+    let start = parse_filter_datetime(start_date)?;
+    let end = parse_filter_datetime(end_date)?;
+
+    if start.is_some() || end.is_some() {
+        activities
+            .retain(|a| activity_date_in_range(&a.activity_date, start.as_ref(), end.as_ref()));
+    }
+
+    Ok(())
+}
+
+fn parse_filter_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+    value
+        .map(|value| DateTime::parse_from_rfc3339(value).map(|date| date.with_timezone(&Utc)))
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn activity_date_in_range(
+    activity_date: &DateTime<Utc>,
+    start: Option<&DateTime<Utc>>,
+    end: Option<&DateTime<Utc>>,
+) -> bool {
+    start.is_none_or(|start| activity_date >= start) && end.is_none_or(|end| activity_date <= end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_date_filter_compares_instants_not_rfc3339_strings() {
+        let activity_date = DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let same_start = parse_filter_datetime(Some("2024-01-01T00:00:00.000Z"))
+            .unwrap()
+            .unwrap();
+        let same_end = parse_filter_datetime(Some("2024-01-01T00:00:00.000Z"))
+            .unwrap()
+            .unwrap();
+        let after_end = DateTime::parse_from_rfc3339("2024-01-01T00:00:01Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        assert!(activity_date_in_range(
+            &activity_date,
+            Some(&same_start),
+            Some(&same_end)
+        ));
+        assert!(!activity_date_in_range(&after_end, None, Some(&same_end)));
+    }
 }

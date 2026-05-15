@@ -17,6 +17,7 @@ import {
 } from "@/hooks/use-alternative-assets";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import {
+  AccountPurpose,
   PORTFOLIO_ACCOUNT_ID,
   HOLDING_CATEGORY_FILTERS,
   apiKindToAlternativeAssetKind,
@@ -67,9 +68,12 @@ export const HoldingsPage = () => {
   } as Account);
 
   const { holdings, isLoading } = useHoldings(selectedAccount?.id ?? PORTFOLIO_ACCOUNT_ID);
-  const { accounts, isLoading: isAccountsLoading } = useAccounts();
+  const { accounts, isLoading: isAccountsLoading } = useAccounts({
+    accountPurpose: AccountPurpose.HOLDINGS,
+  });
   const { data: alternativeHoldings, isLoading: isAlternativeHoldingsLoading } =
     useAlternativeHoldings();
+  const investmentAccounts = useMemo(() => accounts ?? [], [accounts]);
 
   // Mobile filter state
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -415,7 +419,7 @@ export const HoldingsPage = () => {
               selectedTypes={selectedTypes}
               setSelectedTypes={setSelectedTypes}
               selectedAccount={selectedAccount}
-              accounts={accounts ?? []}
+              accounts={investmentAccounts}
               onAccountChange={handleAccountSelect}
               showSearch={true}
               showFilterButton={false}
@@ -578,6 +582,7 @@ export const HoldingsPage = () => {
             setSelectedAccount={handleAccountSelect}
             variant="dropdown"
             includePortfolio={true}
+            accountPurpose={AccountPurpose.HOLDINGS}
             iconOnly={true}
             icon={Icons.ListFilter}
           />
@@ -653,7 +658,7 @@ export const HoldingsPage = () => {
         open={isFilterSheetOpen}
         onOpenChange={setIsFilterSheetOpen}
         selectedAccount={selectedAccount}
-        accounts={accounts ?? []}
+        accounts={investmentAccounts}
         onAccountChange={handleAccountSelect}
         selectedTypes={selectedTypes}
         setSelectedTypes={setSelectedTypes}

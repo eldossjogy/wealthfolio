@@ -13,6 +13,10 @@ import {
 } from "./constants";
 
 export {
+  accountCapabilities,
+  accountPurposeAccountTypes,
+  AccountPurpose,
+  accountSupportsPurpose,
   AccountType,
   ActivityStatus,
   ActivityType,
@@ -34,8 +38,11 @@ export {
   HOLDING_GROUP_ORDER,
   HoldingType,
   ImportFormat,
+  isLiabilityAccountType,
+  isReportAccountType,
   PricingMode,
   QuoteMode,
+  REPORT_ACCOUNT_TYPES,
   SUBTYPE_DISPLAY_NAMES,
 } from "./constants";
 

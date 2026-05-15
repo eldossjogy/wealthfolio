@@ -137,6 +137,8 @@ pub struct ValuationInfo {
     pub valuation_date: NaiveDate,
     /// Category for breakdown
     pub category: AssetCategory,
+    /// True for balance snapshots that should not be treated like stale market data.
+    pub is_cash_like: bool,
 }
 
 /// Asset category for net worth breakdown.

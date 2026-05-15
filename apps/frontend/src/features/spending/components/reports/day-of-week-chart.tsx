@@ -5,10 +5,11 @@ import { formatCompactAmount } from "@wealthfolio/ui";
 import type { Activity } from "@/lib/types";
 import { formatAmount } from "@/lib/utils";
 
-import { OUTFLOW_TYPES, type CashActivityType } from "../../lib/constants";
+import { getActivitySpendingAmount } from "../../lib/constants";
 
 interface DayOfWeekChartProps {
   activities: Activity[];
+  accountTypeById?: Map<string, string>;
   currency: string;
   accent?: string;
 }
@@ -29,10 +30,14 @@ interface DayDatum {
  */
 export function DayOfWeekChart({
   activities,
+  accountTypeById,
   currency,
   accent = "var(--success)",
 }: DayOfWeekChartProps) {
-  const data: DayDatum[] = useMemo(() => buildSeries(activities), [activities]);
+  const data: DayDatum[] = useMemo(
+    () => buildSeries(activities, accountTypeById),
+    [accountTypeById, activities],
+  );
   const peak = useMemo(() => Math.max(0, ...data.map((d) => d.total)), [data]);
 
   return (
@@ -83,19 +88,20 @@ export function DayOfWeekChart({
   );
 }
 
-function buildSeries(activities: Activity[]): DayDatum[] {
+function buildSeries(activities: Activity[], accountTypeById?: Map<string, string>): DayDatum[] {
   const totals = new Array(7).fill(0) as number[];
   const counts = new Array(7).fill(0) as number[];
   for (const a of activities) {
-    if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) continue;
+    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (spendingAmount === 0) continue;
     const dow = (new Date(a.activityDate).getDay() + 6) % 7; // Mon=0
-    totals[dow] += parseFloat(a.amount ?? "0") || 0;
-    counts[dow] += 1;
+    totals[dow] += spendingAmount;
+    if (spendingAmount > 0) counts[dow] += 1;
   }
   return DAY_LABELS.map((day, i) => ({
     day,
-    total: totals[i],
+    total: Math.max(0, totals[i]),
     count: counts[i],
-    avg: counts[i] > 0 ? totals[i] / counts[i] : 0,
+    avg: counts[i] > 0 ? Math.max(0, totals[i]) / counts[i] : 0,
   }));
 }

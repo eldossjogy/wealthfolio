@@ -405,6 +405,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     let cash_activity_service = Arc::new(
         wealthfolio_spending::cash_activities::CashActivityService::new(
             activity_repository.clone(),
+            account_repo.clone(),
             spending_settings_service.clone(),
             activity_taxonomy_assignment_service.clone(),
         ),
@@ -469,6 +470,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     let spending_analytics_service =
         Arc::new(wealthfolio_spending::analytics::AnalyticsService::new(
             activity_repository.clone(),
+            account_repo.clone(),
             analytics_assignment_repo,
             spending_settings_service.clone(),
             taxonomy_service.clone(),

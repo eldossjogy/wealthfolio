@@ -371,8 +371,20 @@ function buildTree({
       const parent = ensureRolled(node.parentId);
       parent.spent += node.spent;
       parent.priorSpent += node.priorSpent;
-      parent.children.push({ ...node, children: [] });
+      if (node.spent > 0 || node.priorSpent > 0 || node.budgeted > 0) {
+        parent.children.push({
+          ...node,
+          spent: Math.max(0, node.spent),
+          priorSpent: Math.max(0, node.priorSpent),
+          children: [],
+        });
+      }
     }
+  }
+
+  for (const node of rolledUp.values()) {
+    node.spent = Math.max(0, node.spent);
+    node.priorSpent = Math.max(0, node.priorSpent);
   }
 
   const compare =

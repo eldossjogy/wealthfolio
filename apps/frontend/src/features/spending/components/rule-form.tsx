@@ -44,6 +44,7 @@ export type RuleFormValues = z.infer<typeof ruleFormSchema>;
 const ACTIVITY_TYPE_OPTIONS = [
   { value: "DEPOSIT", label: "Deposit" },
   { value: "WITHDRAWAL", label: "Withdrawal" },
+  { value: "CREDIT", label: "Credit / Refund" },
   { value: "INTEREST", label: "Interest" },
   { value: "DIVIDEND", label: "Dividend" },
   { value: "FEE", label: "Fee" },

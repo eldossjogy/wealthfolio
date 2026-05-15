@@ -12,7 +12,7 @@ import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { AccountSelector } from "@/components/account-selector";
-import { createPortfolioAccount, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import { AccountPurpose, createPortfolioAccount, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import type { Account } from "@/lib/types";
 import { useSettingsContext } from "@/lib/settings-provider";
 
@@ -105,6 +105,7 @@ export default function IncomePage() {
             setSelectedAccount={setSelectedAccount}
             variant="dropdown"
             includePortfolio
+            accountPurpose={AccountPurpose.INCOME}
             className="h-9"
           />
           <IncomePeriodSelector
@@ -215,6 +216,7 @@ export default function IncomePage() {
           setSelectedAccount={setSelectedAccount}
           variant="dropdown"
           includePortfolio
+          accountPurpose={AccountPurpose.INCOME}
           className="h-9"
         />
         <IncomePeriodSelector selectedPeriod={selectedPeriod} onPeriodSelect={setSelectedPeriod} />

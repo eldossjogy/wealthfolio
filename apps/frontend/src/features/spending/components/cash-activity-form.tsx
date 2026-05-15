@@ -41,7 +41,12 @@ import {
   setActivityEvent,
   unassignActivityCategory,
 } from "../adapters/cash-activities";
-import { CASH_ACTIVITY_TYPES } from "../lib/constants";
+import {
+  getActivityTypesForAccount,
+  getCashActivityLabel,
+  isCashActivityIncome,
+  isSpendingAccountType,
+} from "../lib/constants";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
@@ -52,7 +57,15 @@ const INCOME_TAXONOMY = "income_sources";
 const formSchema = z.object({
   id: z.string().optional(),
   accountId: z.string().min(1, { message: "Please select an account." }),
-  activityType: z.enum(["DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT", "FEE", "INTEREST"]),
+  activityType: z.enum([
+    "DEPOSIT",
+    "WITHDRAWAL",
+    "TRANSFER_IN",
+    "TRANSFER_OUT",
+    "FEE",
+    "INTEREST",
+    "CREDIT",
+  ]),
   activityDate: z.date({ required_error: "Pick a date" }),
   amount: z.coerce.number().min(0.01, { message: "Amount must be greater than zero." }),
   notes: z.string().optional(),
@@ -72,22 +85,17 @@ interface CashActivityFormProps {
   };
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  DEPOSIT: "Deposit",
-  WITHDRAWAL: "Withdrawal",
-  TRANSFER_IN: "Transfer In",
-  TRANSFER_OUT: "Transfer Out",
-  FEE: "Fee",
-  INTEREST: "Interest",
-};
-
 export function CashActivityForm({ open, onOpenChange, activity }: CashActivityFormProps) {
   const isEditing = !!activity?.id;
   const qc = useQueryClient();
-  const { accounts } = useAccounts({ filterActive: true });
-  const cashAccounts = useMemo(
-    () => (accounts ?? []).filter((a: Account) => a.accountType === "CASH"),
-    [accounts],
+  const { accounts } = useAccounts({ filterActive: false });
+  const spendingAccounts = useMemo(
+    () =>
+      (accounts ?? []).filter(
+        (a: Account) =>
+          isSpendingAccountType(a.accountType) && (a.isActive || a.id === activity?.accountId),
+      ),
+    [accounts, activity?.accountId],
   );
 
   // Used only to look up the selected category's name/color for the trigger label.
@@ -134,7 +142,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
   useEffect(() => {
     if (open) {
       form.reset({
-        accountId: activity?.accountId ?? cashAccounts[0]?.id ?? "",
+        accountId: activity?.accountId ?? spendingAccounts[0]?.id ?? "",
         activityType: (activity?.activityType as FormValues["activityType"]) ?? "WITHDRAWAL",
         activityDate: activity?.activityDate ? new Date(activity.activityDate) : new Date(),
         amount: activity?.amount ? parseFloat(activity.amount) : 0,
@@ -146,15 +154,36 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
       });
       setEventId(activity?.eventId ?? null);
     }
-  }, [open, activity, cashAccounts, form]);
+  }, [open, activity, spendingAccounts, form]);
 
   const watchType = form.watch("activityType");
-  const isIncomeType = watchType === "DEPOSIT" || watchType === "INTEREST";
+  const watchAccountId = form.watch("accountId");
+  const selectedAccount = spendingAccounts.find((a) => a.id === watchAccountId);
+  const activityTypeOptions = useMemo(
+    () => {
+      const options = getActivityTypesForAccount(selectedAccount?.accountType);
+      const currentType = activity?.activityType as FormValues["activityType"] | undefined;
+      return currentType && !options.includes(currentType) ? [...options, currentType] : options;
+    },
+    [activity?.activityType, selectedAccount?.accountType],
+  );
+  const isIncomeType = isCashActivityIncome(
+    watchType,
+    selectedAccount?.accountType,
+    activity?.subtype,
+  );
+
+  useEffect(() => {
+    if (!selectedAccount) return;
+    if (!activityTypeOptions.includes(watchType)) {
+      form.setValue("activityType", activityTypeOptions[0]);
+    }
+  }, [activityTypeOptions, form, selectedAccount, watchType]);
 
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
       const dateStr = values.activityDate.toISOString();
-      const account = cashAccounts.find((a) => a.id === values.accountId);
+      const account = spendingAccounts.find((a) => a.id === values.accountId);
       const currency = account?.currency ?? "USD";
 
       let saved: Activity;
@@ -223,11 +252,11 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle>{isEditing ? "Edit Cash Activity" : "Add Cash Activity"}</SheetTitle>
+          <SheetTitle>{isEditing ? "Edit Transaction" : "Add Transaction"}</SheetTitle>
           <SheetDescription>
             {isEditing
               ? "Update an existing transaction."
-              : "Add a new transaction on a tracked CASH account."}
+              : "Add a new transaction on a tracked spending account."}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -248,7 +277,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {cashAccounts.map((acc) => (
+                      {spendingAccounts.map((acc) => (
                         <SelectItem key={acc.id} value={acc.id}>
                           {acc.name} ({acc.currency})
                         </SelectItem>
@@ -273,9 +302,9 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {CASH_ACTIVITY_TYPES.map((t) => (
+                      {activityTypeOptions.map((t) => (
                         <SelectItem key={t} value={t}>
-                          {TYPE_LABELS[t] ?? t}
+                          {getCashActivityLabel(t, selectedAccount?.accountType)}
                         </SelectItem>
                       ))}
                     </SelectContent>

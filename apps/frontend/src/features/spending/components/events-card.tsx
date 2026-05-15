@@ -8,7 +8,7 @@ import { cn, formatAmount, formatDateISO } from "@/lib/utils";
 import { Icons, PrivacyAmount } from "@wealthfolio/ui";
 
 import { getActivityAssignments } from "../adapters/cash-activities";
-import { OUTFLOW_TYPES, type CashActivityType } from "../lib/constants";
+import { getActivitySpendingAmount } from "../lib/constants";
 import { useSpendingEvents } from "../hooks/use-spending-events";
 import { themeBg, type Palette } from "../lib/theme";
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
@@ -17,10 +17,12 @@ const SPENDING_TAXONOMY = "spending_categories";
 
 export function EventsCard({
   activities,
+  accountTypeById,
   categoriesMeta,
   theme,
 }: {
   activities: Activity[];
+  accountTypeById?: Map<string, string>;
   categoriesMeta: CategoryMetaMap;
   theme: Palette;
 }) {
@@ -63,12 +65,18 @@ export function EventsCard({
         ? activities.filter(
             (a) =>
               (a as { eventId?: string | null }).eventId === ev.id &&
-              OUTFLOW_TYPES.includes(a.activityType as CashActivityType),
+              getActivitySpendingAmount(a, accountTypeById?.get(a.accountId)) !== 0,
           )
         : [],
-    [activities, ev],
+    [accountTypeById, activities, ev],
   );
-  const eventSpent = eventActivities.reduce((s, a) => s + (parseFloat(a.amount ?? "0") || 0), 0);
+  const eventSpent = Math.max(
+    0,
+    eventActivities.reduce(
+      (s, a) => s + getActivitySpendingAmount(a, accountTypeById?.get(a.accountId)),
+      0,
+    ),
+  );
   const currency = eventActivities[0]?.currency ?? "USD";
 
   const assignmentQueries = useQueries({
@@ -87,7 +95,7 @@ export function EventsCard({
     eventActivities.forEach((a, i) => {
       const assignments = assignmentQueries[i]?.data ?? [];
       const spending = assignments.find((x) => x.taxonomyId === SPENDING_TAXONOMY);
-      const amount = parseFloat(a.amount ?? "0") || 0;
+      const amount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
       const meta = spending ? categoriesMeta.get(spending.categoryId) : undefined;
       const topId = meta?.parentId ?? spending?.categoryId ?? "__unc__";
       const top = categoriesMeta.get(topId) ?? meta;
@@ -99,24 +107,31 @@ export function EventsCard({
       totals.set(topId, e);
     });
     return Array.from(totals.values())
+      .filter((row) => row.amount > 0)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 2);
-  }, [eventActivities, assignmentQueries, categoriesMeta]);
+  }, [accountTypeById, eventActivities, assignmentQueries, categoriesMeta]);
 
   const baselineDailyAvg = useMemo(() => {
     if (!ev) return 0;
     const evStartIso = ev.startDate.slice(0, 10);
     const evEndIso = ev.endDate.slice(0, 10);
     const baseline = activities.filter((a) => {
-      if (!OUTFLOW_TYPES.includes(a.activityType as CashActivityType)) return false;
+      if (getActivitySpendingAmount(a, accountTypeById?.get(a.accountId)) === 0) return false;
       const dateIso = a.activityDate.slice(0, 10);
       return dateIso < evStartIso || dateIso > evEndIso;
     });
     if (baseline.length === 0) return 0;
-    const total = baseline.reduce((s, a) => s + (parseFloat(a.amount ?? "0") || 0), 0);
+    const total = Math.max(
+      0,
+      baseline.reduce(
+        (s, a) => s + getActivitySpendingAmount(a, accountTypeById?.get(a.accountId)),
+        0,
+      ),
+    );
     const days = Math.max(1, 90 - totalDays);
     return total / days;
-  }, [activities, ev, totalDays]);
+  }, [accountTypeById, activities, ev, totalDays]);
 
   if (!pick) return null;
 

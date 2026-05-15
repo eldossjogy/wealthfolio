@@ -8,7 +8,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { createPortfolioAccount, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import {
+  AccountPurpose,
+  createPortfolioAccount,
+  PORTFOLIO_ACCOUNT_ID,
+} from "@/lib/constants";
 import type { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/lib/settings-provider";
@@ -30,7 +34,7 @@ export const IncomeMobileFilterSheet = ({
 }: IncomeMobileFilterSheetProps) => {
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
-  const { accounts } = useAccounts();
+  const { accounts } = useAccounts({ accountPurpose: AccountPurpose.INCOME });
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

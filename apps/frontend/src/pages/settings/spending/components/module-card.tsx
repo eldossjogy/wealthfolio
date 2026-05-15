@@ -12,6 +12,7 @@ import {
   useSpendingSettings,
   useSpendingSettingsMutation,
 } from "@/features/spending/hooks/use-spending-settings";
+import { isSpendingAccountType } from "@/features/spending/lib/constants";
 import { useAccounts } from "@/hooks/use-accounts";
 import type { Account } from "@/lib/types";
 
@@ -26,8 +27,10 @@ export function ModuleCard() {
   const handleToggle = (next: boolean) => {
     let nextIds = accountIds;
     if (next && accountIds.length === 0) {
-      const cash = (accounts ?? []).filter((a: Account) => a.accountType === "CASH");
-      if (cash.length > 0) nextIds = cash.map((a) => a.id);
+      const spendingAccounts = (accounts ?? []).filter((a: Account) =>
+        isSpendingAccountType(a.accountType),
+      );
+      if (spendingAccounts.length > 0) nextIds = spendingAccounts.map((a) => a.id);
     }
     mutation.mutate({ enabled: next, accountIds: nextIds });
   };

@@ -19,28 +19,41 @@ import {
   useSpendingSettings,
   useSpendingSettingsMutation,
 } from "@/features/spending/hooks/use-spending-settings";
+import {
+  isCreditCardAccountType,
+  isSpendingAccountType,
+} from "@/features/spending/lib/constants";
+import { AccountType } from "@/lib/constants";
 
 export function AccountsCard() {
   const { settings } = useSpendingSettings();
   const mutation = useSpendingSettingsMutation();
-  const { accounts } = useAccounts({ filterActive: true });
+  const { accounts } = useAccounts({ filterActive: false });
 
-  const accountIds = settings?.accountIds ?? [];
+  const accountIds = useMemo(() => settings?.accountIds ?? [], [settings?.accountIds]);
 
-  const cashAccounts = useMemo<Account[]>(
-    () => (accounts ?? []).filter((a) => a.accountType === "CASH"),
+  const spendingAccounts = useMemo<Account[]>(
+    () => (accounts ?? []).filter((a) => isSpendingAccountType(a.accountType)),
     [accounts],
   );
 
   const includedAccounts = useMemo(
-    () => cashAccounts.filter((a) => accountIds.includes(a.id)),
-    [cashAccounts, accountIds],
+    () => spendingAccounts.filter((a) => accountIds.includes(a.id)),
+    [spendingAccounts, accountIds],
   );
 
   const availableAccounts = useMemo(
-    () => cashAccounts.filter((a) => !accountIds.includes(a.id)),
-    [cashAccounts, accountIds],
+    () => spendingAccounts.filter((a) => a.isActive && !accountIds.includes(a.id)),
+    [spendingAccounts, accountIds],
   );
+
+  const hasMixedCashAndCreditAccounts = useMemo(() => {
+    const hasCash = includedAccounts.some((account) => account.accountType === AccountType.CASH);
+    const hasCreditCard = includedAccounts.some((account) =>
+      isCreditCardAccountType(account.accountType),
+    );
+    return hasCash && hasCreditCard;
+  }, [includedAccounts]);
 
   const handleAdd = (id: string) => {
     const next = Array.from(new Set([...accountIds, id]));
@@ -58,7 +71,7 @@ export function AccountsCard() {
         <div className="min-w-0 space-y-0.5">
           <CardTitle className="text-sm font-medium">Spending accounts</CardTitle>
           <CardDescription className="text-xs">
-            Cash accounts that participate in spending. New CASH accounts auto-include.
+            Cash and credit card accounts that participate in spending.
           </CardDescription>
         </div>
         <Popover>
@@ -76,7 +89,7 @@ export function AccountsCard() {
           <PopoverContent className="w-72 p-0" align="end">
             {availableAccounts.length === 0 ? (
               <div className="text-muted-foreground p-3 text-xs">
-                All cash accounts are already included.
+                All active spending accounts are already included.
               </div>
             ) : (
               <div className="max-h-72 overflow-y-auto py-1">
@@ -106,13 +119,13 @@ export function AccountsCard() {
         </Popover>
       </CardHeader>
       <CardContent className="p-4 pt-0">
-        {cashAccounts.length === 0 ? (
+        {spendingAccounts.length === 0 ? (
           <p className="text-muted-foreground text-xs">
-            No CASH accounts found. Create one in Settings → Accounts.
+            No cash or credit card accounts found. Create one in Settings → Accounts.
           </p>
         ) : includedAccounts.length === 0 ? (
           <div className="text-muted-foreground rounded-md border border-dashed py-6 text-center text-xs">
-            No accounts selected. Use “Add account” to include cash accounts.
+            No accounts selected. Use “Add account” to include spending accounts.
           </div>
         ) : (
           <div className="space-y-1">
@@ -122,7 +135,14 @@ export function AccountsCard() {
                 className="bg-muted/30 flex items-center gap-3 rounded-lg px-3 py-2.5"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{account.name}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-semibold">{account.name}</span>
+                    {!account.isActive && (
+                      <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium">
+                        Inactive
+                      </span>
+                    )}
+                  </div>
                   <div className="text-muted-foreground text-[10px]">
                     {account.currency}
                     {account.group ? ` · ${account.group}` : ""}
@@ -139,8 +159,18 @@ export function AccountsCard() {
                 </button>
               </div>
             ))}
+            {hasMixedCashAndCreditAccounts && (
+              <div className="mt-2 flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                <Icons.AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <p>
+                  Credit card payments from tracked cash accounts should be linked as transfers.
+                  Unlinked payments can make both the card charge and cash payment count as
+                  spending.
+                </p>
+              </div>
+            )}
             <p className="text-muted-foreground pt-1 text-[11px]">
-              {includedAccounts.length} of {cashAccounts.length} cash accounts included
+              {includedAccounts.length} of {spendingAccounts.length} spending accounts included
             </p>
           </div>
         )}

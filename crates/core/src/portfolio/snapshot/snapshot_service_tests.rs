@@ -1068,7 +1068,7 @@ mod tests {
             name: name.to_string(),
             currency: currency.to_string(),
             is_active: true,
-            account_type: "REGULAR".to_string(),
+            account_type: "SECURITIES".to_string(),
             group: None,
             is_default: false,
             created_at: Utc::now().naive_utc(),
@@ -4764,7 +4764,7 @@ mod tests {
             name: name.to_string(),
             currency: currency.to_string(),
             is_active,
-            account_type: "REGULAR".to_string(),
+            account_type: "SECURITIES".to_string(),
             group: None,
             is_default: false,
             created_at: Utc::now().naive_utc(),
@@ -4911,6 +4911,7 @@ mod tests {
         //   - Account B: is_active=false, is_archived=false (closed but not archived)
         //   - Account C: is_active=true, is_archived=true (active but archived)
         //   - Account D: is_active=false, is_archived=true (closed and archived)
+        //   - Account E: credit card liability, non-archived (excluded from TOTAL performance)
         let base_currency = "USD";
         let date_str = "2023-01-01";
         let target_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").unwrap();
@@ -4923,11 +4924,15 @@ mod tests {
             create_test_account_with_archive_state("acc_c", "USD", "Active Archived", true, true);
         let acc_d =
             create_test_account_with_archive_state("acc_d", "USD", "Closed Archived", false, true);
+        let mut acc_e =
+            create_test_account_with_archive_state("acc_e", "USD", "Credit Card", true, false);
+        acc_e.account_type = "CREDIT_CARD".to_string();
 
         account_repo.add_account(acc_a.clone());
         account_repo.add_account(acc_b.clone());
         account_repo.add_account(acc_c.clone());
         account_repo.add_account(acc_d.clone());
+        account_repo.add_account(acc_e.clone());
 
         // Create snapshots for all accounts
         let mut snap_a = create_blank_snapshot("acc_a", "USD", date_str);
@@ -4950,12 +4955,21 @@ mod tests {
         snap_d.net_contribution = dec!(4000);
         snap_d.net_contribution_base = dec!(4000);
 
-        // Non-archived accounts: A and B (C and D are archived)
-        let non_archived_ids: HashSet<String> = vec!["acc_a".to_string(), "acc_b".to_string()]
-            .into_iter()
-            .collect();
+        let mut snap_e = create_blank_snapshot("acc_e", "USD", date_str);
+        snap_e.cash_balances.insert("USD".to_string(), dec!(5000));
+        snap_e.net_contribution = dec!(5000);
+        snap_e.net_contribution_base = dec!(5000);
+
+        // Non-archived accounts: A, B, and E (C and D are archived)
+        let non_archived_ids: HashSet<String> = vec![
+            "acc_a".to_string(),
+            "acc_b".to_string(),
+            "acc_e".to_string(),
+        ]
+        .into_iter()
+        .collect();
         let mock_snapshot_repo = MockArchiveAwareSnapshotRepository::new(non_archived_ids);
-        mock_snapshot_repo.add_snapshots(vec![snap_a, snap_b, snap_c, snap_d]);
+        mock_snapshot_repo.add_snapshots(vec![snap_a, snap_b, snap_c, snap_d, snap_e]);
 
         let fx = Arc::new(MockFxService::new());
         let activity_repo = Arc::new(MockActivityRepository::new());
@@ -4976,7 +4990,7 @@ mod tests {
             .await;
         assert!(result.is_ok(), "TOTAL calculation should succeed");
 
-        // Assert: Only A and B contribute to TOTAL (C and D excluded because archived)
+        // Assert: Only A and B contribute to TOTAL
         let saved = mock_snapshot_repo.get_saved_snapshots();
         assert_eq!(saved.len(), 1, "Should have 1 TOTAL snapshot");
 
@@ -4984,8 +4998,8 @@ mod tests {
         assert_eq!(total_snapshot.account_id, PORTFOLIO_TOTAL_ACCOUNT_ID);
         assert_eq!(total_snapshot.snapshot_date, target_date);
 
-        // Total cash should be 1000 (A) + 2000 (B) = 3000
-        // C (3000) and D (4000) are excluded because they're archived
+        // Total cash should be 1000 (A) + 2000 (B) = 3000.
+        // C/D are archived; E is a credit-card liability excluded from TOTAL performance.
         assert_eq!(
             total_snapshot.cash_balances.get("USD"),
             Some(&dec!(3000)),

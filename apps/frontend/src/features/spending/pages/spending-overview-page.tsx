@@ -185,7 +185,7 @@ export default function SpendingOverviewPage() {
         <Icons.CreditCard className="text-muted-foreground mb-4 h-12 w-12" />
         <h3 className="mb-2 text-lg font-semibold">No Spending Data</h3>
         <p className="text-muted-foreground mb-4 text-center">
-          Add cash transactions on a tracked CASH account to start tracking spending.
+          Add transactions on a tracked spending account to start tracking spending.
         </p>
         <Link
           to="/spending/transactions"
@@ -206,6 +206,11 @@ export default function SpendingOverviewPage() {
           totalSpending: periodSummary.totalSpending,
           monthlyAverage: periodSummary.monthlyAverage,
         };
+
+  const positiveCategoryTotal = Object.values(byCategory).reduce(
+    (sum, cat) => sum + Math.max(0, Number(cat.amount) || 0),
+    0,
+  );
 
   const topCategories = Object.entries(byCategory)
     .filter(([, cat]) => cat.amount > 0)
@@ -260,6 +265,10 @@ export default function SpendingOverviewPage() {
     .filter(([, sub]) => sub.amount > 0)
     .sort(([, a], [, b]) => b.amount - a.amount)
     .slice(0, 10);
+  const positiveSubcategoryTotal = Object.values(bySubcategory || {}).reduce(
+    (sum, sub) => sum + Math.max(0, Number(sub.amount) || 0),
+    0,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col space-y-6 px-2 pb-2 pt-2 lg:px-4 lg:pb-4">
@@ -447,8 +456,8 @@ export default function SpendingOverviewPage() {
                     ];
                     return chartItems.map((item, index) => {
                       const percentage =
-                        periodSummary.totalSpending > 0
-                          ? (item.amount / periodSummary.totalSpending) * 100
+                        positiveCategoryTotal > 0
+                          ? (item.amount / positiveCategoryTotal) * 100
                           : 0;
                       return (
                         <div
@@ -480,8 +489,8 @@ export default function SpendingOverviewPage() {
                 </div>
                 {topCategories.map(([key, cat], index) => {
                   const percentage =
-                    periodSummary.totalSpending > 0
-                      ? (cat.amount / periodSummary.totalSpending) * 100
+                    positiveCategoryTotal > 0
+                      ? (cat.amount / positiveCategoryTotal) * 100
                       : 0;
                   const categoryId = cat.categoryId || "uncategorized";
                   const isHidden = hiddenCategories.has(categoryId);
@@ -564,8 +573,8 @@ export default function SpendingOverviewPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               {topSubcategories.map(([key, sub], index) => {
                 const percentage =
-                  periodSummary.totalSpending > 0
-                    ? (sub.amount / periodSummary.totalSpending) * 100
+                  positiveSubcategoryTotal > 0
+                    ? (sub.amount / positiveSubcategoryTotal) * 100
                     : 0;
                 const color =
                   sub.color || DEFAULT_CHART_COLORS[index % DEFAULT_CHART_COLORS.length];

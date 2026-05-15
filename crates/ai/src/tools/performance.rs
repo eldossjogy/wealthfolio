@@ -8,6 +8,10 @@ use std::sync::Arc;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
+use wealthfolio_core::{
+    accounts::{account_supports_purpose, AccountPurpose},
+    constants::PORTFOLIO_TOTAL_ACCOUNT_ID,
+};
 
 // ============================================================================
 // Tool Arguments and Output
@@ -150,6 +154,23 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
         let end_date = Local::now().date_naive();
         let start_date = period_to_start_date(&period, end_date);
 
+        if account_id != PORTFOLIO_TOTAL_ACCOUNT_ID {
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+                return Ok(GetPerformanceOutput {
+                    id: account_id.clone(),
+                    period_start_date: start_date.map(|d| d.to_string()),
+                    period_end_date: Some(end_date.to_string()),
+                    currency: account.currency,
+                    ..Default::default()
+                });
+            }
+        }
+
         // Use PerformanceService to calculate metrics
         let metrics = self
             .env
@@ -183,7 +204,9 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env::test_env::MockEnvironment;
+    use crate::env::test_env::{MockAccountService, MockEnvironment};
+    use chrono::Utc;
+    use wealthfolio_core::accounts::{Account, TrackingMode};
 
     #[tokio::test]
     async fn test_get_performance_tool() {
@@ -204,7 +227,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_performance_with_account_id() {
-        let env = Arc::new(MockEnvironment::new());
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("acc-123", "SECURITIES")],
+        });
+        let env = Arc::new(env);
         let tool = GetPerformanceTool::new(env, "USD".to_string());
 
         let result = tool
@@ -214,6 +241,29 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_performance_returns_empty_metrics_for_credit_card() {
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("card-1", "CREDIT_CARD")],
+        });
+        let env = Arc::new(env);
+        let tool = GetPerformanceTool::new(env, "USD".to_string());
+
+        let output = tool
+            .call(GetPerformanceArgs {
+                account_id: "card-1".to_string(),
+                period: "1M".to_string(),
+            })
+            .await
+            .expect("credit cards should return an empty performance response");
+
+        assert_eq!(output.id, "card-1");
+        assert_eq!(output.currency, "USD");
+        assert_eq!(output.simple_return, 0.0);
+        assert_eq!(output.cumulative_twr, None);
     }
 
     #[tokio::test]
@@ -235,5 +285,27 @@ mod tests {
         // Test ALL - returns None (no start date filter)
         let all_start = period_to_start_date("ALL", today);
         assert_eq!(all_start, None);
+    }
+
+    fn test_account(id: &str, account_type: &str) -> Account {
+        let now = Utc::now().naive_utc();
+        Account {
+            id: id.to_string(),
+            name: id.to_string(),
+            account_type: account_type.to_string(),
+            group: None,
+            currency: "USD".to_string(),
+            is_default: false,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+            platform_id: None,
+            account_number: None,
+            meta: None,
+            provider: None,
+            provider_account_id: None,
+            is_archived: false,
+            tracking_mode: TrackingMode::Transactions,
+        }
     }
 }

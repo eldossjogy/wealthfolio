@@ -1,6 +1,8 @@
 use super::holdings_calculator::HoldingsCalculator;
 use super::SnapshotRepositoryTrait;
-use crate::accounts::{Account, AccountRepositoryTrait, TrackingMode};
+use crate::accounts::{
+    account_supports_purpose, Account, AccountPurpose, AccountRepositoryTrait, TrackingMode,
+};
 use crate::activities::{
     Activity, ActivityCompiler, ActivityRepositoryTrait, DefaultActivityCompiler,
 };
@@ -754,7 +756,7 @@ impl SnapshotService {
                 HashMap::with_capacity(accounts_to_process_today.len());
             let mut keyframes_today = Vec::new();
 
-            for (account_id, _account) in accounts_to_process_today {
+            for (account_id, account) in accounts_to_process_today {
                 let previous_holdings_snapshot = current_holdings_snapshots
                     .get(account_id)
                      .ok_or_else(|| {
@@ -787,11 +789,14 @@ impl SnapshotService {
                     current_holdings_snapshot = carried_forward_state;
                 } else {
                     // Activities occurred, call the calculator
-                    match self.holdings_calculator.calculate_next_holdings(
-                        previous_holdings_snapshot,
-                        &activities_today, // Pass the already fetched activities
-                        current_date,
-                    ) {
+                    match self
+                        .holdings_calculator
+                        .calculate_next_holdings_for_account_type(
+                            previous_holdings_snapshot,
+                            &activities_today, // Pass the already fetched activities
+                            current_date,
+                            Some(&account.account_type),
+                        ) {
                         Ok(calc_result) => {
                             // Collect any warnings from activity processing
                             if calc_result.has_warnings() {
@@ -1292,15 +1297,27 @@ impl SnapshotService {
             mode
         );
 
-        // Use non-archived accounts for TOTAL calculation (includes closed but not archived accounts)
-        let non_archived_accounts = self.account_repository.list(None, Some(false), None)?;
-        if non_archived_accounts.is_empty() {
-            warn!("No non-archived accounts found. Cannot generate TOTAL snapshots.");
+        // Use non-archived report accounts for TOTAL calculation (includes closed but not archived accounts).
+        // Liability accounts keep individual snapshots for net worth, but must not affect investment performance.
+        let report_accounts: Vec<Account> = self
+            .account_repository
+            .list(None, Some(false), None)?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            })
+            .collect();
+        if report_accounts.is_empty() {
+            warn!("No non-archived report accounts found. Cannot generate TOTAL snapshots.");
             self.snapshot_repository
                 .overwrite_all_snapshots_for_account(PORTFOLIO_TOTAL_ACCOUNT_ID, &[])
                 .await?;
             return Ok(0);
         }
+        let report_account_ids: HashSet<String> = report_accounts
+            .iter()
+            .map(|account| account.id.clone())
+            .collect();
 
         let all_individual_keyframes = self
             .snapshot_repository
@@ -1322,6 +1339,9 @@ impl SnapshotService {
 
         for keyframe in all_individual_keyframes {
             if keyframe.account_id == PORTFOLIO_TOTAL_ACCOUNT_ID {
+                continue;
+            }
+            if !report_account_ids.contains(&keyframe.account_id) {
                 continue;
             }
             all_snapshot_dates.insert(keyframe.snapshot_date);
@@ -1412,7 +1432,7 @@ impl SnapshotService {
             return Ok(0);
         }
 
-        let account_ids: Vec<String> = non_archived_accounts
+        let account_ids: Vec<String> = report_accounts
             .iter()
             .filter(|account| account.id != PORTFOLIO_TOTAL_ACCOUNT_ID)
             .map(|account| account.id.clone())

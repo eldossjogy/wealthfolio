@@ -188,8 +188,8 @@ export function BudgetLineChartCard({
         color: meta?.color ?? null,
         icon: meta?.icon ?? null,
         target: t,
-        spent: s,
-        pct: s / t,
+        spent: Math.max(0, s),
+        pct: Math.max(0, s) / t,
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== null)

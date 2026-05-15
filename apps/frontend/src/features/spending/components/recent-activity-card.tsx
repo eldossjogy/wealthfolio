@@ -8,18 +8,20 @@ import { cn, formatDateISO } from "@/lib/utils";
 import { PrivacyAmount } from "@wealthfolio/ui";
 
 import { getActivityAssignments } from "../adapters/cash-activities";
-import { OUTFLOW_TYPES, type CashActivityType } from "../lib/constants";
+import { getActivitySpendingAmount, isCashActivityIncome } from "../lib/constants";
 import { CategoryBadge, ReviewPill, type CategoryMetaMap } from "./category-chips";
 
 const SPENDING_TAXONOMY = "spending_categories";
 
 export function RecentActivityCard({
   activities,
+  accountTypeById,
   categoriesMeta,
   currency,
   uncategorizedCount = 0,
 }: {
   activities: Activity[];
+  accountTypeById?: Map<string, string>;
   categoriesMeta: CategoryMetaMap;
   currency: string;
   uncategorizedCount?: number;
@@ -27,9 +29,16 @@ export function RecentActivityCard({
   const recent = useMemo(() => {
     return activities
       .slice()
+      .filter((activity) => {
+        const accountType = accountTypeById?.get(activity.accountId);
+        return (
+          getActivitySpendingAmount(activity, accountType) !== 0 ||
+          isCashActivityIncome(activity.activityType, accountType, activity.subtype)
+        );
+      })
       .sort((a, b) => b.activityDate.localeCompare(a.activityDate))
       .slice(0, 6);
-  }, [activities]);
+  }, [activities, accountTypeById]);
 
   const assignmentQueries = useQueries({
     queries: recent.map((a) => ({
@@ -124,8 +133,15 @@ export function RecentActivityCard({
               </div>
               {items.map((a) => {
                 const payee = (a.notes ?? "").trim();
-                const isOutflow = OUTFLOW_TYPES.includes(a.activityType as CashActivityType);
-                const amount = parseFloat(a.amount ?? "0") || 0;
+                const spendingAmount = getActivitySpendingAmount(
+                  a,
+                  accountTypeById?.get(a.accountId),
+                );
+                const isOutflow = spendingAmount > 0;
+                const amount =
+                  spendingAmount === 0
+                    ? parseFloat(a.amount ?? "0") || 0
+                    : Math.abs(spendingAmount);
                 const badge = badgeByActivityId.get(a.id);
                 const needsReview = a.needsReview || (isOutflow && !badge);
 

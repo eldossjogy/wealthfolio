@@ -1,6 +1,6 @@
 import { AccountSelector } from "@/components/account-selector";
 import { SwipablePage, SwipablePageView } from "@/components/page";
-import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import { AccountPurpose, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import type { Account } from "@/lib/types";
 import IncomePage from "@/pages/income/income-page";
 import PerformancePage from "@/pages/performance/performance-page";
@@ -55,6 +55,7 @@ export default function PortfolioInsightsPage() {
         setSelectedAccount={setSelectedAccount}
         variant="dropdown"
         includePortfolio={true}
+        accountPurpose={AccountPurpose.HOLDINGS}
         iconOnly={true}
         icon={Icons.ListFilter}
       />

@@ -1,4 +1,9 @@
-import { ACTIVITY_SUBTYPES, ActivityType, ImportFormat } from "@/lib/constants";
+import {
+  ACTIVITY_SUBTYPES,
+  AccountType,
+  ActivityType,
+  ImportFormat,
+} from "@/lib/constants";
 import type { ActivityImport } from "@/lib/types";
 import { tryParseDate } from "@/lib/utils";
 import { isValid, parse, parseISO } from "date-fns";
@@ -23,6 +28,13 @@ export const ACTIVITY_SKIP = "_SKIP_";
 const IMPORTABLE_ACTIVITY_TYPES = new Set<string>(
   Object.values(ActivityType).filter((type) => type !== ActivityType.UNKNOWN),
 );
+const CREDIT_CARD_IMPORT_ACTIVITY_TYPES = new Set<string>([
+  ActivityType.WITHDRAWAL,
+  ActivityType.TRANSFER_IN,
+  ActivityType.CREDIT,
+  ActivityType.FEE,
+  ActivityType.INTEREST,
+]);
 
 // ---------------------------------------------------------------------------
 // Fallback-column helpers — support `string | string[]` in fieldMappings
@@ -164,7 +176,10 @@ export function mapSymbol(
 /**
  * Validate a draft activity and return errors/warnings
  */
-export function validateDraft(draft: Partial<DraftActivity>): {
+export function validateDraft(
+  draft: Partial<DraftActivity>,
+  accountTypeById?: Map<string, string>,
+): {
   status: DraftActivityStatus;
   errors: Record<string, string[]>;
   warnings: Record<string, string[]>;
@@ -193,6 +208,18 @@ export function validateDraft(draft: Partial<DraftActivity>): {
 
   if (!draft.accountId) {
     errors.accountId = ["Account is required"];
+  }
+
+  const accountType = draft.accountId ? accountTypeById?.get(draft.accountId) : undefined;
+  if (
+    accountType === AccountType.CREDIT_CARD &&
+    activityType &&
+    !CREDIT_CARD_IMPORT_ACTIVITY_TYPES.has(activityType)
+  ) {
+    errors.activityType = [
+      ...(errors.activityType ?? []),
+      "Credit card imports only support charges, payments, refunds, fees, and interest",
+    ];
   }
 
   // Trade activities (BUY/SELL)
@@ -359,6 +386,7 @@ export function createDraftActivities(
   },
   defaultAccountId: string,
   validAccountIds?: Set<string>,
+  accountTypeById?: Map<string, string>,
 ): DraftActivity[] {
   const { fieldMappings, activityMappings, symbolMappings, accountMappings, symbolMappingMeta } =
     mapping;
@@ -509,7 +537,7 @@ export function createDraftActivities(
     };
 
     // Validate and get status
-    const validation = validateDraft(draft);
+    const validation = validateDraft(draft, accountTypeById);
 
     return [
       {

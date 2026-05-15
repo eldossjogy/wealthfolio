@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use wealthfolio_core::accounts::account_types;
 use wealthfolio_core::activities::ActivityError;
 use wealthfolio_core::activities::{
     import_type, Activity, ActivityBulkIdentifierMapping, ActivityBulkMutationResult,
@@ -1283,6 +1284,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
             .filter(accounts::id.eq_any(account_ids))
             .filter(accounts::is_archived.eq(false))
+            .filter(accounts::account_type.ne(account_types::CREDIT_CARD))
             .filter(activities::activity_type.eq_any(CONTRIBUTION_TYPES))
             .filter(activities::activity_date.ge(start_utc.to_rfc3339()))
             .filter(activities::activity_date.lt(end_exclusive_utc.to_rfc3339()))
@@ -1394,6 +1396,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
                  AND date(a.activity_date) = q.day
              WHERE a.activity_type IN ('DIVIDEND', 'INTEREST', 'OTHER_INCOME')
              AND acc.is_archived = 0
+             AND acc.account_type != 'CREDIT_CARD'
              {account_filter}
              ORDER BY a.activity_date"
         );

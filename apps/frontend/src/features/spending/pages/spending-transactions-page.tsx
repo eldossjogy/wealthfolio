@@ -37,7 +37,11 @@ import {
 import { TransactionRow } from "../components/transaction-row";
 import { TransactionsBulkBar } from "../components/transactions-bulk-bar";
 import { TransactionsFilterBar, type FilterOption } from "../components/transactions-filter-bar";
-import { CASH_ACTIVITY_TYPES, CASH_ACTIVITY_TYPE_LABELS } from "../lib/constants";
+import {
+  CASH_ACTIVITY_TYPES,
+  CASH_ACTIVITY_TYPE_LABELS,
+  isSpendingAccountType,
+} from "../lib/constants";
 import {
   pluralizeActivity,
   stableArr,
@@ -113,11 +117,13 @@ export default function SpendingTransactionsPage() {
   // Selection
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
-  const { accounts = [] } = useAccounts({ filterActive: true });
+  const { accounts = [] } = useAccounts({ filterActive: false });
   const { accountIds: spendingAccountIds } = useSpendingSettings();
-  const cashAccounts = useMemo(() => {
+  const spendingAccounts = useMemo(() => {
     const includedIds = new Set(spendingAccountIds);
-    return accounts.filter((a: Account) => a.accountType === "CASH" && includedIds.has(a.id));
+    return accounts.filter(
+      (a: Account) => isSpendingAccountType(a.accountType) && includedIds.has(a.id),
+    );
   }, [accounts, spendingAccountIds]);
   const { data: events = [] } = useSpendingEvents();
   const { data: eventTypes = [] } = useEventTypes();
@@ -208,9 +214,9 @@ export default function SpendingTransactionsPage() {
   // Lookup maps
   const accountById = useMemo(() => {
     const m = new Map<string, Account>();
-    cashAccounts.forEach((a) => m.set(a.id, a));
+    spendingAccounts.forEach((a) => m.set(a.id, a));
     return m;
-  }, [cashAccounts]);
+  }, [spendingAccounts]);
 
   const eventsById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
   const eventTypeById = useMemo(() => new Map(eventTypes.map((t) => [t.id, t])), [eventTypes]);
@@ -414,8 +420,8 @@ export default function SpendingTransactionsPage() {
     [],
   );
   const accountOptions = useMemo<FilterOption[]>(
-    () => cashAccounts.map((a) => ({ value: a.id, label: a.name })),
-    [cashAccounts],
+    () => spendingAccounts.map((a) => ({ value: a.id, label: a.name })),
+    [spendingAccounts],
   );
   const categoryOptions = useMemo<FilterOption[]>(
     () => topLevelCategories.map((c) => ({ value: c.id, label: c.name })),

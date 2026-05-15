@@ -43,6 +43,7 @@ const MATCH_TYPE_LABELS: Record<string, string> = {
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   DEPOSIT: "Deposit",
   WITHDRAWAL: "Withdrawal",
+  CREDIT: "Credit / Refund",
   INTEREST: "Interest",
   DIVIDEND: "Dividend",
   FEE: "Fee",

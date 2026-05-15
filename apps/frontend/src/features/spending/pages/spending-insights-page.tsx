@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { useTaxonomy } from "@/hooks/use-taxonomies";
+import { useAccounts } from "@/hooks/use-accounts";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 
@@ -73,6 +74,7 @@ export default function SpendingInsightsPage() {
   const range = useMemo(() => periodToReportsRange(period), [period]);
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
   const { data: budget, isLoading: isBudgetLoading } = useBudget();
+  const { accounts = [] } = useAccounts({ filterActive: false });
 
   const currentRequest = useMemo(() => rangeToReportRequest(range), [range]);
   const { data: currentReport, isLoading: isCurrentLoading } = useSpendingReport(currentRequest);
@@ -127,6 +129,10 @@ export default function SpendingInsightsPage() {
 
   const useDailyForHistory = range.days <= DAILY_GRANULARITY_THRESHOLD_DAYS;
   const taxonomyCategories = taxonomy.data?.categories ?? EMPTY_TAXONOMY;
+  const accountTypeById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.accountType])),
+    [accounts],
+  );
 
   const periodToggle = (
     <AnimatedToggleGroup
@@ -184,6 +190,7 @@ export default function SpendingInsightsPage() {
         {stage === "when" && (
           <WhenWhereStage
             heatmapActivities={heatmapActivities}
+            accountTypeById={accountTypeById}
             events={events}
             taxonomyCategories={taxonomyCategories}
             currency={baseCurrency}

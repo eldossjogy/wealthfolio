@@ -6,8 +6,10 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use rust_decimal::Decimal;
 use wealthfolio_core::{
-    accounts::{AccountServiceTrait, TrackingMode},
+    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait, TrackingMode},
+    constants::PORTFOLIO_TOTAL_ACCOUNT_ID,
     portfolio::{
         income::IncomeSummary,
         performance::{PerformanceMetrics, SimplePerformanceMetrics},
@@ -26,14 +28,25 @@ async fn calculate_accounts_simple_performance(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AccountsSimplePerfBody>,
 ) -> ApiResult<Json<Vec<SimplePerformanceMetrics>>> {
-    let ids = if let Some(ids) = body.account_ids {
-        ids
+    let ids: Vec<String> = if let Some(ids) = body.account_ids {
+        state
+            .account_service
+            .get_accounts_by_ids(&ids)?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            })
+            .map(|account| account.id)
+            .collect()
     } else {
         state
             .account_service
             .get_active_accounts()?
             .into_iter()
-            .map(|a| a.id)
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            })
+            .map(|account| account.id)
             .collect()
     };
     if ids.is_empty() {
@@ -67,6 +80,33 @@ fn parse_tracking_mode(mode: Option<String>) -> Option<TrackingMode> {
     })
 }
 
+fn empty_performance_metrics(
+    id: &str,
+    currency: String,
+    start_date: Option<chrono::NaiveDate>,
+    end_date: Option<chrono::NaiveDate>,
+) -> PerformanceMetrics {
+    PerformanceMetrics {
+        id: id.to_string(),
+        returns: Vec::new(),
+        period_start_date: start_date,
+        period_end_date: end_date,
+        currency,
+        period_gain: Decimal::ZERO,
+        period_return: Some(Decimal::ZERO),
+        cumulative_twr: Some(Decimal::ZERO),
+        gain_loss_amount: None,
+        annualized_twr: Some(Decimal::ZERO),
+        simple_return: Decimal::ZERO,
+        annualized_simple_return: Decimal::ZERO,
+        cumulative_mwr: Some(Decimal::ZERO),
+        annualized_mwr: Some(Decimal::ZERO),
+        volatility: Decimal::ZERO,
+        max_drawdown: Decimal::ZERO,
+        is_holdings_mode: false,
+    }
+}
+
 async fn calculate_performance_history(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PerfBody>,
@@ -74,6 +114,17 @@ async fn calculate_performance_history(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let tracking_mode = parse_tracking_mode(body.tracking_mode);
+    if body.item_type == "account" && body.item_id != PORTFOLIO_TOTAL_ACCOUNT_ID {
+        let account = state.account_service.get_account(&body.item_id)?;
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            return Ok(Json(empty_performance_metrics(
+                &body.item_id,
+                account.currency,
+                start,
+                end,
+            )));
+        }
+    }
     let metrics = state
         .performance_service
         .calculate_performance_history(&body.item_type, &body.item_id, start, end, tracking_mode)
@@ -88,6 +139,17 @@ async fn calculate_performance_summary(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let tracking_mode = parse_tracking_mode(body.tracking_mode);
+    if body.item_type == "account" && body.item_id != PORTFOLIO_TOTAL_ACCOUNT_ID {
+        let account = state.account_service.get_account(&body.item_id)?;
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            return Ok(Json(empty_performance_metrics(
+                &body.item_id,
+                account.currency,
+                start,
+                end,
+            )));
+        }
+    }
     let metrics = state
         .performance_service
         .calculate_performance_summary(&body.item_type, &body.item_id, start, end, tracking_mode)

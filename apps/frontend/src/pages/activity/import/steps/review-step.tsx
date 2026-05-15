@@ -2,12 +2,12 @@ import { Badge } from "@wealthfolio/ui/components/ui/badge";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { ProgressIndicator } from "@wealthfolio/ui/components/ui/progress-indicator";
 import { FacetedFilter } from "@wealthfolio/ui";
+import { useAccounts } from "@/hooks/use-accounts";
 import { useCallback, useMemo, useState } from "react";
 import { ImportAlert } from "../components/import-alert";
 import { ImportReviewGrid } from "../components/import-review-grid";
 import {
   bulkForceImportDrafts,
-  bulkSetAccount,
   bulkSetCurrency,
   bulkSkipDrafts,
   bulkUnskipDrafts,
@@ -91,12 +91,17 @@ export function ReviewStep() {
   const { state, dispatch, validateDrafts } = useImportContext();
   const { parsedRows, mapping, draftActivities } = state;
   const isValidating = state.isValidating;
+  const { accounts = [] } = useAccounts({ filterActive: true, includeArchived: false });
 
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [accountFilter, setAccountFilter] = useState<Set<string>>(new Set());
   const [symbolFilter, setSymbolFilter] = useState<Set<string>>(new Set());
+  const accountTypeById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.accountType])),
+    [accounts],
+  );
 
   // Calculate filter stats (counts by status)
   const filterStats = useMemo(() => {
@@ -204,7 +209,7 @@ export function ReviewStep() {
         } as DraftActivity;
         const nextCandidate = buildImportAssetCandidateFromDraft(mergedDraft);
         // Re-validate the merged draft
-        const validation = validateDraft(mergedDraft);
+        const validation = validateDraft(mergedDraft, accountTypeById);
         // Don't override status if it was explicitly skipped.
         const shouldRevalidateStatus = currentDraft.status !== "skipped";
         dispatch(
@@ -232,7 +237,7 @@ export function ReviewStep() {
         dispatch(updateDraft(rowIndex, updates));
       }
     },
-    [dispatch, draftActivities],
+    [accountTypeById, dispatch, draftActivities],
   );
 
   const handleBulkSkip = useCallback(
@@ -260,9 +265,38 @@ export function ReviewStep() {
 
   const handleBulkSetAccount = useCallback(
     (rowIndexes: number[], newAccountId: string) => {
-      dispatch(bulkSetAccount(rowIndexes, newAccountId));
+      for (const rowIndex of rowIndexes) {
+        const currentDraft = draftActivities.find((draft) => draft.rowIndex === rowIndex);
+        if (!currentDraft) continue;
+
+        const mergedDraft = {
+          ...currentDraft,
+          accountId: newAccountId,
+        } as DraftActivity;
+        const nextCandidate = buildImportAssetCandidateFromDraft(mergedDraft);
+        const validation = validateDraft(mergedDraft, accountTypeById);
+        const shouldRevalidateStatus = currentDraft.status !== "skipped";
+
+        dispatch(
+          updateDraft(rowIndex, {
+            accountId: newAccountId,
+            assetId: undefined,
+            importAssetKey: undefined,
+            assetCandidateKey: nextCandidate?.key,
+            ...(shouldRevalidateStatus
+              ? {
+                  status: validation.status,
+                  errors: validation.errors,
+                  warnings: validation.warnings,
+                  duplicateOfId: undefined,
+                  duplicateOfLineNumber: undefined,
+                }
+              : {}),
+          }),
+        );
+      }
     },
-    [dispatch],
+    [accountTypeById, dispatch, draftActivities],
   );
 
   const handleBulkForceImport = useCallback(

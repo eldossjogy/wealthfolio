@@ -475,13 +475,17 @@ function buildShareSegments(
     e.amount += r.amount;
     byTop.set(topId, e);
   }
-  const sorted = Array.from(byTop.entries())
+  const positiveEntries = Array.from(byTop.entries()).filter(([, e]) => e.amount > 0);
+  const positiveTotal = positiveEntries.reduce((sum, [, e]) => sum + e.amount, 0);
+  if (positiveTotal <= 0) return [];
+
+  const sorted = positiveEntries
     .map(([id, e]) => ({
       id,
       name: e.name,
       color: e.color ?? "#9CA3AF",
       amount: e.amount,
-      share: (e.amount / total) * 100,
+      share: (e.amount / positiveTotal) * 100,
     }))
     .sort((a, b) => b.amount - a.amount);
   const top = sorted.slice(0, 6);
@@ -492,7 +496,7 @@ function buildShareSegments(
       name: "Other",
       color: "#9CA3AF",
       amount: rest,
-      share: (rest / total) * 100,
+      share: (rest / positiveTotal) * 100,
     });
   }
   return top;
@@ -803,6 +807,11 @@ function rollUpToTopLevel(
     const c = meta.get(r.categoryId);
     const topId = c?.parentId ?? r.categoryId;
     out.set(topId, (out.get(topId) ?? 0) + r.amount);
+  }
+  for (const [id, amount] of out) {
+    if (amount <= 0) {
+      out.delete(id);
+    }
   }
   return out;
 }

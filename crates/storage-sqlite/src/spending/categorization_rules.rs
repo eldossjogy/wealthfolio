@@ -14,7 +14,8 @@ use crate::errors::StorageError;
 use crate::schema::categorization_rules;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
+    CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule, RuleMatchType,
+    UpdateCategorizationRule,
 };
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
@@ -166,7 +167,11 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
             .map_err(|e| anyhow::anyhow!(e))
     }
 
-    async fn update(&self, id: &str, patch: UpdateCategorizationRule) -> Result<CategorizationRule> {
+    async fn update(
+        &self,
+        id: &str,
+        patch: UpdateCategorizationRule,
+    ) -> Result<CategorizationRule> {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {

@@ -132,6 +132,7 @@ export type DataSource = (typeof DataSource)[keyof typeof DataSource];
 export const AccountType = {
   SECURITIES: 'SECURITIES',
   CASH: 'CASH',
+  CREDIT_CARD: 'CREDIT_CARD',
   CRYPTOCURRENCY: 'CRYPTOCURRENCY',
 } as const;
 

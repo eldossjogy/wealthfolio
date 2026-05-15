@@ -1514,6 +1514,7 @@ mod tests {
             source_record_id: None,
             source_group_id: None,
             idempotency_key: None,
+            event_id: None,
         };
 
         let result = activity_service.create_activity(new_activity).await;
@@ -1567,6 +1568,7 @@ mod tests {
             source_record_id: None,
             source_group_id: None,
             idempotency_key: None,
+            event_id: None,
         };
 
         let result = activity_service.create_activity(new_activity).await;
@@ -1666,6 +1668,59 @@ mod tests {
         let updated = result.unwrap();
         assert_eq!(updated.amount, Some(dec!(2)));
         assert_eq!(updated.notes.as_deref(), Some("Updated note"));
+    }
+
+    #[tokio::test]
+    async fn credit_card_accounts_reject_investment_activity_types() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut account = create_test_account("card-1", "USD");
+        account.account_type = "CREDIT_CARD".to_string();
+        account_service.add_account(account);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let new_activity = NewActivity {
+            id: Some("activity-1".to_string()),
+            account_id: "card-1".to_string(),
+            asset: None,
+            activity_type: "BUY".to_string(),
+            subtype: None,
+            activity_date: "2024-01-15".to_string(),
+            quantity: Some(dec!(1)),
+            unit_price: Some(dec!(100)),
+            currency: "USD".to_string(),
+            fee: Some(dec!(0)),
+            amount: Some(dec!(100)),
+            status: None,
+            notes: None,
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            event_id: None,
+        };
+
+        let err = activity_service
+            .create_activity(new_activity)
+            .await
+            .expect_err("credit cards should reject investment activity types");
+
+        assert!(err
+            .to_string()
+            .contains("BUY activities are not supported for credit card accounts"));
     }
 
     /// Test: When creating an activity where the activity currency matches the account currency,

@@ -16,7 +16,12 @@ import { forwardRef, useState } from "react";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useSettings } from "@/hooks/use-settings";
-import { AccountType, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import {
+  AccountPurpose,
+  AccountType,
+  accountSupportsPurpose,
+  PORTFOLIO_ACCOUNT_ID,
+} from "@/lib/constants";
 import { AnimatePresence, motion } from "motion/react";
 
 // Custom type for UI purposes that extends the standard AccountType
@@ -26,6 +31,7 @@ type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_ID;
 const accountTypeIcons: Record<string, Icon> = {
   SECURITIES: Icons.Briefcase,
   CASH: Icons.DollarSign,
+  CREDIT_CARD: Icons.CreditCard,
   CRYPTOCURRENCY: Icons.Bitcoin,
   [PORTFOLIO_ACCOUNT_ID]: Icons.Wallet,
 };
@@ -43,6 +49,10 @@ interface AccountSelectorProps {
   icon?: Icon;
   /** Filter accounts by tracking mode(s). If provided, only accounts with matching tracking mode are shown. */
   trackingModes?: TrackingMode[];
+  /** Filter accounts by account type(s). If provided, only accounts with matching account type are shown. */
+  accountTypes?: readonly AccountType[];
+  /** Filter accounts by product purpose. Prefer this over accountTypes for app-owned account policy. */
+  accountPurpose?: AccountPurpose;
 }
 
 // Extended Account type for UI that can have the PORTFOLIO type
@@ -120,6 +130,8 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
       iconOnly = false,
       icon: CustomIcon,
       trackingModes,
+      accountTypes,
+      accountPurpose,
     },
     ref,
   ) => {
@@ -132,10 +144,19 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
 
     const isLoading = isLoadingAccounts || isLoadingSettings;
 
-    // Filter by tracking mode if specified, then add portfolio account if requested
-    const filteredAccounts = trackingModes
-      ? accounts.filter((acc) => trackingModes.includes(acc.trackingMode))
-      : accounts;
+    // Filter by tracking/account type if specified, then add portfolio account if requested
+    const filteredAccounts = accounts.filter((acc) => {
+      if (trackingModes && !trackingModes.includes(acc.trackingMode)) {
+        return false;
+      }
+      if (accountTypes && !accountTypes.includes(acc.accountType)) {
+        return false;
+      }
+      if (accountPurpose && !accountSupportsPurpose(acc, accountPurpose)) {
+        return false;
+      }
+      return true;
+    });
     const displayAccounts = [...filteredAccounts];
 
     if (includePortfolio) {

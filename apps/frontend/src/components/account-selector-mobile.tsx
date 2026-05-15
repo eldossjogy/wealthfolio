@@ -11,7 +11,12 @@ import {
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useSettings } from "@/hooks/use-settings";
-import { AccountType, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
+import {
+  AccountPurpose,
+  AccountType,
+  accountSupportsPurpose,
+  PORTFOLIO_ACCOUNT_ID,
+} from "@/lib/constants";
 import { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Icons, type Icon } from "@wealthfolio/ui";
@@ -24,6 +29,7 @@ type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_ID;
 const accountTypeIcons: Record<string, Icon> = {
   SECURITIES: Icons.Briefcase,
   CASH: Icons.DollarSign,
+  CREDIT_CARD: Icons.CreditCard,
   CRYPTOCURRENCY: Icons.Bitcoin,
   [PORTFOLIO_ACCOUNT_ID]: Icons.Wallet,
 };
@@ -31,6 +37,8 @@ const accountTypeIcons: Record<string, Icon> = {
 interface AccountSelectorMobileProps {
   setSelectedAccount: (account: Account) => void;
   includePortfolio?: boolean;
+  accountTypes?: readonly AccountType[];
+  accountPurpose?: AccountPurpose;
   className?: string;
   iconOnly?: boolean;
   open?: boolean;
@@ -65,6 +73,8 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
     {
       setSelectedAccount,
       includePortfolio = false,
+      accountTypes,
+      accountPurpose,
       className,
       iconOnly = false,
       open: controlledOpen,
@@ -84,10 +94,20 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
 
     const isLoading = isLoadingAccounts || isLoadingSettings;
 
+    const filteredAccounts = (accounts || []).filter((account) => {
+      if (accountTypes && !accountTypes.includes(account.accountType)) {
+        return false;
+      }
+      if (accountPurpose && !accountSupportsPurpose(account, accountPurpose)) {
+        return false;
+      }
+      return true;
+    });
+
     // Add portfolio account if requested
     const allAccounts: UIAccount[] = includePortfolio
-      ? [createPortfolioAccount(settings?.baseCurrency || "USD"), ...(accounts || [])]
-      : accounts || [];
+      ? [createPortfolioAccount(settings?.baseCurrency || "USD"), ...(filteredAccounts || [])]
+      : filteredAccounts;
 
     // Group accounts by type
     const groupedAccounts = allAccounts.reduce(
@@ -115,6 +135,8 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
           return "Securities Accounts";
         case "CASH":
           return "Cash Accounts";
+        case "CREDIT_CARD":
+          return "Credit Card Accounts";
         case "CRYPTOCURRENCY":
           return "Cryptocurrency Accounts";
         default:

@@ -18,10 +18,9 @@ import { cn, formatAmount, formatDate } from "@/lib/utils";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
 import {
-  CASH_ACTIVITY_TYPE_LABELS,
-  INCOME_TYPES,
-  OUTFLOW_TYPES,
-  type CashActivityType,
+  getCashActivityLabel,
+  isCashActivityIncome,
+  isCashActivityOutflow,
 } from "../lib/constants";
 import type { TransactionRowVM } from "../lib/transactions-helpers";
 
@@ -55,7 +54,7 @@ function TransactionRowImpl({
   onDelete,
 }: TransactionRowProps) {
   const a = row.activity;
-  const isOutflow = OUTFLOW_TYPES.includes(a.activityType as CashActivityType);
+  const isOutflow = isCashActivityOutflow(a.activityType, account?.accountType);
   const sign = isOutflow ? "-" : "+";
   const amount = parseFloat(a.amount ?? "0");
   const safeAmount = Number.isFinite(amount) ? amount : 0;
@@ -79,7 +78,7 @@ function TransactionRowImpl({
       <TableCell className="whitespace-nowrap text-sm">{formatDate(a.activityDate)}</TableCell>
       <TableCell>
         <Badge variant="outline" className="text-xs">
-          {CASH_ACTIVITY_TYPE_LABELS[a.activityType as CashActivityType] ?? a.activityType}
+          {getCashActivityLabel(a.activityType, account?.accountType)}
         </Badge>
       </TableCell>
       <TableCell className="text-sm">
@@ -100,7 +99,11 @@ function TransactionRowImpl({
       </TableCell>
       <TableCell>
         <QuickCategorizePopover
-          scope={INCOME_TYPES.includes(a.activityType as CashActivityType) ? "income" : "expense"}
+          scope={
+            isCashActivityIncome(a.activityType, account?.accountType, a.subtype)
+              ? "income"
+              : "expense"
+          }
           selectedCategoryId={row.category?.id ?? null}
           onSelect={(taxonomyId, categoryId) => onAssignCategory(a.id, taxonomyId, categoryId)}
           onClear={() => row.category && onClearCategory(a.id, row.category.taxonomyId)}
