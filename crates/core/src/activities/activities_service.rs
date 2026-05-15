@@ -8,8 +8,8 @@ use crate::accounts::{account_types, Account, AccountServiceTrait};
 use crate::activities::activities_constants::{
     classify_import_activity, is_cash_symbol, is_garbage_symbol, requires_symbol,
     ImportSymbolDisposition, ACTIVITY_TYPE_CREDIT, ACTIVITY_TYPE_FEE, ACTIVITY_TYPE_INTEREST,
-    ACTIVITY_TYPE_SPLIT, ACTIVITY_TYPE_TRANSFER_IN,
-    ACTIVITY_TYPE_TRANSFER_OUT, ACTIVITY_TYPE_WITHDRAWAL, PRICE_BEARING_ACTIVITY_TYPES,
+    ACTIVITY_TYPE_SPLIT, ACTIVITY_TYPE_TRANSFER_IN, ACTIVITY_TYPE_TRANSFER_OUT,
+    ACTIVITY_TYPE_WITHDRAWAL, PRICE_BEARING_ACTIVITY_TYPES,
 };
 use crate::activities::activities_errors::ActivityError;
 use crate::activities::activities_model::*;

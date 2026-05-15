@@ -2686,6 +2686,7 @@ mod tests {
                 source_record_id: None,
                 source_group_id: None,
                 idempotency_key: None,
+                event_id: None,
             })
             .await
             .expect("lowercase subtype should save");
@@ -2743,6 +2744,7 @@ mod tests {
                 source_record_id: None,
                 source_group_id: None,
                 idempotency_key: None,
+                event_id: None,
             })
             .await
             .expect("negative provider-style signs should normalize before validation");
@@ -2797,6 +2799,7 @@ mod tests {
                     source_record_id: Some("option-buy".to_string()),
                     source_group_id: None,
                     idempotency_key: None,
+                    event_id: None,
                 }],
                 &account,
             )
@@ -2852,6 +2855,7 @@ mod tests {
                     source_record_id: Some("staking-cash-only".to_string()),
                     source_group_id: None,
                     idempotency_key: None,
+                    event_id: None,
                 }],
                 &account,
             )
@@ -2912,6 +2916,7 @@ mod tests {
                     source_record_id: Some("staking-invalid-symbol".to_string()),
                     source_group_id: None,
                     idempotency_key: None,
+                    event_id: None,
                 }],
                 &account,
             )
@@ -2968,6 +2973,7 @@ mod tests {
                     source_record_id: Some("interest-drip-label".to_string()),
                     source_group_id: None,
                     idempotency_key: None,
+                    event_id: None,
                 }],
                 &account,
             )
@@ -3022,6 +3028,7 @@ mod tests {
                     source_record_id: Some("credit-staking-label".to_string()),
                     source_group_id: None,
                     idempotency_key: None,
+                    event_id: None,
                 }],
                 &account,
             )
@@ -6467,6 +6474,7 @@ mod tests {
                 needs_review: false,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                event_id: None,
             });
 
         let quote_service = Arc::new(MockQuoteService);
