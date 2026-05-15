@@ -52,7 +52,8 @@ sudo chown -R 1000:1000 /path/to/your/data
 
 - [**Docker / Docker Compose**](https://wealthfolio.app/docs/guide/self-hosting):
   the canonical path. Full walkthrough on the website.
-- [**Unraid**](./unraid/): install via Community Apps. The CA template lives in
-  this repo at [`unraid/template.xml`](./unraid/template.xml).
+- [**Unraid**](./unraid/): install via Community Apps. The CA template is
+  maintained at
+  [`wealthfolio/wealthfolio-unraid`](https://github.com/wealthfolio/wealthfolio-unraid).
 - [**Proxmox VE**](./proxmox/): LXC via community-scripts, Docker-in-LXC, or
   Docker VM.
