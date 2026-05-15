@@ -6,8 +6,9 @@ your own hardware. Full self-hosting guides live on the website:
 📘
 **[wealthfolio.app/docs/guide/self-hosting](https://wealthfolio.app/docs/guide/self-hosting)**
 
-This directory only holds in-repo artifacts (the Unraid CA template) and short
-pointers per platform.
+This directory only holds short pointers per platform — the per-platform
+artifacts (such as the Unraid Community Apps template) live in their own
+repositories.
 
 ## Image
 

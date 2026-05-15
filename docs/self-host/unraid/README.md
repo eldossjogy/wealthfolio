@@ -3,10 +3,11 @@
 Wealthfolio runs as a standard Docker container managed through Unraid's Docker
 tab.
 
-The Community Apps (CA) template is maintained in a dedicated repository so
-the CA scanner picks it up cleanly and doesn't see two competing copies:
+The Community Apps (CA) template is maintained in a dedicated repository so the
+CA scanner picks it up cleanly and doesn't see two competing copies:
 
-👉 **[github.com/wealthfolio/wealthfolio-unraid](https://github.com/wealthfolio/wealthfolio-unraid)**
+👉
+**[github.com/wealthfolio/wealthfolio-unraid](https://github.com/wealthfolio/wealthfolio-unraid)**
 
 📘 **Full setup guide:**
 [wealthfolio.app/docs/guide/self-hosting](https://wealthfolio.app/docs/guide/self-hosting)
