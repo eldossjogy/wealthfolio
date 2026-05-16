@@ -2,6 +2,16 @@ import { useState } from "react";
 import { useAccounts } from "@/hooks/use-accounts";
 import { usePortfolioMutations, usePortfolios } from "@/hooks/use-portfolios";
 import type { NewPortfolio, PortfolioWithAccounts } from "@/lib/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@wealthfolio/ui/components/ui/alert-dialog";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Checkbox } from "@wealthfolio/ui/components/ui/checkbox";
 import {
@@ -24,6 +34,7 @@ export default function PortfoliosPage() {
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PortfolioWithAccounts | null>(null);
+  const [deleting, setDeleting] = useState<PortfolioWithAccounts | null>(null);
 
   const openCreate = () => {
     setEditing(null);
@@ -35,8 +46,9 @@ export default function PortfoliosPage() {
     setOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    deleteMutation.mutate(id);
+  const handleDelete = () => {
+    if (!deleting) return;
+    deleteMutation.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
   };
 
   return (
@@ -70,7 +82,7 @@ export default function PortfoliosPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleDelete(p.id)}
+                  onClick={() => setDeleting(p)}
                   disabled={deleteMutation.isPending}
                 >
                   <Icons.Trash className="h-4 w-4" />
@@ -97,6 +109,29 @@ export default function PortfoliosPage() {
         }}
         isSaving={createMutation.isPending || updateMutation.isPending}
       />
+
+      <AlertDialog open={deleting !== null} onOpenChange={(value) => !value && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete portfolio?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes {deleting ? `"${deleting.name}"` : "this portfolio"} and its account
+              memberships. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMutation.isPending}
+              onClick={handleDelete}
+            >
+              <Icons.Trash className="mr-2 h-4 w-4" />
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
