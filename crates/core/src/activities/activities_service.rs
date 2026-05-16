@@ -4643,6 +4643,7 @@ impl ActivityService {
 
             if mode.is_sync() && sync_review_indices.contains(&idx) {
                 activity.needs_review = Some(true);
+                activity.status = Some(ActivityStatus::Draft);
             }
 
             // Securities transfers derive monetary value from quantity × unit_price;

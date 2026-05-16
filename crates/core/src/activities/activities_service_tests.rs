@@ -1723,6 +1723,66 @@ mod tests {
             .contains("BUY activities are not supported for credit card accounts"));
     }
 
+    #[tokio::test]
+    async fn sync_prepare_marks_unsupported_credit_card_activity_as_review_draft() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut account = create_test_account("card-1", "USD");
+        account.account_type = "CREDIT_CARD".to_string();
+        account_service.add_account(account.clone());
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .prepare_activities_for_sync(
+                vec![NewActivity {
+                    id: Some("card-buy".to_string()),
+                    account_id: "card-1".to_string(),
+                    asset: Some(AssetResolutionInput {
+                        id: Some("AAPL".to_string()),
+                        ..Default::default()
+                    }),
+                    activity_type: "BUY".to_string(),
+                    subtype: None,
+                    activity_date: "2024-01-15".to_string(),
+                    quantity: Some(dec!(1)),
+                    unit_price: Some(dec!(100)),
+                    currency: "USD".to_string(),
+                    fee: Some(dec!(0)),
+                    amount: Some(dec!(100)),
+                    status: Some(ActivityStatus::Posted),
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                    needs_review: Some(false),
+                    source_system: Some("SNAPTRADE".to_string()),
+                    source_record_id: Some("card-buy".to_string()),
+                    source_group_id: None,
+                    idempotency_key: None,
+                    event_id: None,
+                }],
+                &account,
+            )
+            .await
+            .expect("sync preparation should preserve unsupported card rows for review");
+
+        assert!(result.errors.is_empty());
+        assert_eq!(result.prepared.len(), 1);
+        let prepared = &result.prepared[0].activity;
+        assert_eq!(prepared.needs_review, Some(true));
+        assert_eq!(prepared.status, Some(ActivityStatus::Draft));
+    }
+
     /// Test: When creating an activity where the activity currency matches the account currency,
     /// but the asset has a different currency, we should still register the FX pair for the asset currency.
     ///
@@ -2870,6 +2930,7 @@ mod tests {
         assert_eq!(prepared.amount, Some(dec!(25)));
         assert_eq!(prepared.quantity, None);
         assert_eq!(prepared.needs_review, Some(true));
+        assert_eq!(prepared.status, Some(ActivityStatus::Draft));
     }
 
     #[tokio::test]
@@ -2930,6 +2991,7 @@ mod tests {
         assert_eq!(prepared.activity.subtype, None);
         assert_eq!(prepared.activity.amount, Some(dec!(25.00)));
         assert_eq!(prepared.activity.needs_review, Some(true));
+        assert_eq!(prepared.activity.status, Some(ActivityStatus::Draft));
     }
 
     #[tokio::test]
