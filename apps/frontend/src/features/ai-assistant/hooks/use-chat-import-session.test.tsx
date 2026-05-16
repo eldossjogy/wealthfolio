@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AccountType, ActivityType } from "@/lib/constants";
 import type { ImportCsvMappingOutput } from "../types";
 import { useChatImportSession } from "./use-chat-import-session";
 
@@ -200,5 +201,75 @@ describe("useChatImportSession", () => {
     expect(result.current.accountId).toBe("");
     expect(result.current.drafts[0]?.accountId).toBe("acct-2");
     expect(result.current.canConfirm).toBe(true);
+  });
+
+  it("rebuilds ambiguous CSV drafts with the transaction profile after selecting a card account", async () => {
+    adapterMocks.parseCsv.mockResolvedValue({
+      headers: ["Date", "Merchant", "Amount", "Type"],
+      rows: [["2024-01-15", "Starbucks", "12.50", "Purchase"]],
+      detectedConfig: {
+        defaultCurrency: "USD",
+        dateFormat: "auto",
+        decimalSeparator: ".",
+        thousandsSeparator: ",",
+      },
+      errors: [],
+      rowCount: 1,
+    });
+
+    const ambiguousCardStatement: ImportCsvMappingOutput = {
+      ...mapping,
+      csvContent: "Date,Merchant,Amount,Type\n2024-01-15,Starbucks,12.50,Purchase",
+      accountId: null,
+      appliedMapping: {
+        ...mapping.appliedMapping,
+        accountId: "",
+        fieldMappings: {
+          date: "Date",
+          symbol: "Merchant",
+          amount: "Amount",
+          activityType: "Type",
+        },
+        activityMappings: {
+          [ActivityType.WITHDRAWAL]: ["Purchase"],
+        },
+      },
+      availableAccounts: [
+        {
+          id: "brokerage-1",
+          name: "Brokerage",
+          currency: "USD",
+          accountType: AccountType.SECURITIES,
+        },
+        {
+          id: "card-1",
+          name: "Visa",
+          currency: "USD",
+          accountType: AccountType.CREDIT_CARD,
+        },
+      ],
+    };
+
+    const { result } = renderHook(() =>
+      useChatImportSession({ mapping: ambiguousCardStatement }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.importProfile.kind).toBe("investment");
+
+    act(() => {
+      result.current.setAccountId("card-1");
+    });
+
+    await waitFor(() => expect(result.current.drafts[0]?.comment).toBe("Starbucks"));
+
+    expect(result.current.importProfile.kind).toBe("transaction");
+    expect(result.current.drafts[0]).toMatchObject({
+      accountId: "card-1",
+      activityType: ActivityType.WITHDRAWAL,
+      symbol: undefined,
+      comment: "Starbucks",
+      amount: "12.50",
+    });
   });
 });

@@ -564,6 +564,7 @@ export interface ImportCsvAccountOption {
   id: string;
   name: string;
   currency: string;
+  accountType?: import("@/lib/types").AccountType | string;
 }
 
 /**

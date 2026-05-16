@@ -150,6 +150,8 @@ pub struct AccountOption {
     pub id: String,
     pub name: String,
     pub currency: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_type: Option<String>,
 }
 
 /// Resolved asset information.
@@ -292,6 +294,7 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
                 id: a.id.clone(),
                 name: a.name.clone(),
                 currency: a.currency.clone(),
+                account_type: Some(a.account_type.clone()),
             })
             .collect();
 
