@@ -112,6 +112,7 @@ export interface ImportResult {
 
 export interface ImportState {
   step: ImportStep;
+  stepOrder: ImportStep[];
   file: File | null;
   parseConfig: ParseConfig;
   headers: string[];
@@ -154,6 +155,7 @@ export const defaultParseConfig: ParseConfig = {
 
 const INITIAL_STATE: ImportState = {
   step: "upload",
+  stepOrder: ["upload", "mapping", "assets", "review", "confirm", "result"],
   file: null,
   parseConfig: defaultParseConfig,
   headers: [],
@@ -211,6 +213,7 @@ export type ImportAction =
   | { type: "SET_IMPORT_RESULT"; payload: ImportResult }
   | { type: "SET_HOLDINGS_CHECK_PASSED"; payload: boolean }
   | { type: "SET_STEP"; payload: ImportStep }
+  | { type: "SET_STEP_ORDER"; payload: ImportStep[] }
   | { type: "NEXT_STEP" }
   | { type: "PREV_STEP" }
   | { type: "SET_IS_VALIDATING"; payload: boolean }
@@ -226,20 +229,31 @@ export type ImportAction =
 
 const STEP_ORDER: ImportStep[] = ["upload", "mapping", "assets", "review", "confirm", "result"];
 
-function getNextStep(current: ImportStep): ImportStep {
-  const idx = STEP_ORDER.indexOf(current);
-  if (idx < STEP_ORDER.length - 1) {
-    return STEP_ORDER[idx + 1];
+function getNextStep(current: ImportStep, stepOrder: ImportStep[]): ImportStep {
+  const idx = stepOrder.indexOf(current);
+  if (idx >= 0 && idx < stepOrder.length - 1) {
+    return stepOrder[idx + 1];
   }
   return current;
 }
 
-function getPrevStep(current: ImportStep): ImportStep {
-  const idx = STEP_ORDER.indexOf(current);
+function getPrevStep(current: ImportStep, stepOrder: ImportStep[]): ImportStep {
+  const idx = stepOrder.indexOf(current);
   if (idx > 0) {
-    return STEP_ORDER[idx - 1];
+    return stepOrder[idx - 1];
   }
   return current;
+}
+
+function coerceStepForOrder(current: ImportStep, nextOrder: ImportStep[]): ImportStep {
+  if (nextOrder.includes(current)) return current;
+  if (current === "assets" && nextOrder.includes("review")) return "review";
+  const currentDefaultIndex = STEP_ORDER.indexOf(current);
+  return (
+    nextOrder.find((step) => STEP_ORDER.indexOf(step) >= currentDefaultIndex) ??
+    nextOrder[nextOrder.length - 1] ??
+    current
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -398,14 +412,20 @@ function importReducer(state: ImportState, action: ImportAction): ImportState {
     case "SET_STEP":
       return { ...state, step: action.payload };
 
+    case "SET_STEP_ORDER":
+      return {
+        ...state,
+        stepOrder: action.payload,
+        step: coerceStepForOrder(state.step, action.payload),
+      };
+
     case "NEXT_STEP":
-      return { ...state, step: getNextStep(state.step) };
+      return { ...state, step: getNextStep(state.step, state.stepOrder) };
 
     case "PREV_STEP": {
-      const prevStepValue = getPrevStep(state.step);
+      const prevStepValue = getPrevStep(state.step, state.stepOrder);
       const clearDrafts =
-        (state.step === "assets" && prevStepValue === "mapping") ||
-        (state.step === "review" && prevStepValue === "assets");
+        prevStepValue === "mapping" && (state.step === "assets" || state.step === "review");
       return {
         ...state,
         step: prevStepValue,
@@ -457,7 +477,10 @@ export interface ValidationResult {
 interface ImportContextValue {
   state: ImportState;
   dispatch: Dispatch<ImportAction>;
-  validateDrafts: (drafts: DraftActivity[]) => Promise<ValidationResult>;
+  validateDrafts: (
+    drafts: DraftActivity[],
+    options?: { revision?: number },
+  ) => Promise<ValidationResult>;
   previewAssets: (drafts: DraftActivity[]) => Promise<void>;
 }
 
@@ -519,9 +542,12 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
   draftRevisionRef.current = state.draftRevision;
 
   const validateDrafts = useCallback(
-    async (drafts: DraftActivity[]): Promise<ValidationResult> => {
+    async (
+      drafts: DraftActivity[],
+      options?: { revision?: number },
+    ): Promise<ValidationResult> => {
       const run = ++validationRunRef.current;
-      const requestedRevision = draftRevisionRef.current;
+      const requestedRevision = options?.revision ?? draftRevisionRef.current;
       dispatch({ type: "SET_IS_VALIDATING", payload: true });
       dispatch({ type: "SET_VALIDATION_ERROR", payload: null });
       try {

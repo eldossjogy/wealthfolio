@@ -18,6 +18,11 @@ import {
   resolveCashActivityFields,
 } from "./review-draft-utils";
 import type { DraftActivity, DraftActivityStatus } from "../context";
+import {
+  getAllowedActivityTypesForAccountType,
+  isTransactionImportProfile,
+  type ActivityImportProfile,
+} from "./activity-import-profile";
 
 // ---------------------------------------------------------------------------
 // Skip sentinel — used in activity mappings to exclude rows from import
@@ -28,13 +33,6 @@ export const ACTIVITY_SKIP = "_SKIP_";
 const IMPORTABLE_ACTIVITY_TYPES = new Set<string>(
   Object.values(ActivityType).filter((type) => type !== ActivityType.UNKNOWN),
 );
-const CREDIT_CARD_IMPORT_ACTIVITY_TYPES = new Set<string>([
-  ActivityType.WITHDRAWAL,
-  ActivityType.TRANSFER_IN,
-  ActivityType.CREDIT,
-  ActivityType.FEE,
-  ActivityType.INTEREST,
-]);
 
 // ---------------------------------------------------------------------------
 // Fallback-column helpers — support `string | string[]` in fieldMappings
@@ -211,10 +209,11 @@ export function validateDraft(
   }
 
   const accountType = draft.accountId ? accountTypeById?.get(draft.accountId) : undefined;
+  const allowedActivityTypes = new Set(getAllowedActivityTypesForAccountType(accountType));
   if (
     accountType === AccountType.CREDIT_CARD &&
     activityType &&
-    !CREDIT_CARD_IMPORT_ACTIVITY_TYPES.has(activityType)
+    !allowedActivityTypes.has(activityType as ActivityType)
   ) {
     errors.activityType = [
       ...(errors.activityType ?? []),
@@ -387,6 +386,7 @@ export function createDraftActivities(
   defaultAccountId: string,
   validAccountIds?: Set<string>,
   accountTypeById?: Map<string, string>,
+  options?: { importProfile?: ActivityImportProfile },
 ): DraftActivity[] {
   const { fieldMappings, activityMappings, symbolMappings, accountMappings, symbolMappingMeta } =
     mapping;
@@ -427,10 +427,16 @@ export function createDraftActivities(
     // Skip rows mapped to SKIP
     const preCheckType = mapActivityType(rawType, activityMappings);
     if (preCheckType === ACTIVITY_SKIP) return [];
-    const rawSymbol = getColumnValue(row, ImportFormat.SYMBOL);
-    const rawIsin = getColumnValue(row, ImportFormat.ISIN);
-    const rawQuantity = getColumnValue(row, ImportFormat.QUANTITY);
-    const rawUnitPrice = getColumnValue(row, ImportFormat.UNIT_PRICE);
+    const ignoresAssetFields =
+      options?.importProfile && isTransactionImportProfile(options.importProfile);
+    const rawSymbol = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.SYMBOL);
+    const rawIsin = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.ISIN);
+    const rawQuantity = ignoresAssetFields
+      ? undefined
+      : getColumnValue(row, ImportFormat.QUANTITY);
+    const rawUnitPrice = ignoresAssetFields
+      ? undefined
+      : getColumnValue(row, ImportFormat.UNIT_PRICE);
     const rawAmount = getColumnValue(row, ImportFormat.AMOUNT);
     const rawCurrency = getColumnValue(row, ImportFormat.CURRENCY);
     const rawFee = getColumnValue(row, ImportFormat.FEE);
@@ -438,7 +444,9 @@ export function createDraftActivities(
     const rawAccount = getColumnValue(row, ImportFormat.ACCOUNT);
     const rawFxRate = getColumnValue(row, ImportFormat.FX_RATE);
     const rawSubtype = getColumnValue(row, ImportFormat.SUBTYPE);
-    const rawInstrumentType = getColumnValue(row, ImportFormat.INSTRUMENT_TYPE);
+    const rawInstrumentType = ignoresAssetFields
+      ? undefined
+      : getColumnValue(row, ImportFormat.INSTRUMENT_TYPE);
 
     // Parse and normalize values
     const activityDate = parseDateValue(rawDate, dateFormat);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ACTIVITY_SUBTYPES, AccountType, ActivityType, ImportFormat } from "@/lib/constants";
 import { createDraftActivities, draftToActivityImport } from "./draft-utils";
+import { getActivityImportProfileForAccountType } from "./activity-import-profile";
 
 const headers = [
   ImportFormat.DATE,
@@ -413,5 +414,45 @@ describe("createDraftActivities explicit activity mapping", () => {
 
     expect(draft.activityType).toBe(ActivityType.WITHDRAWAL);
     expect(draft.errors.activityType).toBeUndefined();
+  });
+
+  it("ignores stale investment columns for transaction import profiles", () => {
+    const [draft] = createDraftActivities(
+      [["2024-03-15", "PURCHASE", "Starbucks", "1", "1000.00", "USD"]],
+      [
+        ImportFormat.DATE,
+        ImportFormat.ACTIVITY_TYPE,
+        ImportFormat.SYMBOL,
+        ImportFormat.QUANTITY,
+        ImportFormat.AMOUNT,
+        ImportFormat.CURRENCY,
+      ],
+      {
+        ...baseMapping,
+        fieldMappings: {
+          [ImportFormat.DATE]: ImportFormat.DATE,
+          [ImportFormat.ACTIVITY_TYPE]: ImportFormat.ACTIVITY_TYPE,
+          [ImportFormat.SYMBOL]: ImportFormat.SYMBOL,
+          [ImportFormat.QUANTITY]: ImportFormat.QUANTITY,
+          [ImportFormat.AMOUNT]: ImportFormat.AMOUNT,
+          [ImportFormat.CURRENCY]: ImportFormat.CURRENCY,
+        },
+        activityMappings: {
+          [ActivityType.WITHDRAWAL]: ["PURCHASE"],
+        },
+      },
+      parseConfig,
+      "card-1",
+      new Set(["card-1"]),
+      new Map([["card-1", AccountType.CREDIT_CARD]]),
+      { importProfile: getActivityImportProfileForAccountType(AccountType.CREDIT_CARD) },
+    );
+
+    expect(draft.activityType).toBe(ActivityType.WITHDRAWAL);
+    expect(draft.symbol).toBeUndefined();
+    expect(draft.quantity).toBeUndefined();
+    expect(draft.assetCandidateKey).toBeUndefined();
+    expect(draft.amount).toBe("1000.00");
+    expect(draft.status).toBe("valid");
   });
 });

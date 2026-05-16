@@ -17,6 +17,7 @@ import {
 } from "../context";
 import { buildImportAssetCandidateFromDraft } from "../utils/asset-review-utils";
 import { validateDraft } from "../utils/draft-utils";
+import { getActivityImportProfileForResolvedAccountIds } from "../utils/activity-import-profile";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Filter Helpers
@@ -102,6 +103,16 @@ export function ReviewStep() {
     () => new Map(accounts.map((account) => [account.id, account.accountType])),
     [accounts],
   );
+  const importProfile = useMemo(
+    () =>
+      getActivityImportProfileForResolvedAccountIds(
+        accounts,
+        state.accountId
+          ? [state.accountId]
+          : draftActivities.map((draft) => draft.accountId).filter(Boolean),
+      ),
+    [accounts, draftActivities, state.accountId],
+  );
 
   // Calculate filter stats (counts by status)
   const filterStats = useMemo(() => {
@@ -153,8 +164,11 @@ export function ReviewStep() {
 
   // Apply all filters on top of drafts passed to the grid
   const { facetFilteredDrafts, nonSelectableRowIndexes } = useMemo(() => {
+    const effectiveSymbolFilter = importProfile.assetResolutionEnabled
+      ? symbolFilter
+      : new Set<string>();
     const draftsMatchingFacetFilters = draftActivities.filter((draft) =>
-      matchesFacetFilters(draft, typeFilter, accountFilter, symbolFilter),
+      matchesFacetFilters(draft, typeFilter, accountFilter, effectiveSymbolFilter),
     );
 
     if (statusFilter.size === 0) {
@@ -175,10 +189,20 @@ export function ReviewStep() {
       ),
       nonSelectableRowIndexes: [],
     };
-  }, [draftActivities, typeFilter, accountFilter, symbolFilter, statusFilter]);
+  }, [
+    draftActivities,
+    typeFilter,
+    accountFilter,
+    symbolFilter,
+    statusFilter,
+    importProfile.assetResolutionEnabled,
+  ]);
 
   const hasActiveFacetFilters =
-    typeFilter.size > 0 || accountFilter.size > 0 || symbolFilter.size > 0 || statusFilter.size > 0;
+    typeFilter.size > 0 ||
+    accountFilter.size > 0 ||
+    (importProfile.assetResolutionEnabled && symbolFilter.size > 0) ||
+    statusFilter.size > 0;
 
   const clearAllFilters = useCallback(() => {
     setTypeFilter(new Set());
@@ -450,12 +474,14 @@ export function ReviewStep() {
             selectedValues={typeFilter}
             onFilterChange={setTypeFilter}
           />
-          <FacetedFilter
-            title="Symbol"
-            options={facetedOptions.symbols}
-            selectedValues={symbolFilter}
-            onFilterChange={setSymbolFilter}
-          />
+          {importProfile.assetResolutionEnabled && (
+            <FacetedFilter
+              title="Symbol"
+              options={facetedOptions.symbols}
+              selectedValues={symbolFilter}
+              onFilterChange={setSymbolFilter}
+            />
+          )}
           <FacetedFilter
             title="Account"
             options={facetedOptions.accounts}
@@ -495,6 +521,7 @@ export function ReviewStep() {
           }
           onBulkSetCurrency={handleBulkSetCurrency}
           onBulkSetAccount={handleBulkSetAccount}
+          importProfile={importProfile}
         />
       </div>
     </div>
