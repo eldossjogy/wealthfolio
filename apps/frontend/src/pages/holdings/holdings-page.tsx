@@ -122,7 +122,7 @@ export const HoldingsPage = () => {
   );
   const updatePortfolioMutation = useUpdatePortfolioMutation();
 
-  const handleAccountSelect = (account: Account) => {
+  const handleAccountSelect = useCallback((account: Account) => {
     setSelectedAccount(account);
     setIsEditMode(false);
     // Sync AccountFilter when mobile filter sheet selects an account.
@@ -131,7 +131,20 @@ export const HoldingsPage = () => {
     } else {
       setAccountFilter({ type: "account", accountId: account.id });
     }
-  };
+  }, []);
+
+  const handleAccountFilterChange = useCallback(
+    (filter: AccountFilter) => {
+      setAccountFilter(filter);
+      setIsEditMode(false);
+      setSelectedAccount(
+        filter.type === "account"
+          ? (accounts.find((account) => account.id === filter.accountId) ?? null)
+          : null,
+      );
+    },
+    [accounts],
+  );
 
   // Check if the selected account supports manual holdings editing
   const canEditHoldings = useMemo(() => {
@@ -581,7 +594,7 @@ export const HoldingsPage = () => {
             <Icons.ListFilter className="h-4 w-4" />
           </Button>
         ) : (
-          <AccountFilterSelector value={accountFilter} onChange={setAccountFilter} />
+          <AccountFilterSelector value={accountFilter} onChange={handleAccountFilterChange} />
         )}
         {/* Show Update button for HOLDINGS-mode manual accounts (only on investments tab) */}
         {canEditHoldings && !isEditMode && currentTab === "investments" && (
@@ -600,8 +613,8 @@ export const HoldingsPage = () => {
     [
       isMobileViewport,
       setIsFilterSheetOpen,
-      selectedAccount,
-      handleAccountSelect,
+      accountFilter,
+      handleAccountFilterChange,
       canEditHoldings,
       isEditMode,
       currentTab,
