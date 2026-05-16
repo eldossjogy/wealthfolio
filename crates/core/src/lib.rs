@@ -18,6 +18,7 @@ pub mod health;
 pub mod limits;
 pub mod planning;
 pub mod portfolio;
+pub mod portfolios;
 pub mod quotes;
 pub mod secrets;
 pub mod settings;

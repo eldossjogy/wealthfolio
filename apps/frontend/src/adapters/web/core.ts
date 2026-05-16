@@ -31,6 +31,10 @@ export const COMMANDS: CommandMap = {
   create_account: { method: "POST", path: "/accounts" },
   update_account: { method: "PUT", path: "/accounts" },
   delete_account: { method: "DELETE", path: "/accounts" },
+  get_portfolios: { method: "GET", path: "/portfolios" },
+  create_portfolio: { method: "POST", path: "/portfolios" },
+  update_portfolio_entry: { method: "PUT", path: "/portfolios" },
+  delete_portfolio_entry: { method: "DELETE", path: "/portfolios" },
   get_settings: { method: "GET", path: "/settings" },
   update_settings: { method: "PUT", path: "/settings" },
   is_auto_update_check_enabled: { method: "GET", path: "/settings/auto-update-enabled" },
@@ -373,6 +377,22 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "create_account": {
       const data = payload as { account: Record<string, unknown> };
       body = JSON.stringify(data.account);
+      break;
+    }
+    case "create_portfolio": {
+      const { portfolio } = payload as { portfolio: Record<string, unknown> };
+      body = JSON.stringify(portfolio);
+      break;
+    }
+    case "update_portfolio_entry": {
+      const { portfolio } = payload as { portfolio: { id: string } & Record<string, unknown> };
+      url += `/${encodeURIComponent(portfolio.id)}`;
+      body = JSON.stringify(portfolio);
+      break;
+    }
+    case "delete_portfolio_entry": {
+      const { portfolioId } = payload as { portfolioId: string };
+      url += `/${encodeURIComponent(portfolioId)}`;
       break;
     }
     case "delete_database_backup": {

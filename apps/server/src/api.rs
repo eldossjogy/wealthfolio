@@ -42,6 +42,7 @@ mod market_data;
 mod net_worth;
 mod performance;
 mod portfolio;
+mod portfolios;
 mod secrets;
 mod settings;
 pub mod shared;
@@ -89,6 +90,7 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
     #[allow(unused_mut)]
     let mut protected_api = Router::new()
         .merge(accounts::router())
+        .merge(portfolios::router())
         .merge(settings::router())
         .merge(database_backups::router())
         .merge(portfolio::router())

@@ -66,6 +66,14 @@ export type {
 // Shared domain modules (identical logic for both platforms)
 // ============================================================================
 
+// Portfolio Commands
+export {
+  createPortfolio,
+  deletePortfolio,
+  getPortfolios,
+  updatePortfolioEntry,
+} from "../shared/portfolios";
+
 // Account Commands
 export * from "../shared/accounts";
 
