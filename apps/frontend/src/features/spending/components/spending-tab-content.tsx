@@ -412,11 +412,15 @@ export default function SpendingTabContent() {
           backgroundImage: `linear-gradient(to top, ${themeBg(theme, 0.3)}, ${themeBg(theme, 0.15)} 50%, transparent 100%)`,
         }}
       >
-        <div className="h-[280px]">
+        <div className="h-[280px] [&_.recharts-layer]:outline-none [&_.recharts-rectangle]:outline-none [&_.recharts-surface]:outline-none">
           {!isLoading && barData.length > 0 && avgValue > 0 && (
-            <div className="text-muted-foreground/80 flex justify-end px-6 pt-1 text-[11px] tabular-nums">
+            <div className="text-muted-foreground/80 flex items-center justify-end gap-1.5 px-6 pt-1 text-[11px] tabular-nums">
+              <span
+                aria-hidden
+                className="inline-block h-px w-3.5 border-t border-dashed border-current opacity-60"
+              />
               <span>
-                {avgLabel} · {formatAmount(avgValue, currency)}
+                {avgLabel} · {formatCompactAmount(avgValue, currency)}
               </span>
             </div>
           )}
