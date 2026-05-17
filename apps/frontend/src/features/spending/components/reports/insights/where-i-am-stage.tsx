@@ -15,7 +15,7 @@ import { cn, formatAmount } from "@/lib/utils";
 
 import type { MonthBucket } from "../../../hooks/use-monthly-history";
 import type { ReportsRange } from "../../../lib/reports-period";
-import type { BudgetAllocation, BudgetSnapshot } from "../../../types/budget";
+import type { BudgetCategoryRow, BudgetSnapshot } from "../../../types/budget";
 import type { CategoryBreakdownRow, MonthlyReport } from "../../../types/report";
 import { CategoryHierarchyTable, type CategorySort } from "../category-hierarchy-table";
 import { formatMonthName, formatPercentValue } from "./format";
@@ -41,6 +41,7 @@ export interface WhereIAmStageProps {
   isLoading: boolean;
   /** Reserved for callers that want to scroll to the breakdown — currently unused. */
   onJumpToBreakdown?: () => void;
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 export function WhereIAmStage({
@@ -52,6 +53,7 @@ export function WhereIAmStage({
   budget,
   currency,
   isLoading,
+  onCategoryClick,
 }: WhereIAmStageProps) {
   return (
     <div className="flex flex-col gap-6">
@@ -82,6 +84,7 @@ export function WhereIAmStage({
         currency={currency}
         range={range}
         isLoading={isLoading}
+        onCategoryClick={onCategoryClick}
       />
     </div>
   );
@@ -100,7 +103,7 @@ interface PaceCardProps {
 }
 
 const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading }) => {
-  const monthlyTarget = parseFloat(budget?.config.monthlySpendingTarget ?? "0") || 0;
+  const monthlyTarget = budget?.computed.totals.spendingPlanned ?? 0;
   const target = monthlyTarget * Math.max(1, range.months);
 
   const pace = useMemo(
@@ -616,6 +619,7 @@ interface BreakdownCanvasProps {
   currency: string;
   range: ReportsRange;
   isLoading: boolean;
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 function BreakdownCanvas({
@@ -626,11 +630,12 @@ function BreakdownCanvas({
   currency,
   range,
   isLoading,
+  onCategoryClick,
 }: BreakdownCanvasProps) {
   const [filter, setFilter] = useState<BreakdownFilter>("all");
   const [sort, setSort] = useState<BreakdownSort>("spent");
 
-  const allocations = budget?.allocations ?? [];
+  const budgetRows = budget?.computed.groupRows.flatMap((row) => row.categories) ?? [];
   const breakdown = currentReport?.spendingBreakdown ?? [];
   const priorBreakdown = priorReport?.spendingBreakdown ?? [];
 
@@ -639,10 +644,10 @@ function BreakdownCanvas({
       computeFilterCounts({
         breakdown,
         priorBreakdown,
-        allocations,
+        budgetRows,
         taxonomyCategories,
       }),
-    [breakdown, priorBreakdown, allocations, taxonomyCategories],
+    [breakdown, priorBreakdown, budgetRows, taxonomyCategories],
   );
 
   const filteredBreakdown = useMemo(
@@ -651,10 +656,10 @@ function BreakdownCanvas({
         filter,
         breakdown,
         priorBreakdown,
-        allocations,
+        budgetRows,
         taxonomyCategories,
       }),
-    [filter, breakdown, priorBreakdown, allocations, taxonomyCategories],
+    [filter, breakdown, priorBreakdown, budgetRows, taxonomyCategories],
   );
 
   const totalCats = counts.all;
@@ -737,11 +742,12 @@ function BreakdownCanvas({
         <CategoryHierarchyTable
           breakdown={filteredBreakdown}
           priorBreakdown={priorBreakdown}
-          allocations={allocations}
+          budgetRows={budgetRows}
           taxonomyCategories={taxonomyCategories}
           sort={sort}
           currency={currency}
           isLoading={isLoading}
+          onCategoryClick={onCategoryClick}
         />
         <div className="text-muted-foreground/80 border-border/40 flex items-center justify-between border-t px-4 py-3 text-xs">
           <span className="tabular-nums">
@@ -769,16 +775,16 @@ interface FilterCounts {
 function computeFilterCounts({
   breakdown,
   priorBreakdown,
-  allocations,
+  budgetRows,
   taxonomyCategories,
 }: {
   breakdown: CategoryBreakdownRow[];
   priorBreakdown: CategoryBreakdownRow[];
-  allocations: BudgetAllocation[];
+  budgetRows: BudgetCategoryRow[];
   taxonomyCategories: TaxonomyCategory[];
 }): FilterCounts {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
-  const allocMap = new Map(allocations.map((a) => [a.categoryId, parseFloat(a.amount) || 0]));
+  const allocMap = new Map(budgetRows.map((a) => [a.categoryId, a.target || 0]));
   const totals = rollUpToTopLevel(breakdown, meta);
   const priorTotals = rollUpToTopLevel(priorBreakdown, meta);
   const all = totals.size;
@@ -832,18 +838,18 @@ function filterBreakdown({
   filter,
   breakdown,
   priorBreakdown,
-  allocations,
+  budgetRows,
   taxonomyCategories,
 }: {
   filter: BreakdownFilter;
   breakdown: CategoryBreakdownRow[];
   priorBreakdown: CategoryBreakdownRow[];
-  allocations: BudgetAllocation[];
+  budgetRows: BudgetCategoryRow[];
   taxonomyCategories: TaxonomyCategory[];
 }): CategoryBreakdownRow[] {
   if (filter === "all") return breakdown;
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
-  const allocMap = new Map(allocations.map((a) => [a.categoryId, parseFloat(a.amount) || 0]));
+  const allocMap = new Map(budgetRows.map((a) => [a.categoryId, a.target || 0]));
   const totals = rollUpToTopLevel(breakdown, meta);
   const priorTotals = rollUpToTopLevel(priorBreakdown, meta);
   const allowed = new Set<string>();

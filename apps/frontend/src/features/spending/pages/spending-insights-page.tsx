@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
@@ -16,6 +16,8 @@ import {
 } from "@wealthfolio/ui";
 
 import { getEventSpendingSummaries } from "../adapters/events";
+import { CategoryTransactionsSheet } from "../components/reports/category-transactions-sheet";
+import { HeatmapCellSheet } from "../components/reports/heatmap-cell-sheet";
 import { StageNav, type InsightsStage } from "../components/reports/insights/stage-nav";
 import { WhatChangedStage } from "../components/reports/insights/what-changed-stage";
 import { WhenWhereStage } from "../components/reports/insights/when-where-stage";
@@ -127,6 +129,35 @@ export default function SpendingInsightsPage() {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
+  // Click-through sheet for category transactions
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const handleCategoryClick = useCallback((categoryId: string) => {
+    setActiveCategoryId(categoryId);
+  }, []);
+  const activeCategory = useMemo(
+    () =>
+      activeCategoryId
+        ? (taxonomy.data?.categories.find((c) => c.id === activeCategoryId) ?? null)
+        : null,
+    [activeCategoryId, taxonomy.data?.categories],
+  );
+
+  // Click-through sheet for heatmap cells (weekday × hour)
+  const [heatmapCell, setHeatmapCell] = useState<{ weekday: number; hour: number } | null>(null);
+  const handleHeatmapCellClick = useCallback((weekday: number, hour: number) => {
+    setHeatmapCell({ weekday, hour });
+  }, []);
+  const heatmapCellActivities = useMemo(() => {
+    if (!heatmapCell) return [];
+    return heatmapActivities.filter((a) => {
+      const d = new Date(a.activityDate);
+      if (isNaN(d.getTime())) return false;
+      const weekday = (d.getDay() + 6) % 7;
+      return weekday === heatmapCell.weekday && d.getHours() === heatmapCell.hour;
+    });
+  }, [heatmapActivities, heatmapCell]);
+  const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
   const useDailyForHistory = range.days <= DAILY_GRANULARITY_THRESHOLD_DAYS;
   const taxonomyCategories = taxonomy.data?.categories ?? EMPTY_TAXONOMY;
   const accountTypeById = useMemo(
@@ -170,6 +201,7 @@ export default function SpendingInsightsPage() {
             currency={baseCurrency}
             isLoading={isCurrentLoading || isBudgetLoading}
             onJumpToBreakdown={onJumpToBreakdown}
+            onCategoryClick={handleCategoryClick}
           />
         )}
 
@@ -184,6 +216,7 @@ export default function SpendingInsightsPage() {
             isLoading={
               isCurrentLoading || isPriorLoading || (!useDailyForHistory && isHistoryLoading)
             }
+            onCategoryClick={handleCategoryClick}
           />
         )}
 
@@ -196,9 +229,33 @@ export default function SpendingInsightsPage() {
             currency={baseCurrency}
             rangeStart={range.start}
             rangeEnd={range.end}
+            onHeatmapCellClick={handleHeatmapCellClick}
           />
         )}
       </PageContent>
+
+      <CategoryTransactionsSheet
+        open={!!activeCategory}
+        onOpenChange={(open) => {
+          if (!open) setActiveCategoryId(null);
+        }}
+        category={activeCategory}
+        taxonomyCategories={taxonomyCategories}
+        rangeStart={range.start}
+        rangeEnd={range.end}
+        currency={baseCurrency}
+      />
+
+      <HeatmapCellSheet
+        open={!!heatmapCell}
+        onOpenChange={(open) => {
+          if (!open) setHeatmapCell(null);
+        }}
+        activities={heatmapCellActivities}
+        dayLabel={heatmapCell ? HEATMAP_DAY_NAMES[heatmapCell.weekday] : null}
+        hour={heatmapCell?.hour ?? null}
+        currency={baseCurrency}
+      />
     </Page>
   );
 }

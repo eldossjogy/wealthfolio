@@ -155,6 +155,20 @@ export function formatDateISO(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
+/**
+ * Formats a time as "h:mm a" (e.g. "12:00 AM"). Use when only the time of day
+ * is meaningful and the seconds-bearing formatDateTime would be too verbose.
+ */
+export function formatTime(input: string | number | Date | null | undefined): string {
+  if (input === null || input === undefined) return "-";
+  let date: Date | null = null;
+  if (input instanceof Date) date = input;
+  else if (typeof input === "string") date = tryParseDate(input) ?? new Date(input);
+  else if (typeof input === "number") date = Number.isFinite(input) ? new Date(input) : null;
+  if (date && isValid(date)) return format(date, "h:mm a");
+  return "-";
+}
+
 export const formatDateTime = (date: string | Date, timezone?: string) => {
   if (!date) return { date: "-", time: "-" };
 

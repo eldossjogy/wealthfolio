@@ -1,6 +1,8 @@
 import { useMemo, type FC } from "react";
+import { Link } from "react-router-dom";
 
 import {
+  Button,
   Icons,
   Tooltip,
   TooltipContent,
@@ -30,6 +32,8 @@ export interface WhenWhereStageProps {
   /** Period start/end for the events strip. */
   rangeStart: Date;
   rangeEnd: Date;
+  /** Fired when a heatmap cell is clicked. Weekday is Mon=0..Sun=6, hour is 0..23. */
+  onHeatmapCellClick?: (weekday: number, hour: number) => void;
 }
 
 export function WhenWhereStage({
@@ -40,6 +44,7 @@ export function WhenWhereStage({
   currency,
   rangeStart,
   rangeEnd,
+  onHeatmapCellClick,
 }: WhenWhereStageProps) {
   return (
     <div className="flex flex-col gap-6">
@@ -47,6 +52,7 @@ export function WhenWhereStage({
         activities={heatmapActivities}
         accountTypeById={accountTypeById}
         currency={currency}
+        onCellClick={onHeatmapCellClick}
       />
       {events.length > 0 ? (
         <>
@@ -86,12 +92,14 @@ interface WhenYouSpendCardProps {
   activities: Activity[];
   accountTypeById?: Map<string, string>;
   currency: string;
+  onCellClick?: (weekday: number, hour: number) => void;
 }
 
 const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   activities,
   accountTypeById,
   currency,
+  onCellClick,
 }) => {
   const grid = useMemo(
     () => buildWeekdayHourGrid(activities, accountTypeById),
@@ -150,11 +158,13 @@ const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
             <Row
               key={di}
               day={day}
+              weekdayIndex={di}
               cells={row}
               max={grid.max}
               accent={accent}
               median={median}
               currency={currency}
+              onCellClick={onCellClick}
             />
           );
         })}
@@ -174,18 +184,22 @@ const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function Row({
   day,
+  weekdayIndex,
   cells,
   max,
   accent,
   median,
   currency,
+  onCellClick,
 }: {
   day: string;
+  weekdayIndex: number;
   cells: number[];
   max: number;
   accent: string;
   median: number;
   currency: string;
+  onCellClick?: (weekday: number, hour: number) => void;
 }) {
   return (
     <>
@@ -197,12 +211,26 @@ function Row({
         {cells.map((amount, i) => {
           const t = max > 0 ? amount / max : 0;
           const opacity = amount === 0 ? 0.07 : 0.18 + t * 0.75;
+          const label = `${day} ${formatHour(i)} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`;
+          if (!onCellClick) {
+            return (
+              <div
+                key={i}
+                className="aspect-square rounded-[3px]"
+                style={{ backgroundColor: accent, opacity }}
+                title={label}
+              />
+            );
+          }
           return (
-            <div
+            <button
               key={i}
-              className="aspect-square rounded-[3px]"
+              type="button"
+              onClick={() => onCellClick(weekdayIndex, i)}
+              className="aspect-square rounded-[3px] transition-all hover:scale-110 hover:ring-1 hover:ring-[var(--ring)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
               style={{ backgroundColor: accent, opacity }}
-              title={`${day} ${formatHour(i)} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`}
+              title={label}
+              aria-label={label}
             />
           );
         })}
@@ -933,6 +961,12 @@ function EmptyEventsCard() {
         Events let you isolate spend that isn't part of your usual rhythm — so the rest of this view
         stays meaningful.
       </p>
+      <Button asChild variant="outline" size="sm" className="mt-4">
+        <Link to="/spending/transactions">
+          Tag transactions
+          <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
+        </Link>
+      </Button>
     </div>
   );
 }

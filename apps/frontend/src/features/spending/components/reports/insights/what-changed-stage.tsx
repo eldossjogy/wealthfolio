@@ -23,6 +23,7 @@ export interface WhatChangedStageProps {
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   isLoading: boolean;
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 export function WhatChangedStage({
@@ -33,6 +34,7 @@ export function WhatChangedStage({
   taxonomyCategories,
   currency,
   isLoading,
+  onCategoryClick,
 }: WhatChangedStageProps) {
   return (
     <div className="flex flex-col gap-6">
@@ -52,6 +54,7 @@ export function WhatChangedStage({
         currency={currency}
         useDaily={range.days <= 35}
         isLoading={isLoading}
+        onCategoryClick={onCategoryClick}
       />
       <ComparisonTable
         range={range}
@@ -60,6 +63,7 @@ export function WhatChangedStage({
         taxonomyCategories={taxonomyCategories}
         currency={currency}
         isLoading={isLoading}
+        onCategoryClick={onCategoryClick}
       />
     </div>
   );
@@ -317,6 +321,7 @@ interface CategoryTrendsCardProps {
   currency: string;
   useDaily: boolean;
   isLoading: boolean;
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
@@ -327,6 +332,7 @@ const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
   currency,
   useDaily,
   isLoading,
+  onCategoryClick,
 }) => {
   const rows = useMemo(
     () =>
@@ -403,7 +409,12 @@ const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {visible.map((row) => (
-              <SparklineRow key={row.id} row={row} currency={currency} />
+              <SparklineRow
+                key={row.id}
+                row={row}
+                currency={currency}
+                onCategoryClick={onCategoryClick}
+              />
             ))}
           </div>
           {remaining > 0 && (
@@ -515,14 +526,39 @@ function buildSparklineRows({
   });
 }
 
-function SparklineRow({ row, currency }: { row: SparkRow; currency: string }) {
+function SparklineRow({
+  row,
+  currency,
+  onCategoryClick,
+}: {
+  row: SparkRow;
+  currency: string;
+  onCategoryClick?: (categoryId: string) => void;
+}) {
   const color = row.color ?? "var(--muted-foreground)";
   const tintBg = row.color ? `${row.color}14` : "var(--muted)";
   const gradId = `wc-spark-${row.id.replace(/[^a-z0-9]/gi, "_")}`;
   const noChange = row.deltaPct == null || Math.abs(row.deltaPct) < 1;
+  const clickable = !!onCategoryClick;
   return (
     <div
-      className="border-border/60 bg-card/50 flex flex-col gap-1.5 rounded-xl border px-4 pb-4 pt-3"
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={clickable ? () => onCategoryClick?.(row.id) : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onCategoryClick?.(row.id);
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        "border-border/60 bg-card/50 flex flex-col gap-1.5 rounded-xl border px-4 pb-4 pt-3",
+        clickable && "hover:border-border/90 hover:bg-card/70 cursor-pointer transition-colors",
+      )}
       style={{ backgroundImage: `linear-gradient(to bottom, ${tintBg}, transparent 70%)` }}
     >
       <div className="flex items-center justify-between gap-2">
@@ -592,6 +628,7 @@ interface ComparisonTableProps {
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   isLoading: boolean;
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 function ComparisonTable({
@@ -601,6 +638,7 @@ function ComparisonTable({
   taxonomyCategories,
   currency,
   isLoading,
+  onCategoryClick,
 }: ComparisonTableProps) {
   const movers = useMemo(
     () =>
@@ -653,7 +691,13 @@ function ComparisonTable({
         </thead>
         <tbody>
           {movers.map((row) => (
-            <ComparisonRow key={row.id} row={row} currency={currency} maxDelta={maxDelta} />
+            <ComparisonRow
+              key={row.id}
+              row={row}
+              currency={currency}
+              maxDelta={maxDelta}
+              onCategoryClick={onCategoryClick}
+            />
           ))}
         </tbody>
       </table>
@@ -665,16 +709,25 @@ function ComparisonRow({
   row,
   currency,
   maxDelta,
+  onCategoryClick,
 }: {
   row: MoverRow;
   currency: string;
   maxDelta: number;
+  onCategoryClick?: (categoryId: string) => void;
 }) {
   const color = row.color ?? "var(--muted-foreground)";
   const isUp = row.delta > 0;
   const widthPct = (Math.abs(row.delta) / maxDelta) * 50; // each side max 50% of bar
+  const clickable = !!onCategoryClick;
   return (
-    <tr className="border-border/30 hover:bg-muted/20 border-b last:border-b-0">
+    <tr
+      className={cn(
+        "border-border/30 hover:bg-muted/20 border-b last:border-b-0",
+        clickable && "cursor-pointer",
+      )}
+      onClick={clickable ? () => onCategoryClick?.(row.id) : undefined}
+    >
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span

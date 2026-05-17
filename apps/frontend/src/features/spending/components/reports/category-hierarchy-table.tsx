@@ -5,7 +5,7 @@ import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
-import type { BudgetAllocation } from "../../types/budget";
+import type { BudgetCategoryRow } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
 
 export type CategorySort = "spent" | "delta" | "name";
@@ -15,14 +15,16 @@ interface CategoryHierarchyTableProps {
   breakdown: CategoryBreakdownRow[];
   /** Prior-period breakdown — drives the Δ column. */
   priorBreakdown: CategoryBreakdownRow[];
-  /** Per-category budget allocations (top-level categories only in our model). */
-  allocations: BudgetAllocation[];
+  /** Backend-computed category budget rows. */
+  budgetRows: BudgetCategoryRow[];
   /** Taxonomy metadata (used to resolve names + parent ids). */
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   isLoading: boolean;
   /** Sort order for top-level rows. Defaults to "spent" (largest first). */
   sort?: CategorySort;
+  /** Fired when a category row is clicked (excluding the parent expand chevron). */
+  onCategoryClick?: (categoryId: string) => void;
 }
 
 interface NodeRow {
@@ -51,15 +53,16 @@ interface NodeRow {
 export function CategoryHierarchyTable({
   breakdown,
   priorBreakdown,
-  allocations,
+  budgetRows,
   taxonomyCategories,
   currency,
   isLoading,
   sort = "spent",
+  onCategoryClick,
 }: CategoryHierarchyTableProps) {
   const tree = useMemo(
-    () => buildTree({ breakdown, priorBreakdown, allocations, taxonomyCategories, sort }),
-    [breakdown, priorBreakdown, allocations, taxonomyCategories, sort],
+    () => buildTree({ breakdown, priorBreakdown, budgetRows, taxonomyCategories, sort }),
+    [breakdown, priorBreakdown, budgetRows, taxonomyCategories, sort],
   );
 
   const totals = useMemo(() => {
@@ -103,7 +106,12 @@ export function CategoryHierarchyTable({
         </thead>
         <tbody>
           {tree.map((node) => (
-            <ParentRow key={node.id} node={node} currency={currency} />
+            <ParentRow
+              key={node.id}
+              node={node}
+              currency={currency}
+              onCategoryClick={onCategoryClick}
+            />
           ))}
         </tbody>
         <tfoot>
@@ -171,39 +179,60 @@ function ProgressBar({ spent, budget }: { spent: number; budget: number }) {
   );
 }
 
-function ParentRow({ node, currency }: { node: NodeRow; currency: string }) {
+function ParentRow({
+  node,
+  currency,
+  onCategoryClick,
+}: {
+  node: NodeRow;
+  currency: string;
+  onCategoryClick?: (categoryId: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const hasChildren = node.children.length > 0;
   const delta = node.spent - node.priorSpent;
   const accent = node.color ?? "var(--muted-foreground)";
   const tintBg = node.color ? `${node.color}1F` : "var(--muted)";
+  const clickable = !!onCategoryClick;
 
   return (
     <>
-      <tr className="border-border/40 hover:bg-muted/30 group cursor-pointer border-b">
+      <tr
+        className={cn(
+          "border-border/40 hover:bg-muted/30 group border-b",
+          clickable && "cursor-pointer",
+        )}
+        onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
+      >
         <td className="px-3 py-2.5">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="text-foreground flex items-center gap-2 text-left text-sm font-medium"
-            aria-expanded={expanded}
-            disabled={!hasChildren}
-          >
-            <Icons.ChevronRight
-              className={cn(
-                "text-muted-foreground/70 h-3.5 w-3.5 transition-transform",
-                expanded && "rotate-90",
-                !hasChildren && "opacity-0",
-              )}
-            />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }}
+              className="text-muted-foreground/70 hover:text-foreground -m-1 flex h-5 w-5 items-center justify-center rounded p-1"
+              aria-expanded={expanded}
+              aria-label={hasChildren ? "Toggle subcategories" : undefined}
+              disabled={!hasChildren}
+            >
+              <Icons.ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  expanded && "rotate-90",
+                  !hasChildren && "opacity-0",
+                )}
+              />
+            </button>
             <span
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
               style={{ backgroundColor: tintBg, color: accent }}
             >
               <CategoryIcon icon={node.icon} fallback={node.name} className="h-3.5 w-3.5" />
             </span>
-            <span>{node.name}</span>
-          </button>
+            <span className="text-foreground text-sm font-medium">{node.name}</span>
+          </div>
         </td>
         <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
           <span className="text-foreground font-medium">−{formatAmount(node.spent, currency)}</span>
@@ -235,7 +264,13 @@ function ParentRow({ node, currency }: { node: NodeRow; currency: string }) {
       </tr>
       {expanded &&
         node.children.map((child) => (
-          <ChildRow key={child.id} node={child} currency={currency} parentColor={accent} />
+          <ChildRow
+            key={child.id}
+            node={child}
+            currency={currency}
+            parentColor={accent}
+            onCategoryClick={onCategoryClick}
+          />
         ))}
     </>
   );
@@ -245,14 +280,23 @@ function ChildRow({
   node,
   currency,
   parentColor,
+  onCategoryClick,
 }: {
   node: NodeRow;
   currency: string;
   parentColor: string;
+  onCategoryClick?: (categoryId: string) => void;
 }) {
   const delta = node.spent - node.priorSpent;
+  const clickable = !!onCategoryClick;
   return (
-    <tr className="border-border/30 hover:bg-muted/20 border-b text-[13px]">
+    <tr
+      className={cn(
+        "border-border/30 hover:bg-muted/20 border-b text-[13px]",
+        clickable && "cursor-pointer",
+      )}
+      onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
+    >
       <td className="text-muted-foreground/90 px-3 py-1.5 pl-9">
         <div className="flex items-center gap-2">
           <span
@@ -296,20 +340,18 @@ function formatDelta(delta: number, baseline: number): string {
 function buildTree({
   breakdown,
   priorBreakdown,
-  allocations,
+  budgetRows,
   taxonomyCategories,
   sort,
 }: {
   breakdown: CategoryBreakdownRow[];
   priorBreakdown: CategoryBreakdownRow[];
-  allocations: BudgetAllocation[];
+  budgetRows: BudgetCategoryRow[];
   taxonomyCategories: TaxonomyCategory[];
   sort: CategorySort;
 }): NodeRow[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
-  const allocationByCat = new Map(
-    allocations.map((a) => [a.categoryId, parseFloat(a.amount) || 0]),
-  );
+  const allocationByCat = new Map(budgetRows.map((a) => [a.categoryId, a.target || 0]));
 
   // Build a row per taxonomy category that has *any* signal (spend, prior spend, or budget).
   const nodes = new Map<string, NodeRow>();
