@@ -26,6 +26,7 @@ export type {
   BackendSyncReconcileReadyResult,
   BackendSyncSnapshotUploadResult,
   BackendSyncStateResult,
+  DataExportResult,
   EphemeralKeyPair,
   EventCallback,
   ExtractedAddon,
@@ -308,6 +309,9 @@ export {
   runHealthChecks,
   updateHealthConfig,
 } from "../shared/health";
+
+// Data Export Commands
+export { exportDataFile } from "./exports";
 
 // ============================================================================
 // Platform-specific modules (different implementations for web vs desktop)
