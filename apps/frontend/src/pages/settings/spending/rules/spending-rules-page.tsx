@@ -180,9 +180,10 @@ export default function SpendingRulesPage() {
                   onClick={() => rerun.mutate(false)}
                   className="flex-col items-start gap-0.5"
                 >
-                  <span className="text-sm font-medium">Reclassify all</span>
+                  <span className="text-sm font-medium">Re-categorize all</span>
                   <span className="text-muted-foreground text-xs">
-                    Re-apply rules to every activity. Overwrites existing categorizations.
+                    Re-apply rules to every activity. Overwrites previous rule-based
+                    categorizations; manual ones are preserved.
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>

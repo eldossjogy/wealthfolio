@@ -56,7 +56,7 @@ export function CategoriesOverviewCard({ variant }: Props) {
       emptyDescription={
         variant === "expense"
           ? "Create categories to organize cash transactions."
-          : "Create sources to classify incoming cash flows."
+          : "Create sources to categorize incoming cash flows."
       }
       emptyCtaLabel={variant === "expense" ? "Add category" : "Add source"}
       isLoading={isLoading}

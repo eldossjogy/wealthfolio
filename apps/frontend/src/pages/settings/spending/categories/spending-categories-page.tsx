@@ -196,7 +196,7 @@ export default function SpendingCategoriesPage() {
         <SpendingBackLink />
         <SettingsHeader
           heading="Categories"
-          text="Manage expense and income categories used to classify cash transactions."
+          text="Manage expense and income categories used to categorize cash transactions."
           backTo="/settings/spending"
         >
           <Button

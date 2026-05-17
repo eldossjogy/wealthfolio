@@ -88,6 +88,20 @@ impl ActivityTaxonomyAssignmentService {
             .collect();
         self.repo.assign_many_single_select(news).await
     }
+
+    /// Bulk single-select with full control over `source` / `weight`. Used by
+    /// the categorization rules "re-run" path so it can preserve
+    /// `source = "rule"` while still benefiting from the single-transaction
+    /// delete-then-insert semantics of `assign_many_single_select`.
+    pub async fn bulk_apply(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.repo.assign_many_single_select(items).await
+    }
 }
 
 /// Lightweight input for the bulk-assign service method. Doesn't carry weight

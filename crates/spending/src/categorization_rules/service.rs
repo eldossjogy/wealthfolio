@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
+use wealthfolio_core::activities::ActivityRepositoryTrait;
 
-use super::matcher::match_rules;
+use super::matcher::{compile_rules, match_compiled};
 use super::model::{
     CategorizationRule, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
 };
@@ -53,55 +53,18 @@ impl CategorizationRulesService {
         self.repo.delete(id).await
     }
 
-    /// Find the highest-priority matching rule for a single activity (without applying it).
-    /// Useful for the rule tester UI.
-    pub async fn match_one(&self, activity: &Activity) -> Result<Option<CategorizationRule>> {
-        let rules = self.repo.list().await?;
-        let notes = activity.notes.as_deref().unwrap_or("");
-        Ok(match_rules(
-            &rules,
-            notes,
-            activity.effective_type(),
-            &activity.account_id,
-        )
-        .map(|m| m.rule.clone()))
-    }
-
-    /// Apply the best-matching rule to a single activity (creates the assignment).
-    /// Returns the rule that fired, if any.
-    pub async fn apply_to_activity(
-        &self,
-        activity: &Activity,
-    ) -> Result<Option<CategorizationRule>> {
-        let Some(matched) = self.match_one(activity).await? else {
-            return Ok(None);
-        };
-        let (Some(taxonomy_id), Some(category_id)) =
-            (matched.taxonomy_id.clone(), matched.category_id.clone())
-        else {
-            return Ok(Some(matched)); // rule matched but has no category to apply
-        };
-        self.assignment_service
-            .upsert(NewActivityTaxonomyAssignment {
-                id: None,
-                activity_id: activity.id.clone(),
-                taxonomy_id,
-                category_id,
-                weight: 10_000,
-                source: "rule".to_string(),
-            })
-            .await?;
-        Ok(Some(matched))
-    }
-
-    /// Re-run all rules against existing activities. Returns count of activities updated.
+    /// Re-run all rules against existing activities. Returns count of activities
+    /// matched by a rule (a rule that fires counts toward the total even when it
+    /// has no category target to write — matches the prior count semantics).
     /// Filters to the provided account ids when non-empty (typically the spending accounts).
     ///
     /// `only_uncategorized=true` skips activities that already have any activity-scope
-    /// assignment (spending_categories or income_sources). The default safe behavior —
-    /// won't overwrite manual categorizations.
-    /// `only_uncategorized=false` re-applies rules to every activity, overwriting existing
-    /// assignments.
+    /// assignment (spending_categories or income_sources). Default safe behavior.
+    /// `only_uncategorized=false` overwrites existing rule/ai/history/import-sourced
+    /// assignments with the new rule target.
+    ///
+    /// **Manual categorizations (`source = "manual"`) are always preserved**, in
+    /// both modes. A user's explicit choice should never be wiped by a rule re-run.
     pub async fn rerun_all(
         &self,
         account_ids: &[String],
@@ -115,30 +78,52 @@ impl CategorizationRulesService {
             .get_activities_by_account_ids(account_ids)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        let categorized: std::collections::HashSet<String> = if only_uncategorized {
-            let ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
-            let assignments = self.assignment_service.list_for_activities(&ids).await?;
-            assignments
-                .into_iter()
-                .filter(|a| {
-                    a.taxonomy_id == "spending_categories" || a.taxonomy_id == "income_sources"
-                })
-                .map(|a| a.activity_id)
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
+        let ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+        let assignments = self.assignment_service.list_for_activities(&ids).await?;
+        let skip: std::collections::HashSet<String> = assignments
+            .into_iter()
+            .filter(|a| a.taxonomy_id == "spending_categories" || a.taxonomy_id == "income_sources")
+            .filter(|a| only_uncategorized || a.source == "manual")
+            .map(|a| a.activity_id)
+            .collect();
 
-        let mut updated = 0usize;
-        for a in activities {
-            if only_uncategorized && categorized.contains(&a.id) {
+        let rules = self.repo.list().await?;
+        let compiled = compile_rules(&rules);
+
+        let mut matched_count = 0usize;
+        let mut writes: Vec<NewActivityTaxonomyAssignment> = Vec::with_capacity(activities.len());
+        for a in &activities {
+            if skip.contains(&a.id) {
                 continue;
             }
-            if self.apply_to_activity(&a).await?.is_some() {
-                updated += 1;
+            let notes_raw = a.notes.as_deref().unwrap_or("");
+            let notes_upper = notes_raw.to_uppercase();
+            let Some(m) = match_compiled(
+                &compiled,
+                &notes_upper,
+                notes_raw,
+                a.effective_type(),
+                &a.account_id,
+            ) else {
+                continue;
+            };
+            matched_count += 1;
+            if let (Some(tax_id), Some(cat_id)) =
+                (m.rule.taxonomy_id.clone(), m.rule.category_id.clone())
+            {
+                writes.push(NewActivityTaxonomyAssignment {
+                    id: None,
+                    activity_id: a.id.clone(),
+                    taxonomy_id: tax_id,
+                    category_id: cat_id,
+                    weight: 10_000,
+                    source: "rule".to_string(),
+                });
             }
         }
-        Ok(updated)
+
+        self.assignment_service.bulk_apply(writes).await?;
+        Ok(matched_count)
     }
 
     /// List the bundled presets, marking which ones the user already has installed

@@ -9,21 +9,65 @@ pub struct RuleMatch<'r> {
     pub rule: &'r CategorizationRule,
 }
 
-/// Returns the highest-priority rule that matches the given activity attributes.
-/// `notes` is the merchant/payee string (we use the existing `notes` column).
-/// `account_id` and `activity_type` are used for narrowing (account_id-scoped
-/// rules and activity_type-narrowed rules).
-pub fn match_rules<'r>(
-    rules: &'r [CategorizationRule],
-    notes: &str,
+/// A `CategorizationRule` with its pattern pre-normalized (uppercase for the
+/// non-regex variants, compiled `Regex` for the regex variant). Built once
+/// per rerun via [`compile_rules`] so the per-activity loop avoids
+/// re-normalizing strings and re-compiling regex on every comparison.
+pub struct CompiledRule<'r> {
+    pub rule: &'r CategorizationRule,
+    pattern_upper: String,
+    regex: Option<Regex>,
+}
+
+/// Precompile a slice of rules: uppercase their patterns and compile regex
+/// patterns. Rules whose regex fails to compile are kept with `regex = None`
+/// so they will simply never match (matches the previous
+/// `Regex::new(...).ok()` fall-through).
+pub fn compile_rules(rules: &[CategorizationRule]) -> Vec<CompiledRule<'_>> {
+    rules
+        .iter()
+        .map(|rule| {
+            let regex = if matches!(rule.match_type, RuleMatchType::Regex) {
+                match Regex::new(&rule.pattern) {
+                    Ok(re) => Some(re),
+                    Err(err) => {
+                        log::debug!(
+                            "Categorization rule {} has invalid regex {:?}: {}",
+                            rule.id,
+                            rule.pattern,
+                            err
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            CompiledRule {
+                rule,
+                pattern_upper: rule.pattern.to_uppercase(),
+                regex,
+            }
+        })
+        .collect()
+}
+
+/// Highest-priority match against a precompiled rule set. Callers that loop
+/// over many activities should normalize each activity's notes to uppercase
+/// once and pass it as `notes_upper`; `notes_raw` is needed for regex
+/// matching (regex matches against the original casing, same as today).
+pub fn match_compiled<'r>(
+    compiled: &[CompiledRule<'r>],
+    notes_upper: &str,
+    notes_raw: &str,
     activity_type: &str,
     account_id: &str,
 ) -> Option<RuleMatch<'r>> {
-    let normalized = notes.to_uppercase();
     let mut best: Option<&CategorizationRule> = None;
 
-    for rule in rules {
-        // Account scope check
+    for c in compiled {
+        let rule = c.rule;
+
         if !rule.is_global {
             match &rule.account_id {
                 Some(rule_acc) if rule_acc == account_id => {}
@@ -31,22 +75,17 @@ pub fn match_rules<'r>(
             }
         }
 
-        // Activity-type narrowing
         if let Some(rt) = &rule.activity_type {
             if rt != activity_type {
                 continue;
             }
         }
 
-        // Pattern match
-        let pattern = rule.pattern.to_uppercase();
         let matched = match rule.match_type {
-            RuleMatchType::Contains => normalized.contains(&pattern),
-            RuleMatchType::StartsWith => normalized.starts_with(&pattern),
-            RuleMatchType::Exact => normalized == pattern,
-            RuleMatchType::Regex => Regex::new(&rule.pattern)
-                .ok()
-                .is_some_and(|re| re.is_match(notes)),
+            RuleMatchType::Contains => notes_upper.contains(&c.pattern_upper),
+            RuleMatchType::StartsWith => notes_upper.starts_with(&c.pattern_upper),
+            RuleMatchType::Exact => notes_upper == c.pattern_upper,
+            RuleMatchType::Regex => c.regex.as_ref().is_some_and(|re| re.is_match(notes_raw)),
         };
 
         if !matched {
@@ -61,6 +100,20 @@ pub fn match_rules<'r>(
     }
 
     best.map(|rule| RuleMatch { rule })
+}
+
+/// Single-shot match against an un-compiled rule slice. Convenience for the
+/// rule-tester / single-activity paths where the per-call compile cost is
+/// negligible. Bulk paths should use [`compile_rules`] + [`match_compiled`].
+pub fn match_rules<'r>(
+    rules: &'r [CategorizationRule],
+    notes: &str,
+    activity_type: &str,
+    account_id: &str,
+) -> Option<RuleMatch<'r>> {
+    let compiled = compile_rules(rules);
+    let notes_upper = notes.to_uppercase();
+    match_compiled(&compiled, &notes_upper, notes, activity_type, account_id)
 }
 
 #[cfg(test)]
@@ -113,6 +166,28 @@ mod tests {
         r.account_id = Some("acct-other".to_string());
         let rules = vec![r];
         let m = match_rules(&rules, "FOO BAR", "WITHDRAWAL", "acct1");
+        assert!(m.is_none());
+    }
+
+    #[test]
+    fn compiled_matches_same_as_uncompiled() {
+        let rules = vec![
+            rule("a", "FOO", RuleMatchType::Contains, 1),
+            rule("re", r"^bar.*", RuleMatchType::Regex, 2),
+        ];
+        let compiled = compile_rules(&rules);
+
+        let m = match_compiled(&compiled, "FOO X", "FOO X", "WITHDRAWAL", "acct1").unwrap();
+        assert_eq!(m.rule.id, "a");
+        let m = match_compiled(&compiled, "BARABC", "barabc", "WITHDRAWAL", "acct1").unwrap();
+        assert_eq!(m.rule.id, "re");
+    }
+
+    #[test]
+    fn invalid_regex_never_matches_but_doesnt_crash() {
+        let rules = vec![rule("bad", "(unclosed", RuleMatchType::Regex, 5)];
+        let compiled = compile_rules(&rules);
+        let m = match_compiled(&compiled, "ANYTHING", "anything", "WITHDRAWAL", "acct1");
         assert!(m.is_none());
     }
 }

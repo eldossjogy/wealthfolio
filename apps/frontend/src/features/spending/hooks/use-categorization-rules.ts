@@ -66,7 +66,7 @@ export function useCategorizationRuleMutations() {
     onSuccess: (count, onlyUncategorized) => {
       qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
       qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
-      const verb = onlyUncategorized ? "Categorized" : "Reclassified";
+      const verb = onlyUncategorized ? "Categorized" : "Re-categorized";
       toast.success(`${verb} ${count} activit${count === 1 ? "y" : "ies"}.`);
     },
     onError: () => toast.error("Failed to re-run rules."),
