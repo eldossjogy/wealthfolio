@@ -418,6 +418,12 @@ pub fn run() {
             commands::limits::delete_contribution_limit,
             commands::limits::calculate_deposits_for_contribution_limit,
             // Utility commands
+            commands::utilities::save_text_file_with_dialog,
+            commands::utilities::save_file_with_dialog,
+            commands::utilities::write_pending_export_text_file,
+            commands::utilities::write_pending_export_file,
+            commands::utilities::export_data_file,
+            commands::utilities::open_external_url,
             commands::utilities::get_app_info,
             commands::utilities::check_for_updates,
             commands::utilities::install_app_update,

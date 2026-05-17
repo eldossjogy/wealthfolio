@@ -28,6 +28,7 @@ mod assets;
 #[cfg(any(feature = "connect-sync", feature = "device-sync"))]
 pub mod connect;
 mod custom_providers;
+mod data_exports;
 mod database_backups;
 #[cfg(feature = "device-sync")]
 mod device_sync;
@@ -92,6 +93,7 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
         .merge(accounts::router())
         .merge(portfolios::router())
         .merge(settings::router())
+        .merge(data_exports::router())
         .merge(database_backups::router())
         .merge(portfolio::router())
         .merge(holdings::router())

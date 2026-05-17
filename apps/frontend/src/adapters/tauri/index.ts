@@ -46,6 +46,7 @@ export type {
   BackendSyncBackgroundEngineResult,
   BackendSyncSnapshotUploadResult,
   EphemeralKeyPair,
+  DataExportResult,
 } from "../types";
 
 // Re-export AI types from features/ai-assistant
@@ -119,6 +120,9 @@ export * from "../shared/ai-threads";
 
 // Health Center Commands
 export * from "../shared/health";
+
+// Data Export Commands
+export { exportDataFile } from "./exports";
 
 // ============================================================================
 // Platform-specific modules (different implementations)
