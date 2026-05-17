@@ -828,7 +828,11 @@ mod tests {
             unimplemented!("not used in this test")
         }
 
-        async fn sync(&self, _mode: SyncMode, _asset_ids: Option<Vec<String>>) -> Result<SyncResult> {
+        async fn sync(
+            &self,
+            _mode: SyncMode,
+            _asset_ids: Option<Vec<String>>,
+        ) -> Result<SyncResult> {
             unimplemented!("not used in this test")
         }
 
@@ -844,7 +848,11 @@ mod tests {
             unimplemented!("not used in this test")
         }
 
-        async fn handle_activity_created(&self, _symbol: &str, _activity_date: NaiveDate) -> Result<()> {
+        async fn handle_activity_created(
+            &self,
+            _symbol: &str,
+            _activity_date: NaiveDate,
+        ) -> Result<()> {
             Ok(())
         }
 
@@ -962,9 +970,7 @@ mod tests {
                 .iter()
                 .find(|a| a.id == asset_id)
                 .cloned()
-                .ok_or_else(|| {
-                    Error::Database(DatabaseError::NotFound(asset_id.to_string()))
-                })
+                .ok_or_else(|| Error::Database(DatabaseError::NotFound(asset_id.to_string())))
         }
 
         fn list(&self) -> Result<Vec<crate::assets::assets_model::Asset>> {
@@ -987,7 +993,10 @@ mod tests {
             unimplemented!("not used in this test")
         }
 
-        fn search_by_symbol(&self, _query: &str) -> Result<Vec<crate::assets::assets_model::Asset>> {
+        fn search_by_symbol(
+            &self,
+            _query: &str,
+        ) -> Result<Vec<crate::assets::assets_model::Asset>> {
             unimplemented!("not used in this test")
         }
 

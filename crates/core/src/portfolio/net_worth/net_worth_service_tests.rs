@@ -1921,8 +1921,7 @@ async fn test_liability_with_future_zero_quote_is_included_at_past_balance() {
         dec!(180000),
         "USD",
     );
-    let liab_snapshot =
-        create_test_snapshot("liab-mortgage", vec![liab_position], HashMap::new());
+    let liab_snapshot = create_test_snapshot("liab-mortgage", vec![liab_position], HashMap::new());
 
     // Two quotes for the same liability:
     //   • 2024-01-10: current outstanding balance = $180,000

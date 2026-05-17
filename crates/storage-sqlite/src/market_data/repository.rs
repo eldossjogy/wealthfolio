@@ -1062,15 +1062,30 @@ mod tests {
         let present = NaiveDate::from_ymd_opt(2024, 6, 1).unwrap();
         let future = NaiveDate::from_ymd_opt(2041, 12, 31).unwrap();
 
-        repo.save_quote(&quote_with_source(asset_id, past, "MANUAL", Decimal::from(100_000)))
-            .await
-            .expect("save past");
-        repo.save_quote(&quote_with_source(asset_id, present, "MANUAL", Decimal::from(80_000)))
-            .await
-            .expect("save present");
-        repo.save_quote(&quote_with_source(asset_id, future, "MANUAL", Decimal::ZERO))
-            .await
-            .expect("save future");
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            past,
+            "MANUAL",
+            Decimal::from(100_000),
+        ))
+        .await
+        .expect("save past");
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            present,
+            "MANUAL",
+            Decimal::from(80_000),
+        ))
+        .await
+        .expect("save present");
+        repo.save_quote(&quote_with_source(
+            asset_id,
+            future,
+            "MANUAL",
+            Decimal::ZERO,
+        ))
+        .await
+        .expect("save future");
 
         // as_of = present: should return the present row (not the future row)
         let result = repo
@@ -1078,7 +1093,11 @@ mod tests {
             .expect("get_latest_quotes_as_of should succeed");
         assert_eq!(result.len(), 1, "should have one entry");
         let quote = result.get(asset_id).expect("asset should be present");
-        assert_eq!(quote.close, Decimal::from(80_000), "should return present row, not future");
+        assert_eq!(
+            quote.close,
+            Decimal::from(80_000),
+            "should return present row, not future"
+        );
 
         // as_of = before all rows: asset should be absent
         let before_all = NaiveDate::from_ymd_opt(2019, 12, 31).unwrap();
