@@ -9,9 +9,11 @@ import {
   importRulePreset,
   listCategorizationRules,
   listRulePresets,
+  removeRulePreset,
   rerunCategorizationRules,
   updateCategorizationRule,
   type ImportPresetResult,
+  type RemovePresetResult,
   type RulePresetSummary,
 } from "../adapters/rules";
 import type {
@@ -96,5 +98,24 @@ export function useImportRulePreset() {
       );
     },
     onError: () => toast.error("Failed to import preset."),
+  });
+}
+
+export function useRemoveRulePreset() {
+  const qc = useQueryClient();
+  return useMutation<RemovePresetResult, Error, string>({
+    mutationFn: (presetId: string) => removeRulePreset(presetId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES] });
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES, "presets"] });
+      const keptSuffix =
+        result.keptModified > 0
+          ? `, ${result.keptModified} edited rule${result.keptModified === 1 ? "" : "s"} kept`
+          : "";
+      toast.success(
+        `Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}${keptSuffix}.`,
+      );
+    },
+    onError: () => toast.error("Failed to remove preset."),
   });
 }

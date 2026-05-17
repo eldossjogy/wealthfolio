@@ -11,4 +11,8 @@ pub trait CategorizationRulesRepositoryTrait: Send + Sync {
     async fn update(&self, id: &str, patch: UpdateCategorizationRule)
         -> Result<CategorizationRule>;
     async fn delete(&self, id: &str) -> Result<()>;
+    /// Remove all rules originating from `preset_id`. Unmodified rules are
+    /// deleted; user-modified rules are detached (preset metadata cleared) so
+    /// they survive as standalone user rules. Returns `(removed, kept_modified)`.
+    async fn remove_preset(&self, preset_id: &str) -> Result<(usize, usize)>;
 }

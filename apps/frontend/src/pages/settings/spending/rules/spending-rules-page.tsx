@@ -16,7 +16,12 @@ import { useTaxonomy } from "@/hooks/use-taxonomies";
 import type { TaxonomyCategory } from "@/lib/types";
 
 import { RuleEditModal } from "@/features/spending/components/rule-edit-modal";
-import { RuleItem, type RuleCategoryMeta } from "@/features/spending/components/rule-item";
+import {
+  RuleItem,
+  type RuleCategoryMeta,
+  type RulePresetMeta,
+} from "@/features/spending/components/rule-item";
+import { PRESET_FLAGS } from "@/features/spending/components/rule-preset-constants";
 import { RulePresetPicker } from "@/features/spending/components/rule-preset-picker";
 import type {
   RuleFormCategoryOption,
@@ -25,6 +30,7 @@ import type {
 import {
   useCategorizationRuleMutations,
   useCategorizationRules,
+  useRulePresets,
 } from "@/features/spending/hooks/use-categorization-rules";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
 import type { CategorizationRule } from "@/features/spending/types/rule";
@@ -38,6 +44,7 @@ const INCOME_TAXONOMY = "income_sources";
 export default function SpendingRulesPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
   const { data: rules = [], isLoading: rulesLoading } = useCategorizationRules();
+  const { data: presets = [] } = useRulePresets();
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
   const { create, update, remove, rerun } = useCategorizationRuleMutations();
@@ -79,6 +86,17 @@ export default function SpendingRulesPage() {
     });
     return { categoryOptions: opts, categoryMeta: meta };
   }, [spending.data?.categories, income.data?.categories]);
+
+  const presetMeta = useMemo<Record<string, RulePresetMeta>>(() => {
+    const meta: Record<string, RulePresetMeta> = {};
+    presets.forEach((p) => {
+      meta[p.presetId] = {
+        name: p.name,
+        flag: PRESET_FLAGS[p.presetId] ?? "🌐",
+      };
+    });
+    return meta;
+  }, [presets]);
 
   if (!settingsLoading && !isEnabled) {
     return <Navigate to="/settings/spending" replace />;
@@ -233,6 +251,7 @@ export default function SpendingRulesPage() {
                   key={rule.id}
                   rule={rule}
                   categoryMeta={categoryMeta}
+                  presetMeta={presetMeta}
                   onEdit={handleEditRule}
                   onDelete={handleDeleteRule}
                 />

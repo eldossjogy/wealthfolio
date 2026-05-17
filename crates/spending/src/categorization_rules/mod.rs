@@ -12,6 +12,6 @@ pub use matcher::{match_rules, RuleMatch};
 pub use model::{
     CategorizationRule, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
 };
-pub use presets::{ImportPresetResult, RulePreset, RulePresetSummary};
+pub use presets::{ImportPresetResult, RemovePresetResult, RulePreset, RulePresetSummary};
 pub use service::CategorizationRulesService;
 pub use traits::CategorizationRulesRepositoryTrait;

@@ -188,6 +188,18 @@ async fn list_rule_presets(
     ))
 }
 
+async fn remove_rule_preset(
+    State(state): State<Arc<AppState>>,
+    Path(preset_id): Path<String>,
+) -> ApiResult<Json<wealthfolio_spending::categorization_rules::RemovePresetResult>> {
+    Ok(Json(
+        state
+            .categorization_rules_service
+            .remove_preset(&preset_id)
+            .await?,
+    ))
+}
+
 async fn import_rule_preset(
     State(state): State<Arc<AppState>>,
     Path(preset_id): Path<String>,
@@ -462,6 +474,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/v1/spending/rule-presets/:preset_id/import",
             post(import_rule_preset),
+        )
+        .route(
+            "/v1/spending/rule-presets/:preset_id",
+            delete(remove_rule_preset),
         )
         .route(
             "/v1/spending/event-types",

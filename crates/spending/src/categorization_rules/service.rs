@@ -8,7 +8,7 @@ use super::matcher::{compile_rules, match_compiled};
 use super::model::{
     CategorizationRule, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
 };
-use super::presets::{self, ImportPresetResult, RulePresetSummary};
+use super::presets::{self, ImportPresetResult, RemovePresetResult, RulePresetSummary};
 use super::traits::CategorizationRulesRepositoryTrait;
 use crate::activity_assignments::{
     ActivityTaxonomyAssignmentService, NewActivityTaxonomyAssignment,
@@ -217,5 +217,17 @@ impl CategorizationRulesService {
             result.added += 1;
         }
         Ok(result)
+    }
+
+    /// Uninstall a preset. Unmodified rules are deleted; user-modified rules
+    /// are detached (preset metadata cleared) so the user's edits survive as
+    /// standalone rules.
+    pub async fn remove_preset(&self, preset_id: &str) -> Result<RemovePresetResult> {
+        let (removed, kept_modified) = self.repo.remove_preset(preset_id).await?;
+        Ok(RemovePresetResult {
+            preset_id: preset_id.to_string(),
+            removed,
+            kept_modified,
+        })
     }
 }

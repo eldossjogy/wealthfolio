@@ -69,6 +69,17 @@ pub struct ImportPresetResult {
     pub total: usize,
 }
 
+/// Result returned from `remove_preset`.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovePresetResult {
+    pub preset_id: String,
+    /// Number of preset rules deleted (unmodified rules).
+    pub removed: usize,
+    /// Number of preset rules detached (user-modified — kept as standalone rules).
+    pub kept_modified: usize,
+}
+
 /// Compile-embedded preset JSONs. Add new countries by dropping a JSON file
 /// in `crates/spending/seeds/presets/` and adding an entry here.
 const PRESET_JSONS: &[(&str, &str)] = &[

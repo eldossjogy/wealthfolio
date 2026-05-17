@@ -92,3 +92,18 @@ export const importRulePreset = async (presetId: string): Promise<ImportPresetRe
     throw e;
   }
 };
+
+export interface RemovePresetResult {
+  presetId: string;
+  removed: number;
+  keptModified: number;
+}
+
+export const removeRulePreset = async (presetId: string): Promise<RemovePresetResult> => {
+  try {
+    return await invoke<RemovePresetResult>("remove_rule_preset", { presetId });
+  } catch (e) {
+    logger.error("Error removing rule preset.");
+    throw e;
+  }
+};

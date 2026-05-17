@@ -25,10 +25,17 @@ export interface RuleCategoryMeta {
   parentName: string | null;
 }
 
+export interface RulePresetMeta {
+  name: string;
+  flag: string;
+}
+
 interface RuleItemProps {
   rule: CategorizationRule;
   /** category_id → display metadata (joined client-side from taxonomies) */
   categoryMeta: Record<string, RuleCategoryMeta>;
+  /** preset_id → display metadata. Missing entries fall back to the raw id. */
+  presetMeta?: Record<string, RulePresetMeta>;
   onEdit: (rule: CategorizationRule) => void;
   onDelete: (rule: CategorizationRule) => void;
 }
@@ -52,7 +59,7 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   TRANSFER_OUT: "Transfer Out",
 };
 
-export function RuleItem({ rule, categoryMeta, onEdit, onDelete }: RuleItemProps) {
+export function RuleItem({ rule, categoryMeta, presetMeta, onEdit, onDelete }: RuleItemProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [patternExpanded, setPatternExpanded] = useState(false);
 
@@ -71,6 +78,14 @@ export function RuleItem({ rule, categoryMeta, onEdit, onDelete }: RuleItemProps
     ? (ACTIVITY_TYPE_LABELS[rule.activityType] ?? rule.activityType)
     : null;
   const matchLabel = MATCH_TYPE_LABELS[rule.matchType] ?? rule.matchType;
+  const preset = rule.presetId ? (presetMeta?.[rule.presetId] ?? null) : null;
+  const presetBadgeTitle = preset
+    ? rule.presetModified
+      ? `From ${preset.name} preset (edited)`
+      : `From ${preset.name} preset`
+    : rule.presetId
+      ? `From ${rule.presetId.toUpperCase()} preset`
+      : null;
 
   return (
     <>
@@ -79,6 +94,27 @@ export function RuleItem({ rule, categoryMeta, onEdit, onDelete }: RuleItemProps
           {/* Line 1: name + meta */}
           <div className="flex items-center gap-2">
             <span className="text-foreground truncate text-sm font-medium">{rule.name}</span>
+            {rule.presetId && presetBadgeTitle ? (
+              <span
+                className="border-muted-foreground/20 text-muted-foreground inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] leading-none"
+                title={presetBadgeTitle}
+                aria-label={presetBadgeTitle}
+              >
+                {preset?.flag && (
+                  <span className="text-[11px] leading-none" aria-hidden="true">
+                    {preset.flag}
+                  </span>
+                )}
+                <span className="font-medium uppercase tracking-wide">
+                  {preset?.name ?? rule.presetId}
+                </span>
+                {rule.presetModified && (
+                  <span className="text-muted-foreground/60" aria-hidden="true">
+                    ·edited
+                  </span>
+                )}
+              </span>
+            ) : null}
             <span className="text-muted-foreground shrink-0 text-[11px]">
               {matchLabel}
               {rule.priority > 0 && <> · priority {rule.priority}</>}

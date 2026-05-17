@@ -17,8 +17,8 @@ use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, ImportPresetResult, NewCategorizationRule, RulePresetSummary,
-    UpdateCategorizationRule,
+    CategorizationRule, ImportPresetResult, NewCategorizationRule, RemovePresetResult,
+    RulePresetSummary, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{
     Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
@@ -244,6 +244,18 @@ pub async fn import_rule_preset(
         .import_preset(&preset_id, &resolver)
         .await
         .map_err(|e| format!("Failed to import rule preset: {}", e))
+}
+
+#[tauri::command]
+pub async fn remove_rule_preset(
+    preset_id: String,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<RemovePresetResult, String> {
+    state
+        .categorization_rules_service()
+        .remove_preset(&preset_id)
+        .await
+        .map_err(|e| format!("Failed to remove rule preset: {}", e))
 }
 
 #[tauri::command]

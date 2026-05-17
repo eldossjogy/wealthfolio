@@ -253,4 +253,52 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
             .await
             .map_err(|e| anyhow::anyhow!(e))
     }
+
+    async fn remove_preset(&self, preset_id: &str) -> Result<(usize, usize)> {
+        let preset_id = preset_id.to_string();
+        self.writer
+            .exec_tx(move |tx| {
+                let rows: Vec<CategorizationRuleDB> = categorization_rules::table
+                    .filter(categorization_rules::preset_id.eq(&preset_id))
+                    .load::<CategorizationRuleDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                let mut removed = 0usize;
+                let mut kept = 0usize;
+                let now = chrono::Utc::now().to_rfc3339();
+
+                for row in rows {
+                    if row.preset_modified != 0 {
+                        // Detach: clear preset metadata, keep the rule as user-owned.
+                        diesel::update(categorization_rules::table.find(&row.id))
+                            .set((
+                                categorization_rules::preset_id.eq::<Option<String>>(None),
+                                categorization_rules::preset_rule_key.eq::<Option<String>>(None),
+                                categorization_rules::preset_version.eq::<Option<String>>(None),
+                                categorization_rules::preset_modified.eq(0),
+                                categorization_rules::updated_at.eq(&now),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        let mut detached = row.clone();
+                        detached.preset_id = None;
+                        detached.preset_rule_key = None;
+                        detached.preset_version = None;
+                        detached.preset_modified = 0;
+                        detached.updated_at = now.clone();
+                        tx.update(&detached)?;
+                        kept += 1;
+                    } else {
+                        diesel::delete(categorization_rules::table.find(&row.id))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.delete::<CategorizationRuleDB>(row.id.clone());
+                        removed += 1;
+                    }
+                }
+                Ok((removed, kept))
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
 }
