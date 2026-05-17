@@ -47,9 +47,9 @@ const DAILY_GRANULARITY_THRESHOLD_DAYS = 35;
 /**
  * Spending insights — narrative-first, three-stage page.
  *
- *   01 Where I am   — pace card + spent + cashflow + breakdown table
- *   02 What changed — period-vs-period headline + sparklines + delta table
- *   03 When & where — weekday-hour heatmap + events headline + per-event cards
+ *   Where I am   — pace card + spent + cashflow + breakdown table
+ *   What changed — period-vs-period headline + sparklines + delta table
+ *   When & where — weekday-hour heatmap + events headline + per-event cards
  *
  * Owns period + comparison + stage state at the top; each stage receives the
  * data it needs. Data hooks run unconditionally so switching stages is instant.

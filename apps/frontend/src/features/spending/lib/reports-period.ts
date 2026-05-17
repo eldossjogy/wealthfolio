@@ -30,20 +30,36 @@ export interface ReportsRange {
 /** Convert a period selection into the active date range. */
 export function periodToReportsRange(period: ReportsPeriod): ReportsRange {
   const now = new Date();
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-  const start = (() => {
+  // For 1M we span the full calendar month so "X days left in May" reads
+  // correctly and forecasts can project past today. Other periods stay
+  // "through today" since they cover multiple months and the "current month"
+  // is naturally the trailing edge.
+  const { start, end } = (() => {
     switch (period) {
-      case "1M":
-        return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      case "1M": {
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        return { start: monthStart, end: monthEnd };
+      }
       case "3M":
-        return new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
+        return {
+          start: new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0),
+          end: today,
+        };
       case "6M":
-        return new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0);
+        return {
+          start: new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0),
+          end: today,
+        };
       case "YTD":
-        return new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+        return { start: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0), end: today };
       case "1Y":
-        return new Date(now.getFullYear(), now.getMonth() - 11, 1, 0, 0, 0, 0);
+        return {
+          start: new Date(now.getFullYear(), now.getMonth() - 11, 1, 0, 0, 0, 0),
+          end: today,
+        };
     }
   })();
 

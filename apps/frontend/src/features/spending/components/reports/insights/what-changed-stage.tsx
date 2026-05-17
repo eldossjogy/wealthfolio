@@ -121,7 +121,7 @@ const HeadlineCard: FC<HeadlineCardProps> = ({
     <div className={CARD_CLASS}>
       <div className={LABEL_CLASS}>HEADLINE · {labelPair.combined}</div>
       <p className="text-foreground mt-3 max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg">
-        {buildHeadline({ change, pct, movers, currency })}
+        {buildHeadline({ change, pct, movers, currency, priorLabel: labelPair.prior })}
       </p>
 
       <div className="border-border/40 mt-5 grid grid-cols-2 gap-4 border-t pt-4 sm:grid-cols-4">
@@ -227,11 +227,13 @@ function buildHeadline({
   pct,
   movers,
   currency,
+  priorLabel,
 }: {
   change: number;
   pct: number | null;
   movers: MoverRow[];
   currency: string;
+  priorLabel: string;
 }): ReactNode {
   if (movers.length === 0 || change === 0) {
     return <>No meaningful change vs prior period.</>;
@@ -247,45 +249,57 @@ function buildHeadline({
   const topTone = topPct >= 0 ? "text-destructive" : "text-success";
   const topVerb = topPct >= 0 ? "up" : "down";
 
-  const totalPctText =
-    pct == null
-      ? ""
-      : ` Net effect: ${formatPercentValue(pct, { digits: 0, signDisplay: "always" })} on total spend.`;
-
-  if (second) {
-    const secPct = second.pct ?? 0;
-    const secTone = secPct >= 0 ? "text-destructive" : "text-success";
-    const secVerb = secPct >= 0 ? "up" : "down";
-    return (
-      <>
-        You spent{" "}
-        <span className={cn("whitespace-nowrap font-serif font-medium", directionTone)}>
-          {formatAmount(Math.abs(change), currency)} {direction}
-        </span>{" "}
-        this period, but the move is concentrated:{" "}
-        <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
-          {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
-        </span>{" "}
-        while{" "}
-        <span className={cn("whitespace-nowrap font-serif font-medium", secTone)}>
-          {second.name} is {secVerb} {formatPercentValue(Math.abs(secPct), { digits: 0 })}
-        </span>
-        .{totalPctText}
-      </>
+  const totalPctSentence =
+    pct == null ? null : (
+      <span className={cn("font-medium", pct >= 0 ? "text-destructive" : "text-success")}>
+        Total spend {pct >= 0 ? "up" : "down"} {formatPercentValue(Math.abs(pct), { digits: 0 })}.
+      </span>
     );
-  }
+
+  const lead = (
+    <>
+      You spent{" "}
+      <span className={cn("whitespace-nowrap font-serif font-medium", directionTone)}>
+        {formatAmount(Math.abs(change), currency)} {direction}
+      </span>{" "}
+      than {priorLabel}.
+    </>
+  );
+
+  const drivers = second ? (
+    <>
+      Most of the {change >= 0 ? "rise" : "drop"} came from{" "}
+      <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
+        {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
+      </span>
+      .{" "}
+      <span
+        className={cn(
+          "whitespace-nowrap font-serif font-medium",
+          (second.pct ?? 0) >= 0 ? "text-destructive" : "text-success",
+        )}
+      >
+        {second.name} {(second.pct ?? 0) >= 0 ? "up" : "down"}{" "}
+        {formatPercentValue(Math.abs(second.pct ?? 0), { digits: 0 })}
+      </span>
+      .
+    </>
+  ) : (
+    <>
+      Most of the {change >= 0 ? "rise" : "drop"} came from{" "}
+      <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
+        {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
+      </span>
+      .
+    </>
+  );
 
   return (
     <>
-      You spent{" "}
-      <span className={cn("font-serif font-semibold", directionTone)}>
-        {formatAmount(Math.abs(change), currency)} {direction}
-      </span>{" "}
-      this period — driven mostly by{" "}
-      <span className={cn("font-serif font-semibold", topTone)}>
-        {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
-      </span>
-      .{totalPctText}
+      <span>{lead}</span>
+      <br />
+      <span>{drivers}</span>
+      {totalPctSentence && <> {totalPctSentence}</>}
     </>
   );
 }

@@ -44,12 +44,11 @@ export function BudgetLineChartCard({
   if (target <= 0) {
     return (
       <div className="w-full">
-        <div className="flex items-baseline justify-between pb-2">
-          <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
-          <span className="text-muted-foreground/70 text-xs">
-            {now.toLocaleString("en-US", { month: "short", year: "numeric" })}
-          </span>
-        </div>
+        <BudgetCardHeader
+          monthLabel={now
+            .toLocaleString("en-US", { month: "short", year: "numeric" })
+            .toUpperCase()}
+        />
         <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
           <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
           <Link
@@ -198,29 +197,45 @@ export function BudgetLineChartCard({
 
   return (
     <div className="w-full">
-      <div className="flex items-baseline justify-between pb-2">
-        <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
-        <span className="text-muted-foreground/70 text-xs">{monthLabel}</span>
-      </div>
+      <BudgetCardHeader monthLabel={monthLabel} />
       <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 shrink-0" style={{ color: a.accent }} />
           <span className="text-foreground text-sm font-semibold">{a.label}</span>
           <span className="text-muted-foreground/70 ml-auto text-xs tabular-nums">
-            Day {dayOfMonth} of {daysInMonth}
+            Day {dayOfMonth} / {daysInMonth}
           </span>
         </div>
 
         <div className="mt-3">
-          <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
-            <PrivacyAmount value={isOver ? overBy : remaining} currency={currency} />{" "}
-            <span className="text-muted-foreground/70 text-base font-medium">
-              {isOver ? "over" : "left"}
-            </span>
-          </div>
-          <div className="text-muted-foreground/80 text-xs tabular-nums">
-            Budget <PrivacyAmount value={target} currency={currency} /> this month
-          </div>
+          {willOverspend && forecastDelta > target * 0.05 ? (
+            <>
+              <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
+                <PrivacyAmount value={forecast} currency={currency} />{" "}
+                <span className="text-muted-foreground/70 text-base font-medium">forecast</span>
+              </div>
+              <div className="text-destructive mt-0.5 inline-flex items-center gap-1 text-xs font-semibold tabular-nums">
+                <Icons.ArrowUp className="h-3 w-3" />
+                <PrivacyAmount value={forecastDelta} currency={currency} /> over budget
+              </div>
+              <div className="text-muted-foreground/80 mt-0.5 text-xs tabular-nums">
+                <PrivacyAmount value={remaining} currency={currency} /> left today · of{" "}
+                <PrivacyAmount value={target} currency={currency} /> budgeted this month
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
+                <PrivacyAmount value={isOver ? overBy : remaining} currency={currency} />{" "}
+                <span className="text-muted-foreground/70 text-base font-medium">
+                  {isOver ? "over" : "left"}
+                </span>
+              </div>
+              <div className="text-muted-foreground/80 text-xs tabular-nums">
+                of <PrivacyAmount value={target} currency={currency} /> budgeted this month
+              </div>
+            </>
+          )}
         </div>
 
         <div className="relative mt-4 w-full">
@@ -350,6 +365,25 @@ export function BudgetLineChartCard({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function BudgetCardHeader({ monthLabel }: { monthLabel: string }) {
+  return (
+    <div className="flex items-center justify-between pb-2">
+      <div className="flex items-baseline gap-2">
+        <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
+        <span className="text-muted-foreground/60 text-[11px] font-medium uppercase tracking-wide">
+          {monthLabel}
+        </span>
+      </div>
+      <Link
+        to="/settings/spending/budget"
+        className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+      >
+        Manage →
+      </Link>
     </div>
   );
 }

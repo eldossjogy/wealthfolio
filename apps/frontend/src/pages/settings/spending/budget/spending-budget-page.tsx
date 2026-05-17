@@ -30,6 +30,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@wealthfolio/ui";
+import { Switch } from "@wealthfolio/ui/components/ui/switch";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { useBudget, useBudgetMutations } from "@/features/spending/hooks/use-budget";
@@ -151,14 +152,16 @@ export default function SpendingBudgetPage() {
                 }}
                 canDelete={groups.some((g) => g.id !== row.group.id)}
                 deletePending={mutations.removeGroup.isPending}
-                onToggleGroupRollover={(enabled) =>
+                onSaveGroupRollover={(enabled, startingBalance) =>
                   mutations.upsertRollover.mutate({
                     targetType: "group",
                     groupId: row.group.id,
                     enabled,
                     startMonth: monthMode ? periodForWrite : currentMonthKey(),
                     startingBalance:
-                      findGroupRollover(rolloverSettings, row.group.id)?.startingBalance ?? "0",
+                      startingBalance ??
+                      findGroupRollover(rolloverSettings, row.group.id)?.startingBalance ??
+                      "0",
                   })
                 }
                 onToggleCategoryRollover={(category, enabled) =>
@@ -405,7 +408,7 @@ function GroupBudgetSection({
   onMoveCategory,
   onUpdateGroup,
   onDeleteGroup,
-  onToggleGroupRollover,
+  onSaveGroupRollover,
   onToggleCategoryRollover,
 }: {
   row: BudgetGroupRow;
@@ -423,7 +426,7 @@ function GroupBudgetSection({
   onMoveCategory: (categoryId: string, groupId: string) => void;
   onUpdateGroup: (patch: { name?: string; color?: string | null; icon?: string | null }) => void;
   onDeleteGroup: () => void;
-  onToggleGroupRollover: (enabled: boolean) => void;
+  onSaveGroupRollover: (enabled: boolean, startingBalance?: string) => void;
   onToggleCategoryRollover: (row: BudgetCategoryRow, enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -465,6 +468,9 @@ function GroupBudgetSection({
           open={editOpen}
           onOpenChange={setEditOpen}
           onUpdate={onUpdateGroup}
+          rolloverEnabled={groupRollover?.enabled ?? false}
+          rolloverStartingBalance={groupRollover?.startingBalance ?? "0"}
+          onSaveRollover={onSaveGroupRollover}
         />
 
         <button
@@ -525,7 +531,7 @@ function GroupBudgetSection({
             <DropdownMenuItem
               onSelect={(event) => {
                 event.preventDefault();
-                onToggleGroupRollover(!groupRollover?.enabled);
+                onSaveGroupRollover(!groupRollover?.enabled);
               }}
               className="text-xs"
             >
@@ -582,6 +588,13 @@ function GroupBudgetSection({
 
       {open && (
         <div className="border-border/30 border-t">
+          <GroupBufferLine
+            row={row}
+            target={groupOverride}
+            monthMode={monthMode}
+            onSaveGroupBuffer={onSaveGroupBuffer}
+            onDeleteOverride={onDeleteOverride}
+          />
           {row.categories.map((category) => (
             <BudgetCategoryLine
               key={category.categoryId}
@@ -603,13 +616,6 @@ function GroupBudgetSection({
               onToggleRollover={onToggleCategoryRollover}
             />
           ))}
-          <GroupBufferLine
-            row={row}
-            target={groupOverride}
-            monthMode={monthMode}
-            onSaveGroupBuffer={onSaveGroupBuffer}
-            onDeleteOverride={onDeleteOverride}
-          />
         </div>
       )}
     </section>
@@ -622,24 +628,34 @@ function GroupEditDialog({
   open,
   onOpenChange,
   onUpdate,
+  rolloverEnabled,
+  rolloverStartingBalance,
+  onSaveRollover,
 }: {
   group: BudgetGroup;
   color: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdate: (patch: { name?: string; color?: string | null; icon?: string | null }) => void;
+  rolloverEnabled: boolean;
+  rolloverStartingBalance: string;
+  onSaveRollover: (enabled: boolean, startingBalance?: string) => void;
 }) {
   const [draftName, setDraftName] = useState(group.name);
   const [draftColor, setDraftColor] = useState(color);
   const [draftIcon, setDraftIcon] = useState<string | null>(group.icon ?? null);
+  const [draftRollover, setDraftRollover] = useState(rolloverEnabled);
+  const [draftStartingBalance, setDraftStartingBalance] = useState(rolloverStartingBalance);
 
   useEffect(() => {
     if (open) {
       setDraftName(group.name);
       setDraftColor(color);
       setDraftIcon(group.icon ?? null);
+      setDraftRollover(rolloverEnabled);
+      setDraftStartingBalance(rolloverStartingBalance);
     }
-  }, [color, group.icon, group.name, open]);
+  }, [color, group.icon, group.name, open, rolloverEnabled, rolloverStartingBalance]);
 
   const handleSave = () => {
     const patch: { name?: string; color?: string | null; icon?: string | null } = {};
@@ -648,6 +664,15 @@ function GroupEditDialog({
     if (draftColor !== color) patch.color = draftColor;
     if ((draftIcon ?? null) !== (group.icon ?? null)) patch.icon = draftIcon;
     if (Object.keys(patch).length > 0) onUpdate(patch);
+
+    const balanceChanged =
+      draftRollover && normalizeBalance(draftStartingBalance) !== rolloverStartingBalance;
+    if (draftRollover !== rolloverEnabled || balanceChanged) {
+      onSaveRollover(
+        draftRollover,
+        draftRollover ? normalizeBalance(draftStartingBalance) : undefined,
+      );
+    }
     onOpenChange(false);
   };
 
@@ -697,6 +722,43 @@ function GroupEditDialog({
               Icon
             </label>
             <IconPicker value={draftIcon} accent={draftColor} onChange={setDraftIcon} />
+          </div>
+
+          <div className="border-border/40 space-y-2 border-t pt-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="text-foreground text-sm font-medium">Monthly rollover</div>
+                <p className="text-muted-foreground text-[11px] leading-snug">
+                  Carry unspent budget into next month for this group.
+                </p>
+              </div>
+              <Switch
+                checked={draftRollover}
+                onCheckedChange={setDraftRollover}
+                aria-label="Enable monthly rollover"
+              />
+            </div>
+            {draftRollover && (
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <label
+                  htmlFor="rollover-starting-balance"
+                  className="text-muted-foreground text-[11px]"
+                >
+                  Starting balance
+                </label>
+                <div className="w-[120px]">
+                  <input
+                    id="rollover-starting-balance"
+                    type="text"
+                    inputMode="decimal"
+                    value={draftStartingBalance}
+                    onChange={(event) => setDraftStartingBalance(event.target.value)}
+                    placeholder="0"
+                    className="bg-background border-input focus-visible:ring-ring/40 text-foreground placeholder:text-muted-foreground/70 h-8 w-full rounded-md border px-2 text-right text-xs tabular-nums outline-none focus-visible:ring-2"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -873,19 +935,26 @@ function GroupBufferLine({
   const hasOverride = monthMode && !!target;
   const sharePct = safePercent(row.buffer, row.plannedTotal);
   return (
-    <div className="border-border/30 hover:bg-muted/15 flex items-center gap-2 border-t border-dashed px-3 py-1.5 text-xs sm:gap-3 sm:px-4">
+    <div className="hover:bg-muted/15 flex items-center gap-2 px-3 py-1.5 text-xs sm:gap-3 sm:px-4">
       <span
-        className="border-muted-foreground/30 h-4 w-0.5 shrink-0 rounded-full border border-dashed"
+        className="border-muted-foreground/40 h-4 w-0.5 shrink-0 border-l border-dashed"
         aria-hidden
       />
-      <span className="text-muted-foreground/80 min-w-0 flex-1 truncate italic">
-        Unassigned buffer
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="text-muted-foreground min-w-0 flex-1 truncate">Group buffer</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={4} className="max-w-[220px] text-xs">
+          Extra headroom for this group that isn't assigned to a category.
+        </TooltipContent>
+      </Tooltip>
 
       <div className="relative w-[80px] shrink-0">
-        <div className="border-muted-foreground/30 rounded-md border border-dashed">
-          <AmountInput value={row.buffer} onCommit={(value) => onSaveGroupBuffer(row, value)} />
-        </div>
+        <AmountInput
+          value={row.buffer}
+          variant="dashed"
+          onCommit={(value) => onSaveGroupBuffer(row, value)}
+        />
         {hasOverride && (
           <button
             type="button"
@@ -1109,16 +1178,34 @@ function EmptyPanelLine({ children }: { children: ReactNode }) {
   );
 }
 
-function AmountInput({ value, onCommit }: { value: number; onCommit: (value: string) => void }) {
+function AmountInput({
+  value,
+  onCommit,
+  variant = "default",
+}: {
+  value: number;
+  onCommit: (value: string) => void;
+  variant?: "default" | "dashed";
+}) {
   const [draft, setDraft] = useState(String(value || ""));
   const [focused, setFocused] = useState(false);
+  const isEmpty = !focused && (!draft || Number.parseFloat(draft) === 0);
 
   useEffect(() => {
     if (!focused) setDraft(String(value || ""));
   }, [focused, value]);
 
   return (
-    <div className="bg-muted/60 border-border/60 focus-within:ring-ring/50 flex h-7 w-full items-center rounded-md border px-2 transition-shadow focus-within:ring-2">
+    <div
+      className={cn(
+        "bg-background focus-within:ring-ring/40 focus-within:border-ring hover:border-foreground/30 flex h-7 w-full items-center rounded-md border px-2 transition-shadow focus-within:ring-2",
+        variant === "dashed"
+          ? "border-muted-foreground/30 border-dashed"
+          : isEmpty
+            ? "border-border/70 border-dashed"
+            : "border-input",
+      )}
+    >
       <input
         type="text"
         inputMode="decimal"
@@ -1139,7 +1226,7 @@ function AmountInput({ value, onCommit }: { value: number; onCommit: (value: str
           if (event.key === "Enter") event.currentTarget.blur();
         }}
         placeholder="0"
-        className="text-foreground placeholder:text-muted-foreground/50 min-w-0 flex-1 bg-transparent text-right text-xs tabular-nums outline-none"
+        className="text-foreground placeholder:text-muted-foreground/70 min-w-0 flex-1 bg-transparent text-right text-xs tabular-nums outline-none"
       />
     </div>
   );
@@ -1180,6 +1267,14 @@ function findCategoryRollover(settings: BudgetRolloverSetting[], categoryId: str
       setting.taxonomyId === SPENDING_TAXONOMY &&
       setting.categoryId === categoryId,
   );
+}
+
+function normalizeBalance(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "0";
+  const parsed = Number.parseFloat(trimmed);
+  if (!Number.isFinite(parsed)) return "0";
+  return String(parsed);
 }
 
 function safePercent(value: number, total: number) {

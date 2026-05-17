@@ -54,32 +54,42 @@ export function WhenWhereStage({
         currency={currency}
         onCellClick={onHeatmapCellClick}
       />
-      {events.length > 0 ? (
-        <>
-          <EventsHeadlineCard
-            events={events}
-            currency={currency}
-            rangeStart={rangeStart}
-            rangeEnd={rangeEnd}
-            heatmapActivities={heatmapActivities}
-            accountTypeById={accountTypeById}
-          />
-          <div className="grid gap-4 lg:grid-cols-3">
-            {events.slice(0, 3).map((event) => (
-              <EventDetailCard
-                key={event.eventId}
-                event={event}
-                taxonomyCategories={taxonomyCategories}
-                currency={currency}
-                heatmapActivities={heatmapActivities}
-                accountTypeById={accountTypeById}
-              />
-            ))}
-          </div>
-        </>
-      ) : (
-        <EmptyEventsCard />
-      )}
+      <div className="flex flex-col gap-4">
+        <header>
+          <h2 className="text-foreground text-base font-semibold tracking-tight">
+            Where it happened
+          </h2>
+          <p className="text-muted-foreground text-xs">
+            Trips, places, and one-offs that changed your usual rhythm.
+          </p>
+        </header>
+        {events.length > 0 ? (
+          <>
+            <EventsHeadlineCard
+              events={events}
+              currency={currency}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              heatmapActivities={heatmapActivities}
+              accountTypeById={accountTypeById}
+            />
+            <div className="grid gap-4 lg:grid-cols-3">
+              {events.slice(0, 3).map((event) => (
+                <EventDetailCard
+                  key={event.eventId}
+                  event={event}
+                  taxonomyCategories={taxonomyCategories}
+                  currency={currency}
+                  heatmapActivities={heatmapActivities}
+                  accountTypeById={accountTypeById}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <EmptyEventsCard />
+        )}
+      </div>
     </div>
   );
 }
@@ -953,17 +963,15 @@ function formatRange(start: Date, end: Date): string {
 function EmptyEventsCard() {
   return (
     <div className={CARD_CLASS}>
-      <div className={LABEL_CLASS}>NO TAGGED EVENTS</div>
-      <p className="text-foreground mt-3 text-base font-semibold leading-snug">
-        Tag a trip or one-off to see how it stacks up against your normal week.
+      <p className="text-foreground text-base font-semibold leading-snug">
+        No trips or events tagged
       </p>
       <p className="text-muted-foreground/80 mt-2 text-sm">
-        Events let you isolate spend that isn't part of your usual rhythm — so the rest of this view
-        stays meaningful.
+        Tag a trip, place, or one-off to see how it compares with your normal week.
       </p>
       <Button asChild variant="outline" size="sm" className="mt-4">
         <Link to="/spending/transactions">
-          Tag transactions
+          Tag event
           <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
         </Link>
       </Button>

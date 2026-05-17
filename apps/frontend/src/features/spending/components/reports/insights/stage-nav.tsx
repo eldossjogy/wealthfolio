@@ -9,20 +9,17 @@ interface StageNavProps {
   contextLabel?: string;
 }
 
-const STAGES: { id: InsightsStage; index: string; label: string }[] = [
-  { id: "where", index: "01", label: "Where I am" },
-  { id: "changed", index: "02", label: "What changed" },
-  { id: "when", index: "when", label: "When & where" },
+const STAGES: { id: InsightsStage; label: string }[] = [
+  { id: "where", label: "Where I am" },
+  { id: "changed", label: "What changed" },
+  { id: "when", label: "When & where" },
 ];
-
-// Re-encode index labels so they always look like 01/02/03 even after edits.
-const RENDER_INDEX = ["01", "02", "03"];
 
 export function StageNav({ stage, onStageChange, contextLabel }: StageNavProps) {
   return (
     <div className="border-border/60 bg-card/40 flex flex-wrap items-center gap-2 rounded-2xl border px-3 py-2 backdrop-blur-xl">
       <div className="flex flex-wrap items-center gap-1">
-        {STAGES.map((s, i) => {
+        {STAGES.map((s) => {
           const active = stage === s.id;
           return (
             <button
@@ -37,17 +34,6 @@ export function StageNav({ stage, onStageChange, contextLabel }: StageNavProps) 
               )}
               aria-current={active ? "step" : undefined}
             >
-              <span
-                className={cn(
-                  "rounded px-1 text-[10px] font-semibold tabular-nums",
-                  active ? "text-background/70" : "text-muted-foreground/60",
-                )}
-              >
-                {RENDER_INDEX[i]}
-              </span>
-              <span className={cn("text-muted-foreground/40", active && "text-background/40")}>
-                |
-              </span>
               <span className="font-medium">{s.label}</span>
             </button>
           );

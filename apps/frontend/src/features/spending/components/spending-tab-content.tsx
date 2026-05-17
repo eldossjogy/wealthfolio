@@ -19,8 +19,6 @@ import { cn, formatAmount, formatDateISO } from "@/lib/utils";
 import Balance from "@/pages/dashboard/balance";
 
 import {
-  GainAmount,
-  GainPercent,
   Icons,
   IntervalSelector,
   PrivacyAmount,
@@ -148,9 +146,10 @@ export default function SpendingTabContent() {
   const totalSpending = report?.current.outflow ?? 0;
   const priorSpending = priorReport?.current.outflow ?? 0;
   const delta = totalSpending - priorSpending;
-  const deltaPct = priorSpending > 0 ? delta / priorSpending : 0;
-  const gainSign = -delta;
-  const gainPct = -deltaPct;
+  // A near-zero prior makes the percent change explode (e.g. −2,062%).
+  // Hide it whenever prior is small relative to current spending.
+  const priorIsMeaningful = priorSpending >= Math.max(100, totalSpending * 0.02);
+  const deltaPct = priorIsMeaningful ? delta / priorSpending : 0;
 
   const handleIntervalSelect = (
     code: TimePeriod,
@@ -377,40 +376,25 @@ export default function SpendingTabContent() {
       <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
           <div>
+            <div className="text-muted-foreground/80 text-[11px] font-semibold uppercase tracking-[0.12em]">
+              Spent{selectedIntervalDescription ? ` · ${selectedIntervalDescription}` : ""}
+            </div>
             <Balance
               isLoading={isLoading}
               targetValue={totalSpending}
               currency={currency}
               displayCurrency={true}
             />
-            <div className="text-md flex space-x-3">
+            <div className="text-md flex items-center">
               {isPriorLoading ? (
-                <div className="flex items-center gap-3 pt-1">
-                  <Skeleton className="h-4 w-24" />
-                  <div className="border-secondary my-1 border-r pr-2" />
-                  <Skeleton className="h-4 w-16" />
-                </div>
-              ) : (
-                <>
-                  <GainAmount
-                    className="lg:text-md text-sm font-light"
-                    value={gainSign}
-                    currency={currency}
-                    displayCurrency={false}
-                  />
-                  <div className="border-secondary my-1 border-r pr-2" />
-                  <GainPercent
-                    className="lg:text-md text-sm font-light"
-                    value={gainPct}
-                    animated={true}
-                  />
-                </>
-              )}
-              {selectedIntervalDescription && (
-                <span className="lg:text-md text-muted-foreground ml-1 text-sm font-light">
-                  {selectedIntervalDescription}
-                </span>
-              )}
+                <Skeleton className="mt-1 h-4 w-56" />
+              ) : priorSpending > 0 ? (
+                <SpendingDeltaLine
+                  delta={delta}
+                  currency={currency}
+                  deltaPct={priorSpending >= 100 && Math.abs(deltaPct) <= 5 ? deltaPct : null}
+                />
+              ) : null}
             </div>
           </div>
           <CashFlowStrip
@@ -429,6 +413,13 @@ export default function SpendingTabContent() {
         }}
       >
         <div className="h-[280px]">
+          {!isLoading && barData.length > 0 && avgValue > 0 && (
+            <div className="text-muted-foreground/80 flex justify-end px-6 pt-1 text-[11px] tabular-nums">
+              <span>
+                {avgLabel} · {formatAmount(avgValue, currency)}
+              </span>
+            </div>
+          )}
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <Skeleton className="h-full w-full" />
@@ -440,7 +431,7 @@ export default function SpendingTabContent() {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barData} margin={{ top: 16, right: 24, left: 16, bottom: 8 }}>
+              <BarChart data={barData} margin={{ top: 8, right: 24, left: 16, bottom: 8 }}>
                 <defs>
                   <linearGradient id="spending-bar" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={theme.deep} stopOpacity={0.95} />
@@ -481,13 +472,6 @@ export default function SpendingTabContent() {
                     stroke="var(--muted-foreground)"
                     strokeDasharray="3 3"
                     strokeOpacity={0.4}
-                    label={{
-                      value: `${avgLabel} · ${formatAmount(avgValue, currency)}`,
-                      position: "insideTopRight",
-                      offset: 6,
-                      fill: "var(--muted-foreground)",
-                      fontSize: 11,
-                    }}
                   />
                 )}
                 <Bar
@@ -556,6 +540,7 @@ export default function SpendingTabContent() {
                     total={totalSpending}
                     currency={currency}
                     themeColor={theme.deep}
+                    groupRows={budget?.computed.groupRows ?? []}
                   />
                 )}
               </div>
@@ -698,7 +683,7 @@ function CashFlowStrip({
   return (
     <div className="flex items-end gap-6 sm:gap-8">
       <KpiStat label="Income" value={income} sign="+" currency={currency} tone="success" />
-      <KpiStat label="Spending" value={spending} sign="−" currency={currency} tone="destructive" />
+      <KpiStat label="Spending" value={spending} currency={currency} tone="muted" />
       <KpiStat
         label="Net"
         value={Math.abs(net)}
@@ -719,7 +704,7 @@ function KpiStat({
 }: {
   label: string;
   value: number;
-  sign: "+" | "−";
+  sign?: "+" | "−";
   currency: string;
   tone: "success" | "destructive" | "muted";
 }) {
@@ -957,11 +942,17 @@ function CategoryRankedBar({
   total,
   currency,
   themeColor,
+  groupRows = [],
 }: {
   rows: CategoryRow[];
   total: number;
   currency: string;
   themeColor: string;
+  /**
+   * Budget groups (Needs / Wants / …). When any category here is assigned to a
+   * group, the list switches to a grouped layout with collapsible group rows.
+   */
+  groupRows?: import("../types/budget").BudgetGroupRow[];
 }) {
   if (rows.length === 0 || total <= 0) {
     return (
@@ -970,14 +961,30 @@ function CategoryRankedBar({
       </div>
     );
   }
-  const top = rows.slice(0, 7);
-  const restAmount = rows.slice(7).reduce((s, r) => s + r.amount, 0);
+
+  // Build category → group map from budget. If nothing is assigned, fall back
+  // to the flat list (existing behavior).
+  const categoryGroup = new Map<string, { id: string; name: string; color: string | null }>();
+  for (const g of groupRows) {
+    for (const cat of g.categories) {
+      categoryGroup.set(cat.categoryId, {
+        id: g.group.id,
+        name: g.group.name,
+        color: g.group.color,
+      });
+    }
+  }
+  const hasAnyGroup = rows.some((r) => categoryGroup.has(r.id));
+
   const categorizedSum = rows.reduce((s, r) => s + r.amount, 0);
   const uncategorizedAmount = Math.max(0, total - categorizedSum);
-  const uncategorizedShare = total > 0 ? (uncategorizedAmount / total) * 100 : 0;
-  const segments = [...top];
+
+  // ── Bar segments — share the top-N slicing across both layouts. ─────
+  const top = rows.slice(0, 7);
+  const restAmount = rows.slice(7).reduce((s, r) => s + r.amount, 0);
+  const barSegments = [...top];
   if (restAmount > 0) {
-    segments.push({
+    barSegments.push({
       id: "__other__",
       name: "Other",
       amount: restAmount,
@@ -986,27 +993,106 @@ function CategoryRankedBar({
     });
   }
 
+  const StackedBar = (
+    <div className="bg-foreground/10 relative flex h-3 w-full overflow-hidden rounded-full">
+      {barSegments.map((s, i) => {
+        const share = (s.amount / total) * 100;
+        const color = s.color ?? themeColor;
+        return (
+          <div
+            key={s.id}
+            className="h-full transition-opacity hover:opacity-80"
+            style={{
+              width: `${share}%`,
+              backgroundColor: color,
+              opacity: 0.85 - i * 0.05,
+              borderRight: "1px solid var(--card)",
+            }}
+            title={`${s.name} — ${formatAmount(s.amount, currency)} (${share.toFixed(1)}%)`}
+          />
+        );
+      })}
+    </div>
+  );
+
+  if (hasAnyGroup) {
+    // Group rows by their group assignment; unassigned categories + the
+    // uncategorized bucket fall into a synthetic "Other" group.
+    type Bucket = {
+      id: string;
+      name: string;
+      color: string | null;
+      categories: CategoryRow[];
+      total: number;
+    };
+    const buckets = new Map<string, Bucket>();
+    const ensureBucket = (id: string, name: string, color: string | null) => {
+      let b = buckets.get(id);
+      if (!b) {
+        b = { id, name, color, categories: [], total: 0 };
+        buckets.set(id, b);
+      }
+      return b;
+    };
+    // Seed declared groups first so they keep the user's sortOrder when totals tie.
+    for (const g of groupRows) ensureBucket(g.group.id, g.group.name, g.group.color);
+
+    // The backend ships an "Other" system group (key="other"). Reuse it for
+    // unassigned categories so we don't render two "Other" rows side by side.
+    const fallbackGroup =
+      groupRows.find((g) => g.group.key === "other") ??
+      groupRows.find((g) => g.group.name.toLowerCase() === "other");
+    const ensureOther = () =>
+      fallbackGroup
+        ? ensureBucket(fallbackGroup.group.id, fallbackGroup.group.name, fallbackGroup.group.color)
+        : ensureBucket("__other__", "Other", null);
+
+    for (const row of rows) {
+      const g = categoryGroup.get(row.id);
+      const b = g ? ensureBucket(g.id, g.name, g.color) : ensureOther();
+      b.categories.push(row);
+      b.total += row.amount;
+    }
+    if (uncategorizedAmount > 0.01) {
+      const b = ensureOther();
+      b.categories.push({
+        id: "__uncategorized__",
+        name: "Uncategorized — review",
+        color: null,
+        icon: null,
+        amount: uncategorizedAmount,
+      });
+      b.total += uncategorizedAmount;
+    }
+
+    // Preserve insertion order: declared groups follow the user's `sortOrder`
+    // from the backend (mockup convention), and the synthetic "Other" bucket
+    // naturally lands last because it's only created on demand.
+    const orderedBuckets = Array.from(buckets.values()).filter((b) => b.total > 0);
+
+    return (
+      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
+        {StackedBar}
+        <div className="mt-3 space-y-2">
+          {orderedBuckets.map((bucket) => (
+            <GroupedCategoryBlock
+              key={bucket.id}
+              bucket={bucket}
+              total={total}
+              currency={currency}
+              themeColor={themeColor}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Flat layout (no budget groups configured) — unchanged. ──────────
+  const uncategorizedShare = total > 0 ? (uncategorizedAmount / total) * 100 : 0;
   return (
     <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
-      <div className="bg-foreground/10 relative flex h-3 w-full overflow-hidden rounded-full">
-        {segments.map((s, i) => {
-          const share = (s.amount / total) * 100;
-          const color = s.color ?? themeColor;
-          return (
-            <div
-              key={s.id}
-              className="h-full transition-opacity hover:opacity-80"
-              style={{
-                width: `${share}%`,
-                backgroundColor: color,
-                opacity: 0.85 - i * 0.05,
-                borderRight: "1px solid var(--card)",
-              }}
-              title={`${s.name} — ${formatAmount(s.amount, currency)} (${share.toFixed(1)}%)`}
-            />
-          );
-        })}
-      </div>
+      {StackedBar}
 
       <div className="mt-3 space-y-1.5">
         {top.map((r, i) => {
@@ -1061,9 +1147,141 @@ function CategoryRankedBar({
   );
 }
 
+function GroupedCategoryBlock({
+  bucket,
+  total,
+  currency,
+  themeColor,
+}: {
+  bucket: {
+    id: string;
+    name: string;
+    color: string | null;
+    categories: CategoryRow[];
+    total: number;
+  };
+  total: number;
+  currency: string;
+  themeColor: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const share = total > 0 ? (bucket.total / total) * 100 : 0;
+  const accent = bucket.color ?? themeColor;
+  // Sort categories by spend descending, but always pin the uncategorized
+  // bucket to the end — it's a "to-do" row, not a normal category.
+  const sortedCats = bucket.categories.slice().sort((a, b) => {
+    if (a.id === "__uncategorized__") return 1;
+    if (b.id === "__uncategorized__") return -1;
+    return b.amount - a.amount;
+  });
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="hover:bg-muted/40 flex w-full items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
+      >
+        <Icons.ChevronRight
+          className={cn(
+            "text-muted-foreground/70 h-3 w-3 shrink-0 transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <span
+          className="block h-2.5 w-2.5 shrink-0 rounded-sm"
+          style={{ backgroundColor: accent }}
+        />
+        <span className="text-foreground min-w-0 flex-1 truncate text-left text-xs font-semibold uppercase tracking-wide">
+          {bucket.name}
+        </span>
+        <span className="text-muted-foreground/80 w-12 text-right text-[11px] font-medium tabular-nums">
+          {share.toFixed(1)}%
+        </span>
+        <span className="text-foreground w-24 text-right text-xs font-semibold tabular-nums">
+          <PrivacyAmount value={bucket.total} currency={currency} />
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5 pl-6">
+          {sortedCats.map((cat) => {
+            const catShare = total > 0 ? (cat.amount / total) * 100 : 0;
+            const isUncategorized = cat.id === "__uncategorized__";
+            const to = isUncategorized
+              ? "/spending/transactions?status=uncategorized"
+              : `/spending/transactions?category=${cat.id}`;
+            const dotColor = cat.color ?? accent;
+            return (
+              <Link
+                key={cat.id}
+                to={to}
+                className="hover:bg-muted/40 flex items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
+              >
+                <span
+                  className="block h-2 w-2 shrink-0 rounded-sm"
+                  style={{ backgroundColor: dotColor, opacity: 0.85 }}
+                />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-xs font-medium",
+                    isUncategorized ? "text-muted-foreground/90 italic" : "text-foreground/90",
+                  )}
+                >
+                  {cat.name}
+                </span>
+                <span className="text-muted-foreground/70 w-12 text-right text-[11px] tabular-nums">
+                  {catShare.toFixed(1)}%
+                </span>
+                <span className="text-foreground w-24 text-right text-xs font-medium tabular-nums">
+                  <PrivacyAmount value={cat.amount} currency={currency} />
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function truncateForBox(text: string, boxWidth: number, fontSize: number): string {
   if (!text) return "";
   const charW = fontSize * 0.62;
   const max = Math.max(2, Math.floor(boxWidth / charW));
   return text.length > max ? text.slice(0, Math.max(1, max - 1)) + "…" : text;
+}
+
+function SpendingDeltaLine({
+  delta,
+  currency,
+  deltaPct,
+}: {
+  delta: number;
+  currency: string;
+  deltaPct: number | null;
+}) {
+  const isFlat = Math.abs(delta) < 1;
+  const direction = delta < 0 ? "Down" : "Up";
+  const tone = isFlat ? "text-muted-foreground" : delta < 0 ? "text-success" : "text-destructive";
+
+  if (isFlat) {
+    return (
+      <span className="text-muted-foreground lg:text-md text-sm font-light">
+        About the same as prior period
+      </span>
+    );
+  }
+
+  const pctSuffix = deltaPct !== null ? ` (${(Math.abs(deltaPct) * 100).toFixed(1)}%)` : "";
+
+  return (
+    <span className="lg:text-md text-sm font-light">
+      <span className={cn("font-medium", tone)}>
+        {direction} {formatAmount(Math.abs(delta), currency)}
+        {pctSuffix}
+      </span>{" "}
+      <span className="text-muted-foreground">from prior period</span>
+    </span>
+  );
 }

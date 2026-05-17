@@ -167,9 +167,7 @@ const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading
 
       {/* Row 2 — text insight (replaces the redundant "big number" — that fact
           already lives in the Spent card next to it). Serif for editorial feel. */}
-      <p className="text-foreground mt-3 text-base font-normal leading-snug tracking-tight md:text-lg">
-        {pace.narrative}
-      </p>
+      <div className="mt-3">{pace.narrative}</div>
 
       {/* Row 3 — progress bar with pace tick */}
       <div className="bg-foreground/10 relative mt-4 h-2 w-full overflow-hidden rounded-full">
@@ -250,9 +248,10 @@ function computePace(
   // Narrative sentence. When the window is closed OR today is the last day,
   // there's nothing to project — describe the actual outcome instead.
   const isComplete = !isLive || daysRemaining === 0;
+  const closeLabel = range.months <= 1 ? "month end" : "period close";
   const narrative = isComplete
     ? buildClosedNarrative({ spent, target, currency })
-    : buildLiveNarrative({ diffFromPace, projection, target, currency });
+    : buildLiveNarrative({ diffFromPace, projection, target, currency, closeLabel });
 
   return {
     status,
@@ -272,29 +271,40 @@ function buildLiveNarrative({
   projection,
   target,
   currency,
+  closeLabel,
 }: {
   diffFromPace: number;
   projection: number;
   target: number;
   currency: string;
+  closeLabel: string;
 }): ReactNode {
   const direction = diffFromPace > 0 ? "over" : "under";
   const colorClass = diffFromPace > 0 ? "text-destructive" : "text-success";
   const projColorClass = projection > target ? "text-destructive" : "text-success";
+  const pctOfBudget = target > 0 ? (projection / target) * 100 : 0;
 
   return (
-    <>
-      You're{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
+    <div className="flex flex-col gap-1.5">
+      <div
+        className={cn(
+          "font-serif text-lg font-medium leading-tight tracking-tight md:text-xl",
+          colorClass,
+        )}
+      >
         {formatCompactAmount(Math.abs(diffFromPace), currency)} {direction} pace
-      </span>{" "}
-      for the period — projected{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", projColorClass)}>
-        {formatCompactAmount(projection, currency)}
-      </span>{" "}
-      by close ({formatPercentValue(target > 0 ? (projection / target) * 100 : 0, { digits: 0 })} of
-      budget).
-    </>
+      </div>
+      <div className="text-foreground/90 text-sm">
+        Projected{" "}
+        <span className={cn("font-serif font-medium", projColorClass)}>
+          {formatCompactAmount(projection, currency)}
+        </span>{" "}
+        by {closeLabel}
+      </div>
+      <div className="text-muted-foreground/80 text-xs tabular-nums">
+        {formatPercentValue(pctOfBudget, { digits: 0 })} of budget
+      </div>
+    </div>
   );
 }
 
@@ -309,20 +319,27 @@ function buildClosedNarrative({
 }): ReactNode {
   const diff = spent - target;
   const colorClass = diff > 0 ? "text-destructive" : "text-success";
-  const pctText = formatPercentValue(target > 0 ? (spent / target) * 100 : 0, { digits: 0 });
+  const pctOfBudget = target > 0 ? (spent / target) * 100 : 0;
   return (
-    <>
-      You spent{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
-        {formatCompactAmount(spent, currency)}
-      </span>{" "}
-      against a {formatCompactAmount(target, currency)} target — {pctText} of budget,{" "}
-      {diff > 0 ? "over by" : "under by"}{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", colorClass)}>
-        {formatCompactAmount(Math.abs(diff), currency)}
-      </span>
-      .
-    </>
+    <div className="flex flex-col gap-1.5">
+      <div
+        className={cn(
+          "font-serif text-lg font-medium leading-tight tracking-tight md:text-xl",
+          colorClass,
+        )}
+      >
+        {formatCompactAmount(spent, currency)} spent
+      </div>
+      <div className="text-foreground/90 text-sm">
+        Against a {formatCompactAmount(target, currency)} target —{" "}
+        <span className={cn("font-medium", colorClass)}>
+          {diff > 0 ? "over" : "under"} by {formatCompactAmount(Math.abs(diff), currency)}
+        </span>
+      </div>
+      <div className="text-muted-foreground/80 text-xs tabular-nums">
+        {formatPercentValue(pctOfBudget, { digits: 0 })} of budget
+      </div>
+    </div>
   );
 }
 
@@ -580,6 +597,11 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
             {formatAmount(totals.income, currency)}
           </span>
         </div>
+        {totals.income === 0 && (
+          <p className="text-muted-foreground/70 pl-14 text-[10px] leading-snug">
+            No income in selected accounts for this period.
+          </p>
+        )}
         <div className="flex items-center gap-2 text-[11px]">
           <span className="text-muted-foreground w-12 shrink-0">Spent</span>
           <div className="bg-foreground/5 h-1.5 flex-1 overflow-hidden rounded-full">
@@ -636,6 +658,7 @@ function BreakdownCanvas({
   const [sort, setSort] = useState<BreakdownSort>("spent");
 
   const budgetRows = budget?.computed.groupRows.flatMap((row) => row.categories) ?? [];
+  const groupRows = budget?.computed.groupRows ?? [];
   const breakdown = currentReport?.spendingBreakdown ?? [];
   const priorBreakdown = priorReport?.spendingBreakdown ?? [];
 
@@ -743,6 +766,7 @@ function BreakdownCanvas({
           breakdown={filteredBreakdown}
           priorBreakdown={priorBreakdown}
           budgetRows={budgetRows}
+          groupRows={groupRows}
           taxonomyCategories={taxonomyCategories}
           sort={sort}
           currency={currency}
