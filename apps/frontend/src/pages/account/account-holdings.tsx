@@ -36,7 +36,7 @@ const AccountHoldings = ({
 
   const { data: holdings, isLoading } = useQuery<Holding[], Error>({
     queryKey: [QueryKeys.HOLDINGS, accountId],
-    queryFn: () => getHoldings(accountId),
+    queryFn: () => getHoldings({ type: "account", accountId }),
   });
 
   const { accounts } = useAccounts();

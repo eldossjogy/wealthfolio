@@ -92,6 +92,7 @@ mod tests {
                 AccountFilter::Portfolio { portfolio_id: _ } => {
                     Ok(vec!["a1".to_string(), "a2".to_string()])
                 }
+                AccountFilter::AdHoc { account_ids } => Ok(account_ids.clone()),
             }
         }
     }

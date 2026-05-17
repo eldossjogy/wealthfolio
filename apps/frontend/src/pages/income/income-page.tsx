@@ -68,16 +68,15 @@ export default function IncomePage() {
 
   const [accountFilter, setAccountFilter] = useState<AccountFilter>({ type: "all" });
 
-  // Portfolio-level income aggregation is a follow-up; portfolio filter falls back to all accounts.
-  const accountId = accountFilter.type === "account" ? accountFilter.accountId : undefined;
+  const incomeFilter = accountFilter.type === "all" ? undefined : accountFilter;
 
   const {
     data: incomeData,
     isLoading,
     error,
   } = useQuery<IncomeSummary[], Error>({
-    queryKey: [QueryKeys.INCOME_SUMMARY, accountId ?? "ALL"],
-    queryFn: () => getIncomeSummary(accountId),
+    queryKey: [QueryKeys.INCOME_SUMMARY, incomeFilter ?? "ALL"],
+    queryFn: () => getIncomeSummary(incomeFilter),
   });
 
   if (isLoading) {

@@ -25,6 +25,14 @@ pub trait AllocationServiceTrait: Send + Sync {
         base_currency: &str,
     ) -> Result<PortfolioAllocations>;
 
+    /// Computes portfolio allocations aggregated across multiple accounts (portfolio filter).
+    async fn get_portfolio_allocations_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        aggregated_account_id: &str,
+    ) -> Result<PortfolioAllocations>;
+
     /// Returns holdings filtered by a taxonomy category with full category metadata.
     /// Used for drill-down views when user clicks on an allocation category.
     async fn get_holdings_by_allocation(
@@ -33,6 +41,16 @@ pub trait AllocationServiceTrait: Send + Sync {
         base_currency: &str,
         taxonomy_id: &str,
         category_id: &str,
+    ) -> Result<AllocationHoldings>;
+
+    /// Returns holdings by allocation aggregated across multiple accounts.
+    async fn get_holdings_by_allocation_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+        aggregated_account_id: &str,
     ) -> Result<AllocationHoldings>;
 }
 
@@ -285,26 +303,12 @@ impl AllocationService {
             _ => category_id, // No parent - this is the top level
         }
     }
-}
 
-#[async_trait]
-impl AllocationServiceTrait for AllocationService {
-    async fn get_portfolio_allocations(
+    async fn compute_allocations_from_holdings(
         &self,
-        account_id: &str,
-        base_currency: &str,
+        holdings: &[Holding],
+        _base_currency: &str,
     ) -> Result<PortfolioAllocations> {
-        debug!(
-            "Computing portfolio allocations for account {} in {}",
-            account_id, base_currency
-        );
-
-        // 1. Get holdings
-        let holdings = self
-            .holdings_service
-            .get_holdings(account_id, base_currency)
-            .await?;
-
         if holdings.is_empty() {
             return Ok(PortfolioAllocations::default());
         }
@@ -450,23 +454,17 @@ impl AllocationServiceTrait for AllocationService {
         })
     }
 
-    async fn get_holdings_by_allocation(
+    async fn compute_holdings_by_allocation_from_holdings(
         &self,
-        account_id: &str,
+        holdings: &[Holding],
         base_currency: &str,
         taxonomy_id: &str,
         category_id: &str,
     ) -> Result<AllocationHoldings> {
-        debug!(
-            "Getting holdings for category {} in taxonomy {} for account {}",
-            category_id, taxonomy_id, account_id
-        );
-
         // Get taxonomy with categories for hierarchy lookup and metadata
         let taxonomy_with_cats = self.taxonomy_service.get_taxonomy(taxonomy_id)?;
         let empty_categories: Vec<Category> = Vec::new();
 
-        // Extract taxonomy metadata
         let (taxonomy_name, taxonomy_color, categories) = match &taxonomy_with_cats {
             Some(twc) => (
                 twc.taxonomy.name.clone(),
@@ -480,7 +478,6 @@ impl AllocationServiceTrait for AllocationService {
             ),
         };
 
-        // Look up category metadata
         let (category_name, category_color) = if category_id == "__UNKNOWN__" {
             ("Unknown".to_string(), "#878580".to_string())
         } else {
@@ -490,12 +487,6 @@ impl AllocationServiceTrait for AllocationService {
                 .map(|c| (c.name.clone(), c.color.clone()))
                 .unwrap_or_else(|| (category_id.to_string(), taxonomy_color.clone()))
         };
-
-        // Get all holdings for the account
-        let holdings = self
-            .holdings_service
-            .get_holdings(account_id, base_currency)
-            .await?;
 
         if holdings.is_empty() {
             return Ok(AllocationHoldings {
@@ -550,7 +541,7 @@ impl AllocationServiceTrait for AllocationService {
         // Calculate total value of matched holdings for weight calculation
         let mut matched_holdings: Vec<(&Holding, i32)> = Vec::new();
 
-        for holding in &holdings {
+        for holding in holdings {
             let asset_id = match &holding.instrument {
                 Some(instrument) => &instrument.id,
                 None => continue,
@@ -640,5 +631,76 @@ impl AllocationServiceTrait for AllocationService {
             total_value: total_matched_value,
             currency: base_currency.to_string(),
         })
+    }
+}
+
+#[async_trait]
+impl AllocationServiceTrait for AllocationService {
+    async fn get_portfolio_allocations(
+        &self,
+        account_id: &str,
+        base_currency: &str,
+    ) -> Result<PortfolioAllocations> {
+        let holdings = self
+            .holdings_service
+            .get_holdings(account_id, base_currency)
+            .await?;
+        self.compute_allocations_from_holdings(&holdings, base_currency)
+            .await
+    }
+
+    async fn get_portfolio_allocations_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        aggregated_account_id: &str,
+    ) -> Result<PortfolioAllocations> {
+        let holdings = self
+            .holdings_service
+            .get_holdings_for_accounts(account_ids, base_currency, aggregated_account_id)
+            .await?;
+        self.compute_allocations_from_holdings(&holdings, base_currency)
+            .await
+    }
+
+    async fn get_holdings_by_allocation(
+        &self,
+        account_id: &str,
+        base_currency: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> Result<AllocationHoldings> {
+        let holdings = self
+            .holdings_service
+            .get_holdings(account_id, base_currency)
+            .await?;
+        self.compute_holdings_by_allocation_from_holdings(
+            &holdings,
+            base_currency,
+            taxonomy_id,
+            category_id,
+        )
+        .await
+    }
+
+    async fn get_holdings_by_allocation_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+        aggregated_account_id: &str,
+    ) -> Result<AllocationHoldings> {
+        let holdings = self
+            .holdings_service
+            .get_holdings_for_accounts(account_ids, base_currency, aggregated_account_id)
+            .await?;
+        self.compute_holdings_by_allocation_from_holdings(
+            &holdings,
+            base_currency,
+            taxonomy_id,
+            category_id,
+        )
+        .await
     }
 }

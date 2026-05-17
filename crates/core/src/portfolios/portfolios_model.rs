@@ -118,4 +118,6 @@ pub enum AccountFilter {
     Account { account_id: String },
     /// A saved portfolio — resolved to its member account IDs.
     Portfolio { portfolio_id: String },
+    /// Ad-hoc list of account IDs (e.g. activity page multi-select).
+    AdHoc { account_ids: Vec<String> },
 }

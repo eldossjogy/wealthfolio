@@ -7,7 +7,7 @@ import { useHoldings } from "@/hooks/use-holdings";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { PORTFOLIO_ACCOUNT_ID, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { TaxonomyAllocation } from "@/lib/types";
+import type { AccountFilter, TaxonomyAllocation } from "@/lib/types";
 import { useNavigate } from "react-router-dom";
 import { AllocationDetailSheet } from "./components/allocation-detail-sheet";
 import { CashHoldingsWidget } from "./components/cash-holdings-widget";
@@ -21,16 +21,22 @@ import { SegmentedAllocationBar } from "./components/segmented-allocation-bar";
 
 interface HoldingsInsightsPageProps {
   accountId?: string;
+  filter?: AccountFilter;
 }
 
-export const HoldingsInsightsPage = ({ accountId: accountIdProp }: HoldingsInsightsPageProps) => {
+export const HoldingsInsightsPage = ({
+  accountId: accountIdProp,
+  filter: filterProp,
+}: HoldingsInsightsPageProps) => {
   const navigate = useNavigate();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
+  const accountFilter: AccountFilter =
+    filterProp ?? (accountIdProp ? { type: "account", accountId: accountIdProp } : { type: "all" });
   const accountId = accountIdProp ?? PORTFOLIO_ACCOUNT_ID;
-  const { holdings, isLoading: holdingsLoading } = useHoldings(accountId);
-  const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountId);
+  const { holdings, isLoading: holdingsLoading } = useHoldings(accountFilter);
+  const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountFilter);
 
   const isLoading = holdingsLoading || allocationsLoading;
 

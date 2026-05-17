@@ -6,6 +6,7 @@ use axum::{
 };
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
+use wealthfolio_core::portfolios::AccountFilter;
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     portfolio::{
@@ -22,22 +23,49 @@ use wealthfolio_core::{
 use crate::{error::ApiResult, main_lib::AppState};
 
 use super::dto::{
-    AllocationHoldingsQuery, AssetHoldingsQuery, CheckHoldingsImportRequest,
-    CheckHoldingsImportResult, DeleteSnapshotQuery, HistoryQuery, HoldingItemQuery, HoldingsQuery,
-    HoldingsSnapshotInput, ImportHoldingsCsvRequest, ImportHoldingsCsvResult,
+    AllocationFilterBody, AllocationHoldingsQuery, AssetHoldingsQuery, CheckHoldingsImportRequest,
+    CheckHoldingsImportResult, DeleteSnapshotQuery, FilterBody, HistoryQuery, HoldingItemQuery,
+    HoldingsQuery, HoldingsSnapshotInput, ImportHoldingsCsvRequest, ImportHoldingsCsvResult,
     SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo, SnapshotsQuery, SymbolCheckResult,
 };
 use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
 
+fn resolve_filter(
+    filter: &AccountFilter,
+    state: &AppState,
+) -> Result<Vec<String>, crate::error::ApiError> {
+    match filter {
+        AccountFilter::All => Ok(vec!["TOTAL".to_string()]),
+        AccountFilter::Account { account_id } => Ok(vec![account_id.clone()]),
+        AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => state
+            .portfolio_service
+            .resolve_account_filter(filter)
+            .map_err(Into::into),
+    }
+}
+
+fn aggregated_id(filter: &AccountFilter) -> String {
+    if let AccountFilter::Portfolio { portfolio_id } = filter {
+        portfolio_id.clone()
+    } else {
+        String::new()
+    }
+}
+
 pub async fn get_holdings(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<HoldingsQuery>,
+    Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<Vec<Holding>>> {
     let base = state.base_currency.read().unwrap().clone();
-    let holdings = state
-        .holdings_service
-        .get_holdings(&q.account_id, &base)
-        .await?;
+    let ids = resolve_filter(&body.filter, &state)?;
+    let holdings = if ids.len() == 1 {
+        state.holdings_service.get_holdings(&ids[0], &base).await?
+    } else {
+        state
+            .holdings_service
+            .get_holdings_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+            .await?
+    };
     Ok(Json(holdings))
 }
 
@@ -132,25 +160,47 @@ pub async fn get_latest_valuations(
 
 pub async fn get_portfolio_allocations(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<HoldingsQuery>,
+    Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<PortfolioAllocations>> {
     let base = state.base_currency.read().unwrap().clone();
-    let allocations = state
-        .allocation_service
-        .get_portfolio_allocations(&q.account_id, &base)
-        .await?;
+    let ids = resolve_filter(&body.filter, &state)?;
+    let allocations = if ids.len() == 1 {
+        state
+            .allocation_service
+            .get_portfolio_allocations(&ids[0], &base)
+            .await?
+    } else {
+        state
+            .allocation_service
+            .get_portfolio_allocations_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+            .await?
+    };
     Ok(Json(allocations))
 }
 
 pub async fn get_holdings_by_allocation(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<AllocationHoldingsQuery>,
+    Json(body): Json<AllocationFilterBody>,
 ) -> ApiResult<Json<AllocationHoldings>> {
     let base = state.base_currency.read().unwrap().clone();
-    let result = state
-        .allocation_service
-        .get_holdings_by_allocation(&q.account_id, &base, &q.taxonomy_id, &q.category_id)
-        .await?;
+    let ids = resolve_filter(&body.filter, &state)?;
+    let result = if ids.len() == 1 {
+        state
+            .allocation_service
+            .get_holdings_by_allocation(&ids[0], &base, &body.taxonomy_id, &body.category_id)
+            .await?
+    } else {
+        state
+            .allocation_service
+            .get_holdings_by_allocation_for_accounts(
+                &ids,
+                &base,
+                &body.taxonomy_id,
+                &body.category_id,
+                &aggregated_id(&body.filter),
+            )
+            .await?
+    };
     Ok(Json(result))
 }
 

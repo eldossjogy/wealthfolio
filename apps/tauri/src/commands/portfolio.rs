@@ -23,6 +23,7 @@ use wealthfolio_core::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
         SnapshotSource,
     },
+    portfolios::AccountFilter,
     quotes::MarketSyncMode,
     valuation::DailyAccountValuation,
 };
@@ -72,18 +73,48 @@ pub async fn update_portfolio(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolves `AccountFilter` to account IDs. `All` returns `["TOTAL"]` to use the fast
+/// pre-computed snapshot; `Portfolio`/`AdHoc` return resolved member IDs for aggregation.
+async fn resolve_filter_to_ids(
+    filter: &AccountFilter,
+    state: &ServiceContext,
+) -> Result<Vec<String>, String> {
+    match filter {
+        AccountFilter::All => Ok(vec!["TOTAL".to_string()]),
+        AccountFilter::Account { account_id } => Ok(vec![account_id.clone()]),
+        AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => state
+            .portfolio_service()
+            .resolve_account_filter(filter)
+            .map_err(|e| e.to_string()),
+    }
+}
+
 #[tauri::command]
 pub async fn get_holdings(
     state: State<'_, Arc<ServiceContext>>,
-    account_id: String,
+    filter: AccountFilter,
 ) -> Result<Vec<Holding>, String> {
     debug!("Get holdings...");
     let base_currency = state.get_base_currency();
-    state
-        .holdings_service()
-        .get_holdings(&account_id, &base_currency)
-        .await
-        .map_err(|e| e.to_string())
+    let ids = resolve_filter_to_ids(&filter, &state).await?;
+    if ids.len() == 1 {
+        state
+            .holdings_service()
+            .get_holdings(&ids[0], &base_currency)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
+            portfolio_id.clone()
+        } else {
+            String::new()
+        };
+        state
+            .holdings_service()
+            .get_holdings_for_accounts(&ids, &base_currency, &aggregated_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -132,34 +163,63 @@ pub async fn get_asset_holdings(
 #[tauri::command]
 pub async fn get_portfolio_allocations(
     state: State<'_, Arc<ServiceContext>>,
-    account_id: String,
+    filter: AccountFilter,
 ) -> Result<PortfolioAllocations, String> {
-    debug!("Get portfolio allocations for account: {}", account_id);
     let base_currency = state.get_base_currency();
-    state
-        .allocation_service()
-        .get_portfolio_allocations(&account_id, &base_currency)
-        .await
-        .map_err(|e| e.to_string())
+    let ids = resolve_filter_to_ids(&filter, &state).await?;
+    if ids.len() == 1 {
+        state
+            .allocation_service()
+            .get_portfolio_allocations(&ids[0], &base_currency)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
+            portfolio_id.clone()
+        } else {
+            String::new()
+        };
+        state
+            .allocation_service()
+            .get_portfolio_allocations_for_accounts(&ids, &base_currency, &aggregated_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
 pub async fn get_holdings_by_allocation(
     state: State<'_, Arc<ServiceContext>>,
-    account_id: String,
+    filter: AccountFilter,
     taxonomy_id: String,
     category_id: String,
 ) -> Result<AllocationHoldings, String> {
-    debug!(
-        "Get holdings for category {} in taxonomy {} for account {}",
-        category_id, taxonomy_id, account_id
-    );
     let base_currency = state.get_base_currency();
-    state
-        .allocation_service()
-        .get_holdings_by_allocation(&account_id, &base_currency, &taxonomy_id, &category_id)
-        .await
-        .map_err(|e| e.to_string())
+    let ids = resolve_filter_to_ids(&filter, &state).await?;
+    if ids.len() == 1 {
+        state
+            .allocation_service()
+            .get_holdings_by_allocation(&ids[0], &base_currency, &taxonomy_id, &category_id)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
+            portfolio_id.clone()
+        } else {
+            String::new()
+        };
+        state
+            .allocation_service()
+            .get_holdings_by_allocation_for_accounts(
+                &ids,
+                &base_currency,
+                &taxonomy_id,
+                &category_id,
+                &aggregated_id,
+            )
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -224,12 +284,22 @@ pub async fn get_latest_valuations(
 #[tauri::command]
 pub async fn get_income_summary(
     state: State<'_, Arc<ServiceContext>>,
-    account_id: Option<String>,
+    filter: Option<AccountFilter>,
 ) -> Result<Vec<IncomeSummary>, String> {
     debug!("Fetching income summary...");
+    let account_ids: Option<Vec<String>> = match &filter {
+        None | Some(AccountFilter::All) => None,
+        Some(AccountFilter::Account { account_id }) => Some(vec![account_id.clone()]),
+        Some(AccountFilter::Portfolio { .. }) | Some(AccountFilter::AdHoc { .. }) => Some(
+            state
+                .portfolio_service()
+                .resolve_account_filter(filter.as_ref().unwrap())
+                .map_err(|e| e.to_string())?,
+        ),
+    };
     state
         .income_service()
-        .get_income_summary(account_id.as_deref())
+        .get_income_summary(account_ids.as_deref())
         .map_err(|e| e.to_string())
 }
 

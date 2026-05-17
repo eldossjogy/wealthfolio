@@ -1,5 +1,6 @@
 import { getAccounts } from "@/adapters";
 import { usePersistentState } from "@/hooks/use-persistent-state";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { debounce } from "@/lib/debounce";
 import { ActivityType } from "@/lib/constants";
@@ -40,6 +41,11 @@ const ActivityPage = () => {
     "activity-filter-accounts",
     [],
   );
+  const [selectedPortfolioId, setSelectedPortfolioId] = usePersistentState<string | null>(
+    "activity-filter-portfolio",
+    null,
+  );
+  const { data: portfolios = [] } = usePortfolios();
   const [selectedActivityTypes, setSelectedActivityTypes] = usePersistentState<ActivityType[]>(
     "activity-filter-types",
     [],
@@ -254,13 +260,42 @@ const ActivityPage = () => {
       <PageContent className="pb-2 md:pb-4 lg:pb-5">
         <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
           {/* Unified Controls */}
+          {portfolios.length > 0 && !isMobileViewport && (
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">Portfolio:</span>
+              <select
+                className="border-input bg-background rounded-md border px-2 py-1 text-xs"
+                value={selectedPortfolioId ?? ""}
+                onChange={(e) => {
+                  const id = e.target.value || null;
+                  setSelectedPortfolioId(id);
+                  if (id) {
+                    const p = portfolios.find((p) => p.id === id);
+                    if (p) setSelectedAccounts(p.accountIds);
+                  } else {
+                    setSelectedAccounts([]);
+                  }
+                }}
+              >
+                <option value="">All</option>
+                {portfolios.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {isMobileViewport ? (
             <ActivityMobileControls
               accounts={accounts}
               searchQuery={searchInput}
               onSearchQueryChange={handleSearchChange}
               selectedAccountIds={selectedAccounts}
-              onAccountIdsChange={setSelectedAccounts}
+              onAccountIdsChange={(ids) => {
+                setSelectedAccounts(ids);
+                setSelectedPortfolioId(null);
+              }}
               selectedActivityTypes={selectedActivityTypes}
               onActivityTypesChange={setSelectedActivityTypes}
               isCompactView={isCompactView}
@@ -272,7 +307,10 @@ const ActivityPage = () => {
               searchQuery={searchInput}
               onSearchQueryChange={handleSearchChange}
               selectedAccountIds={selectedAccounts}
-              onAccountIdsChange={setSelectedAccounts}
+              onAccountIdsChange={(ids) => {
+                setSelectedAccounts(ids);
+                setSelectedPortfolioId(null);
+              }}
               selectedActivityTypes={selectedActivityTypes}
               onActivityTypesChange={setSelectedActivityTypes}
               selectedInstrumentTypes={selectedInstrumentTypes}

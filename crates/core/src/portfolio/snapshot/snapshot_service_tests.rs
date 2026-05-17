@@ -481,7 +481,8 @@ mod tests {
         }
         fn get_income_activities_data(
             &self,
-            _account_id: Option<&str>,
+            
+            _account_ids: Option<&[String]>,
         ) -> AppResult<Vec<ActivityIncomeData>> {
             unimplemented!()
         }
@@ -710,7 +711,8 @@ mod tests {
         }
         fn get_income_activities_data(
             &self,
-            _account_id: Option<&str>,
+            
+            _account_ids: Option<&[String]>,
         ) -> AppResult<Vec<ActivityIncomeData>> {
             unimplemented!()
         }

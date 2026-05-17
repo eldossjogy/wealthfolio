@@ -62,14 +62,10 @@ export const HoldingsPage = () => {
 
   const [accountFilter, setAccountFilter] = useState<AccountFilter>({ type: "all" });
 
-  // Derive accountId for holdings: portfolio filter falls back to TOTAL (follow-up PR adds aggregation).
-  const holdingsAccountId =
-    accountFilter.type === "account" ? accountFilter.accountId : PORTFOLIO_ACCOUNT_ID;
-
   // Keep selectedAccount for edit/add functionality when a specific account is selected.
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
 
-  const { holdings, isLoading } = useHoldings(holdingsAccountId);
+  const { holdings, isLoading } = useHoldings(accountFilter);
   const { accounts, isLoading: isAccountsLoading } = useAccounts();
   const { data: alternativeHoldings, isLoading: isAlternativeHoldingsLoading } =
     useAlternativeHoldings();

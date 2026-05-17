@@ -22,6 +22,17 @@ use super::HoldingsValuationServiceTrait;
 pub trait HoldingsServiceTrait: Send + Sync {
     async fn get_holdings(&self, account_id: &str, base_currency: &str) -> Result<Vec<Holding>>;
 
+    /// Aggregates holdings from multiple accounts into a single merged list.
+    /// Holdings with the same asset are merged by summing MonetaryValue fields.
+    /// Lots are concatenated. Weights are recomputed over the full merged set.
+    /// `aggregated_account_id` is stored on each resulting Holding (use `""` for ad-hoc filters).
+    async fn get_holdings_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        aggregated_account_id: &str,
+    ) -> Result<Vec<Holding>>;
+
     /// Retrieves a specific holding for an account, calculates its valuation, and includes lot details.
     async fn get_holding(
         &self,
@@ -357,6 +368,19 @@ impl HoldingsService {
     }
 }
 
+fn add_monetary(acc: &mut MonetaryValue, other: &MonetaryValue) {
+    acc.local += other.local;
+    acc.base += other.base;
+}
+
+fn add_optional_monetary(acc: &mut Option<MonetaryValue>, other: &Option<MonetaryValue>) {
+    match (acc.as_mut(), other) {
+        (Some(a), Some(b)) => add_monetary(a, b),
+        (None, Some(b)) => *acc = Some(b.clone()),
+        _ => {}
+    }
+}
+
 fn apply_factor_to_monetary_value(value: &mut MonetaryValue, factor: Decimal) {
     value.local *= factor;
 }
@@ -617,6 +641,79 @@ impl HoldingsServiceTrait for HoldingsService {
         }
 
         Ok(holdings)
+    }
+
+    async fn get_holdings_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        aggregated_account_id: &str,
+    ) -> Result<Vec<Holding>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Collect all holdings from each member account.
+        let mut all_holdings: Vec<Holding> = Vec::new();
+        for account_id in account_ids {
+            let holdings = self.get_holdings(account_id, base_currency).await?;
+            all_holdings.extend(holdings);
+        }
+
+        // Merge by key: securities/alternatives → asset id; cash → local_currency.
+        let mut merged: HashMap<String, Holding> = HashMap::new();
+        for holding in all_holdings {
+            let key = match &holding.holding_type {
+                HoldingType::Cash => format!("CASH-{}", holding.local_currency),
+                _ => holding
+                    .instrument
+                    .as_ref()
+                    .map(|i| i.id.clone())
+                    .unwrap_or_else(|| holding.id.clone()),
+            };
+
+            match merged.entry(key.clone()) {
+                std::collections::hash_map::Entry::Occupied(mut occ) => {
+                    let acc = occ.get_mut();
+                    acc.quantity += holding.quantity;
+                    add_monetary(&mut acc.market_value, &holding.market_value);
+                    add_optional_monetary(&mut acc.cost_basis, &holding.cost_basis);
+                    add_optional_monetary(&mut acc.unrealized_gain, &holding.unrealized_gain);
+                    add_optional_monetary(&mut acc.realized_gain, &holding.realized_gain);
+                    add_optional_monetary(&mut acc.total_gain, &holding.total_gain);
+                    add_optional_monetary(&mut acc.day_change, &holding.day_change);
+                    add_optional_monetary(&mut acc.prev_close_value, &holding.prev_close_value);
+                    if let Some(date) = holding.open_date {
+                        acc.open_date = Some(match acc.open_date {
+                            Some(existing) => existing.min(date),
+                            None => date,
+                        });
+                    }
+                    if let Some(lots) = holding.lots {
+                        acc.lots
+                            .get_or_insert_with(std::collections::VecDeque::new)
+                            .extend(lots);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(vac) => {
+                    let mut h = holding;
+                    h.id = format!("AGG-{}", key);
+                    h.account_id = aggregated_account_id.to_string();
+                    vac.insert(h);
+                }
+            }
+        }
+
+        let mut result: Vec<Holding> = merged.into_values().collect();
+        // Sort for deterministic output: cash last, then by id.
+        result.sort_by(|a, b| {
+            let a_cash = matches!(a.holding_type, HoldingType::Cash);
+            let b_cash = matches!(b.holding_type, HoldingType::Cash);
+            a_cash.cmp(&b_cash).then_with(|| a.id.cmp(&b.id))
+        });
+
+        apply_portfolio_weights(aggregated_account_id, &mut result);
+        Ok(result)
     }
 
     async fn get_holding(

@@ -63,7 +63,8 @@ export interface NewPortfolio {
 export type AccountFilter =
   | { type: "all" }
   | { type: "account"; accountId: string }
-  | { type: "portfolio"; portfolioId: string };
+  | { type: "portfolio"; portfolioId: string }
+  | { type: "adHoc"; accountIds: string[] };
 
 export interface Account {
   id: string;

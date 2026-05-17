@@ -249,6 +249,7 @@ impl PortfolioRepositoryTrait for PortfolioRepository {
                     .map_err(StorageError::from)?;
                 Ok(ids)
             }
+            AccountFilter::AdHoc { account_ids } => Ok(account_ids.clone()),
         }
     }
 }

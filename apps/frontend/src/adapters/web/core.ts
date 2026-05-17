@@ -43,13 +43,13 @@ export const COMMANDS: CommandMap = {
   backup_database: { method: "POST", path: "/utilities/database/backup" },
   list_database_backups: { method: "GET", path: "/utilities/database/backups" },
   delete_database_backup: { method: "DELETE", path: "/utilities/database/backups" },
-  get_holdings: { method: "GET", path: "/holdings" },
+  get_holdings: { method: "POST", path: "/holdings" },
   get_holding: { method: "GET", path: "/holdings/item" },
   get_asset_holdings: { method: "GET", path: "/holdings/by-asset" },
   get_historical_valuations: { method: "GET", path: "/valuations/history" },
   get_latest_valuations: { method: "GET", path: "/valuations/latest" },
-  get_portfolio_allocations: { method: "GET", path: "/allocations" },
-  get_holdings_by_allocation: { method: "GET", path: "/allocations/holdings" },
+  get_portfolio_allocations: { method: "POST", path: "/allocations" },
+  get_holdings_by_allocation: { method: "POST", path: "/allocations/holdings" },
   // Snapshot management
   get_snapshots: { method: "GET", path: "/snapshots" },
   get_snapshot_by_date: { method: "GET", path: "/snapshots/holdings" },
@@ -63,7 +63,7 @@ export const COMMANDS: CommandMap = {
   calculate_accounts_simple_performance: { method: "POST", path: "/performance/accounts/simple" },
   calculate_performance_history: { method: "POST", path: "/performance/history" },
   calculate_performance_summary: { method: "POST", path: "/performance/summary" },
-  get_income_summary: { method: "GET", path: "/income/summary" },
+  get_income_summary: { method: "POST", path: "/income/summary" },
   // Goals
   get_goals: { method: "GET", path: "/goals" },
   get_goal: { method: "GET", path: "/goals" },
@@ -406,8 +406,8 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "get_holdings": {
-      const p = payload as { accountId: string };
-      url += `?accountId=${encodeURIComponent(p.accountId)}`;
+      const p = payload as { filter: unknown };
+      body = JSON.stringify({ filter: p.filter });
       break;
     }
     case "get_holding": {
@@ -444,23 +444,17 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "get_portfolio_allocations": {
-      const { accountId } = payload as { accountId: string };
-      const params = new URLSearchParams();
-      params.set("accountId", accountId);
-      url += `?${params.toString()}`;
+      const p = payload as { filter: unknown };
+      body = JSON.stringify({ filter: p.filter });
       break;
     }
     case "get_holdings_by_allocation": {
-      const { accountId, taxonomyId, categoryId } = payload as {
-        accountId: string;
-        taxonomyId: string;
-        categoryId: string;
-      };
-      const params = new URLSearchParams();
-      params.set("accountId", accountId);
-      params.set("taxonomyId", taxonomyId);
-      params.set("categoryId", categoryId);
-      url += `?${params.toString()}`;
+      const p = payload as { filter: unknown; taxonomyId: string; categoryId: string };
+      body = JSON.stringify({
+        filter: p.filter,
+        taxonomyId: p.taxonomyId,
+        categoryId: p.categoryId,
+      });
       break;
     }
     // Snapshot management
@@ -565,10 +559,8 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "get_income_summary": {
-      const { accountId: incomeAccountId } = payload as { accountId?: string };
-      if (incomeAccountId) {
-        url += `?accountId=${encodeURIComponent(incomeAccountId)}`;
-      }
+      const p = payload as { filter?: unknown };
+      body = JSON.stringify({ filter: p?.filter ?? null });
       break;
     }
     case "get_goal":

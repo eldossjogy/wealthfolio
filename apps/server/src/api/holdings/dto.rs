@@ -1,11 +1,26 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use wealthfolio_core::portfolios::AccountFilter;
 
 #[derive(Deserialize)]
 pub struct HoldingsQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct FilterBody {
+    pub filter: AccountFilter,
+}
+
+#[derive(Deserialize)]
+pub struct AllocationFilterBody {
+    pub filter: AccountFilter,
+    #[serde(rename = "taxonomyId")]
+    pub taxonomy_id: String,
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
 }
 
 #[derive(Deserialize)]

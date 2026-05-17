@@ -30,7 +30,10 @@ function filterLabel(
   if (filter.type === "account") {
     return accounts.find((a) => a.id === filter.accountId)?.name ?? "Account";
   }
-  return portfolios.find((p) => p.id === filter.portfolioId)?.name ?? "Portfolio";
+  if (filter.type === "portfolio") {
+    return portfolios.find((p) => p.id === filter.portfolioId)?.name ?? "Portfolio";
+  }
+  return `Custom (${filter.accountIds.length})`;
 }
 
 export function AccountFilterSelector({ value, onChange, className }: AccountFilterSelectorProps) {
@@ -91,10 +94,22 @@ export function AccountFilterSelector({ value, onChange, className }: AccountFil
             {portfolios.length > 0 && (
               <CommandGroup heading="Portfolios">
                 {portfolios.map((p) => (
-                  <CommandItem key={p.id} value={p.id} keywords={[p.name]} disabled>
+                  <CommandItem
+                    key={p.id}
+                    value={p.id}
+                    keywords={[p.name]}
+                    onSelect={() => select({ type: "portfolio", portfolioId: p.id })}
+                  >
                     <Icons.Folder className="mr-2 h-4 w-4" />
                     {p.name}
-                    <span className="text-muted-foreground ml-auto text-xs">Coming soon</span>
+                    <Icons.Check
+                      className={cn(
+                        "ml-auto h-4 w-4",
+                        value.type === "portfolio" && value.portfolioId === p.id
+                          ? "opacity-100"
+                          : "opacity-0",
+                      )}
+                    />
                   </CommandItem>
                 ))}
               </CommandGroup>

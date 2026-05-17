@@ -96,7 +96,11 @@ export function AllocationDetailSheet({
       selectedCategoryId,
     ],
     queryFn: () =>
-      getHoldingsByAllocation(accountId, allocation?.taxonomyId ?? "", selectedCategoryId ?? ""),
+      getHoldingsByAllocation(
+        { type: "account", accountId },
+        allocation?.taxonomyId ?? "",
+        selectedCategoryId ?? "",
+      ),
     enabled: !!selectedCategoryId && !!allocation?.taxonomyId,
     staleTime: 30000,
   });
