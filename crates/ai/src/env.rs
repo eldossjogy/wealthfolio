@@ -889,6 +889,14 @@ pub mod test_env {
             Ok(HashMap::new())
         }
 
+        fn get_latest_quotes_as_of(
+            &self,
+            _symbols: &[String],
+            _as_of: chrono::NaiveDate,
+        ) -> CoreResult<HashMap<String, Quote>> {
+            Ok(HashMap::new())
+        }
+
         fn get_latest_quotes_snapshot(
             &self,
             asset_ids: &[String],
