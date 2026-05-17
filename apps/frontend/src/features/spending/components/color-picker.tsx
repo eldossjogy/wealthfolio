@@ -5,7 +5,7 @@ import { Icons, Input, Popover, PopoverContent, PopoverTrigger } from "@wealthfo
 import { cn } from "@/lib/utils";
 
 /** Curated extended palette — shades grouped roughly by hue, in 5 columns × 7 rows. */
-const EXTENDED_PALETTE: string[] = [
+export const EXTENDED_PALETTE: string[] = [
   // Reds
   "#fecaca",
   "#f87171",

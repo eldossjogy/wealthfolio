@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -12,37 +11,21 @@ import {
 } from "@wealthfolio/ui";
 
 import { useBudget } from "@/features/spending/hooks/use-budget";
-import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { formatAmount } from "@/lib/utils";
 
-const SPENDING_TAXONOMY = "spending_categories";
-const INCOME_TAXONOMY = "income_sources";
 const MAX_VISIBLE = 6;
 
 export function BudgetOverviewCard() {
   const { data: budget, isLoading: budgetLoading } = useBudget();
-  const spending = useTaxonomy(SPENDING_TAXONOMY);
-  const income = useTaxonomy(INCOME_TAXONOMY);
-  const isLoading = budgetLoading || spending.isLoading || income.isLoading;
+  const isLoading = budgetLoading;
+  const spendingTarget = budget?.computed.totals.spendingPlanned ?? 0;
+  const incomeTarget = budget?.computed.totals.incomePlanned ?? 0;
+  const currency = budget?.computed.currency ?? "USD";
+  const budgetRows = budget?.computed.groupRows.flatMap((group) => group.categories) ?? [];
+  const isEmpty = !isLoading && spendingTarget <= 0 && incomeTarget <= 0;
 
-  const categoryMap = useMemo(() => {
-    const map = new Map<string, { name: string; color: string | null }>();
-    [...(spending.data?.categories ?? []), ...(income.data?.categories ?? [])].forEach((c) =>
-      map.set(c.id, { name: c.name, color: c.color }),
-    );
-    return map;
-  }, [spending.data?.categories, income.data?.categories]);
-
-  const config = budget?.config;
-  const allocations = budget?.allocations ?? [];
-  const expenseAllocations = allocations.filter((a) => a.taxonomyId === SPENDING_TAXONOMY);
-  const spendingTarget = parseFloat(config?.monthlySpendingTarget ?? "0") || 0;
-  const incomeTarget = parseFloat(config?.monthlyIncomeTarget ?? "0") || 0;
-  const currency = config?.currency ?? "USD";
-  const isEmpty = !isLoading && !config;
-
-  const visible = expenseAllocations.slice(0, MAX_VISIBLE);
-  const overflow = Math.max(0, expenseAllocations.length - visible.length);
+  const visible = budgetRows.filter((row) => row.target > 0).slice(0, MAX_VISIBLE);
+  const overflow = Math.max(0, budgetRows.filter((row) => row.target > 0).length - visible.length);
 
   return (
     <Card>
@@ -52,17 +35,15 @@ export function BudgetOverviewCard() {
           <CardDescription className="text-xs">
             {isEmpty
               ? "Default monthly targets and category splits — used as the baseline when a month has no override."
-              : `Default monthly targets and category splits · ${allocations.length} allocation${allocations.length === 1 ? "" : "s"}`}
+              : `Default monthly targets and category splits · ${visible.length + overflow} target${visible.length + overflow === 1 ? "" : "s"}`}
           </CardDescription>
         </div>
-        {!isEmpty && (
-          <Button asChild variant="ghost" size="sm" className="-mt-1 shrink-0">
-            <Link to="/settings/spending/budget">
-              Manage
-              <Icons.ChevronRight className="ml-1 h-3.5 w-3.5" />
-            </Link>
-          </Button>
-        )}
+        <Button asChild variant="ghost" size="sm" className="-mt-1 shrink-0">
+          <Link to="/settings/spending/budget">
+            Manage
+            <Icons.ChevronRight className="ml-1 h-3.5 w-3.5" />
+          </Link>
+        </Button>
       </CardHeader>
       <CardContent className="p-4 pt-0">
         {isLoading ? (
@@ -100,18 +81,17 @@ export function BudgetOverviewCard() {
             </div>
             {visible.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
-                {visible.map((alloc) => {
-                  const cat = categoryMap.get(alloc.categoryId);
+                {visible.map((row) => {
                   return (
                     <span
-                      key={alloc.id}
+                      key={row.categoryId}
                       className="bg-muted/60 text-foreground inline-flex max-w-[200px] items-center gap-1.5 rounded-full px-2 py-0.5 text-xs"
                     >
                       <span
                         className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: cat?.color ?? "var(--muted-foreground)" }}
+                        style={{ backgroundColor: row.color ?? "var(--muted-foreground)" }}
                       />
-                      <span className="truncate">{cat?.name ?? alloc.categoryId}</span>
+                      <span className="truncate">{row.name}</span>
                     </span>
                   );
                 })}

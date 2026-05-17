@@ -10,7 +10,9 @@ use wealthfolio_spending::activity_assignments::{
 use wealthfolio_spending::analytics::{
     EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest, SpendingSummary,
 };
-use wealthfolio_spending::budget::{BudgetAllocation, BudgetSnapshot, UpdateBudgetConfig};
+use wealthfolio_spending::budget::{
+    BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
+};
 use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
@@ -343,58 +345,144 @@ pub async fn delete_event(id: String, state: State<'_, Arc<ServiceContext>>) -> 
 }
 
 #[tauri::command]
-pub async fn get_budget(state: State<'_, Arc<ServiceContext>>) -> Result<BudgetSnapshot, String> {
-    let base_currency = state.get_base_currency();
-    state
-        .budget_service()
-        .get(&base_currency)
-        .await
-        .map_err(|e| format!("Failed to load budget: {}", e))
-}
-
-#[tauri::command]
-pub async fn update_budget_config(
-    patch: UpdateBudgetConfig,
+pub async fn get_budget(
+    period_key: Option<String>,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
     state
         .budget_service()
-        .update_config(patch, &base_currency)
+        .get(period_key, &base_currency)
         .await
-        .map_err(|e| format!("Failed to update budget config: {}", e))?;
-    state
-        .budget_service()
-        .get(&base_currency)
-        .await
-        .map_err(|e| format!("Failed to reload budget: {}", e))
+        .map_err(|e| format!("Failed to load budget: {}", e))
 }
 
 #[tauri::command]
-pub async fn upsert_budget_allocation(
-    taxonomy_id: String,
-    category_id: String,
-    amount: String,
+pub async fn upsert_budget_target(
+    target: NewBudgetTarget,
+    period_key: Option<String>,
     state: State<'_, Arc<ServiceContext>>,
-) -> Result<BudgetAllocation, String> {
+) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
     state
         .budget_service()
-        .upsert_allocation(taxonomy_id, category_id, amount, &base_currency)
+        .upsert_target(target, period_key, &base_currency)
         .await
-        .map_err(|e| format!("Failed to save budget allocation: {}", e))
+        .map_err(|e| format!("Failed to save budget target: {}", e))
 }
 
 #[tauri::command]
-pub async fn delete_budget_allocation(
+pub async fn delete_budget_target(
     id: String,
+    period_key: Option<String>,
     state: State<'_, Arc<ServiceContext>>,
-) -> Result<(), String> {
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
     state
         .budget_service()
-        .delete_allocation(&id)
+        .delete_target(&id, period_key, &base_currency)
         .await
-        .map_err(|e| format!("Failed to delete budget allocation: {}", e))
+        .map_err(|e| format!("Failed to delete budget target: {}", e))
+}
+
+#[tauri::command]
+pub async fn upsert_budget_rollover_setting(
+    setting: NewBudgetRolloverSetting,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .upsert_rollover_setting(setting, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to save budget rollover setting: {}", e))
+}
+
+#[tauri::command]
+pub async fn delete_budget_rollover_setting(
+    id: String,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .delete_rollover_setting(&id, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to delete budget rollover setting: {}", e))
+}
+
+#[tauri::command]
+pub async fn create_budget_group(
+    group: NewBudgetGroup,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .create_group(group, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to create budget group: {}", e))
+}
+
+#[tauri::command]
+pub async fn update_budget_group(
+    id: String,
+    patch: UpdateBudgetGroup,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .update_group(&id, patch, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to update budget group: {}", e))
+}
+
+#[tauri::command]
+pub async fn delete_budget_group(
+    id: String,
+    reassign_to_group_id: String,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .delete_group(&id, &reassign_to_group_id, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to delete budget group: {}", e))
+}
+
+#[tauri::command]
+pub async fn assign_category_to_group(
+    category_id: String,
+    group_id: String,
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .assign_category_to_group(category_id, group_id, period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to assign category to group: {}", e))
+}
+
+#[tauri::command]
+pub async fn reset_budget_groups(
+    period_key: Option<String>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .reset_groups(period_key, &base_currency)
+        .await
+        .map_err(|e| format!("Failed to reset budget groups: {}", e))
 }
 
 #[tauri::command]

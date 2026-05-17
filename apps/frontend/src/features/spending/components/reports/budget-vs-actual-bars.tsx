@@ -5,12 +5,12 @@ import { Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
-import type { BudgetAllocation } from "../../types/budget";
+import type { BudgetCategoryRow } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
 
 interface BudgetVsActualBarsProps {
   breakdown: CategoryBreakdownRow[];
-  allocations: BudgetAllocation[];
+  budgetRows: BudgetCategoryRow[];
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   isLoading: boolean;
@@ -64,14 +64,14 @@ const STATUS_FILL: Record<Status, string> = {
  */
 export function BudgetVsActualBars({
   breakdown,
-  allocations,
+  budgetRows,
   taxonomyCategories,
   currency,
   isLoading,
 }: BudgetVsActualBarsProps) {
   const rows = useMemo(
-    () => buildRows(breakdown, allocations, taxonomyCategories),
-    [breakdown, allocations, taxonomyCategories],
+    () => buildRows(breakdown, budgetRows, taxonomyCategories),
+    [breakdown, budgetRows, taxonomyCategories],
   );
 
   const summary = useMemo(() => {
@@ -269,7 +269,7 @@ function statusOf(pct: number): Status {
 
 function buildRows(
   breakdown: CategoryBreakdownRow[],
-  allocations: BudgetAllocation[],
+  budgetRows: BudgetCategoryRow[],
   taxonomyCategories: TaxonomyCategory[],
 ): BudgetRow[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
@@ -282,9 +282,9 @@ function buildRows(
     spentByTop.set(topId, (spentByTop.get(topId) ?? 0) + r.amount);
   }
 
-  return allocations
+  return budgetRows
     .map<BudgetRow | null>((a) => {
-      const budgeted = parseFloat(a.amount) || 0;
+      const budgeted = a.target || 0;
       if (budgeted <= 0) return null;
       const m = meta.get(a.categoryId);
       const spent = spentByTop.get(a.categoryId) ?? 0;

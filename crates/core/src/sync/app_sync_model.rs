@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical list of local tables that participate in app-side device sync.
 /// Order matters: parent tables before children (FK dependencies).
-pub const APP_SYNC_TABLES: [&str; 20] = [
+pub const APP_SYNC_TABLES: [&str; 24] = [
     // Base tables (no FK deps)
     "platforms",
     "assets",
@@ -24,6 +24,8 @@ pub const APP_SYNC_TABLES: [&str; 20] = [
     "activities",
     // No FK deps
     "import_templates",
+    // Spending budget groups have no FK deps.
+    "budget_groups",
     // Depends on: import_templates
     "import_account_templates",
     // No FK deps (base table)
@@ -32,6 +34,10 @@ pub const APP_SYNC_TABLES: [&str; 20] = [
     "taxonomy_categories",
     // Depends on: assets, taxonomy_categories
     "asset_taxonomy_assignments",
+    // Depends on: budget_groups, taxonomy_categories
+    "budget_group_assignments",
+    "budget_targets",
+    "budget_rollover_settings",
     // Depends on: accounts, goals
     "goals_allocation",
     // Depends on: ai_threads
@@ -70,8 +76,10 @@ pub enum SyncEntity {
     CategorizationRule,
     Event,
     EventType,
-    BudgetConfig,
-    BudgetAllocation,
+    BudgetGroup,
+    BudgetGroupAssignment,
+    BudgetTarget,
+    BudgetRolloverSetting,
 }
 
 /// Supported sync operations.

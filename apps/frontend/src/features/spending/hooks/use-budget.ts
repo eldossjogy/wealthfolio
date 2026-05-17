@@ -4,58 +4,102 @@ import { toast } from "sonner";
 import { QueryKeys } from "@/lib/query-keys";
 
 import {
-  deleteBudgetAllocation,
+  assignCategoryToGroup,
+  createBudgetGroup,
+  deleteBudgetGroup,
+  deleteBudgetRolloverSetting,
+  deleteBudgetTarget,
   getBudget,
-  updateBudgetConfig,
-  upsertBudgetAllocation,
+  resetBudgetGroups,
+  updateBudgetGroup,
+  upsertBudgetRolloverSetting,
+  upsertBudgetTarget,
 } from "../adapters/budget";
-import type { BudgetSnapshot, UpdateBudgetConfig } from "../types/budget";
+import type {
+  NewBudgetGroup,
+  NewBudgetRolloverSetting,
+  NewBudgetTarget,
+  UpdateBudgetGroup,
+} from "../types/budget";
 
-export function useBudget() {
-  return useQuery<BudgetSnapshot, Error>({
-    queryKey: [QueryKeys.SPENDING_BUDGET],
-    queryFn: getBudget,
+export function useBudget(periodKey?: string) {
+  return useQuery({
+    queryKey: [QueryKeys.SPENDING_BUDGET, periodKey ?? null],
+    queryFn: () => getBudget(periodKey),
   });
 }
 
-export function useBudgetMutations() {
+export function useBudgetMutations(periodKey?: string) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
 
-  const updateConfig = useMutation({
-    mutationFn: (patch: UpdateBudgetConfig) => updateBudgetConfig(patch),
-    onSuccess: () => {
-      invalidate();
-      toast.success("Budget updated.");
-    },
-    onError: () => toast.error("Failed to update budget."),
+  const upsertTarget = useMutation({
+    mutationFn: (target: NewBudgetTarget) => upsertBudgetTarget(target, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to save budget target."),
   });
 
-  const upsertAllocation = useMutation({
-    mutationFn: ({
-      taxonomyId,
-      categoryId,
-      amount,
-    }: {
-      taxonomyId: string;
-      categoryId: string;
-      amount: string;
-    }) => upsertBudgetAllocation(taxonomyId, categoryId, amount),
-    onSuccess: () => {
-      invalidate();
-      toast.success("Allocation saved.");
-    },
-    onError: () => toast.error("Failed to save allocation."),
+  const removeTarget = useMutation({
+    mutationFn: (id: string) => deleteBudgetTarget(id, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to remove budget target."),
   });
 
-  const removeAllocation = useMutation({
-    mutationFn: (id: string) => deleteBudgetAllocation(id),
-    onSuccess: () => {
-      invalidate();
-      toast.success("Allocation removed.");
-    },
-    onError: () => toast.error("Failed to delete allocation."),
+  const upsertRollover = useMutation({
+    mutationFn: (setting: NewBudgetRolloverSetting) =>
+      upsertBudgetRolloverSetting(setting, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to save rollover setting."),
   });
 
-  return { updateConfig, upsertAllocation, removeAllocation };
+  const removeRollover = useMutation({
+    mutationFn: (id: string) => deleteBudgetRolloverSetting(id, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to remove rollover setting."),
+  });
+
+  const createGroup = useMutation({
+    mutationFn: (group: NewBudgetGroup) => createBudgetGroup(group, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to create budget group."),
+  });
+
+  const updateGroup = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: UpdateBudgetGroup }) =>
+      updateBudgetGroup(id, patch, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to update budget group."),
+  });
+
+  const removeGroup = useMutation({
+    mutationFn: ({ id, reassignToGroupId }: { id: string; reassignToGroupId: string }) =>
+      deleteBudgetGroup(id, reassignToGroupId, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to delete budget group."),
+  });
+
+  const assignCategory = useMutation({
+    mutationFn: ({ categoryId, groupId }: { categoryId: string; groupId: string }) =>
+      assignCategoryToGroup(categoryId, groupId, periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to move category."),
+  });
+
+  const resetGroups = useMutation({
+    mutationFn: () => resetBudgetGroups(periodKey),
+    onSuccess: invalidate,
+    onError: () => toast.error("Failed to reset budget groups."),
+  });
+
+  return {
+    upsertTarget,
+    removeTarget,
+    upsertRollover,
+    removeRollover,
+    createGroup,
+    updateGroup,
+    removeGroup,
+    assignCategory,
+    resetGroups,
+  };
 }

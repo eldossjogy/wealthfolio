@@ -2,26 +2,41 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::model::{
-    BudgetAllocation, BudgetConfig, NewBudgetAllocation, NewBudgetConfig, UpdateBudgetConfig,
+    BudgetGroup, BudgetGroupAssignment, BudgetRolloverSetting, BudgetTarget, NewBudgetGroup,
+    NewBudgetGroupAssignment, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
 
 #[async_trait]
 pub trait BudgetRepositoryTrait: Send + Sync {
-    /// Get the singleton budget config (id="default"). Returns None if not yet created.
-    async fn get_config(&self) -> Result<Option<BudgetConfig>>;
+    async fn list_groups(&self) -> Result<Vec<BudgetGroup>>;
+    async fn create_group(&self, new_group: NewBudgetGroup) -> Result<BudgetGroup>;
+    async fn update_group(&self, id: &str, patch: UpdateBudgetGroup) -> Result<BudgetGroup>;
+    async fn delete_group(&self, id: &str) -> Result<()>;
+    async fn upsert_system_groups(&self, groups: Vec<NewBudgetGroup>) -> Result<Vec<BudgetGroup>>;
 
-    /// Create the budget config (called once on first save).
-    async fn create_config(&self, new_config: NewBudgetConfig) -> Result<BudgetConfig>;
+    async fn list_group_assignments(&self) -> Result<Vec<BudgetGroupAssignment>>;
+    async fn upsert_group_assignment(
+        &self,
+        assignment: NewBudgetGroupAssignment,
+    ) -> Result<BudgetGroupAssignment>;
+    async fn upsert_group_assignments(
+        &self,
+        assignments: Vec<NewBudgetGroupAssignment>,
+    ) -> Result<Vec<BudgetGroupAssignment>>;
 
-    /// Update the budget config in place.
-    async fn update_config(&self, id: &str, patch: UpdateBudgetConfig) -> Result<BudgetConfig>;
+    async fn list_targets(&self) -> Result<Vec<BudgetTarget>>;
+    async fn upsert_target(&self, target: NewBudgetTarget) -> Result<BudgetTarget>;
+    async fn delete_target(&self, id: &str) -> Result<()>;
 
-    /// List allocations for the given budget_config_id.
-    async fn list_allocations(&self, budget_config_id: &str) -> Result<Vec<BudgetAllocation>>;
-
-    /// Upsert an allocation (UNIQUE on (budget_config_id, taxonomy_id, category_id)).
-    async fn upsert_allocation(&self, new_alloc: NewBudgetAllocation) -> Result<BudgetAllocation>;
-
-    /// Remove an allocation by id.
-    async fn delete_allocation(&self, id: &str) -> Result<()>;
+    async fn list_rollover_settings(&self) -> Result<Vec<BudgetRolloverSetting>>;
+    async fn upsert_rollover_setting(
+        &self,
+        setting: NewBudgetRolloverSetting,
+    ) -> Result<BudgetRolloverSetting>;
+    async fn delete_rollover_setting(&self, id: &str) -> Result<()>;
+    async fn disable_category_rollovers(
+        &self,
+        taxonomy_id: &str,
+        category_ids: &[String],
+    ) -> Result<Vec<BudgetRolloverSetting>>;
 }

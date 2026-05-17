@@ -1,46 +1,133 @@
 import { invoke, logger } from "#platform";
-import type { BudgetAllocation, BudgetSnapshot, UpdateBudgetConfig } from "../types/budget";
+import type {
+  BudgetSnapshot,
+  NewBudgetGroup,
+  NewBudgetRolloverSetting,
+  NewBudgetTarget,
+  UpdateBudgetGroup,
+} from "../types/budget";
 
-export const getBudget = async (): Promise<BudgetSnapshot> => {
+export const getBudget = async (periodKey?: string): Promise<BudgetSnapshot> => {
   try {
-    return await invoke<BudgetSnapshot>("get_budget");
+    return await invoke<BudgetSnapshot>("get_budget", { periodKey });
   } catch (e) {
     logger.error("Error fetching budget.");
     throw e;
   }
 };
 
-export const updateBudgetConfig = async (patch: UpdateBudgetConfig): Promise<BudgetSnapshot> => {
+export const upsertBudgetTarget = async (
+  target: NewBudgetTarget,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
   try {
-    return await invoke<BudgetSnapshot>("update_budget_config", { patch });
+    return await invoke<BudgetSnapshot>("upsert_budget_target", { target, periodKey });
   } catch (e) {
-    logger.error("Error updating budget config.");
+    logger.error("Error saving budget target.");
     throw e;
   }
 };
 
-export const upsertBudgetAllocation = async (
-  taxonomyId: string,
-  categoryId: string,
-  amount: string,
-): Promise<BudgetAllocation> => {
+export const deleteBudgetTarget = async (
+  id: string,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
   try {
-    return await invoke<BudgetAllocation>("upsert_budget_allocation", {
-      taxonomyId,
-      categoryId,
-      amount,
+    return await invoke<BudgetSnapshot>("delete_budget_target", { id, periodKey });
+  } catch (e) {
+    logger.error("Error deleting budget target.");
+    throw e;
+  }
+};
+
+export const upsertBudgetRolloverSetting = async (
+  setting: NewBudgetRolloverSetting,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("upsert_budget_rollover_setting", { setting, periodKey });
+  } catch (e) {
+    logger.error("Error saving budget rollover setting.");
+    throw e;
+  }
+};
+
+export const deleteBudgetRolloverSetting = async (
+  id: string,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("delete_budget_rollover_setting", { id, periodKey });
+  } catch (e) {
+    logger.error("Error deleting budget rollover setting.");
+    throw e;
+  }
+};
+
+export const createBudgetGroup = async (
+  group: NewBudgetGroup,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("create_budget_group", { group, periodKey });
+  } catch (e) {
+    logger.error("Error creating budget group.");
+    throw e;
+  }
+};
+
+export const updateBudgetGroup = async (
+  id: string,
+  patch: UpdateBudgetGroup,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("update_budget_group", { id, patch, periodKey });
+  } catch (e) {
+    logger.error("Error updating budget group.");
+    throw e;
+  }
+};
+
+export const deleteBudgetGroup = async (
+  id: string,
+  reassignToGroupId: string,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("delete_budget_group", {
+      id,
+      reassignToGroupId,
+      periodKey,
     });
   } catch (e) {
-    logger.error("Error saving budget allocation.");
+    logger.error("Error deleting budget group.");
     throw e;
   }
 };
 
-export const deleteBudgetAllocation = async (id: string): Promise<void> => {
+export const assignCategoryToGroup = async (
+  categoryId: string,
+  groupId: string,
+  periodKey?: string,
+): Promise<BudgetSnapshot> => {
   try {
-    await invoke<void>("delete_budget_allocation", { id });
+    return await invoke<BudgetSnapshot>("assign_category_to_group", {
+      categoryId,
+      groupId,
+      periodKey,
+    });
   } catch (e) {
-    logger.error("Error deleting budget allocation.");
+    logger.error("Error assigning category to group.");
+    throw e;
+  }
+};
+
+export const resetBudgetGroups = async (periodKey?: string): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("reset_budget_groups", { periodKey });
+  } catch (e) {
+    logger.error("Error resetting budget groups.");
     throw e;
   }
 };

@@ -542,23 +542,54 @@ diesel::table! {
 }
 
 diesel::table! {
-    budget_config (id) {
+    budget_groups (id) {
         id -> Text,
-        monthly_spending_target -> Text,
-        monthly_income_target -> Text,
-        currency -> Text,
+        name -> Text,
+        key -> Text,
+        color -> Nullable<Text>,
+        icon -> Nullable<Text>,
+        sort_order -> Integer,
+        is_system -> Integer,
         created_at -> Text,
         updated_at -> Text,
     }
 }
 
 diesel::table! {
-    budget_allocations (id) {
+    budget_group_assignments (id) {
         id -> Text,
-        budget_config_id -> Text,
+        group_id -> Text,
         taxonomy_id -> Text,
         category_id -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    budget_targets (id) {
+        id -> Text,
+        period_key -> Text,
+        target_type -> Text,
+        taxonomy_id -> Nullable<Text>,
+        category_id -> Nullable<Text>,
+        group_id -> Nullable<Text>,
         amount -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
+    budget_rollover_settings (id) {
+        id -> Text,
+        target_type -> Text,
+        taxonomy_id -> Nullable<Text>,
+        category_id -> Nullable<Text>,
+        group_id -> Nullable<Text>,
+        enabled -> Integer,
+        start_month -> Text,
+        starting_balance -> Text,
         created_at -> Text,
         updated_at -> Text,
     }
@@ -585,8 +616,12 @@ diesel::joinable!(activities -> events (event_id));
 diesel::joinable!(events -> event_types (event_type_id));
 diesel::joinable!(categorization_rules -> accounts (account_id));
 diesel::joinable!(categorization_rules -> taxonomies (taxonomy_id));
-diesel::joinable!(budget_allocations -> budget_config (budget_config_id));
-diesel::joinable!(budget_allocations -> taxonomies (taxonomy_id));
+diesel::joinable!(budget_group_assignments -> budget_groups (group_id));
+diesel::joinable!(budget_group_assignments -> taxonomies (taxonomy_id));
+diesel::joinable!(budget_targets -> budget_groups (group_id));
+diesel::joinable!(budget_targets -> taxonomies (taxonomy_id));
+diesel::joinable!(budget_rollover_settings -> budget_groups (group_id));
+diesel::joinable!(budget_rollover_settings -> taxonomies (taxonomy_id));
 
 diesel::joinable!(import_account_templates -> import_templates (template_id));
 
@@ -628,6 +663,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     event_types,
     events,
     categorization_rules,
-    budget_config,
-    budget_allocations,
+    budget_groups,
+    budget_group_assignments,
+    budget_targets,
+    budget_rollover_settings,
 );

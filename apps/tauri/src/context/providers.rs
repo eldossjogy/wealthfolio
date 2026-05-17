@@ -136,7 +136,7 @@ pub async fn initialize_context(
     );
     let activity_taxonomy_assignment_service = Arc::new(
         wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService::new(
-            activity_assignments_repo,
+            activity_assignments_repo.clone(),
         ),
     );
     let settings = settings_service.get_settings()?;
@@ -260,6 +260,11 @@ pub async fn initialize_context(
     );
     let budget_service = Arc::new(wealthfolio_spending::budget::BudgetService::new(
         budget_repo,
+        activity_repository.clone(),
+        account_repository.clone(),
+        activity_assignments_repo.clone(),
+        spending_settings_service.clone(),
+        taxonomy_service.clone(),
     ));
 
     // Spending: analytics — needs activity repo + assignment repo (re-built since the

@@ -485,8 +485,10 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::CategorizationRule => Some(("categorization_rules", "id")),
         SyncEntity::Event => Some(("events", "id")),
         SyncEntity::EventType => Some(("event_types", "id")),
-        SyncEntity::BudgetConfig => Some(("budget_config", "id")),
-        SyncEntity::BudgetAllocation => Some(("budget_allocations", "id")),
+        SyncEntity::BudgetGroup => Some(("budget_groups", "id")),
+        SyncEntity::BudgetGroupAssignment => Some(("budget_group_assignments", "id")),
+        SyncEntity::BudgetTarget => Some(("budget_targets", "id")),
+        SyncEntity::BudgetRolloverSetting => Some(("budget_rollover_settings", "id")),
     }
 }
 

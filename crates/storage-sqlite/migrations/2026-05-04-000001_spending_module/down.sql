@@ -2,10 +2,22 @@
 -- Order: drop FK-dependent objects first.
 
 -- Drop budget tables
-DROP INDEX IF EXISTS idx_budget_allocations_category;
-DROP INDEX IF EXISTS idx_budget_allocations_config;
-DROP TABLE IF EXISTS budget_allocations;
-DROP TABLE IF EXISTS budget_config;
+DROP INDEX IF EXISTS idx_budget_rollover_settings_group;
+DROP INDEX IF EXISTS idx_budget_rollover_settings_category;
+DROP INDEX IF EXISTS idx_budget_rollover_settings_group_unique;
+DROP INDEX IF EXISTS idx_budget_rollover_settings_category_unique;
+DROP TABLE IF EXISTS budget_rollover_settings;
+DROP INDEX IF EXISTS idx_budget_targets_group;
+DROP INDEX IF EXISTS idx_budget_targets_category;
+DROP INDEX IF EXISTS idx_budget_targets_period;
+DROP INDEX IF EXISTS idx_budget_targets_group_buffer_unique;
+DROP INDEX IF EXISTS idx_budget_targets_category_unique;
+DROP TABLE IF EXISTS budget_targets;
+DROP INDEX IF EXISTS idx_budget_group_assignments_category;
+DROP INDEX IF EXISTS idx_budget_group_assignments_group;
+DROP TABLE IF EXISTS budget_group_assignments;
+DROP INDEX IF EXISTS idx_budget_groups_sort;
+DROP TABLE IF EXISTS budget_groups;
 
 -- Drop categorization_rules
 DROP INDEX IF EXISTS idx_categorization_rules_preset_unique;

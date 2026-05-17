@@ -571,11 +571,11 @@ export default function SpendingTabContent() {
 
             <div className="space-y-6 lg:col-span-1">
               <BudgetLineChartCard
-                target={parseFloat(budget?.config.monthlySpendingTarget ?? "0") || 0}
+                target={budget?.computed.totals.spendingPlanned ?? 0}
                 spent={monthReport?.current.outflow ?? 0}
-                currency={budget?.config.currency ?? currency}
+                currency={budget?.computed.currency ?? currency}
                 historicalDailyAvg={historicalDailyAvg}
-                allocations={budget?.allocations ?? []}
+                allocations={budget?.computed.groupRows.flatMap((row) => row.categories) ?? []}
                 spendingBreakdown={monthReport?.spendingBreakdown ?? []}
                 categoriesMeta={categoriesMeta}
                 monthByDay={monthReport?.byDay ?? []}

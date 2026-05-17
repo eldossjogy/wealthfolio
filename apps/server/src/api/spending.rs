@@ -11,7 +11,9 @@ use crate::{error::ApiResult, main_lib::AppState};
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment;
 use wealthfolio_spending::analytics::{MonthlyReport, ReportRequest};
-use wealthfolio_spending::budget::{BudgetAllocation, BudgetSnapshot, UpdateBudgetConfig};
+use wealthfolio_spending::budget::{
+    BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
+};
 use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
@@ -249,46 +251,165 @@ async fn delete_event(State(state): State<Arc<AppState>>, Path(id): Path<String>
     Ok(())
 }
 
-async fn get_budget(State(state): State<Arc<AppState>>) -> ApiResult<Json<BudgetSnapshot>> {
-    let base = state.base_currency.read().unwrap().clone();
-    Ok(Json(state.budget_service.get(&base).await?))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BudgetQuery {
+    period_key: Option<String>,
 }
 
-async fn update_budget_config(
+async fn get_budget(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<UpdateBudgetConfig>,
+    Query(query): Query<BudgetQuery>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
-    state.budget_service.update_config(payload, &base).await?;
-    Ok(Json(state.budget_service.get(&base).await?))
+    Ok(Json(
+        state.budget_service.get(query.period_key, &base).await?,
+    ))
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpsertAllocationBody {
-    taxonomy_id: String,
-    category_id: String,
-    amount: String,
-}
-
-async fn upsert_budget_allocation(
+async fn upsert_budget_target(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<UpsertAllocationBody>,
-) -> ApiResult<Json<BudgetAllocation>> {
+    Query(query): Query<BudgetQuery>,
+    Json(payload): Json<NewBudgetTarget>,
+) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
-    let row = state
-        .budget_service
-        .upsert_allocation(body.taxonomy_id, body.category_id, body.amount, &base)
-        .await?;
-    Ok(Json(row))
+    Ok(Json(
+        state
+            .budget_service
+            .upsert_target(payload, query.period_key, &base)
+            .await?,
+    ))
 }
 
-async fn delete_budget_allocation(
+async fn delete_budget_target(
     State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
     Path(id): Path<String>,
-) -> ApiResult<()> {
-    state.budget_service.delete_allocation(&id).await?;
-    Ok(())
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .delete_target(&id, query.period_key, &base)
+            .await?,
+    ))
+}
+
+async fn upsert_budget_rollover_setting(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Json(payload): Json<NewBudgetRolloverSetting>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .upsert_rollover_setting(payload, query.period_key, &base)
+            .await?,
+    ))
+}
+
+async fn delete_budget_rollover_setting(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .delete_rollover_setting(&id, query.period_key, &base)
+            .await?,
+    ))
+}
+
+async fn create_budget_group(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Json(payload): Json<NewBudgetGroup>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .create_group(payload, query.period_key, &base)
+            .await?,
+    ))
+}
+
+async fn update_budget_group(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Path(id): Path<String>,
+    Json(payload): Json<UpdateBudgetGroup>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .update_group(&id, payload, query.period_key, &base)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteBudgetGroupBody {
+    reassign_to_group_id: String,
+}
+
+async fn delete_budget_group(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Path(id): Path<String>,
+    Json(payload): Json<DeleteBudgetGroupBody>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .delete_group(&id, &payload.reassign_to_group_id, query.period_key, &base)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AssignCategoryToGroupBody {
+    category_id: String,
+    group_id: String,
+}
+
+async fn assign_category_to_group(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+    Json(payload): Json<AssignCategoryToGroupBody>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .assign_category_to_group(
+                payload.category_id,
+                payload.group_id,
+                query.period_key,
+                &base,
+            )
+            .await?,
+    ))
+}
+
+async fn reset_budget_groups(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<BudgetQuery>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .reset_groups(query.period_key, &base)
+            .await?,
+    ))
 }
 
 async fn get_spending_report(
@@ -352,17 +473,32 @@ pub fn router() -> Router<Arc<AppState>> {
             "/v1/spending/events/:id",
             put(update_event).delete(delete_event),
         )
+        .route("/v1/spending/budget", get(get_budget))
+        .route("/v1/spending/budget/targets", post(upsert_budget_target))
         .route(
-            "/v1/spending/budget",
-            get(get_budget).put(update_budget_config),
+            "/v1/spending/budget/targets/:id",
+            delete(delete_budget_target),
         )
         .route(
-            "/v1/spending/budget/allocations",
-            post(upsert_budget_allocation),
+            "/v1/spending/budget/rollovers",
+            post(upsert_budget_rollover_setting),
         )
         .route(
-            "/v1/spending/budget/allocations/:id",
-            delete(delete_budget_allocation),
+            "/v1/spending/budget/rollovers/:id",
+            delete(delete_budget_rollover_setting),
+        )
+        .route("/v1/spending/budget/groups", post(create_budget_group))
+        .route(
+            "/v1/spending/budget/groups/reset",
+            post(reset_budget_groups),
+        )
+        .route(
+            "/v1/spending/budget/groups/:id",
+            put(update_budget_group).delete(delete_budget_group),
+        )
+        .route(
+            "/v1/spending/budget/group-assignments",
+            post(assign_category_to_group),
         )
         .route("/v1/spending/report", post(get_spending_report))
 }

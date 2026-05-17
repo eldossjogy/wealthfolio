@@ -170,6 +170,17 @@ export const COMMANDS: CommandMap = {
   remove_asset_taxonomy_assignment: { method: "DELETE", path: "/taxonomies/assignments" },
   get_migration_status: { method: "GET", path: "/taxonomies/migration/status" },
   migrate_legacy_classifications: { method: "POST", path: "/taxonomies/migration/run" },
+  // Spending budget
+  get_budget: { method: "GET", path: "/spending/budget" },
+  upsert_budget_target: { method: "POST", path: "/spending/budget/targets" },
+  delete_budget_target: { method: "DELETE", path: "/spending/budget/targets" },
+  upsert_budget_rollover_setting: { method: "POST", path: "/spending/budget/rollovers" },
+  delete_budget_rollover_setting: { method: "DELETE", path: "/spending/budget/rollovers" },
+  create_budget_group: { method: "POST", path: "/spending/budget/groups" },
+  update_budget_group: { method: "PUT", path: "/spending/budget/groups" },
+  delete_budget_group: { method: "DELETE", path: "/spending/budget/groups" },
+  assign_category_to_group: { method: "POST", path: "/spending/budget/group-assignments" },
+  reset_budget_groups: { method: "POST", path: "/spending/budget/groups/reset" },
   // Health Center
   get_health_status: { method: "GET", path: "/health/status" },
   run_health_checks: { method: "POST", path: "/health/check" },
@@ -357,6 +368,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   if (!config) throw new Error(`Unsupported command ${command}`);
   let url = `${API_PREFIX}${config.path}`;
   let body: BodyInit | undefined;
+
+  const addPeriodKey = (periodKey?: string) => {
+    if (!periodKey) return;
+    const params = new URLSearchParams();
+    params.set("periodKey", periodKey);
+    url += `?${params.toString()}`;
+  };
 
   switch (command) {
     case "update_account": {
@@ -966,6 +984,88 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     case "migrate_legacy_classifications":
       break;
+    // Spending budget commands
+    case "get_budget": {
+      const { periodKey } = (payload ?? {}) as { periodKey?: string };
+      addPeriodKey(periodKey);
+      break;
+    }
+    case "upsert_budget_target": {
+      const { target, periodKey } = payload as {
+        target: Record<string, unknown>;
+        periodKey?: string;
+      };
+      addPeriodKey(periodKey);
+      body = JSON.stringify(target);
+      break;
+    }
+    case "delete_budget_target": {
+      const { id, periodKey } = payload as { id: string; periodKey?: string };
+      url += `/${encodeURIComponent(id)}`;
+      addPeriodKey(periodKey);
+      break;
+    }
+    case "upsert_budget_rollover_setting": {
+      const { setting, periodKey } = payload as {
+        setting: Record<string, unknown>;
+        periodKey?: string;
+      };
+      addPeriodKey(periodKey);
+      body = JSON.stringify(setting);
+      break;
+    }
+    case "delete_budget_rollover_setting": {
+      const { id, periodKey } = payload as { id: string; periodKey?: string };
+      url += `/${encodeURIComponent(id)}`;
+      addPeriodKey(periodKey);
+      break;
+    }
+    case "create_budget_group": {
+      const { group, periodKey } = payload as {
+        group: Record<string, unknown>;
+        periodKey?: string;
+      };
+      addPeriodKey(periodKey);
+      body = JSON.stringify(group);
+      break;
+    }
+    case "update_budget_group": {
+      const { id, patch, periodKey } = payload as {
+        id: string;
+        patch: Record<string, unknown>;
+        periodKey?: string;
+      };
+      url += `/${encodeURIComponent(id)}`;
+      addPeriodKey(periodKey);
+      body = JSON.stringify(patch);
+      break;
+    }
+    case "delete_budget_group": {
+      const { id, reassignToGroupId, periodKey } = payload as {
+        id: string;
+        reassignToGroupId: string;
+        periodKey?: string;
+      };
+      url += `/${encodeURIComponent(id)}`;
+      addPeriodKey(periodKey);
+      body = JSON.stringify({ reassignToGroupId });
+      break;
+    }
+    case "assign_category_to_group": {
+      const { categoryId, groupId, periodKey } = payload as {
+        categoryId: string;
+        groupId: string;
+        periodKey?: string;
+      };
+      addPeriodKey(periodKey);
+      body = JSON.stringify({ categoryId, groupId });
+      break;
+    }
+    case "reset_budget_groups": {
+      const { periodKey } = (payload ?? {}) as { periodKey?: string };
+      addPeriodKey(periodKey);
+      break;
+    }
     // Health Center commands
     case "get_health_status":
     case "run_health_checks":

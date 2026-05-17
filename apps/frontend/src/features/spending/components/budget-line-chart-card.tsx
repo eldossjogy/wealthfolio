@@ -4,6 +4,7 @@ import { cn, formatAmount } from "@/lib/utils";
 import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@wealthfolio/ui";
 
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
+import type { BudgetCategoryRow } from "../types/budget";
 
 export function BudgetLineChartCard({
   target,
@@ -19,7 +20,7 @@ export function BudgetLineChartCard({
   spent: number;
   currency: string;
   historicalDailyAvg: number;
-  allocations: { id: string; categoryId: string; amount: string }[];
+  allocations: BudgetCategoryRow[];
   spendingBreakdown: { categoryId: string; amount: number; count: number }[];
   categoriesMeta: CategoryMetaMap;
   monthByDay: { date: string; outflow: number }[];
@@ -177,12 +178,12 @@ export function BudgetLineChartCard({
   })();
   const rings = allocations
     .map((al) => {
-      const t = parseFloat(al.amount) || 0;
+      const t = al.target || 0;
       if (t <= 0) return null;
       const meta = categoriesMeta.get(al.categoryId);
       const s = spentByTop.get(al.categoryId) ?? 0;
       return {
-        id: al.id,
+        id: al.categoryId,
         categoryId: al.categoryId,
         name: meta?.name ?? al.categoryId,
         color: meta?.color ?? null,

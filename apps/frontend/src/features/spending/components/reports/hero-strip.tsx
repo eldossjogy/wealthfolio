@@ -198,7 +198,7 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
   currency,
   isLoading,
 }) => {
-  const monthlyTarget = parseFloat(budget?.config.monthlySpendingTarget ?? "0") || 0;
+  const monthlyTarget = budget?.computed.totals.spendingPlanned ?? 0;
   const target = monthlyTarget * Math.max(1, monthsInRange);
   const pct = target > 0 ? spent / target : 0;
   const isOver = pct > 1;
