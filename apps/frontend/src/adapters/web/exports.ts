@@ -13,17 +13,17 @@ const fallbackFileName = (data: ExportDataType, format: DataExportFileFormat): s
 const filenameFromContentDisposition = (value: string | null): string | null => {
   if (!value) return null;
 
-  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
   if (utf8Match?.[1]) {
     return decodeURIComponent(utf8Match[1]);
   }
 
-  const quotedMatch = value.match(/filename="([^"]+)"/i);
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
   if (quotedMatch?.[1]) {
     return quotedMatch[1];
   }
 
-  const bareMatch = value.match(/filename=([^;]+)/i);
+  const bareMatch = /filename=([^;]+)/i.exec(value);
   return bareMatch?.[1]?.trim() ?? null;
 };
 

@@ -203,7 +203,7 @@ fn save_content_with_dialog(
 ) -> Result<bool, String> {
     let mut dialog = app_handle.dialog().file().set_file_name(file_name);
 
-    if let Some(extension) = file_extension(&file_name) {
+    if let Some(extension) = file_extension(file_name) {
         let filter_name = extension.to_ascii_uppercase();
         dialog = dialog.add_filter(filter_name, &[extension]);
     }
