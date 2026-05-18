@@ -1,8 +1,7 @@
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
-import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import { parseOccSymbol } from "@/lib/occ-symbol";
-import { Account, Holding } from "@/lib/types";
+import { Account, AccountFilter, Holding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AmountDisplay, GainPercent, Input, Separator } from "@wealthfolio/ui";
 import { Button } from "@wealthfolio/ui/components/ui/button";
@@ -18,9 +17,10 @@ interface HoldingsTableMobileProps {
   isLoading: boolean;
   selectedTypes: string[];
   setSelectedTypes: (types: string[]) => void;
-  selectedAccount: Account | null;
+  accountFilter: AccountFilter;
+  onAccountFilterChange: (filter: AccountFilter) => void;
   accounts: Account[];
-  onAccountChange: (account: Account) => void;
+  portfolios: { id: string; name: string }[];
   showAccountFilter?: boolean;
   showSearch?: boolean;
   showFilterButton?: boolean;
@@ -36,9 +36,10 @@ export const HoldingsTableMobile = ({
   isLoading,
   selectedTypes,
   setSelectedTypes,
-  selectedAccount,
+  accountFilter,
+  onAccountFilterChange,
   accounts,
-  onAccountChange,
+  portfolios,
   showAccountFilter = true,
   showSearch = true,
   showFilterButton = true,
@@ -63,10 +64,10 @@ export const HoldingsTableMobile = ({
   const setShowTotalReturn = controlledSetShowTotalReturn ?? setInternalShowTotalReturn;
 
   const hasActiveFilters = useMemo(() => {
-    const hasAccountFilter = showAccountFilter && selectedAccount?.id !== PORTFOLIO_ACCOUNT_ID;
+    const hasAccountFilter = showAccountFilter && accountFilter.type !== "all";
     const hasTypeFilter = selectedTypes.length > 0;
     return hasAccountFilter || hasTypeFilter;
-  }, [selectedAccount, selectedTypes, showAccountFilter]);
+  }, [accountFilter, selectedTypes, showAccountFilter]);
 
   const filteredHoldings = useMemo(() => {
     let result = [...holdings];
@@ -244,9 +245,10 @@ export const HoldingsTableMobile = ({
       <HoldingsMobileFilterSheet
         open={isFilterSheetOpen}
         onOpenChange={setIsFilterSheetOpen}
-        selectedAccount={selectedAccount}
+        accountFilter={accountFilter}
+        onAccountFilterChange={onAccountFilterChange}
         accounts={accounts}
-        onAccountChange={onAccountChange}
+        portfolios={portfolios}
         selectedTypes={selectedTypes}
         setSelectedTypes={setSelectedTypes}
         showAccountFilter={showAccountFilter}

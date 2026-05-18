@@ -9,6 +9,7 @@ import { AccountFilterSelector } from "@/components/account-filter-selector";
 import { ActionPalette, type ActionPaletteGroup } from "@/components/action-palette";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useHoldings } from "@/hooks/use-holdings";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import {
   useAlternativeHoldings,
   useDeleteAlternativeAsset,
@@ -67,6 +68,7 @@ export const HoldingsPage = () => {
 
   const { holdings, isLoading } = useHoldings(accountFilter);
   const { accounts, isLoading: isAccountsLoading } = useAccounts();
+  const { data: portfolios = [] } = usePortfolios();
   const { data: alternativeHoldings, isLoading: isAlternativeHoldingsLoading } =
     useAlternativeHoldings();
 
@@ -117,17 +119,6 @@ export const HoldingsPage = () => {
     undefined,
   );
   const updatePortfolioMutation = useUpdatePortfolioMutation();
-
-  const handleAccountSelect = useCallback((account: Account) => {
-    setSelectedAccount(account);
-    setIsEditMode(false);
-    // Sync AccountFilter when mobile filter sheet selects an account.
-    if (account.id === PORTFOLIO_ACCOUNT_ID) {
-      setAccountFilter({ type: "all" });
-    } else {
-      setAccountFilter({ type: "account", accountId: account.id });
-    }
-  }, []);
 
   const handleAccountFilterChange = useCallback(
     (filter: AccountFilter) => {
@@ -431,9 +422,10 @@ export const HoldingsPage = () => {
               isLoading={isDataLoading}
               selectedTypes={selectedTypes}
               setSelectedTypes={setSelectedTypes}
-              selectedAccount={selectedAccount}
+              accountFilter={accountFilter}
+              onAccountFilterChange={handleAccountFilterChange}
               accounts={accounts ?? []}
-              onAccountChange={handleAccountSelect}
+              portfolios={portfolios}
               showSearch={true}
               showFilterButton={false}
               sortBy={sortBy}
@@ -662,9 +654,10 @@ export const HoldingsPage = () => {
       <HoldingsMobileFilterSheet
         open={isFilterSheetOpen}
         onOpenChange={setIsFilterSheetOpen}
-        selectedAccount={selectedAccount}
+        accountFilter={accountFilter}
+        onAccountFilterChange={handleAccountFilterChange}
         accounts={accounts ?? []}
-        onAccountChange={handleAccountSelect}
+        portfolios={portfolios}
         selectedTypes={selectedTypes}
         setSelectedTypes={setSelectedTypes}
         sortBy={sortBy}

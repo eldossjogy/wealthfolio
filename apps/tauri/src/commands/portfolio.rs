@@ -29,6 +29,42 @@ use wealthfolio_core::{
 };
 
 // ============================================================================
+// AccountFilter IPC boundary struct
+// ============================================================================
+
+/// Flat struct that mirrors the TypeScript `AccountFilter` discriminated union.
+/// Used only at the Tauri IPC boundary because serde internally-tagged enums
+/// fail deserialization in Tauri v2 (all variant fields are required simultaneously).
+/// The frontend sends `{ type: "account", accountId: "X" }` unchanged — this struct
+/// deserializes that format and converts to the internal `AccountFilter` enum.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountFilterInput {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub account_id: Option<String>,
+    pub portfolio_id: Option<String>,
+    pub account_ids: Option<Vec<String>>,
+}
+
+impl AccountFilterInput {
+    fn into_account_filter(self) -> AccountFilter {
+        match self.kind.as_str() {
+            "account" => AccountFilter::Account {
+                account_id: self.account_id.unwrap_or_default(),
+            },
+            "portfolio" => AccountFilter::Portfolio {
+                portfolio_id: self.portfolio_id.unwrap_or_default(),
+            },
+            "adHoc" => AccountFilter::AdHoc {
+                account_ids: self.account_ids.unwrap_or_default(),
+            },
+            _ => AccountFilter::All,
+        }
+    }
+}
+
+// ============================================================================
 // Snapshot Info Types
 // ============================================================================
 
@@ -92,10 +128,12 @@ async fn resolve_filter_to_ids(
 #[tauri::command]
 pub async fn get_holdings(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilter,
+    filter: AccountFilterInput,
 ) -> Result<Vec<Holding>, String> {
     debug!("Get holdings...");
     let base_currency = state.get_base_currency();
+    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
+    let filter = filter.into_account_filter();
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -104,11 +142,6 @@ pub async fn get_holdings(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
-            portfolio_id.clone()
-        } else {
-            String::new()
-        };
         state
             .holdings_service()
             .get_holdings_for_accounts(&ids, &base_currency, &aggregated_id)
@@ -163,9 +196,11 @@ pub async fn get_asset_holdings(
 #[tauri::command]
 pub async fn get_portfolio_allocations(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilter,
+    filter: AccountFilterInput,
 ) -> Result<PortfolioAllocations, String> {
     let base_currency = state.get_base_currency();
+    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
+    let filter = filter.into_account_filter();
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -174,11 +209,6 @@ pub async fn get_portfolio_allocations(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
-            portfolio_id.clone()
-        } else {
-            String::new()
-        };
         state
             .allocation_service()
             .get_portfolio_allocations_for_accounts(&ids, &base_currency, &aggregated_id)
@@ -190,11 +220,13 @@ pub async fn get_portfolio_allocations(
 #[tauri::command]
 pub async fn get_holdings_by_allocation(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilter,
+    filter: AccountFilterInput,
     taxonomy_id: String,
     category_id: String,
 ) -> Result<AllocationHoldings, String> {
     let base_currency = state.get_base_currency();
+    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
+    let filter = filter.into_account_filter();
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -203,11 +235,6 @@ pub async fn get_holdings_by_allocation(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let aggregated_id = if let AccountFilter::Portfolio { portfolio_id } = &filter {
-            portfolio_id.clone()
-        } else {
-            String::new()
-        };
         state
             .allocation_service()
             .get_holdings_by_allocation_for_accounts(
@@ -284,18 +311,23 @@ pub async fn get_latest_valuations(
 #[tauri::command]
 pub async fn get_income_summary(
     state: State<'_, Arc<ServiceContext>>,
-    filter: Option<AccountFilter>,
+    filter: Option<AccountFilterInput>,
 ) -> Result<Vec<IncomeSummary>, String> {
     debug!("Fetching income summary...");
-    let account_ids: Option<Vec<String>> = match &filter {
-        None | Some(AccountFilter::All) => None,
-        Some(AccountFilter::Account { account_id }) => Some(vec![account_id.clone()]),
-        Some(AccountFilter::Portfolio { .. }) | Some(AccountFilter::AdHoc { .. }) => Some(
-            state
-                .portfolio_service()
-                .resolve_account_filter(filter.as_ref().unwrap())
-                .map_err(|e| e.to_string())?,
-        ),
+    let account_ids: Option<Vec<String>> = if let Some(input) = filter {
+        let af = input.into_account_filter();
+        match &af {
+            AccountFilter::All => None,
+            AccountFilter::Account { account_id } => Some(vec![account_id.clone()]),
+            AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => Some(
+                state
+                    .portfolio_service()
+                    .resolve_account_filter(&af)
+                    .map_err(|e| e.to_string())?,
+            ),
+        }
+    } else {
+        None
     };
     state
         .income_service()

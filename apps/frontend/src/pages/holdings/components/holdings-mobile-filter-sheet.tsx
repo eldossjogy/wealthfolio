@@ -8,18 +8,18 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { HOLDING_CATEGORY_FILTERS, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
-import { Account, HoldingCategoryFilterId } from "@/lib/types";
+import { HOLDING_CATEGORY_FILTERS } from "@/lib/constants";
+import { Account, AccountFilter, HoldingCategoryFilterId } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useSettingsContext } from "@/lib/settings-provider";
 import { AnimatedToggleGroup, ScrollArea, Separator } from "@wealthfolio/ui";
 
 interface HoldingsMobileFilterSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  selectedAccount: Account | null;
+  accountFilter: AccountFilter;
+  onAccountFilterChange: (filter: AccountFilter) => void;
   accounts: Account[];
-  onAccountChange: (account: Account) => void;
+  portfolios: { id: string; name: string }[];
   selectedTypes: string[];
   setSelectedTypes: (types: string[]) => void;
   showAccountFilter?: boolean;
@@ -35,9 +35,10 @@ interface HoldingsMobileFilterSheetProps {
 export const HoldingsMobileFilterSheet = ({
   open,
   onOpenChange,
-  selectedAccount,
+  accountFilter,
+  onAccountFilterChange,
   accounts,
-  onAccountChange,
+  portfolios,
   selectedTypes,
   setSelectedTypes,
   showAccountFilter = true,
@@ -49,9 +50,6 @@ export const HoldingsMobileFilterSheet = ({
   setCategoryFilter,
   typeOptions,
 }: HoldingsMobileFilterSheetProps) => {
-  const { settings } = useSettingsContext();
-  const baseCurrency = settings?.baseCurrency ?? "USD";
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -143,54 +141,70 @@ export const HoldingsMobileFilterSheet = ({
                   <div
                     className={cn(
                       "flex cursor-pointer items-center justify-between p-3 text-sm transition-colors",
-                      selectedAccount?.id === PORTFOLIO_ACCOUNT_ID
+                      accountFilter.type === "all"
                         ? "bg-accent/50 font-medium"
                         : "hover:bg-muted/50",
                     )}
                     onClick={() => {
-                      onAccountChange({
-                        id: PORTFOLIO_ACCOUNT_ID,
-                        name: "All Portfolio",
-                        accountType: "PORTFOLIO" as unknown as Account["accountType"],
-                        balance: 0,
-                        currency: baseCurrency,
-                        isDefault: false,
-                        isActive: true,
-                        createdAt: new Date(),
-                        updatedAt: new Date(),
-                      } as Account);
+                      onAccountFilterChange({ type: "all" });
                       onOpenChange(false);
                     }}
                   >
                     <span className="flex items-center gap-2">
-                      <Icons.LayoutDashboard className="text-muted-foreground h-4 w-4" />
-                      All Portfolio
+                      <Icons.Wallet className="text-muted-foreground h-4 w-4" />
+                      All Accounts
                     </span>
-                    {selectedAccount?.id === PORTFOLIO_ACCOUNT_ID && (
+                    {accountFilter.type === "all" && (
                       <Icons.Check className="text-primary h-4 w-4" />
                     )}
                   </div>
+                  {portfolios.map((portfolio) => (
+                    <div
+                      key={portfolio.id}
+                      className={cn(
+                        "flex cursor-pointer items-center justify-between border-t p-3 text-sm transition-colors",
+                        accountFilter.type === "portfolio" &&
+                          accountFilter.portfolioId === portfolio.id
+                          ? "bg-accent/50 font-medium"
+                          : "hover:bg-muted/50",
+                      )}
+                      onClick={() => {
+                        onAccountFilterChange({ type: "portfolio", portfolioId: portfolio.id });
+                        onOpenChange(false);
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Icons.Folder className="text-muted-foreground h-4 w-4" />
+                        {portfolio.name}
+                      </span>
+                      {accountFilter.type === "portfolio" &&
+                        accountFilter.portfolioId === portfolio.id && (
+                          <Icons.Check className="text-primary h-4 w-4" />
+                        )}
+                    </div>
+                  ))}
                   {accounts.map((account) => (
                     <div
                       key={account.id}
                       className={cn(
                         "flex cursor-pointer items-center justify-between border-t p-3 text-sm transition-colors",
-                        selectedAccount?.id === account.id
+                        accountFilter.type === "account" && accountFilter.accountId === account.id
                           ? "bg-accent/50 font-medium"
                           : "hover:bg-muted/50",
                       )}
                       onClick={() => {
-                        onAccountChange(account);
+                        onAccountFilterChange({ type: "account", accountId: account.id });
                         onOpenChange(false);
                       }}
                     >
                       <span className="flex items-center gap-2">
-                        <Icons.Wallet className="text-muted-foreground h-4 w-4" />
+                        <Icons.CreditCard className="text-muted-foreground h-4 w-4" />
                         {account.name}
                       </span>
-                      {selectedAccount?.id === account.id && (
-                        <Icons.Check className="text-primary h-4 w-4" />
-                      )}
+                      {accountFilter.type === "account" &&
+                        accountFilter.accountId === account.id && (
+                          <Icons.Check className="text-primary h-4 w-4" />
+                        )}
                     </div>
                   ))}
                 </div>

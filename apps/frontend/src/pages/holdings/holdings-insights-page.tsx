@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useHoldings } from "@/hooks/use-holdings";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { PORTFOLIO_ACCOUNT_ID, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { AccountFilter, TaxonomyAllocation } from "@/lib/types";
@@ -37,6 +38,15 @@ export const HoldingsInsightsPage = ({
   const accountId = accountIdProp ?? PORTFOLIO_ACCOUNT_ID;
   const { holdings, isLoading: holdingsLoading } = useHoldings(accountFilter);
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountFilter);
+
+  const { data: portfolios = [] } = usePortfolios();
+  const filteredAccountIds = useMemo(() => {
+    if (accountFilter.type === "account") return [accountFilter.accountId];
+    if (accountFilter.type === "portfolio") {
+      return portfolios.find((p) => p.id === accountFilter.portfolioId)?.accountIds;
+    }
+    return undefined;
+  }, [accountFilter, portfolios]);
 
   const isLoading = holdingsLoading || allocationsLoading;
 
@@ -163,7 +173,7 @@ export const HoldingsInsightsPage = ({
             }
           />
 
-          <DrillableAccountChart isLoading={isLoading} />
+          <DrillableAccountChart isLoading={isLoading} accountIds={filteredAccountIds} />
 
           <DrillableDonutChart
             title="Classes"
