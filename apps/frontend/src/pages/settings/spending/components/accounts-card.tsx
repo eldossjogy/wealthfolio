@@ -1,29 +1,27 @@
 import { useMemo } from "react";
 
+import { BankIcon } from "@phosphor-icons/react/dist/csr/Bank";
+import { CreditCardIcon } from "@phosphor-icons/react/dist/csr/CreditCard";
+
 import { useAccounts } from "@/hooks/use-accounts";
 import type { Account } from "@/lib/types";
 import {
-  Button,
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
   Icons,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+  Switch,
 } from "@wealthfolio/ui";
 
 import {
   useSpendingSettings,
   useSpendingSettingsMutation,
 } from "@/features/spending/hooks/use-spending-settings";
-import {
-  isCreditCardAccountType,
-  isSpendingAccountType,
-} from "@/features/spending/lib/constants";
+import { isCreditCardAccountType, isSpendingAccountType } from "@/features/spending/lib/constants";
 import { AccountType } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 export function AccountsCard() {
   const { settings } = useSpendingSettings();
@@ -33,8 +31,18 @@ export function AccountsCard() {
   const accountIds = useMemo(() => settings?.accountIds ?? [], [settings?.accountIds]);
 
   const spendingAccounts = useMemo<Account[]>(
-    () => (accounts ?? []).filter((a) => isSpendingAccountType(a.accountType)),
-    [accounts],
+    () =>
+      (accounts ?? [])
+        .filter((a) => isSpendingAccountType(a.accountType))
+        .sort((a, b) => {
+          // Tracked first, then active, then name
+          const aTracked = accountIds.includes(a.id) ? 0 : 1;
+          const bTracked = accountIds.includes(b.id) ? 0 : 1;
+          if (aTracked !== bTracked) return aTracked - bTracked;
+          if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        }),
+    [accounts, accountIds],
   );
 
   const includedAccounts = useMemo(
@@ -42,125 +50,93 @@ export function AccountsCard() {
     [spendingAccounts, accountIds],
   );
 
-  const availableAccounts = useMemo(
-    () => spendingAccounts.filter((a) => a.isActive && !accountIds.includes(a.id)),
-    [spendingAccounts, accountIds],
-  );
-
-  const hasMixedCashAndCreditAccounts = useMemo(() => {
-    const hasCash = includedAccounts.some((account) => account.accountType === AccountType.CASH);
-    const hasCreditCard = includedAccounts.some((account) =>
-      isCreditCardAccountType(account.accountType),
-    );
-    return hasCash && hasCreditCard;
+  const hasMixedCashAndCredit = useMemo(() => {
+    const hasCash = includedAccounts.some((a) => a.accountType === AccountType.CASH);
+    const hasCredit = includedAccounts.some((a) => isCreditCardAccountType(a.accountType));
+    return hasCash && hasCredit;
   }, [includedAccounts]);
 
-  const handleAdd = (id: string) => {
-    const next = Array.from(new Set([...accountIds, id]));
-    mutation.mutate({ accountIds: next });
-  };
-
-  const handleRemove = (id: string) => {
-    const next = accountIds.filter((x) => x !== id);
-    mutation.mutate({ accountIds: next });
+  const handleToggle = (id: string, next: boolean) => {
+    const nextIds = next
+      ? Array.from(new Set([...accountIds, id]))
+      : accountIds.filter((x) => x !== id);
+    mutation.mutate({ accountIds: nextIds });
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-4 pb-3">
-        <div className="min-w-0 space-y-0.5">
-          <CardTitle className="text-sm font-medium">Spending accounts</CardTitle>
+    <Card className="rounded-lg">
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 p-6 pb-4">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="text-base font-semibold tracking-tight">
+            Spending accounts
+          </CardTitle>
           <CardDescription className="text-xs">
-            Cash and credit card accounts that participate in spending.
+            Cash and credit card accounts that participate in spending. Investment accounts are
+            excluded automatically.
           </CardDescription>
         </div>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="-mt-1 shrink-0"
-              disabled={availableAccounts.length === 0}
-            >
-              <Icons.Plus className="mr-1 h-3.5 w-3.5" />
-              Add account
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="end">
-            {availableAccounts.length === 0 ? (
-              <div className="text-muted-foreground p-3 text-xs">
-                All active spending accounts are already included.
-              </div>
-            ) : (
-              <div className="max-h-72 overflow-y-auto py-1">
-                {availableAccounts.map((account) => (
-                  <button
-                    key={account.id}
-                    type="button"
-                    onClick={() => handleAdd(account.id)}
-                    disabled={mutation.isPending}
-                    className="hover:bg-muted/60 flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-foreground truncate text-sm font-medium">
-                        {account.name}
-                      </div>
-                      <div className="text-muted-foreground truncate text-[11px]">
-                        {account.currency}
-                        {account.group ? ` · ${account.group}` : ""}
-                      </div>
-                    </div>
-                    <Icons.Plus className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
       </CardHeader>
-      <CardContent className="p-4 pt-0">
+      <CardContent className="p-6 pt-0">
         {spendingAccounts.length === 0 ? (
-          <p className="text-muted-foreground text-xs">
+          <div className="text-muted-foreground rounded-md border border-dashed py-8 text-center text-xs">
             No cash or credit card accounts found. Create one in Settings → Accounts.
-          </p>
-        ) : includedAccounts.length === 0 ? (
-          <div className="text-muted-foreground rounded-md border border-dashed py-6 text-center text-xs">
-            No accounts selected. Use “Add account” to include spending accounts.
           </div>
         ) : (
-          <div className="space-y-1">
-            {includedAccounts.map((account) => (
-              <div
-                key={account.id}
-                className="bg-muted/30 flex items-center gap-3 rounded-lg px-3 py-2.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-semibold">{account.name}</span>
-                    {!account.isActive && (
-                      <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium">
-                        Inactive
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground text-[10px]">
-                    {account.currency}
-                    {account.group ? ` · ${account.group}` : ""}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(account.id)}
-                  disabled={mutation.isPending}
-                  className="text-muted-foreground hover:text-foreground shrink-0 rounded-md p-1 transition-colors"
-                  aria-label={`Remove ${account.name}`}
+          <div className="flex flex-col gap-2">
+            {spendingAccounts.map((account) => {
+              const tracked = accountIds.includes(account.id);
+              const isCredit = isCreditCardAccountType(account.accountType);
+              const typeLabel = isCredit ? "Credit card" : "Cash";
+              const TypeIcon = isCredit ? CreditCardIcon : BankIcon;
+              return (
+                <div
+                  key={account.id}
+                  className={cn(
+                    "grid grid-cols-[auto_1fr_auto] items-center gap-4 rounded-md border px-4 py-3.5 transition-colors",
+                    tracked
+                      ? "bg-muted/30 border-border"
+                      : "border-border border-dashed bg-transparent opacity-80",
+                  )}
                 >
-                  <Icons.X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-            {hasMixedCashAndCreditAccounts && (
-              <div className="mt-2 flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                  <div
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-md border",
+                      tracked
+                        ? "bg-background border-border text-foreground"
+                        : "border-border/60 text-muted-foreground bg-transparent",
+                    )}
+                  >
+                    <TypeIcon size={18} weight="duotone" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium">{account.name}</span>
+                      {!account.isActive && (
+                        <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-xs">
+                      {typeLabel} · {account.currency}
+                      {account.group ? ` · ${account.group}` : ""}
+                      {!tracked && " · not tracked"}
+                    </div>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={tracked}
+                    onCheckedChange={(next) => handleToggle(account.id, next)}
+                    disabled={mutation.isPending}
+                    aria-label={`${tracked ? "Stop tracking" : "Track"} ${account.name}`}
+                    className="data-[state=checked]:bg-success data-[state=unchecked]:bg-muted-foreground/40"
+                  />
+                </div>
+              );
+            })}
+
+            {hasMixedCashAndCredit && (
+              <div className="text-warning border-warning/30 bg-warning/10 mt-3 flex gap-2 rounded-md border p-2.5 text-xs leading-relaxed">
                 <Icons.AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <p>
                   Credit card payments from tracked cash accounts should be linked as transfers.
@@ -169,9 +145,6 @@ export function AccountsCard() {
                 </p>
               </div>
             )}
-            <p className="text-muted-foreground pt-1 text-[11px]">
-              {includedAccounts.length} of {spendingAccounts.length} spending accounts included
-            </p>
           </div>
         )}
       </CardContent>

@@ -1,108 +1,156 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
-import {
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Icons,
-} from "@wealthfolio/ui";
+import { Button, Icons } from "@wealthfolio/ui";
 
 import { useBudget } from "@/features/spending/hooks/use-budget";
-import { formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-const MAX_VISIBLE = 6;
+import { formatAmountWhole } from "./format";
 
 export function BudgetOverviewCard() {
-  const { data: budget, isLoading: budgetLoading } = useBudget();
-  const isLoading = budgetLoading;
-  const spendingTarget = budget?.computed.totals.spendingPlanned ?? 0;
-  const incomeTarget = budget?.computed.totals.incomePlanned ?? 0;
-  const currency = budget?.computed.currency ?? "USD";
-  const budgetRows = budget?.computed.groupRows.flatMap((group) => group.categories) ?? [];
-  const isEmpty = !isLoading && spendingTarget <= 0 && incomeTarget <= 0;
+  const { data: budget, isLoading } = useBudget();
 
-  const visible = budgetRows.filter((row) => row.target > 0).slice(0, MAX_VISIBLE);
-  const overflow = Math.max(0, budgetRows.filter((row) => row.target > 0).length - visible.length);
+  const spendingPlanned = budget?.computed.totals.spendingPlanned ?? 0;
+  const incomePlanned = budget?.computed.totals.incomePlanned ?? 0;
+  const currency = budget?.computed.currency ?? "USD";
+
+  const groups = useMemo(() => {
+    return (budget?.computed.groupRows ?? []).map((row) => ({
+      id: row.group.id,
+      name: row.group.name,
+      color: row.group.color,
+      planned: row.plannedTotal,
+    }));
+  }, [budget?.computed.groupRows]);
+
+  const fundedGroups = groups.filter((g) => g.planned > 0);
+  const unfundedGroups = groups.filter((g) => g.planned <= 0);
+  const totalPlanned = fundedGroups.reduce((sum, g) => sum + g.planned, 0) || 1;
+
+  const pctOfIncome =
+    incomePlanned > 0 ? Math.round((spendingPlanned / incomePlanned) * 100) : null;
+  const isOver = pctOfIncome !== null && pctOfIncome > 100;
+
+  const isEmpty = !isLoading && spendingPlanned <= 0 && incomePlanned <= 0;
+
+  if (isLoading) {
+    return <div className="bg-muted/40 h-44 w-full animate-pulse rounded-lg" />;
+  }
+
+  if (isEmpty) {
+    return (
+      <div className="bg-card rounded-lg border p-6">
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-base font-semibold">Default monthly plan</h3>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Define groups and default targets to use as the baseline each month.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link to="/settings/spending/setup">
+              <Icons.Plus className="mr-1.5 h-3.5 w-3.5" />
+              Set up budget
+            </Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-4 pb-3">
-        <div className="min-w-0 space-y-0.5">
-          <CardTitle className="text-sm font-medium">Budget setup</CardTitle>
-          <CardDescription className="text-xs">
-            {isEmpty
-              ? "Groups, default monthly targets, and rollover — the baseline used for every month."
-              : `Groups, default monthly targets, and rollover · ${visible.length + overflow} target${visible.length + overflow === 1 ? "" : "s"}`}
-          </CardDescription>
+    <Link
+      to="/settings/spending/setup"
+      aria-label="Open budget setup"
+      className="bg-card hover:border-foreground/20 group flex items-stretch overflow-hidden rounded-lg border transition-all hover:shadow-md"
+    >
+      <div className="min-w-0 flex-1 p-6">
+        <div className="mb-4">
+          <h3 className="text-base font-semibold tracking-tight">Default monthly plan</h3>
+          <p className="text-muted-foreground mt-1 text-xs">
+            Baseline group targets used every month until you change them.
+          </p>
         </div>
-        <Button asChild variant="ghost" size="sm" className="-mt-1 shrink-0">
-          <Link to="/settings/spending/setup">
-            Manage
-            <Icons.ChevronRight className="ml-1 h-3.5 w-3.5" />
-          </Link>
-        </Button>
-      </CardHeader>
-      <CardContent className="p-4 pt-0">
-        {isLoading ? (
-          <div className="bg-muted/40 h-12 w-full animate-pulse rounded-md" />
-        ) : isEmpty ? (
-          <div className="space-y-3 py-2">
-            <div>
-              <div className="text-foreground text-sm font-medium">No budget set up yet</div>
-              <p className="text-muted-foreground text-xs">
-                Define groups and default targets to use as the baseline each month.
-              </p>
+
+        <div className="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <div className="tabular-nums leading-none">
+              <span className="text-foreground text-2xl font-semibold tracking-tight">
+                {formatAmountWhole(spendingPlanned, currency)}
+              </span>
+              {incomePlanned > 0 && (
+                <span className="text-muted-foreground ml-1 text-base font-normal">
+                  / {formatAmountWhole(incomePlanned, currency)}
+                </span>
+              )}
             </div>
-            <Button asChild size="sm">
-              <Link to="/settings/spending/setup">
-                <Icons.Plus className="mr-1.5 h-3.5 w-3.5" />
-                Set up budget
-              </Link>
-            </Button>
+            <div className="text-muted-foreground mt-1.5 text-[10px] font-medium uppercase tracking-widest">
+              Planned spending {incomePlanned > 0 && "/ Monthly income"}
+            </div>
           </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-muted/30 rounded-md px-3 py-2">
-                <div className="text-muted-foreground text-[11px]">Monthly spending</div>
-                <div className="text-foreground text-sm font-semibold tabular-nums">
-                  {formatAmount(spendingTarget, currency)}
-                </div>
-              </div>
-              <div className="bg-muted/30 rounded-md px-3 py-2">
-                <div className="text-muted-foreground text-[11px]">Monthly income</div>
-                <div className="text-foreground text-sm font-semibold tabular-nums">
-                  {formatAmount(incomeTarget, currency)}
-                </div>
-              </div>
-            </div>
-            {visible.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {visible.map((row) => {
-                  return (
-                    <span
-                      key={row.categoryId}
-                      className="bg-muted/60 text-foreground inline-flex max-w-[200px] items-center gap-1.5 rounded-full px-2 py-0.5 text-xs"
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: row.color ?? "var(--muted-foreground)" }}
-                      />
-                      <span className="truncate">{row.name}</span>
-                    </span>
-                  );
-                })}
-                {overflow > 0 && (
-                  <span className="text-muted-foreground text-xs">+{overflow} more</span>
-                )}
-              </div>
-            )}
+          {pctOfIncome !== null && (
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium",
+                isOver ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success",
+              )}
+            >
+              <Icons.AlertCircle className="h-3 w-3" />
+              {pctOfIncome}% of income
+            </span>
+          )}
+        </div>
+
+        {fundedGroups.length > 0 && (
+          <div className="mb-3.5 flex h-2 w-full gap-0.5 overflow-hidden rounded">
+            {fundedGroups.map((g) => (
+              <span
+                key={g.id}
+                className="block h-full"
+                style={{
+                  width: `${(g.planned / totalPlanned) * 100}%`,
+                  background: g.color ?? "var(--muted-foreground)",
+                }}
+              />
+            ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+
+        <div className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs">
+          {fundedGroups.map((g) => (
+            <span key={g.id} className="inline-flex items-center gap-1.5 py-0.5">
+              <span
+                className="h-2 w-2 rounded-sm"
+                style={{ background: g.color ?? "var(--muted-foreground)" }}
+              />
+              <span className="text-foreground font-medium">{g.name}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {formatAmountWhole(g.planned, currency)}
+              </span>
+            </span>
+          ))}
+          {unfundedGroups.map((g) => (
+            <span
+              key={g.id}
+              className="text-muted-foreground inline-flex items-center gap-1.5 py-0.5"
+            >
+              <span
+                className="h-2 w-2 rounded-sm opacity-40"
+                style={{ background: g.color ?? "var(--muted-foreground)" }}
+              />
+              <span>{g.name}</span>
+              <span>—</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* CTA strip */}
+      <div className="bg-muted/30 group-hover:bg-foreground group-hover:text-background text-muted-foreground flex w-24 shrink-0 flex-col items-center justify-center gap-1.5 border-l text-xs font-medium uppercase tracking-widest transition-colors">
+        <span>Open plan</span>
+        <Icons.ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+      </div>
+    </Link>
   );
 }

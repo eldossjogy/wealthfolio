@@ -25,7 +25,7 @@ export function EventTypesOverviewCard() {
       description={
         total === 0
           ? "Tag recurring or one-off events on transactions and timelines."
-          : `${total} type${total === 1 ? "" : "s"} · used to tag transactions and timelines`
+          : `${total} tag${total === 1 ? "" : "s"} used to mark trips, moves, and one-off life events on the timeline.`
       }
       chips={chips}
       manageHref="/settings/spending/events"
@@ -33,6 +33,8 @@ export function EventTypesOverviewCard() {
       emptyDescription="Add types like Vacation, Move, or Wedding to tag transactions."
       emptyCtaLabel="Add event type"
       isLoading={isLoading}
+      chipShape="tag"
+      maxVisible={20}
     />
   );
 }

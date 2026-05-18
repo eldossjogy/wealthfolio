@@ -18,26 +18,31 @@ export function CategoriesOverviewCard({ variant }: Props) {
   const taxonomyId = TAXONOMY_ID[variant];
   const { data, isLoading } = useTaxonomy(taxonomyId);
 
-  const { chips, total, topCount, subCount } = useMemo(() => {
+  const { chips, topCount, subCount } = useMemo(() => {
     const cats = (data?.categories ?? []) as TaxonomyCategory[];
     const top = cats.filter((c) => !c.parentId).sort((a, b) => a.sortOrder - b.sortOrder);
     const sub = cats.filter((c) => c.parentId);
-    const items: OverviewChip[] = top.map((c) => ({
-      id: c.id,
-      name: c.name,
-      color: c.color,
-    }));
+    // Use number of children as a rough "weight" so the distribution bar
+    // visually emphasizes top-level categories with more subcategories.
+    const items: OverviewChip[] = top.map((c) => {
+      const childCount = sub.filter((s) => s.parentId === c.id).length;
+      return {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        value: Math.max(1, childCount),
+      };
+    });
     return {
       chips: items,
-      total: cats.length,
       topCount: top.length,
       subCount: sub.length,
     };
   }, [data?.categories]);
 
-  const title = variant === "expense" ? "Expense categories" : "Income sources categories";
+  const title = variant === "expense" ? "Expense categories" : "Income sources";
   const description =
-    total === 0
+    topCount === 0
       ? variant === "expense"
         ? "Group transactions into expense buckets."
         : "Group transactions into income sources."
@@ -50,7 +55,6 @@ export function CategoriesOverviewCard({ variant }: Props) {
       title={title}
       description={description}
       chips={chips}
-      totalCount={total > 0 ? total : undefined}
       manageHref={`/settings/spending/categories?tab=${variant}`}
       emptyTitle={variant === "expense" ? "No expense categories yet" : "No income sources yet"}
       emptyDescription={
@@ -60,6 +64,7 @@ export function CategoriesOverviewCard({ variant }: Props) {
       }
       emptyCtaLabel={variant === "expense" ? "Add category" : "Add source"}
       isLoading={isLoading}
+      showDistribution
     />
   );
 }

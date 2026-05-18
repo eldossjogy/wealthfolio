@@ -1,62 +1,214 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Label,
-  Switch,
-} from "@wealthfolio/ui";
+import { useMemo } from "react";
+
+import { Switch } from "@wealthfolio/ui";
 
 import {
   useSpendingSettings,
   useSpendingSettingsMutation,
 } from "@/features/spending/hooks/use-spending-settings";
+import { useBudget } from "@/features/spending/hooks/use-budget";
+import {
+  useCategorizationRules,
+  useRulePresets,
+} from "@/features/spending/hooks/use-categorization-rules";
 import { isSpendingAccountType } from "@/features/spending/lib/constants";
 import { useAccounts } from "@/hooks/use-accounts";
 import type { Account } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+import { formatAmountWhole } from "./format";
 
 export function ModuleCard() {
   const { settings, isLoading } = useSpendingSettings();
   const mutation = useSpendingSettingsMutation();
   const { accounts } = useAccounts({ filterActive: true });
+  const { data: budget } = useBudget();
+  const { data: rules } = useCategorizationRules();
+  const { data: presets } = useRulePresets();
 
   const enabled = settings?.enabled ?? false;
-  const accountIds = settings?.accountIds ?? [];
+  const accountIds = useMemo(() => settings?.accountIds ?? [], [settings?.accountIds]);
+
+  const spendingAccounts = useMemo<Account[]>(
+    () => (accounts ?? []).filter((a) => isSpendingAccountType(a.accountType)),
+    [accounts],
+  );
+  const tracked = useMemo(
+    () => spendingAccounts.filter((a) => accountIds.includes(a.id)),
+    [spendingAccounts, accountIds],
+  );
 
   const handleToggle = (next: boolean) => {
     let nextIds = accountIds;
-    if (next && accountIds.length === 0) {
-      const spendingAccounts = (accounts ?? []).filter((a: Account) =>
-        isSpendingAccountType(a.accountType),
-      );
-      if (spendingAccounts.length > 0) nextIds = spendingAccounts.map((a) => a.id);
+    if (next && accountIds.length === 0 && spendingAccounts.length > 0) {
+      nextIds = spendingAccounts.map((a) => a.id);
     }
     mutation.mutate({ enabled: next, accountIds: nextIds });
   };
 
+  // Spending-accounts subline: dominant type · currency
+  const trackedSummary = useMemo(() => {
+    if (tracked.length === 0) return "No accounts tracked";
+    const currencies = Array.from(new Set(tracked.map((a) => a.currency)));
+    const types = Array.from(new Set(tracked.map((a) => a.accountType)));
+    const typeLabel =
+      types.length === 1
+        ? types[0] === "CREDIT_CARD"
+          ? "Credit card"
+          : types[0] === "CASH"
+            ? "Cash"
+            : "Mixed"
+        : "Mixed";
+    return `${typeLabel} · ${currencies.join(" · ")}`;
+  }, [tracked]);
+
+  // Rules + region count (regions = installed country presets)
+  const ruleCount = rules?.length ?? 0;
+  const regionCount = useMemo(() => (presets ?? []).filter((p) => p.installed).length, [presets]);
+
+  // Budget totals
+  const spendingPlanned = budget?.computed.totals.spendingPlanned ?? 0;
+  const incomePlanned = budget?.computed.totals.incomePlanned ?? 0;
+  const currency = budget?.computed.currency ?? "USD";
+  const plannedPct = incomePlanned > 0 ? Math.round((spendingPlanned / incomePlanned) * 100) : null;
+  const overPlan = plannedPct !== null && plannedPct > 100;
+
+  const activeGroups = useMemo(
+    () =>
+      (budget?.computed.groupRows ?? []).filter((row) => row.plannedTotal > 0 || row.actual > 0),
+    [budget?.computed.groupRows],
+  );
+
+  const groupNamesSubline = useMemo(() => {
+    if (activeGroups.length === 0) return "—";
+    return (
+      activeGroups
+        .slice(0, 3)
+        .map((g) => g.group.name)
+        .join(" · ") + (activeGroups.length > 3 ? "…" : "")
+    );
+  }, [activeGroups]);
+
   return (
-    <Card>
-      <CardHeader className="p-4 pb-3">
-        <CardTitle className="text-sm font-medium">Enable spending tracking</CardTitle>
-        <CardDescription className="text-xs">
-          Adds a Spending section to the sidebar and dashboard. Off by default. Disabling hides
-          spending UI — your data is preserved.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-4 pt-0">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="spending-enabled" className="text-sm">
-            {enabled ? "Enabled" : "Disabled"}
-          </Label>
-          <Switch
-            id="spending-enabled"
-            checked={enabled}
-            onCheckedChange={handleToggle}
-            disabled={isLoading || mutation.isPending}
+    <section
+      aria-label="Tracker status"
+      className="bg-foreground text-background relative overflow-hidden rounded-lg shadow-lg"
+    >
+      <div className="px-6 py-6 sm:px-7">
+        {/* Top row: state + master toggle */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-3">
+            <div className="text-background/60 flex items-center gap-2 text-xs font-medium uppercase tracking-widest">
+              <span className="relative flex h-2 w-2">
+                <span
+                  className={cn(
+                    "absolute inline-flex h-full w-full rounded-full opacity-60",
+                    enabled ? "animate-ping bg-green-300" : "bg-background/40",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "relative inline-flex h-2 w-2 rounded-full",
+                    enabled ? "bg-green-300" : "bg-background/40",
+                  )}
+                />
+              </span>
+              <span className="text-background font-medium">
+                {enabled ? "Tracking active" : "Tracking disabled"}
+              </span>
+              {enabled && tracked.length > 0 && (
+                <span className="text-background/45">
+                  · {tracked.length} account{tracked.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            <div className="text-base font-medium tracking-tight sm:text-lg">
+              {enabled
+                ? `Tracking ${tracked.length} of ${spendingAccounts.length} cash account${spendingAccounts.length === 1 ? "" : "s"}. Add transactions via import or manual entry.`
+                : "Spending tracking is off. Enable to start categorizing cash and credit-card activity."}
+            </div>
+            <div className="text-background/50 text-xs">
+              Disabling hides the spending UI without deleting any data.
+            </div>
+          </div>
+
+          <label className="flex shrink-0 cursor-pointer select-none items-center gap-2">
+            <span className="text-background/55 text-xs font-medium uppercase tracking-widest">
+              {enabled ? "Enabled" : "Disabled"}
+            </span>
+            <Switch
+              checked={enabled}
+              onCheckedChange={handleToggle}
+              disabled={isLoading || mutation.isPending}
+              className={cn(
+                "data-[state=checked]:bg-warning data-[state=unchecked]:bg-background/15",
+                "[&_[data-slot=switch-thumb]]:data-[state=checked]:bg-foreground",
+                "[&_[data-slot=switch-thumb]]:data-[state=unchecked]:bg-background/40",
+              )}
+            />
+          </label>
+        </div>
+
+        {/* Stats grid */}
+        <div className="border-background/10 mt-6 grid grid-cols-2 gap-y-5 border-t pt-5 sm:grid-cols-4">
+          <HeroStat
+            label="Spending accounts"
+            value={tracked.length}
+            unit={`of ${spendingAccounts.length} cash`}
+            sub={trackedSummary}
+          />
+          <HeroStat
+            label="Categorization"
+            value={ruleCount}
+            unit={ruleCount === 1 ? "rule" : "rules"}
+            sub={regionCount > 0 ? `${regionCount} region${regionCount === 1 ? "" : "s"}` : "—"}
+          />
+          <HeroStat
+            label="Planned vs income"
+            value={plannedPct ?? "—"}
+            unit={plannedPct !== null ? "%" : undefined}
+            valueClassName={overPlan ? "text-warning" : undefined}
+            sub={
+              spendingPlanned > 0 || incomePlanned > 0
+                ? `${formatAmountWhole(spendingPlanned, currency)} / ${formatAmountWhole(incomePlanned, currency)}`
+                : "Set up budget"
+            }
+          />
+          <HeroStat
+            label="Budget groups"
+            value={activeGroups.length}
+            unit={activeGroups.length === 1 ? "active" : "active"}
+            sub={groupNamesSubline}
+            sublineClassName="truncate"
           />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </section>
+  );
+}
+
+interface HeroStatProps {
+  label: string;
+  value: number | string;
+  unit?: string;
+  sub?: string;
+  valueClassName?: string;
+  sublineClassName?: string;
+}
+
+function HeroStat({ label, value, unit, sub, valueClassName, sublineClassName }: HeroStatProps) {
+  return (
+    <div className="pr-4">
+      <div className="text-background/55 text-[10px] font-medium uppercase tracking-widest">
+        {label}
+      </div>
+      <div className="mt-2 flex items-baseline gap-1 tabular-nums">
+        <span className={cn("text-2xl font-semibold leading-none tracking-tight", valueClassName)}>
+          {value}
+        </span>
+        {unit && <span className="text-background/55 ml-1 text-xs font-normal">{unit}</span>}
+      </div>
+      {sub && <div className={cn("text-background/45 mt-1 text-xs", sublineClassName)}>{sub}</div>}
+    </div>
   );
 }

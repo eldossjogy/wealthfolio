@@ -14,13 +14,13 @@ export interface OverviewChip {
   id: string;
   name: string;
   color?: string | null;
+  value?: number;
 }
 
 interface OverviewCardProps {
   title: string;
   description?: string;
   chips: OverviewChip[];
-  totalCount?: number;
   manageHref: string;
   manageLabel?: string;
   emptyTitle: string;
@@ -28,13 +28,16 @@ interface OverviewCardProps {
   emptyCtaLabel: string;
   isLoading?: boolean;
   maxVisible?: number;
+  /** Renders a stacked distribution bar above the chips. */
+  showDistribution?: boolean;
+  /** Visual shape of chips. */
+  chipShape?: "pill" | "tag";
 }
 
 export function OverviewCard({
   title,
   description,
   chips,
-  totalCount,
   manageHref,
   manageLabel = "Manage",
   emptyTitle,
@@ -42,30 +45,36 @@ export function OverviewCard({
   emptyCtaLabel,
   isLoading = false,
   maxVisible = 7,
+  showDistribution = false,
+  chipShape = "pill",
 }: OverviewCardProps) {
   const visible = chips.slice(0, maxVisible);
   const overflow = Math.max(0, chips.length - visible.length);
   const isEmpty = !isLoading && chips.length === 0;
 
+  // Distribution flex weights — fall back to equal share if no `value` provided.
+  const totalValue = chips.reduce((sum, c) => sum + (c.value && c.value > 0 ? c.value : 0), 0) || 0;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-4 pb-3">
-        <div className="min-w-0 space-y-0.5">
-          <CardTitle className="text-sm font-medium">{title}</CardTitle>
+    <Card className="rounded-lg">
+      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-6 pb-4">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="text-base font-semibold tracking-tight">{title}</CardTitle>
           {description && <CardDescription className="text-xs">{description}</CardDescription>}
         </div>
         {!isEmpty && (
-          <Button asChild variant="ghost" size="sm" className="-mt-1 shrink-0">
-            <Link to={manageHref}>
-              {manageLabel}
-              <Icons.ChevronRight className="ml-1 h-3.5 w-3.5" />
-            </Link>
-          </Button>
+          <Link
+            to={manageHref}
+            className="text-foreground hover:text-foreground/80 group inline-flex shrink-0 items-center gap-1 text-xs font-medium"
+          >
+            {manageLabel}
+            <Icons.ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </Link>
         )}
       </CardHeader>
-      <CardContent className="p-4 pt-0">
+      <CardContent className="p-6 pt-0">
         {isLoading ? (
-          <div className="bg-muted/40 h-6 w-full animate-pulse rounded-md" />
+          <div className="bg-muted/40 h-12 w-full animate-pulse rounded-md" />
         ) : isEmpty ? (
           <div className="space-y-3 py-2">
             <div>
@@ -80,25 +89,57 @@ export function OverviewCard({
             </Button>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {visible.map((chip) => (
-              <span
-                key={chip.id}
-                className="bg-muted/60 text-foreground inline-flex max-w-[200px] items-center gap-1.5 rounded-full px-2 py-0.5 text-xs"
-              >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: chip.color ?? "var(--muted-foreground)" }}
-                />
-                <span className="truncate">{chip.name}</span>
-              </span>
-            ))}
-            {overflow > 0 && (
-              <span className="text-muted-foreground text-xs">+{overflow} more</span>
+          <div className="space-y-3">
+            {showDistribution && chips.length > 0 && (
+              <div className="flex h-1.5 w-full gap-0.5 overflow-hidden rounded-sm">
+                {chips.map((c) => {
+                  const weight =
+                    totalValue > 0 && c.value && c.value > 0
+                      ? (c.value / totalValue) * 100
+                      : 100 / chips.length;
+                  return (
+                    <span
+                      key={c.id}
+                      className="block h-full"
+                      style={{
+                        width: `${weight}%`,
+                        background: c.color ?? "var(--muted-foreground)",
+                      }}
+                    />
+                  );
+                })}
+              </div>
             )}
-            {totalCount !== undefined && (
-              <span className="text-muted-foreground ml-auto text-[11px]">{totalCount} total</span>
-            )}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {visible.map((chip) =>
+                chipShape === "tag" ? (
+                  <span
+                    key={chip.id}
+                    className="bg-muted/60 border-border/60 text-foreground inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-xs"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: chip.color ?? "var(--muted-foreground)" }}
+                    />
+                    <span className="truncate">{chip.name}</span>
+                  </span>
+                ) : (
+                  <span
+                    key={chip.id}
+                    className="bg-muted/60 text-foreground inline-flex max-w-[200px] items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: chip.color ?? "var(--muted-foreground)" }}
+                    />
+                    <span className="truncate">{chip.name}</span>
+                  </span>
+                ),
+              )}
+              {overflow > 0 && (
+                <span className="text-muted-foreground text-xs">+{overflow} more</span>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

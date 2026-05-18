@@ -1,4 +1,7 @@
-import { SettingsHeader } from "../settings-header";
+import { useNavigate } from "react-router-dom";
+
+import { Button, Icons } from "@wealthfolio/ui";
+
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
 
 import { AccountsCard } from "./components/accounts-card";
@@ -10,28 +13,86 @@ import { RulesOverviewCard } from "./components/rules-overview-card";
 
 export default function SpendingSettingsPage() {
   const { isEnabled } = useSpendingSettings();
+  const navigate = useNavigate();
 
   return (
-    <div className="space-y-6">
-      <SettingsHeader
-        heading="Spending Tracker"
-        text="Track expenses on your cash accounts: categories, events, categorization rules, budgets, and reports."
-      />
+    <div className="font-mono text-sm leading-relaxed antialiased [&>*+*]:mt-9 [&>section+section]:mt-11">
+      <header className="grid grid-cols-[auto_1fr] items-start gap-2 lg:block">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate("/settings")}
+          className="ml-1 lg:hidden"
+        >
+          <Icons.ArrowLeft className="size-6" />
+        </Button>
+        <div className="min-w-0">
+          <nav
+            aria-label="Breadcrumb"
+            className="text-muted-foreground mb-3 hidden items-center gap-1.5 text-xs lg:flex"
+          >
+            <span>Settings</span>
+            <span className="text-muted-foreground/50">/</span>
+            <span>Portfolio</span>
+            <span className="text-muted-foreground/50">/</span>
+            <span className="text-foreground">Spending Tracker</span>
+          </nav>
+          <h1 className="text-foreground text-xl font-semibold tracking-tight lg:text-2xl">
+            Spending Tracker
+          </h1>
+          <p className="text-muted-foreground mt-1 max-w-[64ch] text-sm">
+            Track expenses on your cash accounts — categories, events, automation rules, and
+            budgets.
+          </p>
+        </div>
+      </header>
 
-      <div className="space-y-4">
-        <ModuleCard />
+      <ModuleCard />
 
-        {isEnabled && (
-          <>
+      {isEnabled && (
+        <>
+          <Section title="Sources" meta="Which accounts feed the tracker">
             <AccountsCard />
-            <CategoriesOverviewCard variant="expense" />
-            <CategoriesOverviewCard variant="income" />
-            <EventTypesOverviewCard />
-            <RulesOverviewCard />
+          </Section>
+
+          <Section title="Budgets" meta="Default monthly plan and rollover behavior">
             <BudgetOverviewCard />
-          </>
-        )}
-      </div>
+          </Section>
+
+          <Section title="Taxonomy" meta="How transactions are classified">
+            <div className="grid gap-3 md:grid-cols-2">
+              <CategoriesOverviewCard variant="expense" />
+              <CategoriesOverviewCard variant="income" />
+            </div>
+            <EventTypesOverviewCard />
+          </Section>
+
+          <Section title="Automation" meta="Auto-tag activities by transaction-name patterns">
+            <RulesOverviewCard />
+          </Section>
+        </>
+      )}
     </div>
+  );
+}
+
+interface SectionProps {
+  title: string;
+  meta?: string;
+  children: React.ReactNode;
+}
+
+function Section({ title, meta, children }: SectionProps) {
+  return (
+    <section>
+      <div className="mb-[14px] flex items-baseline justify-between gap-3">
+        <h2 className="text-muted-foreground text-xs font-medium uppercase tracking-widest">
+          {title}
+        </h2>
+        {meta && <span className="text-muted-foreground/80 hidden text-xs sm:inline">{meta}</span>}
+      </div>
+      <div className="space-y-3.5">{children}</div>
+    </section>
   );
 }
