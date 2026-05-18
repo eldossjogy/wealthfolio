@@ -149,7 +149,7 @@ function BudgetRow({ row, currency }: { row: BudgetRow; currency: string }) {
 
   return (
     <Link
-      to={`/spending/transactions?category=${encodeURIComponent(row.id)}`}
+      to={`/activities?tab=spending&category=${encodeURIComponent(row.id)}`}
       className="hover:bg-muted/30 group block px-2 py-2.5 transition-colors"
     >
       {/* Row header */}

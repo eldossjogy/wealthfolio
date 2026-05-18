@@ -27,7 +27,7 @@ export function periodToDateRange(period: SpendingPeriod): DateRange {
   }
 }
 
-/** Build a /spending/transactions URL with category/subcategory + date filters as query params. */
+/** Build a spending-transactions URL with category/subcategory + date filters as query params. */
 export function buildCashflowUrl(opts: {
   categoryId?: string | null;
   subcategoryId?: string | null;
@@ -35,10 +35,10 @@ export function buildCashflowUrl(opts: {
   endDate?: string;
 }): string {
   const params = new URLSearchParams();
+  params.set("tab", "spending");
   if (opts.categoryId) params.set("category", opts.categoryId);
   if (opts.subcategoryId) params.set("subcategory", opts.subcategoryId);
   if (opts.startDate) params.set("from", opts.startDate);
   if (opts.endDate) params.set("to", opts.endDate);
-  const qs = params.toString();
-  return qs ? `/spending/transactions?${qs}` : "/spending/transactions";
+  return `/activities?${params.toString()}`;
 }

@@ -188,7 +188,7 @@ export default function SpendingOverviewPage() {
           Add transactions on a tracked spending account to start tracking spending.
         </p>
         <Link
-          to="/spending/transactions"
+          to="/activities?tab=spending"
           className="text-primary hover:text-primary/80 inline-flex items-center gap-1 text-sm underline-offset-4 hover:underline"
         >
           Go to transactions
@@ -456,9 +456,7 @@ export default function SpendingOverviewPage() {
                     ];
                     return chartItems.map((item, index) => {
                       const percentage =
-                        positiveCategoryTotal > 0
-                          ? (item.amount / positiveCategoryTotal) * 100
-                          : 0;
+                        positiveCategoryTotal > 0 ? (item.amount / positiveCategoryTotal) * 100 : 0;
                       return (
                         <div
                           key={index}
@@ -489,9 +487,7 @@ export default function SpendingOverviewPage() {
                 </div>
                 {topCategories.map(([key, cat], index) => {
                   const percentage =
-                    positiveCategoryTotal > 0
-                      ? (cat.amount / positiveCategoryTotal) * 100
-                      : 0;
+                    positiveCategoryTotal > 0 ? (cat.amount / positiveCategoryTotal) * 100 : 0;
                   const categoryId = cat.categoryId || "uncategorized";
                   const isHidden = hiddenCategories.has(categoryId);
                   const monthsWithCategory = Object.entries(periodSummary.byMonthByCategory).filter(
@@ -573,9 +569,7 @@ export default function SpendingOverviewPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               {topSubcategories.map(([key, sub], index) => {
                 const percentage =
-                  positiveSubcategoryTotal > 0
-                    ? (sub.amount / positiveSubcategoryTotal) * 100
-                    : 0;
+                  positiveSubcategoryTotal > 0 ? (sub.amount / positiveSubcategoryTotal) * 100 : 0;
                 const color =
                   sub.color || DEFAULT_CHART_COLORS[index % DEFAULT_CHART_COLORS.length];
                 const subcategoryId = sub.subcategoryId || key;

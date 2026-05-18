@@ -13,7 +13,7 @@ const sections = [
     end: true,
   },
   {
-    href: "/spending/transactions",
+    href: "/activities?tab=spending",
     title: "Transactions",
     icon: <Icons.Activity className="size-4" />,
   },

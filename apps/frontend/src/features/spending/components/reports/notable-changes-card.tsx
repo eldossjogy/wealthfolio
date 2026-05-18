@@ -120,7 +120,7 @@ function ChangeColumn({
         {rows.map((r) => (
           <li key={r.id}>
             <Link
-              to={`/spending/transactions?category=${encodeURIComponent(r.id)}`}
+              to={`/activities?tab=spending&category=${encodeURIComponent(r.id)}`}
               className="hover:bg-muted/40 group flex items-center gap-2 rounded-md px-1 py-1 transition-colors"
             >
               <span

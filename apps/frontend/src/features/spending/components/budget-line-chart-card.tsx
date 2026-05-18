@@ -418,7 +418,7 @@ function BudgetRing({
 
   return (
     <Link
-      to={`/spending/transactions?category=${encodeURIComponent(ring.categoryId)}`}
+      to={`/activities?tab=spending&category=${encodeURIComponent(ring.categoryId)}`}
       className="hover:bg-muted/40 flex shrink-0 flex-col items-center gap-1 rounded-md px-1 py-1 transition-colors"
       title={`${ring.name}: ${ring.spent.toFixed(2)} / ${ring.target.toFixed(2)}`}
     >

@@ -94,9 +94,10 @@ export function HeatmapCellSheet({
     const start = new Date(end);
     start.setDate(end.getDate() - 12 * 7);
     const params = new URLSearchParams();
+    params.set("tab", "spending");
     params.set("from", start.toISOString().slice(0, 10));
     params.set("to", end.toISOString().slice(0, 10));
-    return `/spending/transactions?${params.toString()}`;
+    return `/activities?${params.toString()}`;
   }, []);
 
   return (

@@ -821,7 +821,7 @@ function CategoryTreemapMono({
             onClick={(node: unknown) => {
               const id = (node as { id?: string } | null)?.id;
               if (id && id !== "__other__") {
-                navigate(`/spending/transactions?category=${id}`);
+                navigate(`/activities?tab=spending&category=${id}`);
               }
             }}
           >
@@ -1105,7 +1105,7 @@ function CategoryRankedBar({
           return (
             <Link
               key={r.id}
-              to={`/spending/transactions?category=${r.id}`}
+              to={`/activities?tab=spending&category=${r.id}`}
               className="hover:bg-muted/40 group flex items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
             >
               <span
@@ -1126,7 +1126,7 @@ function CategoryRankedBar({
         })}
         {uncategorizedAmount > 0.01 && (
           <Link
-            to="/spending/transactions?status=uncategorized"
+            to="/activities?tab=spending&status=uncategorized"
             className="border-border/60 hover:bg-muted/40 mt-1 flex items-center gap-2.5 rounded-md border border-dashed px-2 py-1.5 transition-colors"
           >
             <Icons.AlertCircle className="text-muted-foreground h-3 w-3 shrink-0" />
@@ -1213,8 +1213,8 @@ function GroupedCategoryBlock({
             const catShare = total > 0 ? (cat.amount / total) * 100 : 0;
             const isUncategorized = cat.id === "__uncategorized__";
             const to = isUncategorized
-              ? "/spending/transactions?status=uncategorized"
-              : `/spending/transactions?category=${cat.id}`;
+              ? "/activities?tab=spending&status=uncategorized"
+              : `/activities?tab=spending&category=${cat.id}`;
             const dotColor = cat.color ?? accent;
             return (
               <Link

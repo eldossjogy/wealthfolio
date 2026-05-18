@@ -778,7 +778,7 @@ function BreakdownCanvas({
             {shownCats} of {totalCats} categor{totalCats === 1 ? "y" : "ies"} shown
           </span>
           <Link
-            to="/spending/transactions"
+            to="/activities?tab=spending"
             className="text-foreground hover:text-foreground/80 inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
           >
             Open transactions →

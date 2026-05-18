@@ -153,8 +153,9 @@ export function CategoryTransactionsSheet({
   }, [accountById, category, isTopLevel, items, taxonomyCategories]);
 
   const transactionsLink = useMemo(() => {
-    if (!category) return "/spending/transactions";
+    if (!category) return "/activities?tab=spending";
     const params = new URLSearchParams();
+    params.set("tab", "spending");
     if (category.parentId) {
       params.set("subcategory", category.id);
     } else {
@@ -162,7 +163,7 @@ export function CategoryTransactionsSheet({
     }
     params.set("from", rangeStart.toISOString().slice(0, 10));
     params.set("to", rangeEnd.toISOString().slice(0, 10));
-    return `/spending/transactions?${params.toString()}`;
+    return `/activities?${params.toString()}`;
   }, [category, rangeStart, rangeEnd]);
 
   const accent = category?.color ?? "var(--muted-foreground)";

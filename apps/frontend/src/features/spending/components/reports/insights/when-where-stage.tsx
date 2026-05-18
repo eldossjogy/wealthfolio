@@ -13,6 +13,7 @@ import {
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
+import { useSpendingEventMutations } from "../../../hooks/use-spending-events";
 import { getActivitySpendingAmount } from "../../../lib/constants";
 import { FOREST_THEME } from "../../../lib/theme";
 import type { EventSpendingSummary } from "../../../types/event";
@@ -717,6 +718,31 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
     [days, lift, currency, topCategories],
   );
 
+  // Tagged transactions whose date falls outside the event's [start, end].
+  // The backend's `dailySpending` is keyed by every day with tagged spend,
+  // so we can detect them by comparing keys against the window.
+  const outOfRange = useMemo(() => {
+    const s = event.startDate.slice(0, 10);
+    const e = event.endDate.slice(0, 10);
+    const dates: string[] = [];
+    for (const dateKey of Object.keys(event.dailySpending ?? {})) {
+      const k = dateKey.slice(0, 10);
+      if (k < s || k > e) dates.push(k);
+    }
+    dates.sort();
+    return dates;
+  }, [event.dailySpending, event.startDate, event.endDate]);
+
+  const { update } = useSpendingEventMutations();
+  const expandWindow = () => {
+    if (outOfRange.length === 0) return;
+    const all = [...outOfRange, event.startDate.slice(0, 10), event.endDate.slice(0, 10)].sort();
+    update.mutate({
+      id: event.eventId,
+      patch: { startDate: all[0], endDate: all[all.length - 1] },
+    });
+  };
+
   return (
     <div className={CARD_CLASS}>
       <div className="flex items-center gap-2.5">
@@ -733,6 +759,30 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
           </div>
         </div>
       </div>
+
+      {outOfRange.length > 0 && (
+        <div className="bg-warning/10 border-warning/40 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-[11px]">
+          <span className="text-foreground/90">
+            <span className="font-medium tabular-nums">{outOfRange.length}</span> tagged tx outside
+            event dates
+            <span className="text-muted-foreground/80 ml-1 tabular-nums">
+              ({formatOutOfRangeDate(outOfRange[0])}
+              {outOfRange.length > 1
+                ? `–${formatOutOfRangeDate(outOfRange[outOfRange.length - 1])}`
+                : ""}
+              )
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={expandWindow}
+            disabled={update.isPending}
+            className="text-foreground hover:bg-warning/15 rounded px-2 py-0.5 text-[11px] font-medium underline-offset-2 hover:underline disabled:opacity-50"
+          >
+            {update.isPending ? "Expanding…" : "Expand window →"}
+          </button>
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <div>
@@ -956,6 +1006,11 @@ function formatRange(start: Date, end: Date): string {
     : `${formatMonthDay(start)} – ${formatMonthDay(end)}`.toUpperCase();
 }
 
+/** "2026-05-08" → "May 8" (parsed at noon to avoid UTC drift). */
+function formatOutOfRangeDate(dateKey: string): string {
+  return formatMonthDay(new Date(`${dateKey.slice(0, 10)}T12:00:00`));
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // Empty events state
 // ═════════════════════════════════════════════════════════════════════════
@@ -970,7 +1025,7 @@ function EmptyEventsCard() {
         Tag a trip, place, or one-off to see how it compares with your normal week.
       </p>
       <Button asChild variant="outline" size="sm" className="mt-4">
-        <Link to="/spending/transactions">
+        <Link to="/activities?tab=spending">
           Tag event
           <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
         </Link>

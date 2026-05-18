@@ -102,7 +102,7 @@ function SparklineCard({ row, currency }: { row: CategorySparklineRow; currency:
 
   return (
     <Link
-      to={`/spending/transactions?category=${encodeURIComponent(row.id)}`}
+      to={`/activities?tab=spending&category=${encodeURIComponent(row.id)}`}
       className="border-border/60 bg-card/40 hover:bg-card/60 group flex flex-col gap-1 rounded-lg border px-3 py-2.5 transition-colors"
     >
       <div className="flex items-center justify-between gap-2">
