@@ -1,15 +1,7 @@
-import { useMemo, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { Link } from "react-router-dom";
 
-import {
-  Button,
-  Icons,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-  formatCompactAmount,
-} from "@wealthfolio/ui";
+import { Button, Icons, formatCompactAmount } from "@wealthfolio/ui";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
@@ -20,8 +12,7 @@ import type { EventSpendingSummary } from "../../../types/event";
 import { formatMonthDay } from "./format";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
-const LABEL_CLASS =
-  "text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-[0.12em]";
+const LABEL_CLASS = "text-muted-foreground/70 text-[10px] font-normal uppercase tracking-[0.12em]";
 
 export interface WhenWhereStageProps {
   /** Last 12 weeks of cash activities (for the heatmap). */
@@ -47,6 +38,16 @@ export function WhenWhereStage({
   rangeEnd,
   onHeatmapCellClick,
 }: WhenWhereStageProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(events[0]?.eventId ?? null);
+
+  useEffect(() => {
+    if (!selectedId || !events.some((e) => e.eventId === selectedId)) {
+      setSelectedId(events[0]?.eventId ?? null);
+    }
+  }, [events, selectedId]);
+
+  const selected = events.find((e) => e.eventId === selectedId) ?? null;
+
   return (
     <div className="flex flex-col gap-6">
       <WhenYouSpendCard
@@ -56,36 +57,29 @@ export function WhenWhereStage({
         onCellClick={onHeatmapCellClick}
       />
       <div className="flex flex-col gap-4">
-        <header>
-          <h2 className="text-foreground text-base font-semibold tracking-tight">
-            Where it happened
-          </h2>
-          <p className="text-muted-foreground text-xs">
-            Trips, places, and one-offs that changed your usual rhythm.
-          </p>
-        </header>
         {events.length > 0 ? (
           <>
-            <EventsHeadlineCard
+            <EventsTimelineCard
               events={events}
               currency={currency}
               rangeStart={rangeStart}
               rangeEnd={rangeEnd}
               heatmapActivities={heatmapActivities}
               accountTypeById={accountTypeById}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
             />
-            <div className="grid gap-4 lg:grid-cols-3">
-              {events.slice(0, 3).map((event) => (
-                <EventDetailCard
-                  key={event.eventId}
-                  event={event}
-                  taxonomyCategories={taxonomyCategories}
-                  currency={currency}
-                  heatmapActivities={heatmapActivities}
-                  accountTypeById={accountTypeById}
-                />
-              ))}
-            </div>
+            {selected && (
+              <EventDetailPanel
+                event={selected}
+                events={events}
+                taxonomyCategories={taxonomyCategories}
+                currency={currency}
+                heatmapActivities={heatmapActivities}
+                accountTypeById={accountTypeById}
+                onSelect={setSelectedId}
+              />
+            )}
           </>
         ) : (
           <EmptyEventsCard />
@@ -339,182 +333,546 @@ function median(values: number[]): number {
 // Events headline + timeline strip
 // ═════════════════════════════════════════════════════════════════════════
 
-interface EventsHeadlineCardProps {
+interface EventsTimelineCardProps {
   events: EventSpendingSummary[];
   currency: string;
   rangeStart: Date;
   rangeEnd: Date;
-  /** Used to estimate "normal pace" outside event windows. */
+  /** Last 12 weeks of cash activities; used for daily series + normal pace. */
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }
 
-const EventsHeadlineCard: FC<EventsHeadlineCardProps> = ({
+const MONTH_LABELS = [
+  "JAN",
+  "FEB",
+  "MAR",
+  "APR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AUG",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DEC",
+];
+
+// Kind palette lifted from the Events Tracking design — muted, warm tones.
+const KIND_COLORS = {
+  trip: { stroke: "#4F6B92", fill: "#D8E1EE" },
+  wedding: { stroke: "#B0552E", fill: "#EFD2C2" },
+  holiday: { stroke: "#6B8E54", fill: "#D4DEC7" },
+  move: { stroke: "#B89A4C", fill: "#EBDDB7" },
+  oneoff: { stroke: "#8E7CB3", fill: "#DCD3EA" },
+} as const;
+
+type EventKind = keyof typeof KIND_COLORS;
+
+function inferEventKind(typeName: string | null | undefined): EventKind {
+  const n = (typeName ?? "").toLowerCase();
+  if (n.includes("trip") || n.includes("travel") || n.includes("flight") || n.includes("vacation"))
+    return "trip";
+  if (n.includes("wedding")) return "wedding";
+  if (n.includes("holiday")) return "holiday";
+  if (n.includes("move") || n.includes("apartment") || n.includes("home")) return "move";
+  return "oneoff";
+}
+
+/** Resolve stroke/fill for an event. Prefers eventTypeColor; otherwise uses the kind palette. */
+function getEventColors(ev: EventSpendingSummary): { stroke: string; fill: string } {
+  const kind = inferEventKind(ev.eventTypeName);
+  if (ev.eventTypeColor) {
+    // Use custom stroke; derive a soft fill by appending alpha hex.
+    return { stroke: ev.eventTypeColor, fill: `${ev.eventTypeColor}33` };
+  }
+  return KIND_COLORS[kind];
+}
+
+const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   events,
   currency,
   rangeStart,
   rangeEnd,
   heatmapActivities,
   accountTypeById,
+  selectedId,
+  onSelect,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const node = containerRef.current;
+    const update = () => setWidth(node.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
   const computed = useMemo(
     () => computeEventsAggregate(events, heatmapActivities, accountTypeById),
     [accountTypeById, events, heatmapActivities],
   );
 
-  const totalSpan = Math.max(1, inclusiveDays(rangeStart, rangeEnd));
-  const months = useMemo(() => buildMonthColumns(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
-  const lanes = useMemo(() => assignLanes(events), [events]);
-  const laneCount = Math.max(1, ...lanes.map((l) => l + 1));
+  const dailySeries = useMemo(
+    () => buildDailySeries(heatmapActivities, events, accountTypeById, rangeStart, rangeEnd),
+    [heatmapActivities, events, accountTypeById, rangeStart, rangeEnd],
+  );
+
+  const periodDays = Math.max(1, inclusiveDays(rangeStart, rangeEnd));
+  const W = Math.max(640, width || 1232);
+  const padL = 14;
+  const padR = 64;
+  const innerW = W - padL - padR;
+  const dayW = innerW / periodDays;
+
+  const bandsTop = 48;
+  const bandsH = 56;
+  const chartTop = bandsTop + bandsH + 18;
+  const chartH = 96;
+  const axisTop = chartTop + chartH;
+  const totalH = axisTop + 30;
+
+  // Scale ceiling: ensure normal-pace sits visually in the middle, and a single
+  // large outlier doesn't squash the rest of the series against the x-axis.
+  const maxDaily = Math.max(1, ...dailySeries);
+  const scaleMax = Math.max(maxDaily * 1.1, computed.normalPace * 2.2);
+  const yDaily = (v: number) => chartTop + chartH - (Math.min(v, scaleMax) / scaleMax) * chartH;
+
+  // Area + line paths
+  const points = dailySeries.map((v, i) => [padL + (i + 0.5) * dayW, yDaily(v)] as const);
+  const linePath = points.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
+  const areaPath = `${linePath} L${padL + innerW},${chartTop + chartH} L${padL},${chartTop + chartH} Z`;
+
+  const yNormal = yDaily(computed.normalPace);
+
+  // Today marker — only show if today is within range.
+  const today = new Date();
+  const todayIdx = Math.round((today.getTime() - rangeStart.getTime()) / 86_400_000);
+  const showToday = todayIdx >= 0 && todayIdx <= periodDays - 1;
+  const todayX = padL + (todayIdx + 0.5) * dayW;
+
+  // Month markers
+  const months = useMemo(() => buildMonthMarkers(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
+
+  // Narrow-event label stacking — adjacent narrow bands stagger label rows.
+  const WIDE_THRESHOLD = 50;
+  const NARROW_LABEL_W = 110;
+  const labelRowByEventId = useMemo(() => {
+    const result: Record<string, number> = {};
+    const rowEnds: number[] = [];
+    const indexed = events.map((e) => {
+      const start = new Date(e.startDate);
+      const end = new Date(e.endDate);
+      const a = Math.max(0, Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000));
+      const b = Math.min(
+        periodDays - 1,
+        Math.round((end.getTime() - rangeStart.getTime()) / 86_400_000),
+      );
+      return { e, a, b, x: padL + a * dayW };
+    });
+    indexed.sort((a, b) => a.x - b.x);
+    for (const { e, a, b, x } of indexed) {
+      const w = Math.max((b - a + 1) * dayW, 6);
+      if (w > WIDE_THRESHOLD) continue;
+      const labelStart = x + w / 2 - NARROW_LABEL_W / 2;
+      const labelEnd = labelStart + NARROW_LABEL_W;
+      let row = 0;
+      while (rowEnds[row] != null && rowEnds[row] > labelStart) row++;
+      rowEnds[row] = labelEnd;
+      result[e.eventId] = row;
+    }
+    return result;
+  }, [events, rangeStart, periodDays, dayW]);
+
+  const selected = events.find((e) => e.eventId === selectedId) ?? events[events.length - 1];
+  const biggest = events.slice().sort((a, b) => b.totalSpending - a.totalSpending)[0];
+
+  // Legend mirrors the actual event types present in the data — same color
+  // source as the bands so the swatches always match what's drawn.
+  const usedTypes = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; stroke: string; fill: string }>();
+    for (const ev of events) {
+      if (map.has(ev.eventTypeId)) continue;
+      const c = getEventColors(ev);
+      map.set(ev.eventTypeId, {
+        id: ev.eventTypeId,
+        name: ev.eventTypeName ?? "Event",
+        stroke: c.stroke,
+        fill: c.fill,
+      });
+    }
+    return Array.from(map.values());
+  }, [events]);
 
   return (
-    <div className={CARD_CLASS}>
-      <p className="text-foreground max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg">
-        <span className="font-medium">{events.length}</span> tagged event
-        {events.length === 1 ? "" : "s"} accounted for{" "}
-        <span className="whitespace-nowrap font-medium">
-          {formatAmount(computed.totalSpent, currency)}
-        </span>{" "}
-        across <span className="font-medium">{computed.totalEventDays}</span> days
-        {computed.lift !== 0 && (
-          <>
-            {" — "}
-            <span
-              className={cn(
-                "whitespace-nowrap font-serif font-medium",
-                computed.lift > 0 ? "text-destructive" : "text-success",
-              )}
-            >
-              {computed.lift > 0 ? "+" : "−"}
-              {formatAmount(Math.abs(computed.lift), currency)}{" "}
-              {computed.lift > 0 ? "above" : "below"} your normal pace
-            </span>
-            .
-          </>
-        )}
-        {computed.topEventName && (
-          <>
-            {" "}
-            <span className="font-medium">{computed.topEventName}</span> drove most of it.
-          </>
-        )}
-      </p>
-
-      {/* Compact swim-lane timeline. Month columns at the top; events as
-          colored capsules placed by date below, stacked into lanes only when
-          they overlap. Hover for full name + amount. */}
-      <div className="border-border/40 mt-5 overflow-hidden rounded-lg border">
-        {/* Month axis */}
-        <div className="bg-muted/20 border-border/40 flex border-b">
-          {months.map((m, i) => (
-            <div
-              key={i}
-              className={cn(
-                "border-border/40 text-muted-foreground/80 px-2 py-1 text-center text-[10px] uppercase tracking-wide",
-                i < months.length - 1 && "border-r",
-              )}
-              style={{ width: `${m.widthPct}%` }}
-            >
-              {m.yearLabel && (
-                <div className="text-foreground/70 text-[10px] font-semibold">{m.yearLabel}</div>
-              )}
-              <div>{m.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Lane area */}
-        <div className="relative" style={{ height: laneCount * LANE_HEIGHT + LANE_PADDING * 2 }}>
-          {/* Month grid lines */}
-          <div className="pointer-events-none absolute inset-0 flex">
-            {months.map((m, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "border-border/30 h-full",
-                  i < months.length - 1 && "border-r border-dashed",
-                )}
-                style={{ width: `${m.widthPct}%` }}
-              />
-            ))}
+    <div className={cn(CARD_CLASS, "font-mono")} ref={containerRef}>
+      {/* HEADER */}
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-foreground text-base font-semibold tracking-tight">Events</div>
+          <div className="text-muted-foreground/80 mt-0.5 text-[11px]">
+            {events.length} tagged event{events.length === 1 ? "" : "s"} across{" "}
+            {computed.totalEventDays} days · click any band to inspect
           </div>
-
-          <TooltipProvider delayDuration={150}>
-            {events.map((ev, i) => {
-              const start = new Date(ev.startDate);
-              const end = new Date(ev.endDate);
-              const leftDays = dayOffset(rangeStart, start);
-              const widthDays = Math.max(1, inclusiveDays(start, end));
-              const left = Math.max(0, (leftDays / totalSpan) * 100);
-              const width = Math.max(0.8, Math.min(100 - left, (widthDays / totalSpan) * 100));
-              const color = ev.eventTypeColor ?? FOREST_THEME.deep;
-              const lane = lanes[i];
-              const dateLabel = formatGanttRange(start, end);
-              return (
-                <Tooltip key={ev.eventId}>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="group absolute flex items-center overflow-hidden rounded-sm transition-all hover:z-10 hover:brightness-95 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
-                      style={{
-                        left: `${left}%`,
-                        width: `${width}%`,
-                        top: LANE_PADDING + lane * LANE_HEIGHT,
-                        height: LANE_HEIGHT - 4,
-                        backgroundColor: `${color}24`,
-                        borderLeft: `3px solid ${color}`,
-                      }}
-                      aria-label={`${ev.eventName}, ${dateLabel}, ${formatAmount(ev.totalSpending, currency)}`}
-                    >
-                      {width >= 8 && (
-                        <span
-                          className="truncate pl-1.5 pr-1 text-[10px] font-semibold"
-                          style={{ color }}
-                        >
-                          {ev.eventName}
-                        </span>
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-sm font-semibold">
-                        <span
-                          className="block h-2 w-2 shrink-0 rounded-sm"
-                          style={{ backgroundColor: color }}
-                        />
-                        {ev.eventName}
-                      </div>
-                      <div className="text-muted-foreground text-xs tabular-nums">
-                        {dateLabel} · {ev.transactionCount} tx
-                      </div>
-                      <div className="text-foreground text-xs font-medium tabular-nums">
-                        {formatAmount(ev.totalSpending, currency)}
-                      </div>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </TooltipProvider>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {usedTypes.map((t) => (
+            <span
+              key={t.id}
+              className="text-muted-foreground/80 inline-flex items-center gap-1.5 text-[10px] tracking-wider"
+            >
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-[2px]"
+                style={{ background: t.fill, border: `1.5px solid ${t.stroke}` }}
+              />
+              {t.name.toUpperCase()}
+            </span>
+          ))}
+          <Button asChild variant="outline" size="sm" className="ml-1 h-7 text-[11px]">
+            <Link to="/spending/events">+ TAG EVENT</Link>
+          </Button>
         </div>
       </div>
 
-      <div className="border-border/40 mt-4 flex flex-wrap items-baseline justify-between gap-2 border-t pt-3 text-[11px]">
-        <span className="text-muted-foreground inline-flex items-center gap-2">
-          <span className="bg-foreground/40 inline-block h-px w-5" />
-          Your normal daily pace ({formatAmount(computed.normalPace, currency)})
-        </span>
-        <span className="text-muted-foreground/80 tabular-nums">
-          Combined event days:{" "}
-          <span className="text-foreground font-semibold">
-            {computed.totalEventDays}/{totalSpan}
-          </span>
-        </span>
+      {/* TIMELINE CHART */}
+      <div className="relative w-full">
+        <svg width={W} height={totalH} style={{ display: "block", overflow: "visible" }}>
+          {/* Month gridlines + labels */}
+          {months.map((m, i) => {
+            const x = padL + m.idx * dayW;
+            const showYear = m.label === "JAN" || i === 0;
+            return (
+              <g key={i}>
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={20}
+                  y2={chartTop + chartH}
+                  stroke="currentColor"
+                  className="text-foreground/10"
+                  strokeDasharray="2 3"
+                />
+                <text
+                  x={x + 6}
+                  y={14}
+                  className="fill-muted-foreground/80"
+                  fontSize={10}
+                  letterSpacing={0.5}
+                >
+                  {m.label}
+                  {showYear ? ` ${m.year}` : ""}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Normal-pace baseline */}
+          {computed.normalPace > 0 && (
+            <>
+              <line
+                x1={padL}
+                x2={padL + innerW}
+                y1={yNormal}
+                y2={yNormal}
+                stroke="currentColor"
+                className="text-muted-foreground/60"
+                strokeDasharray="3 3"
+              />
+              <text
+                x={padL + innerW + 4}
+                y={yNormal + 3}
+                fontSize={9}
+                className="fill-muted-foreground"
+              >
+                {formatCompactAmount(computed.normalPace, currency)}/d
+              </text>
+            </>
+          )}
+
+          {/* Daily area */}
+          <path d={areaPath} fill="currentColor" className="text-foreground/5" />
+          <path
+            d={linePath}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1}
+            className="text-muted-foreground/60"
+          />
+
+          {/* Highlight event regions on the daily chart */}
+          {events.map((ev) => {
+            const start = new Date(ev.startDate);
+            const end = new Date(ev.endDate);
+            const a = Math.max(
+              0,
+              Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000),
+            );
+            const b = Math.min(
+              periodDays - 1,
+              Math.round((end.getTime() - rangeStart.getTime()) / 86_400_000),
+            );
+            if (b < 0 || a > periodDays - 1) return null;
+            const x1 = padL + a * dayW;
+            const x2 = padL + (b + 1) * dayW;
+            const c = getEventColors(ev);
+            const isSel = selectedId === ev.eventId;
+            return (
+              <rect
+                key={"hl-" + ev.eventId}
+                x={x1}
+                y={chartTop - 2}
+                width={x2 - x1}
+                height={chartH + 4}
+                fill={c.fill}
+                opacity={isSel ? 0.55 : 0.28}
+              />
+            );
+          })}
+
+          {/* Re-stroke chart line on top of highlights */}
+          <path
+            d={linePath}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.2}
+            className="text-foreground/80"
+          />
+
+          {/* Event bands */}
+          {events.map((ev) => {
+            const start = new Date(ev.startDate);
+            const end = new Date(ev.endDate);
+            const a = Math.max(
+              0,
+              Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000),
+            );
+            const b = Math.min(
+              periodDays - 1,
+              Math.round((end.getTime() - rangeStart.getTime()) / 86_400_000),
+            );
+            if (b < 0 || a > periodDays - 1) return null;
+            const x1 = padL + a * dayW;
+            const x2 = padL + (b + 1) * dayW;
+            const w = Math.max(x2 - x1, 6);
+            const isSel = selectedId === ev.eventId;
+            const c = getEventColors(ev);
+            const days = Math.max(1, inclusiveDays(start, end));
+            const expected = computed.normalPace * days;
+            const lift = ev.totalSpending - expected;
+            const kindLabel = (ev.eventTypeName ?? "").toUpperCase();
+            const labelRowIdx = labelRowByEventId[ev.eventId] ?? 0;
+            const labelYOffset = -4 - labelRowIdx * 12;
+
+            return (
+              <g
+                key={ev.eventId}
+                style={{ cursor: "pointer" }}
+                onClick={() => onSelect(ev.eventId)}
+              >
+                <rect
+                  x={x1}
+                  y={bandsTop}
+                  width={w}
+                  height={bandsH - 4}
+                  fill={c.fill}
+                  stroke={c.stroke}
+                  strokeWidth={isSel ? 2 : 1}
+                  rx={4}
+                  opacity={isSel ? 1 : 0.85}
+                />
+                <rect
+                  x={x1}
+                  y={bandsTop}
+                  width={3}
+                  height={bandsH - 4}
+                  fill={c.stroke}
+                  opacity={isSel ? 1 : 0.7}
+                />
+
+                {w > WIDE_THRESHOLD ? (
+                  <>
+                    <text
+                      x={x1 + 8}
+                      y={bandsTop + 16}
+                      fontSize={11}
+                      className="fill-foreground"
+                      fontWeight={isSel ? 700 : 600}
+                    >
+                      {ev.eventName}
+                    </text>
+                    <text
+                      x={x1 + 8}
+                      y={bandsTop + 32}
+                      fontSize={9.5}
+                      fontWeight={600}
+                      className={lift >= 0 ? "fill-destructive" : "fill-success"}
+                    >
+                      {lift >= 0 ? "+" : "−"}
+                      {formatCompactAmount(Math.abs(lift), currency)}
+                    </text>
+                    <text
+                      x={x1 + 8}
+                      y={bandsTop + 46}
+                      fontSize={9}
+                      className="fill-muted-foreground"
+                    >
+                      {days}D · {kindLabel}
+                    </text>
+                  </>
+                ) : (
+                  <g>
+                    {labelRowIdx > 0 && (
+                      <line
+                        x1={x1 + w / 2}
+                        x2={x1 + w / 2}
+                        y1={bandsTop}
+                        y2={bandsTop + labelYOffset + 2}
+                        stroke={c.stroke}
+                        strokeWidth={1}
+                        opacity={0.5}
+                      />
+                    )}
+                    <text
+                      x={x1 + w / 2}
+                      y={bandsTop + labelYOffset}
+                      fontSize={10}
+                      fontWeight={isSel ? 700 : 500}
+                      textAnchor="middle"
+                      className={isSel ? "fill-foreground" : "fill-foreground/80"}
+                    >
+                      {ev.eventName}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Today marker */}
+          {showToday && (
+            <>
+              <line
+                x1={todayX}
+                x2={todayX}
+                y1={4}
+                y2={chartTop + chartH}
+                stroke="#EAC91F"
+                strokeWidth={1.5}
+              />
+              <circle cx={todayX} cy={4} r={3} fill="#EAC91F" />
+              <text x={todayX + 6} y={14} fontSize={9.5} fontWeight={600} fill="#EAC91F">
+                TODAY
+              </text>
+            </>
+          )}
+
+          {/* Bookend dates */}
+          <text x={padL} y={axisTop + 14} fontSize={9.5} className="fill-muted-foreground">
+            {formatBookendDate(rangeStart)}
+          </text>
+          <text
+            x={padL + innerW}
+            y={axisTop + 14}
+            fontSize={9.5}
+            textAnchor="end"
+            className="fill-muted-foreground"
+          >
+            {formatBookendDate(rangeEnd)} · {periodDays} DAYS
+          </text>
+          <text
+            x={padL + innerW / 2}
+            y={axisTop + 14}
+            fontSize={9.5}
+            textAnchor="middle"
+            className="fill-muted-foreground/70"
+          >
+            DAILY SPEND
+          </text>
+        </svg>
+      </div>
+
+      {/* Summary strip */}
+      <div className="border-border/40 mt-4 grid grid-cols-2 gap-x-0 gap-y-4 border-t pt-4 md:grid-cols-4">
+        <SummaryCell label={`ACROSS ${events.length} EVENT${events.length === 1 ? "" : "S"}`}>
+          <div className="text-foreground text-lg font-semibold tabular-nums tracking-tight">
+            {formatAmount(computed.totalSpent, currency)}
+          </div>
+          <div className="text-muted-foreground/80 mt-0.5 text-[10px]">
+            {computed.totalEventDays} event-days ·{" "}
+            {Math.round((computed.totalEventDays / periodDays) * 100)}% of period
+          </div>
+        </SummaryCell>
+        <SummaryCell label="COMBINED LIFT" divided>
+          <div
+            className={cn(
+              "text-lg font-semibold tabular-nums tracking-tight",
+              computed.lift >= 0 ? "text-destructive" : "text-success",
+            )}
+          >
+            {computed.lift >= 0 ? "+" : "−"}
+            {formatAmount(Math.abs(computed.lift), currency)}
+          </div>
+          <div className="text-muted-foreground/80 mt-0.5 text-[10px]">
+            on event days, vs normal pace
+          </div>
+        </SummaryCell>
+        {biggest && (
+          <SummaryCell label="BIGGEST EVENT" divided>
+            <div className="text-foreground truncate text-lg font-semibold tracking-tight">
+              {biggest.eventName}
+            </div>
+            <div className="text-muted-foreground/80 mt-0.5 text-[10px] tabular-nums">
+              {formatAmount(biggest.totalSpending, currency)}
+            </div>
+          </SummaryCell>
+        )}
+        {selected && (
+          <SummaryCell label="SELECTED" divided>
+            <div className="mt-0.5 inline-flex items-center gap-2">
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+                style={{
+                  background: getEventColors(selected).fill,
+                  border: `1.5px solid ${getEventColors(selected).stroke}`,
+                }}
+              />
+              <span className="text-foreground truncate text-lg font-semibold tracking-tight">
+                {selected.eventName}
+              </span>
+            </div>
+            <div className="text-muted-foreground/80 mt-0.5 text-[10px] tabular-nums">
+              {formatSelectedRange(new Date(selected.startDate), new Date(selected.endDate))} ·{" "}
+              {inclusiveDays(new Date(selected.startDate), new Date(selected.endDate))}D
+            </div>
+          </SummaryCell>
+        )}
       </div>
     </div>
   );
 };
+
+function SummaryCell({
+  label,
+  divided,
+  children,
+}: {
+  label: string;
+  divided?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn(divided && "md:border-border/40 md:border-l md:pl-4")}>
+      <div className={LABEL_CLASS}>{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
 
 interface EventsAggregate {
   totalSpent: number;
@@ -579,116 +937,89 @@ function inclusiveDays(a: Date, b: Date): number {
   return Math.max(0, Math.round((b.getTime() - a.getTime()) / (24 * 3600 * 1000))) + 1;
 }
 
-/** Day offset of B from A — same day = 0, next day = 1. Used for positioning. */
-function dayOffset(a: Date, b: Date): number {
-  return Math.max(0, Math.round((b.getTime() - a.getTime()) / (24 * 3600 * 1000)));
-}
+/** Build a per-day spend series across [rangeStart, rangeEnd]. */
+function buildDailySeries(
+  activities: Activity[],
+  events: EventSpendingSummary[],
+  accountTypeById: Map<string, string> | undefined,
+  rangeStart: Date,
+  rangeEnd: Date,
+): number[] {
+  const periodDays = Math.max(1, inclusiveDays(rangeStart, rangeEnd));
+  const series = new Array(periodDays).fill(0);
+  const startMs = rangeStart.getTime();
 
-/** Compact date-range label for a Gantt row. "May 6–8" / "Apr 28 – May 2". */
-function formatGanttRange(start: Date, end: Date): string {
-  const sameMonth =
-    start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
-  if (sameMonth) {
-    return start.getDate() === end.getDate()
-      ? formatMonthDay(start)
-      : `${formatMonthDay(start)}–${end.getDate()}`;
+  for (const a of activities) {
+    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (amt <= 0) continue;
+    const idx = Math.round((new Date(a.activityDate).getTime() - startMs) / 86_400_000);
+    if (idx >= 0 && idx < periodDays) series[idx] += amt;
   }
-  return `${formatMonthDay(start)} – ${formatMonthDay(end)}`;
+
+  // Overlay event-level dailySpending (covers periods outside the 12-week window).
+  for (const ev of events) {
+    for (const [dateKey, amount] of Object.entries(ev.dailySpending ?? {})) {
+      const day = new Date(`${dateKey}T12:00:00`);
+      const idx = Math.round((day.getTime() - startMs) / 86_400_000);
+      if (idx >= 0 && idx < periodDays && amount > 0) series[idx] = amount;
+    }
+  }
+  return series;
 }
 
-// ─── Timeline helpers ────────────────────────────────────────────────────
-
-const LANE_HEIGHT = 22;
-const LANE_PADDING = 6;
-
-const monthShort = new Intl.DateTimeFormat(undefined, { month: "short" });
-
-interface MonthColumn {
+interface MonthMarker {
+  idx: number;
   label: string;
-  /** Year shown above the month label, only on the first column or on Jan. */
-  yearLabel: string | null;
-  /** Width of this column as a percentage of the full timeline width. */
-  widthPct: number;
+  year: number;
 }
 
-/** Compute month columns spanning [rangeStart, rangeEnd], sized by day count. */
-function buildMonthColumns(rangeStart: Date, rangeEnd: Date): MonthColumn[] {
-  const totalDays = Math.max(
-    1,
-    Math.round((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000) + 1,
-  );
-  const out: MonthColumn[] = [];
-  const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
-  let lastYear: number | null = null;
+function buildMonthMarkers(rangeStart: Date, rangeEnd: Date): MonthMarker[] {
+  const out: MonthMarker[] = [];
+  const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1, 12, 0, 0, 0);
   while (cursor <= rangeEnd) {
-    const monthStart = cursor < rangeStart ? rangeStart : new Date(cursor);
-    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
-    const clampedEnd = monthEnd > rangeEnd ? rangeEnd : monthEnd;
-    const days = Math.max(
-      1,
-      Math.round((clampedEnd.getTime() - monthStart.getTime()) / 86_400_000) + 1,
-    );
-    const year = cursor.getFullYear();
-    out.push({
-      label: monthShort.format(cursor),
-      // Show year on the first column AND on every January after — keeps
-      // multi-year ranges navigable without repeating the year on every cell.
-      yearLabel: lastYear == null || year !== lastYear ? String(year) : null,
-      widthPct: (days / totalDays) * 100,
-    });
-    lastYear = year;
+    const idx = Math.round((cursor.getTime() - rangeStart.getTime()) / 86_400_000);
+    out.push({ idx, label: MONTH_LABELS[cursor.getMonth()], year: cursor.getFullYear() });
     cursor.setMonth(cursor.getMonth() + 1);
   }
   return out;
 }
 
-/** Assign each event a lane index (0-based) so overlapping events stack. */
-function assignLanes(events: EventSpendingSummary[]): number[] {
-  // Indices preserved against the input order so the caller can map back.
-  const indexed = events.map((e, i) => ({ i, start: e.startDate, end: e.endDate }));
-  indexed.sort((a, b) => a.start.localeCompare(b.start));
-  const laneEnds: string[] = [];
-  const laneByIndex = new Array(events.length).fill(0);
-  for (const ev of indexed) {
-    let placed = false;
-    for (let l = 0; l < laneEnds.length; l++) {
-      if (laneEnds[l] < ev.start) {
-        laneEnds[l] = ev.end;
-        laneByIndex[ev.i] = l;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      laneByIndex[ev.i] = laneEnds.length;
-      laneEnds.push(ev.end);
-    }
-  }
-  return laneByIndex;
+function formatBookendDate(d: Date): string {
+  return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+function formatSelectedRange(start: Date, end: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(start.getMonth() + 1)}/${pad(start.getDate())} – ${pad(end.getMonth() + 1)}/${pad(end.getDate())}`;
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Per-event detail card
+// Rich event detail panel — replaces the old 3-up EventDetailCard grid
 // ═════════════════════════════════════════════════════════════════════════
 
-interface EventDetailCardProps {
+interface EventDetailPanelProps {
   event: EventSpendingSummary;
+  events: EventSpendingSummary[];
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
+  onSelect: (id: string) => void;
 }
 
-const EventDetailCard: FC<EventDetailCardProps> = ({
+const EventDetailPanel: FC<EventDetailPanelProps> = ({
   event,
+  events,
   taxonomyCategories,
   currency,
   heatmapActivities,
   accountTypeById,
+  onSelect,
 }) => {
-  const startDate = new Date(event.startDate);
-  const endDate = new Date(event.endDate);
+  const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
+  const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
   const days = Math.max(1, inclusiveDays(startDate, endDate));
+  const dailyDuring = days > 0 ? event.totalSpending / days : 0;
 
   const baseline = useMemo(
     () => computeBaselinePace(heatmapActivities, [event], accountTypeById),
@@ -697,30 +1028,45 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
 
   const expected = baseline * days;
   const lift = event.totalSpending - expected;
-  const multiple = expected > 0 ? event.totalSpending / expected : 0;
-  const dailyDuring = days > 0 ? event.totalSpending / days : 0;
+  const dailyDeltaPct = baseline > 0 ? Math.round((dailyDuring / baseline - 1) * 100) : 0;
 
-  const topCategories = useMemo(
-    () => buildEventCategoryRows(event, taxonomyCategories).slice(0, 5),
+  const categories = useMemo(
+    () => buildEventCategoryRows(event, taxonomyCategories),
     [event, taxonomyCategories],
   );
-  const maxCategoryAmount = topCategories[0]?.amount ?? 1;
-  const maxRate = Math.max(baseline, dailyDuring, 1);
+  const maxCategoryAmount = Math.max(1, ...categories.map((c) => c.amount));
 
-  const tag = event.eventTypeName ?? "Event";
+  const dailySeries = useMemo(() => buildEventDailySeries(event, days), [event, days]);
+  const peak = useMemo(() => findPeakDay(event, days), [event, days]);
+
+  const beforeSeries = useMemo(
+    () => buildWindowSeries(heatmapActivities, accountTypeById, startDate, -7, 7),
+    [heatmapActivities, accountTypeById, startDate],
+  );
+  const afterSeries = useMemo(
+    () => buildWindowSeries(heatmapActivities, accountTypeById, endDate, 1, 3),
+    [heatmapActivities, accountTypeById, endDate],
+  );
+  const beforeAvg = avgSeries(beforeSeries);
+  const afterAvg = avgSeries(afterSeries);
+  const hangoverPct = baseline > 0 ? Math.round((afterAvg / baseline - 1) * 100) : 0;
+
   const tagColor = event.eventTypeColor ?? FOREST_THEME.deep;
-  const HeaderIcon = pickEventIcon(tag);
+  const HeaderIcon = pickEventIcon(event.eventTypeName ?? "Event");
 
-  const rangeLabel = formatRange(startDate, endDate);
+  const currentIdx = events.findIndex((e) => e.eventId === event.eventId);
+  const canNav = events.length > 1;
+  const prevEvent = canNav ? events[(currentIdx - 1 + events.length) % events.length] : null;
+  const nextEvent = canNav ? events[(currentIdx + 1) % events.length] : null;
 
   const caption = useMemo(
-    () => buildEventCaption({ days, lift, currency, top: topCategories }),
-    [days, lift, currency, topCategories],
+    () => buildEventCaption({ days, lift, currency, top: categories }),
+    [days, lift, currency, categories],
   );
 
-  // Tagged transactions whose date falls outside the event's [start, end].
-  // The backend's `dailySpending` is keyed by every day with tagged spend,
-  // so we can detect them by comparing keys against the window.
+  // Detect tagged transactions falling outside the event's date window. The
+  // backend's `dailySpending` covers every day with tagged spend, including
+  // dates outside the event's own [start, end].
   const outOfRange = useMemo(() => {
     const s = event.startDate.slice(0, 10);
     const e = event.endDate.slice(0, 10);
@@ -744,19 +1090,46 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
   };
 
   return (
-    <div className={CARD_CLASS}>
-      <div className="flex items-center gap-2.5">
-        <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: `${tagColor}1F`, color: tagColor }}
-        >
-          <HeaderIcon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-foreground truncate text-sm font-semibold">{event.eventName}</div>
-          <div className="text-muted-foreground/80 text-[11px] uppercase tabular-nums tracking-wide">
-            {rangeLabel} · {days} {days === 1 ? "DAY" : "DAYS"} · {event.transactionCount} TX
+    <div className={cn(CARD_CLASS, "font-mono")}>
+      {/* HEADER */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md"
+            style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
+          >
+            <HeaderIcon className="h-5 w-5" style={{ color: tagColor }} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-foreground truncate text-xl font-semibold tracking-tight">
+              {event.eventName}
+            </div>
+            <div className="text-muted-foreground/80 mt-1 text-[11px] uppercase tabular-nums tracking-wide">
+              {formatRange(startDate, endDate)} · {days} DAY{days === 1 ? "" : "S"} ·{" "}
+              {event.transactionCount} TX
+              {event.eventTypeName ? ` · ${event.eventTypeName.toUpperCase()}` : ""}
+            </div>
           </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px]"
+            onClick={() => prevEvent && onSelect(prevEvent.eventId)}
+            disabled={!canNav}
+          >
+            ← PREV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-[11px]"
+            onClick={() => nextEvent && onSelect(nextEvent.eventId)}
+            disabled={!canNav}
+          >
+            NEXT →
+          </Button>
         </div>
       </div>
 
@@ -784,124 +1157,429 @@ const EventDetailCard: FC<EventDetailCardProps> = ({
         </div>
       )}
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div>
-          <div className={LABEL_CLASS}>TOTAL</div>
-          <div className="text-foreground mt-1 text-lg font-semibold tabular-nums tracking-tight">
+      {/* STAT BLOCK */}
+      <div className="bg-muted/30 border-border/40 mt-4 grid grid-cols-2 gap-y-3 rounded-md border p-4 md:grid-cols-4 md:gap-x-0">
+        <StatCell label="EVENT TOTAL">
+          <div className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
             {formatAmount(event.totalSpending, currency)}
           </div>
-        </div>
-        <div>
-          <div className={LABEL_CLASS}>LIFT VS NORMAL</div>
+          <div className="text-muted-foreground/80 mt-1 text-[10px]">
+            across {event.transactionCount} transactions
+          </div>
+        </StatCell>
+        <StatCell label="LIFT VS NORMAL" divided>
           <div
             className={cn(
-              "mt-1 text-lg font-semibold tabular-nums tracking-tight",
-              lift > 0 ? "text-destructive" : "text-success",
+              "text-xl font-semibold tabular-nums tracking-tight",
+              lift >= 0 ? "text-destructive" : "text-success",
             )}
           >
             {lift >= 0 ? "+" : "−"}
             {formatAmount(Math.abs(lift), currency)}
-            {multiple > 0 && (
-              <span className="text-muted-foreground/70 ml-1 text-xs font-medium">
-                ·{multiple.toFixed(1)}×
-              </span>
-            )}
           </div>
-        </div>
+          <div className="text-muted-foreground/80 mt-1 text-[10px]">
+            vs {formatAmount(Math.max(0, expected), currency)} expected
+          </div>
+        </StatCell>
+        <StatCell label="DAILY DURING" divided>
+          <div className="text-foreground text-xl font-semibold tabular-nums tracking-tight">
+            {formatAmount(dailyDuring, currency)}
+          </div>
+          <div className="text-muted-foreground/80 mt-1 text-[10px]">
+            {baseline > 0
+              ? `${dailyDeltaPct >= 0 ? "+" : "−"}${Math.abs(dailyDeltaPct)}% vs ${formatAmount(baseline, currency)}`
+              : "no baseline available"}
+          </div>
+        </StatCell>
+        <StatCell label="PEAK DAY" divided>
+          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
+            {peak ? formatAmount(peak.amount, currency) : "—"}
+          </div>
+          <div className="text-muted-foreground/80 mt-1 text-[10px]">
+            {peak ? formatPeakDay(peak.date) : ""}
+          </div>
+        </StatCell>
       </div>
 
-      <div className="mt-5">
-        <div className={LABEL_CLASS}>DAILY RATE</div>
-        <div className="mt-2 space-y-1.5">
-          <RateRow
-            label="Normal"
-            value={baseline}
-            currency={currency}
-            maxRate={maxRate}
-            tone="muted"
-          />
-          <RateRow
-            label="During"
-            value={dailyDuring}
-            currency={currency}
-            maxRate={maxRate}
-            tone={dailyDuring > baseline ? "warn" : "good"}
-          />
-        </div>
-      </div>
+      {/* TAKEAWAY */}
+      <p className="text-foreground/90 mt-5 text-[13px] leading-relaxed">
+        <span className={cn(LABEL_CLASS, "mr-2")}>TAKEAWAY</span>
+        {caption}
+      </p>
 
-      {topCategories.length > 0 && (
-        <div className="mt-5">
-          <div className={LABEL_CLASS}>WHERE IT WENT</div>
-          <div className="mt-2 space-y-1.5">
-            {topCategories.map((c) => (
-              <div key={c.id} className="flex items-center gap-2 text-[11px]">
-                <span
-                  className="block h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: c.color }}
-                />
-                <span className="text-foreground/90 w-24 shrink-0 truncate text-xs">{c.name}</span>
-                <div className="bg-foreground/5 h-1.5 flex-1 overflow-hidden rounded-full">
+      {/* WHAT DROVE IT */}
+      <SubLabel right={`${categories.length} CATEGOR${categories.length === 1 ? "Y" : "IES"}`}>
+        WHAT DROVE IT
+      </SubLabel>
+      {categories.length > 0 && (
+        <>
+          <div className="bg-foreground/5 mb-3 mt-2 flex h-2.5 gap-px overflow-hidden rounded-sm">
+            {categories.map((c) => (
+              <div
+                key={c.id}
+                title={`${c.name} · ${formatAmount(c.amount, currency)}`}
+                style={{ flex: `${c.amount} 0 0`, background: c.color }}
+              />
+            ))}
+          </div>
+          <div>
+            {categories.map((c) => (
+              <div
+                key={c.id}
+                className="border-border/30 grid grid-cols-[120px_1fr_100px] items-center gap-3 border-b py-2 last:border-b-0 md:grid-cols-[160px_1fr_120px]"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+                    style={{ background: c.color }}
+                  />
+                  <span className="text-foreground/90 truncate text-[12px]">{c.name}</span>
+                </div>
+                <div className="bg-foreground/5 relative h-3.5 overflow-hidden rounded-sm">
                   <div
-                    className="h-full rounded-full transition-all"
+                    className="h-full"
                     style={{
-                      width: `${(c.amount / maxCategoryAmount) * 100}%`,
-                      backgroundColor: c.color,
-                      opacity: 0.8,
+                      width: `${Math.max(2, (c.amount / maxCategoryAmount) * 100)}%`,
+                      background: c.color,
+                      opacity: 0.85,
                     }}
                   />
                 </div>
-                <span className="text-foreground/90 w-16 shrink-0 text-right text-xs font-semibold tabular-nums">
+                <span className="text-foreground/90 text-right text-[12px] font-medium tabular-nums">
                   {formatAmount(c.amount, currency)}
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      <p className="text-muted-foreground/80 mt-4 text-[11px] italic">{caption}</p>
+      <Hr />
+
+      {/* DAY BY DAY */}
+      <SubLabel
+        right={
+          peak
+            ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
+            : `BASELINE ${formatAmount(baseline, currency)}`
+        }
+      >
+        DAY BY DAY
+      </SubLabel>
+      <DailyBars
+        data={dailySeries}
+        startDate={startDate}
+        endDate={endDate}
+        baseline={baseline}
+        currency={currency}
+      />
+
+      <Hr />
+
+      {/* AFTER */}
+      <SubLabel right={`${days}D EVENT WINDOW`}>AFTER · DID YOUR RHYTHM RETURN?</SubLabel>
+      <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-3">
+        <RhythmCard
+          label="7D BEFORE"
+          value={beforeAvg}
+          currency={currency}
+          series={beforeSeries}
+          accent="muted"
+        />
+        <RhythmCard
+          label="DURING"
+          value={dailyDuring}
+          currency={currency}
+          series={dailySeries}
+          accent="during"
+        />
+        <RhythmCard
+          label="3D AFTER"
+          value={afterAvg}
+          currency={currency}
+          series={afterSeries}
+          accent={hangoverPct > 5 ? "warn" : hangoverPct < -5 ? "good" : "muted"}
+          hangoverPct={afterSeries.length > 0 ? hangoverPct : undefined}
+        />
+      </div>
+
+      <Hr />
+
+      {/* JUMP TO */}
+      <SubLabel>JUMP TO</SubLabel>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {events.map((ev) => {
+          const c = getEventColors(ev);
+          const isSel = ev.eventId === event.eventId;
+          return (
+            <button
+              key={ev.eventId}
+              type="button"
+              onClick={() => onSelect(ev.eventId)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] transition-colors",
+                isSel
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+              )}
+              style={{
+                background: isSel ? c.fill : "transparent",
+                borderColor: isSel ? c.stroke : "transparent",
+              }}
+            >
+              <span
+                className="inline-block h-2 w-2 rounded-[2px]"
+                style={{ background: c.fill, border: `1.5px solid ${c.stroke}` }}
+              />
+              {ev.eventName}
+              <span className="text-muted-foreground/80 ml-1">
+                · {formatChipDate(new Date(ev.startDate))}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };
 
-function RateRow({
+function StatCell({
+  label,
+  divided,
+  children,
+}: {
+  label: string;
+  divided?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn(divided && "md:border-border/40 md:border-l md:pl-4")}>
+      <div className={LABEL_CLASS}>{label}</div>
+      <div className="mt-1.5">{children}</div>
+    </div>
+  );
+}
+
+function SubLabel({ children, right }: { children: React.ReactNode; right?: string }) {
+  return (
+    <div className="mt-5 flex items-center justify-between gap-3">
+      <div className={LABEL_CLASS}>{children}</div>
+      {right ? <div className={cn(LABEL_CLASS, "text-right")}>{right}</div> : null}
+    </div>
+  );
+}
+
+function Hr() {
+  return <div className="bg-border/40 my-5 h-px" />;
+}
+
+function DailyBars({
+  data,
+  startDate,
+  endDate,
+  baseline,
+  currency,
+}: {
+  data: number[];
+  startDate: Date;
+  endDate: Date;
+  baseline: number;
+  currency: string;
+}) {
+  const max = Math.max(1, baseline, ...data);
+  const days = data.length;
+  return (
+    <div className="mt-3">
+      <div className="relative flex h-28 items-end gap-[3px]">
+        {baseline > 0 && (
+          <div
+            className="border-foreground/30 pointer-events-none absolute left-0 right-0 border-t border-dashed"
+            style={{ bottom: `${(baseline / max) * 100}%` }}
+          />
+        )}
+        {data.map((v, i) => (
+          <div
+            key={i}
+            className="bg-foreground/85 min-w-[2px] flex-1 rounded-t-[2px]"
+            style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
+            title={formatAmount(v, currency)}
+          />
+        ))}
+      </div>
+      <div className="text-muted-foreground/80 mt-2 flex items-center justify-between text-[10px] tracking-wide">
+        <span className="tabular-nums">{formatPeakDay(startDate)}</span>
+        <span className="text-muted-foreground/60">
+          {days} day{days === 1 ? "" : "s"}
+        </span>
+        <span className="tabular-nums">{formatPeakDay(endDate)}</span>
+      </div>
+    </div>
+  );
+}
+
+type RhythmAccent = "muted" | "during" | "warn" | "good";
+
+function RhythmCard({
   label,
   value,
   currency,
-  maxRate,
-  tone,
+  series,
+  accent,
+  hangoverPct,
 }: {
   label: string;
   value: number;
   currency: string;
-  maxRate: number;
-  tone: "muted" | "warn" | "good";
+  series: number[];
+  accent: RhythmAccent;
+  hangoverPct?: number;
 }) {
-  const fill =
-    tone === "warn"
-      ? "var(--destructive)"
-      : tone === "good"
-        ? "var(--success)"
-        : "var(--muted-foreground)";
+  const palette = {
+    muted: {
+      bg: "bg-muted/20",
+      border: "border-border/40",
+      stroke: "var(--muted-foreground)",
+      fill: null as string | null,
+    },
+    during: {
+      bg: "bg-success/10",
+      border: "border-success/30",
+      stroke: "var(--success)",
+      fill: "var(--success)",
+    },
+    warn: {
+      bg: "bg-destructive/10",
+      border: "border-destructive/30",
+      stroke: "var(--destructive)",
+      fill: null as string | null,
+    },
+    good: {
+      bg: "bg-success/10",
+      border: "border-success/30",
+      stroke: "var(--success)",
+      fill: null as string | null,
+    },
+  }[accent];
+
   return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="text-muted-foreground w-14 shrink-0">{label}</span>
-      <div className="bg-foreground/5 h-1.5 flex-1 overflow-hidden rounded-full">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{
-            width: `${Math.min(100, (value / maxRate) * 100)}%`,
-            backgroundColor: fill,
-            opacity: tone === "muted" ? 0.5 : 0.7,
-          }}
-        />
+    <div className={cn("rounded-md border p-3", palette.bg, palette.border)}>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className={LABEL_CLASS}>{label}</div>
+        {typeof hangoverPct === "number" && Math.abs(hangoverPct) > 5 && (
+          <span
+            className={cn(
+              "rounded-sm px-1.5 py-0.5 text-[9px] tracking-wider",
+              hangoverPct > 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success",
+            )}
+          >
+            {hangoverPct > 0 ? `HANGOVER +${hangoverPct}%` : `UNDER ${hangoverPct}%`}
+          </span>
+        )}
       </div>
-      <span className="text-foreground/90 w-20 shrink-0 text-right text-xs font-semibold tabular-nums">
-        {formatAmount(value, currency)}
-      </span>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-foreground text-base font-semibold tabular-nums">
+          {series.length === 0 ? "—" : `${formatAmount(value, currency)}/d`}
+        </span>
+        {series.length > 0 && (
+          <Sparkline data={series} stroke={palette.stroke} fill={palette.fill} />
+        )}
+      </div>
     </div>
   );
+}
+
+function Sparkline({
+  data,
+  stroke,
+  fill,
+}: {
+  data: number[];
+  stroke: string;
+  fill: string | null;
+}) {
+  const w = 80;
+  const h = 22;
+  const max = Math.max(1, ...data);
+  const pts = data.map((v, i) => {
+    const x = (i / Math.max(1, data.length - 1)) * w;
+    const y = h - (v / max) * h;
+    return `${x},${y}`;
+  });
+  const line = `M${pts.join(" L")}`;
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  return (
+    <svg width={w} height={h} className="shrink-0">
+      {fill && <path d={area} fill={fill} opacity={0.25} />}
+      <path d={line} fill="none" stroke={stroke} strokeWidth={1.2} />
+    </svg>
+  );
+}
+
+// ─── EventDetailPanel data helpers ───────────────────────────────────────
+
+function buildEventDailySeries(event: EventSpendingSummary, days: number): number[] {
+  const start = new Date(event.startDate);
+  const series = new Array(days).fill(0);
+  for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
+    const d = new Date(`${dateKey}T12:00:00`);
+    const idx = Math.round((d.getTime() - start.getTime()) / 86_400_000);
+    if (idx >= 0 && idx < days) series[idx] = amount;
+  }
+  return series;
+}
+
+function findPeakDay(
+  event: EventSpendingSummary,
+  days: number,
+): { date: Date; amount: number } | null {
+  const series = buildEventDailySeries(event, days);
+  let bestIdx = -1;
+  let best = -Infinity;
+  series.forEach((v, i) => {
+    if (v > best) {
+      best = v;
+      bestIdx = i;
+    }
+  });
+  if (bestIdx < 0 || best <= 0) return null;
+  const start = new Date(event.startDate);
+  const d = new Date(start);
+  d.setDate(d.getDate() + bestIdx);
+  return { date: d, amount: best };
+}
+
+function buildWindowSeries(
+  activities: Activity[],
+  accountTypeById: Map<string, string> | undefined,
+  anchor: Date,
+  offsetDays: number,
+  windowDays: number,
+): number[] {
+  const start = new Date(anchor);
+  start.setDate(start.getDate() + offsetDays);
+  start.setHours(0, 0, 0, 0);
+  const series = new Array(windowDays).fill(0);
+  for (const a of activities) {
+    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (amt <= 0) continue;
+    const idx = Math.floor((new Date(a.activityDate).getTime() - start.getTime()) / 86_400_000);
+    if (idx >= 0 && idx < windowDays) series[idx] += amt;
+  }
+  return series.some((v) => v > 0) ? series : [];
+}
+
+function avgSeries(series: number[]): number {
+  if (series.length === 0) return 0;
+  return series.reduce((a, b) => a + b, 0) / series.length;
+}
+
+function formatPeakDay(d: Date): string {
+  const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  return `${dayNames[d.getDay()]}, ${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
+}
+
+function formatChipDate(d: Date): string {
+  return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
 }
 
 interface EventCategoryRow {
