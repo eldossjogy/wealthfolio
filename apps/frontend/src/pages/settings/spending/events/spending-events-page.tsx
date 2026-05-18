@@ -226,7 +226,14 @@ export default function SpendingEventsPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => navigate(buildCashflowUrl({}))}
+                              onClick={() =>
+                                navigate(
+                                  buildCashflowUrl({
+                                    startDate: event.startDate,
+                                    endDate: event.endDate,
+                                  }),
+                                )
+                              }
                               title="View transactions"
                             >
                               <Icons.ExternalLink className="h-4 w-4" />

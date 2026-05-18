@@ -16,6 +16,7 @@ import {
   type RemovePresetResult,
   type RulePresetSummary,
 } from "../adapters/rules";
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import type {
   CategorizationRule,
   NewCategorizationRule,
@@ -66,8 +67,8 @@ export function useCategorizationRuleMutations() {
   const rerun = useMutation({
     mutationFn: (onlyUncategorized: boolean) => rerunCategorizationRules(onlyUncategorized),
     onSuccess: (count, onlyUncategorized) => {
-      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      // Rerun touches every cash activity's category — refresh report/budget too.
+      invalidateSpendingCaches(qc);
       const verb = onlyUncategorized ? "Categorized" : "Re-categorized";
       toast.success(`${verb} ${count} activit${count === 1 ? "y" : "ies"}.`);
     },

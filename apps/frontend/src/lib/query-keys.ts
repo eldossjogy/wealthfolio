@@ -5,9 +5,7 @@ export const QueryKeys = {
 
   // Spending module keys
   SPENDING_SETTINGS: "spending_settings",
-  SPENDING_SUMMARY: "spending_summary",
   SPENDING_TRANSACTIONS: "spending_transactions",
-  SPENDING_CATEGORY_BREAKDOWN: "spending_category_breakdown",
   SPENDING_RULES: "spending_rules",
   SPENDING_EVENTS: "spending_events",
   SPENDING_EVENT_TYPES: "spending_event_types",

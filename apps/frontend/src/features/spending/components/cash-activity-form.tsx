@@ -9,6 +9,7 @@ import { createActivity, updateActivity } from "@/adapters";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import type { Account, Activity, ActivityCreate, ActivityUpdate } from "@/lib/types";
 
 import {
@@ -159,14 +160,11 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
   const watchType = form.watch("activityType");
   const watchAccountId = form.watch("accountId");
   const selectedAccount = spendingAccounts.find((a) => a.id === watchAccountId);
-  const activityTypeOptions = useMemo(
-    () => {
-      const options = getActivityTypesForAccount(selectedAccount?.accountType);
-      const currentType = activity?.activityType as FormValues["activityType"] | undefined;
-      return currentType && !options.includes(currentType) ? [...options, currentType] : options;
-    },
-    [activity?.activityType, selectedAccount?.accountType],
-  );
+  const activityTypeOptions = useMemo(() => {
+    const options = getActivityTypesForAccount(selectedAccount?.accountType);
+    const currentType = activity?.activityType as FormValues["activityType"] | undefined;
+    return currentType && !options.includes(currentType) ? [...options, currentType] : options;
+  }, [activity?.activityType, selectedAccount?.accountType]);
   const isIncomeType = isCashActivityIncome(
     watchType,
     selectedAccount?.accountType,
@@ -236,9 +234,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
       return saved;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
-      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENTS] });
+      invalidateSpendingCaches(qc);
       qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
       toast.success(isEditing ? "Activity updated." : "Activity created.");
       onOpenChange(false);

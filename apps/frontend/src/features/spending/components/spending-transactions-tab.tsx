@@ -51,6 +51,7 @@ import {
 } from "../hooks/use-cash-activities";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import type { CashActivitySearchRequest, CashActivityStatusFilter } from "../types/cash-activity";
 
 const SPENDING_TAXONOMY = "spending_categories";
@@ -263,8 +264,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
         });
       },
       onSuccess: () => {
-        qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-        qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+        invalidateSpendingCaches(qc);
         qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
         toast.success("Transaction duplicated.");
       },
@@ -282,8 +282,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
         return results;
       },
       onSuccess: (results) => {
-        qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-        qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+        invalidateSpendingCaches(qc);
         qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
         const ok = results.filter((r) => r.status === "fulfilled").length;
         const failed = results.length - ok;

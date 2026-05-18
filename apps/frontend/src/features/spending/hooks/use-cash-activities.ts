@@ -14,6 +14,7 @@ import {
   unassignActivityCategory,
   type BulkCategoryAssignment,
 } from "../adapters/cash-activities";
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import type { ActivityTaxonomyAssignment, CashActivityFilter } from "../types/cash-activity";
 
 export function useCashActivities(filter?: CashActivityFilter) {
@@ -64,8 +65,7 @@ export function useAssignActivityCategory() {
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "assignments", vars.activityId],
       });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      invalidateSpendingCaches(queryClient);
     },
     onError: () => toast.error("Failed to set category."),
   });
@@ -76,8 +76,7 @@ export function useBulkAssignCategories() {
   return useMutation<ActivityTaxonomyAssignment[], Error, BulkCategoryAssignment[]>({
     mutationFn: (items: BulkCategoryAssignment[]) => bulkAssignCategories(items),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      invalidateSpendingCaches(queryClient);
     },
     onError: () => toast.error("Failed to apply categories."),
   });
@@ -92,8 +91,7 @@ export function useUnassignActivityCategory() {
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "assignments", vars.activityId],
       });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
+      invalidateSpendingCaches(queryClient);
     },
     onError: () => toast.error("Failed to clear category."),
   });
@@ -105,9 +103,7 @@ export function useSetActivityEvent() {
     mutationFn: ({ activityId, eventId }: { activityId: string; eventId: string | null }) =>
       setActivityEvent(activityId, eventId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENTS] });
+      invalidateSpendingCaches(queryClient);
     },
     onError: () => toast.error("Failed to set event."),
   });

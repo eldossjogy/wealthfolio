@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { QueryKeys } from "@/lib/query-keys";
@@ -24,10 +24,10 @@ export function useCashActivitySearch(
   const pageSize = options.pageSize ?? PAGE_SIZE;
   const enabled = options.enabled ?? true;
 
-  const stableKey = useMemo(() => JSON.stringify(request), [request]);
-
   const query = useInfiniteQuery<CashActivitySearchResponse, Error>({
-    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "search", stableKey, pageSize],
+    // React Query structurally compares keys, so we can pass the request object
+    // directly without stringifying.
+    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "search", request, pageSize],
     queryFn: ({ pageParam = 0 }) =>
       searchCashActivities({
         ...request,
@@ -59,16 +59,4 @@ export function useCashActivitySearch(
     refetch: query.refetch,
     error: query.error,
   };
-}
-
-/** Single-page (paginated) variant for grid views — kept for parity with activity hooks. */
-export function useCashActivitySearchPage(
-  request: CashActivitySearchRequest,
-  options: { enabled?: boolean } = {},
-) {
-  return useQuery<CashActivitySearchResponse, Error>({
-    queryKey: [QueryKeys.SPENDING_TRANSACTIONS, "page", JSON.stringify(request)],
-    queryFn: () => searchCashActivities(request),
-    enabled: options.enabled ?? true,
-  });
 }

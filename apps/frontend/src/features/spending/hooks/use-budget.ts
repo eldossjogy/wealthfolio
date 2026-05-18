@@ -24,15 +24,23 @@ import type {
 } from "../types/budget";
 
 export function useBudget(periodKey?: string) {
+  // Normalize: backend treats undefined the same as "default"; without this the
+  // two callers cache under different keys and refetch twice.
+  const normalizedKey = periodKey ?? "default";
   return useQuery({
-    queryKey: [QueryKeys.SPENDING_BUDGET, periodKey ?? null],
+    queryKey: [QueryKeys.SPENDING_BUDGET, normalizedKey],
     queryFn: () => getBudget(periodKey),
   });
 }
 
 export function useBudgetMutations(periodKey?: string) {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
+  // Budget edits affect report rollups (group→category mapping changes how
+  // spending sums roll up), so blow both buckets.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
+    qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_REPORT] });
+  };
 
   const upsertTarget = useMutation({
     mutationFn: (target: NewBudgetTarget) => upsertBudgetTarget(target, periodKey),

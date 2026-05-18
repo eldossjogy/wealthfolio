@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { QueryKeys } from "@/lib/query-keys";
 
 import { getSpendingSettings, updateSpendingSettings } from "../adapters/settings";
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import type { SpendingSettings, SpendingSettingsUpdate } from "../types";
 
 export function useSpendingSettings() {
@@ -31,12 +32,7 @@ export function useSpendingSettingsMutation() {
       queryClient.setQueryData([QueryKeys.SPENDING_SETTINGS], data);
       // Account opt-in changes the universe of cash activities — invalidate every
       // spending-scoped cache so each view refetches with the new account_ids.
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_SUMMARY] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_TRANSACTIONS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_REPORT] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_CATEGORY_BREAKDOWN] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENTS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
+      invalidateSpendingCaches(queryClient);
       toast.success("Spending settings updated.");
     },
     onError: () => toast.error("Failed to update spending settings."),
