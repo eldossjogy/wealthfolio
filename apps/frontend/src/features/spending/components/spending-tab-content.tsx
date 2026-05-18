@@ -708,14 +708,14 @@ function CategoryTreemapMono({
 
   const top = rows.slice(0, 8);
   const restAmount = rows.slice(8).reduce((s, r) => s + r.amount, 0);
-  const data: Array<{
+  const data: {
     name: string;
     amount: number;
     fill: string;
     accent: string | null;
     id: string;
     pct: number;
-  }> = top.map((r) => ({
+  }[] = top.map((r) => ({
     name: r.name,
     amount: r.amount,
     fill: themeColor,

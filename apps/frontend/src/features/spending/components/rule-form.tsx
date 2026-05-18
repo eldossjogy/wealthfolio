@@ -92,7 +92,7 @@ export function RuleForm({ rule, categoryOptions, onSubmit, onCancel, isLoading 
     defaultValues: {
       name: rule?.name ?? "",
       pattern: rule?.pattern ?? "",
-      matchType: (rule?.matchType as RuleMatchType) ?? "contains",
+      matchType: rule?.matchType ?? "contains",
       taxonomyId: rule?.taxonomyId ?? "",
       categoryId: composite(rule), // we encode taxonomyId:categoryId in this single field
       activityType: rule?.activityType ?? "",

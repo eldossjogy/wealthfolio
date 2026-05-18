@@ -163,7 +163,6 @@ import {
   Smile,
   Sofa,
   Stethoscope,
-  Tag,
   Train,
   Truck,
   Tv,
@@ -778,7 +777,8 @@ const IconsInternal = {
   Smile: Smile,
   Sofa: Sofa,
   Stethoscope: Stethoscope,
-  Tag: Tag,
+  // Tag is registered above as a Phosphor TagIcon — don't re-register here
+  // (Lucide and Phosphor Tag both want the same key).
   Train: Train,
   Truck: Truck,
   Tv: Tv,
