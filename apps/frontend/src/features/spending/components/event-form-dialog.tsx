@@ -1,10 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 
 import {
   Button,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
   DatePickerInput,
   Dialog,
   DialogContent,
@@ -18,17 +25,22 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  Icons,
   Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Textarea,
 } from "@wealthfolio/ui";
 
-import { useSpendingEventMutations } from "../hooks/use-spending-events";
-import type { EventType, NewSpendingEvent, SpendingEvent } from "../types/event";
+import { useSetActivityEvent } from "../hooks/use-cash-activities";
+import {
+  useEventTypeMutations,
+  useEventTypes,
+  useSpendingEventMutations,
+} from "../hooks/use-spending-events";
+import type { EventDialogPrefill } from "./event-dialog-provider";
+import type { NewSpendingEvent, SpendingEvent } from "../types/event";
 
 const eventSchema = z
   .object({
@@ -45,24 +57,54 @@ const eventSchema = z
 
 type EventFormValues = z.infer<typeof eventSchema>;
 
+const PRESET_COLORS = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#14b8a6",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#6b7280",
+];
+
 interface Props {
-  eventTypes: EventType[];
   event?: SpendingEvent;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  defaultEventTypeId?: string;
+  prefill?: EventDialogPrefill;
+  /** If provided, the saved event will be tagged onto this activity on success. */
+  activityId?: string;
+  onCreated?: (event: SpendingEvent) => void;
+  onUpdated?: (event: SpendingEvent) => void;
 }
 
 export function EventFormDialog({
-  eventTypes,
   event,
   open,
   onOpenChange,
-  defaultEventTypeId,
+  prefill,
+  activityId,
+  onCreated,
+  onUpdated,
 }: Props) {
+  const { data: eventTypes = [] } = useEventTypes();
   const { create, update } = useSpendingEventMutations();
+  const { create: createType } = useEventTypeMutations();
+  const setEventOnActivity = useSetActivityEvent();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditing = !!event;
+
+  // Inline "create event type" expand state.
+  const [showCreateType, setShowCreateType] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
+  const [newTypeColor, setNewTypeColor] = useState(PRESET_COLORS[0]);
+  const [typeError, setTypeError] = useState<string | null>(null);
+  const [isCreatingType, setIsCreatingType] = useState(false);
+
+  // Type picker popover state.
+  const [typePopoverOpen, setTypePopoverOpen] = useState(false);
 
   const form = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema) as never,
@@ -76,26 +118,56 @@ export function EventFormDialog({
   });
 
   useEffect(() => {
-    if (open) {
-      if (event) {
-        form.reset({
-          name: event.name,
-          description: event.description ?? "",
-          eventTypeId: event.eventTypeId,
-          startDate: new Date(event.startDate),
-          endDate: new Date(event.endDate),
-        });
-      } else {
-        form.reset({
-          name: "",
-          description: "",
-          eventTypeId: defaultEventTypeId ?? "",
-          startDate: new Date(),
-          endDate: new Date(),
-        });
-      }
+    if (!open) return;
+    setShowCreateType(false);
+    setNewTypeName("");
+    setNewTypeColor(PRESET_COLORS[0]);
+    setTypeError(null);
+    if (event) {
+      form.reset({
+        name: event.name,
+        description: event.description ?? "",
+        eventTypeId: event.eventTypeId,
+        startDate: new Date(event.startDate),
+        endDate: new Date(event.endDate),
+      });
+    } else {
+      form.reset({
+        name: prefill?.name ?? "",
+        description: prefill?.description ?? "",
+        eventTypeId: prefill?.eventTypeId ?? "",
+        startDate: prefill?.startDate ?? new Date(),
+        endDate: prefill?.endDate ?? prefill?.startDate ?? new Date(),
+      });
     }
-  }, [open, event, form, defaultEventTypeId]);
+  }, [open, event, form, prefill]);
+
+  const selectedTypeId = form.watch("eventTypeId");
+  const selectedType = useMemo(
+    () => eventTypes.find((t) => t.id === selectedTypeId) ?? null,
+    [eventTypes, selectedTypeId],
+  );
+
+  const handleCreateType = async () => {
+    const name = newTypeName.trim();
+    if (!name) {
+      setTypeError("Name is required");
+      return;
+    }
+    setIsCreatingType(true);
+    setTypeError(null);
+    try {
+      const created = await createType.mutateAsync({ name, color: newTypeColor });
+      form.setValue("eventTypeId", created.id, { shouldValidate: true });
+      setShowCreateType(false);
+      setNewTypeName("");
+      setNewTypeColor(PRESET_COLORS[0]);
+    } catch {
+      setTypeError("Failed to create event type.");
+    } finally {
+      setIsCreatingType(false);
+    }
+  };
 
   const handleSubmit = async (values: EventFormValues) => {
     setIsSubmitting(true);
@@ -104,7 +176,7 @@ export function EventFormDialog({
       const endDateStr = values.endDate.toISOString().split("T")[0];
 
       if (isEditing && event) {
-        await update.mutateAsync({
+        const updated = await update.mutateAsync({
           id: event.id,
           patch: {
             name: values.name,
@@ -114,6 +186,7 @@ export function EventFormDialog({
             endDate: endDateStr,
           },
         });
+        onUpdated?.(updated);
       } else {
         const newEvent: NewSpendingEvent = {
           name: values.name,
@@ -122,7 +195,11 @@ export function EventFormDialog({
           startDate: startDateStr,
           endDate: endDateStr,
         };
-        await create.mutateAsync(newEvent);
+        const created = await create.mutateAsync(newEvent);
+        if (activityId) {
+          await setEventOnActivity.mutateAsync({ activityId, eventId: created.id });
+        }
+        onCreated?.(created);
       }
       form.reset();
       onOpenChange(false);
@@ -178,22 +255,160 @@ export function EventFormDialog({
               control={form.control}
               name="eventTypeId"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="flex flex-col">
                   <FormLabel>Event Type</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select event type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {eventTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.id}>
-                          {type.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {!showCreateType ? (
+                    <Popover open={typePopoverOpen} onOpenChange={setTypePopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <button
+                            type="button"
+                            aria-label={
+                              selectedType
+                                ? `Change event type (${selectedType.name})`
+                                : "Select event type"
+                            }
+                            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                          >
+                            {selectedType ? (
+                              <span className="flex min-w-0 items-center gap-2">
+                                {selectedType.color && (
+                                  <span
+                                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                    style={{ backgroundColor: selectedType.color }}
+                                    aria-hidden="true"
+                                  />
+                                )}
+                                <span className="truncate">{selectedType.name}</span>
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">Select event type</span>
+                            )}
+                            <Icons.ChevronDown
+                              className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="w-[--radix-popover-trigger-width] p-0"
+                        align="start"
+                      >
+                        <Command>
+                          <CommandInput placeholder="Search event types..." />
+                          <CommandList>
+                            <CommandEmpty>No event types found.</CommandEmpty>
+                            {eventTypes.length > 0 && (
+                              <CommandGroup>
+                                {eventTypes.map((t) => {
+                                  const isSelected = field.value === t.id;
+                                  return (
+                                    <CommandItem
+                                      key={t.id}
+                                      value={t.name}
+                                      onSelect={() => {
+                                        field.onChange(t.id);
+                                        setTypePopoverOpen(false);
+                                      }}
+                                      className="flex items-center gap-2"
+                                    >
+                                      {t.color && (
+                                        <span
+                                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                          style={{ backgroundColor: t.color }}
+                                          aria-hidden="true"
+                                        />
+                                      )}
+                                      <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                                      {isSelected && (
+                                        <Icons.Check className="text-muted-foreground h-3.5 w-3.5" />
+                                      )}
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            )}
+                            <CommandSeparator />
+                            <CommandGroup>
+                              <CommandItem
+                                value="__create_new_type__"
+                                onSelect={() => {
+                                  setTypePopoverOpen(false);
+                                  setShowCreateType(true);
+                                }}
+                                className="text-primary flex items-center gap-2"
+                              >
+                                <Icons.Plus className="h-3.5 w-3.5" />
+                                Create new type
+                              </CommandItem>
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <div className="border-input bg-muted/20 space-y-3 rounded-md border p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-foreground text-xs font-semibold">
+                          New event type
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreateType(false);
+                            setNewTypeName("");
+                            setTypeError(null);
+                          }}
+                          className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <Input
+                        autoFocus
+                        placeholder="e.g., Travel, Wedding, Move"
+                        value={newTypeName}
+                        onChange={(e) => {
+                          setNewTypeName(e.target.value);
+                          if (typeError) setTypeError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleCreateType();
+                          }
+                        }}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {PRESET_COLORS.map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            aria-label={`Pick color ${color}`}
+                            className={`h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                              newTypeColor === color
+                                ? "border-foreground ring-2 ring-offset-1"
+                                : "border-transparent"
+                            }`}
+                            style={{ backgroundColor: color }}
+                            onClick={() => setNewTypeColor(color)}
+                          />
+                        ))}
+                      </div>
+                      {typeError && <p className="text-destructive text-xs">{typeError}</p>}
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleCreateType}
+                          disabled={isCreatingType || !newTypeName.trim()}
+                        >
+                          {isCreatingType ? "Creating..." : "Create type"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -239,7 +454,7 @@ export function EventFormDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting || showCreateType}>
                 {isSubmitting
                   ? isEditing
                     ? "Updating..."

@@ -23,6 +23,11 @@ import {
 import { useEventTypeMutations } from "../hooks/use-spending-events";
 import type { EventType } from "../types/event";
 
+interface EventTypePrefill {
+  name?: string;
+  color?: string;
+}
+
 const eventTypeSchema = z.object({
   name: z.string().min(1, "Name is required"),
   color: z.string().optional(),
@@ -46,9 +51,11 @@ interface Props {
   eventType?: EventType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  prefill?: EventTypePrefill;
+  onCreated?: (eventType: EventType) => void;
 }
 
-export function EventTypeFormDialog({ eventType, open, onOpenChange }: Props) {
+export function EventTypeFormDialog({ eventType, open, onOpenChange, prefill, onCreated }: Props) {
   const { create, update } = useEventTypeMutations();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isEditing = !!eventType;
@@ -56,19 +63,19 @@ export function EventTypeFormDialog({ eventType, open, onOpenChange }: Props) {
   const form = useForm<EventTypeFormValues>({
     resolver: zodResolver(eventTypeSchema),
     defaultValues: {
-      name: eventType?.name ?? "",
-      color: eventType?.color ?? PRESET_COLORS[0],
+      name: eventType?.name ?? prefill?.name ?? "",
+      color: eventType?.color ?? prefill?.color ?? PRESET_COLORS[0],
     },
   });
 
   useEffect(() => {
     if (open) {
       form.reset({
-        name: eventType?.name ?? "",
-        color: eventType?.color ?? PRESET_COLORS[0],
+        name: eventType?.name ?? prefill?.name ?? "",
+        color: eventType?.color ?? prefill?.color ?? PRESET_COLORS[0],
       });
     }
-  }, [open, eventType, form]);
+  }, [open, eventType, form, prefill]);
 
   const handleSubmit = async (values: EventTypeFormValues) => {
     setIsSubmitting(true);
@@ -79,10 +86,11 @@ export function EventTypeFormDialog({ eventType, open, onOpenChange }: Props) {
           patch: { name: values.name, color: values.color ?? null },
         });
       } else {
-        await create.mutateAsync({
+        const created = await create.mutateAsync({
           name: values.name,
           color: values.color ?? null,
         });
+        onCreated?.(created);
       }
       form.reset();
       onOpenChange(false);

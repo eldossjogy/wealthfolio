@@ -12,6 +12,7 @@ import { getActivitySpendingAmount } from "../lib/constants";
 import { useSpendingEvents } from "../hooks/use-spending-events";
 import { themeBg, type Palette } from "../lib/theme";
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
+import { useEventDialog } from "./event-dialog-provider";
 
 const SPENDING_TAXONOMY = "spending_categories";
 
@@ -27,6 +28,7 @@ export function EventsCard({
   theme: Palette;
 }) {
   const { data: events = [] } = useSpendingEvents();
+  const { openEventDialog } = useEventDialog();
 
   const pick = useMemo(() => {
     const todayKey = formatDateISO(new Date());
@@ -271,17 +273,28 @@ export function EventsCard({
         </div>
       )}
 
-      <Link
-        to={pick.mode === "upcoming" ? "/settings/spending/events" : "/spending/insights"}
-        className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
-      >
-        {pick.mode === "upcoming"
-          ? "Plan event"
-          : pick.mode === "recent"
-            ? "See breakdown"
-            : "Open event"}
-        <Icons.ChevronRight className="h-3 w-3" />
-      </Link>
+      {pick.mode === "upcoming" ? (
+        <button
+          type="button"
+          onClick={() => {
+            const start = new Date();
+            start.setDate(start.getDate() + 7);
+            openEventDialog({ prefill: { startDate: start, endDate: start } });
+          }}
+          className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+        >
+          Plan event
+          <Icons.ChevronRight className="h-3 w-3" />
+        </button>
+      ) : (
+        <Link
+          to="/spending/insights"
+          className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+        >
+          {pick.mode === "recent" ? "See breakdown" : "Open event"}
+          <Icons.ChevronRight className="h-3 w-3" />
+        </Link>
+      )}
     </div>
   );
 }

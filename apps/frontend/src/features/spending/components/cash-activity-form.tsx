@@ -411,6 +411,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                 selectedEventId={eventId}
                 onSelect={setEventId}
                 onClear={() => setEventId(null)}
+                defaultDate={form.watch("activityDate") ?? undefined}
                 trigger={
                   <button
                     type="button"

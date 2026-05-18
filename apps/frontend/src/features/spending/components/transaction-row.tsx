@@ -141,6 +141,8 @@ function TransactionRowImpl({
           selectedEventId={event?.id ?? null}
           onSelect={(eventId) => onSetEvent(a.id, eventId)}
           onClear={() => onSetEvent(a.id, null)}
+          activityId={a.id}
+          defaultDate={a.activityDate ? new Date(a.activityDate) : undefined}
           trigger={
             <button
               type="button"

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
-import { Link } from "react-router-dom";
 
 import { Button, Icons, formatCompactAmount } from "@wealthfolio/ui";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
+import { useEventDialog } from "../../event-dialog-provider";
 import { useSpendingEventMutations } from "../../../hooks/use-spending-events";
 import { getActivitySpendingAmount } from "../../../lib/constants";
 import type { EventSpendingSummary } from "../../../types/event";
@@ -84,7 +84,7 @@ export function WhenWhereStage({
             )}
           </>
         ) : (
-          <EmptyEventsCard />
+          <EmptyEventsCard rangeStart={rangeStart} rangeEnd={rangeEnd} />
         )}
       </div>
     </div>
@@ -164,6 +164,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   selectedId,
   onSelect,
 }) => {
+  const { openEventDialog } = useEventDialog();
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
 
@@ -346,8 +347,18 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               {t.name.toUpperCase()}
             </span>
           ))}
-          <Button asChild variant="outline" size="sm" className="ml-1 h-7 text-[11px]">
-            <Link to="/settings/spending/events">+ TAG EVENT</Link>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-1 h-7 text-[11px]"
+            onClick={() =>
+              openEventDialog({
+                prefill: { startDate: rangeStart, endDate: rangeEnd },
+                onCreated: (ev) => onSelect(ev.id),
+              })
+            }
+          >
+            + TAG EVENT
           </Button>
         </div>
       </div>
@@ -1525,18 +1536,6 @@ function buildEventCaption({
   return `Lift vs your normal week: ${lift >= 0 ? "+" : "−"}${formatAmount(Math.abs(lift), currency)} over ${days} days.`;
 }
 
-function pickEventIcon(name: string): typeof Icons.Calendar {
-  const n = name.toLowerCase();
-  if (n.includes("trip") || n.includes("travel") || n.includes("flight"))
-    return Icons.Plane ?? Icons.Calendar;
-  if (n.includes("birthday") || n.includes("party") || n.includes("celebration"))
-    return Icons.Star ?? Icons.Calendar;
-  if (n.includes("move") || n.includes("apartment") || n.includes("home"))
-    return Icons.Home ?? Icons.Calendar;
-  if (n.includes("wedding")) return Icons.Sparkles ?? Icons.Calendar;
-  return Icons.Calendar;
-}
-
 function formatRange(start: Date, end: Date): string {
   const sameMonth =
     start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
@@ -1554,7 +1553,8 @@ function formatOutOfRangeDate(dateKey: string): string {
 // Empty events state
 // ═════════════════════════════════════════════════════════════════════════
 
-function EmptyEventsCard() {
+function EmptyEventsCard({ rangeStart, rangeEnd }: { rangeStart: Date; rangeEnd: Date }) {
+  const { openEventDialog } = useEventDialog();
   return (
     <div className={CARD_CLASS}>
       <p className="text-foreground text-base font-semibold leading-snug">
@@ -1563,11 +1563,18 @@ function EmptyEventsCard() {
       <p className="text-muted-foreground/80 mt-2 text-sm">
         Tag a trip, place, or one-off to see how it compares with your normal week.
       </p>
-      <Button asChild variant="outline" size="sm" className="mt-4">
-        <Link to="/activities?tab=spending">
-          Tag event
-          <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
-        </Link>
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-4"
+        onClick={() =>
+          openEventDialog({
+            prefill: { startDate: rangeStart, endDate: rangeEnd },
+          })
+        }
+      >
+        Tag event
+        <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
       </Button>
     </div>
   );

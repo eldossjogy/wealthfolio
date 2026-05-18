@@ -16,8 +16,7 @@ import {
   Skeleton,
 } from "@wealthfolio/ui";
 
-import { EventFormDialog } from "@/features/spending/components/event-form-dialog";
-import { EventTypeFormDialog } from "@/features/spending/components/event-type-form-dialog";
+import { useEventDialog } from "@/features/spending/components/event-dialog-provider";
 import {
   useEventTypeMutations,
   useEventTypes,
@@ -38,12 +37,8 @@ export default function SpendingEventsPage() {
   const { data: eventTypes = [], isLoading: typesLoading } = useEventTypes();
   const { remove: removeEventType } = useEventTypeMutations();
   const { remove: removeEvent } = useSpendingEventMutations();
+  const { openEventDialog, openEventTypeDialog } = useEventDialog();
 
-  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
-  const [isEventTypeDialogOpen, setIsEventTypeDialogOpen] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<SpendingEvent | undefined>();
-  const [selectedEventType, setSelectedEventType] = useState<EventType | undefined>();
-  const [selectedTypeForNewEvent, setSelectedTypeForNewEvent] = useState<EventType | undefined>();
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
 
   const isLoading = eventsLoading || typesLoading;
@@ -71,25 +66,21 @@ export default function SpendingEventsPage() {
   };
 
   const handleAddEventType = () => {
-    setSelectedEventType(undefined);
-    setIsEventTypeDialogOpen(true);
+    openEventTypeDialog();
   };
 
   const handleEditEventType = (eventType: EventType) => {
-    setSelectedEventType(eventType);
-    setIsEventTypeDialogOpen(true);
+    openEventTypeDialog({ eventType });
   };
 
   const handleAddEvent = (eventType?: EventType) => {
-    setSelectedEvent(undefined);
-    setSelectedTypeForNewEvent(eventType);
-    setIsEventDialogOpen(true);
+    openEventDialog({
+      prefill: { eventTypeId: eventType?.id },
+    });
   };
 
   const handleEditEvent = (event: SpendingEvent) => {
-    setSelectedEvent(event);
-    setSelectedTypeForNewEvent(undefined);
-    setIsEventDialogOpen(true);
+    openEventDialog({ event });
   };
 
   return (
@@ -286,20 +277,6 @@ export default function SpendingEventsPage() {
           No event types yet. Click &quot;Add event type&quot; to create one.
         </div>
       )}
-
-      <EventFormDialog
-        eventTypes={eventTypes}
-        open={isEventDialogOpen}
-        onOpenChange={setIsEventDialogOpen}
-        event={selectedEvent}
-        defaultEventTypeId={selectedTypeForNewEvent?.id}
-      />
-
-      <EventTypeFormDialog
-        eventType={selectedEventType}
-        open={isEventTypeDialogOpen}
-        onOpenChange={setIsEventTypeDialogOpen}
-      />
     </div>
   );
 }

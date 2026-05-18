@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import {
   Command,
@@ -16,8 +15,7 @@ import {
 } from "@wealthfolio/ui";
 
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
-
-const EVENTS_MANAGE_PATH = "/settings/spending/events";
+import { useEventDialog } from "./event-dialog-provider";
 
 export interface QuickEventPopoverProps {
   trigger: React.ReactNode;
@@ -25,6 +23,14 @@ export interface QuickEventPopoverProps {
   onSelect: (eventId: string) => void;
   onClear?: () => void;
   align?: "start" | "center" | "end";
+  /**
+   * When provided, "Create event" from the popover opens the create dialog with
+   * this activity pre-tagged. The new event is also automatically linked to the
+   * activity on save.
+   */
+  activityId?: string;
+  /** Pre-fills the start date of new events created from this popover. */
+  defaultDate?: Date;
 }
 
 export function QuickEventPopover({
@@ -33,15 +39,28 @@ export function QuickEventPopover({
   onSelect,
   onClear,
   align = "start",
+  activityId,
+  defaultDate,
 }: QuickEventPopoverProps) {
   const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+  const { openEventDialog } = useEventDialog();
   const { data: events = [] } = useSpendingEvents();
   const { data: eventTypes = [] } = useEventTypes();
 
   const handleCreate = () => {
+    const seedName = search.trim();
     setOpen(false);
-    navigate(EVENTS_MANAGE_PATH);
+    openEventDialog({
+      prefill: {
+        name: seedName || undefined,
+        startDate: defaultDate ?? new Date(),
+        endDate: defaultDate ?? new Date(),
+      },
+      activityId,
+      onCreated: (ev) => onSelect(ev.id),
+    });
+    setSearch("");
   };
 
   const typeById = new Map(eventTypes.map((t) => [t.id, t]));
@@ -68,7 +87,7 @@ export function QuickEventPopover({
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent className="w-[280px] p-0" align={align}>
         <Command>
-          <CommandInput placeholder="Search events..." />
+          <CommandInput placeholder="Search events..." value={search} onValueChange={setSearch} />
           <CommandList>
             {events.length === 0 ? (
               <CommandEmpty>
@@ -110,12 +129,12 @@ export function QuickEventPopover({
             <CommandSeparator />
             <CommandGroup>
               <CommandItem
-                value="create-event"
+                value="__create_event__"
                 onSelect={handleCreate}
                 className="text-primary flex items-center gap-2"
               >
                 <Icons.Plus className="h-3.5 w-3.5" />
-                Create event
+                {search.trim() ? `Create event "${search.trim()}"` : "Create event"}
               </CommandItem>
               {selectedEventId && onClear && (
                 <CommandItem
