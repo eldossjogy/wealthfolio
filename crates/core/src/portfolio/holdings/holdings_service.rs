@@ -1510,6 +1510,7 @@ mod tests {
             }),
             weight: dec!(0.1),
             as_of_date: as_of,
+            source_account_ids: vec![],
             metadata: None,
         };
 
@@ -1579,6 +1580,7 @@ mod tests {
             }),
             weight: dec!(1),
             as_of_date: valuation_date_today(),
+            source_account_ids: vec![],
             metadata: None,
         };
 

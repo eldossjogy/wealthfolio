@@ -506,6 +506,7 @@ mod tests {
             realized_gain_pct: None,   // To be calculated
             total_gain: None,          // To be calculated
             total_gain_pct: None,      // To be calculated
+            source_account_ids: vec![],
             metadata: None,
         }
     }
