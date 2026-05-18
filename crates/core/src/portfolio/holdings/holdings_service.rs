@@ -280,6 +280,7 @@ impl HoldingsService {
                 weight: Decimal::ZERO,
                 as_of_date: today,
                 metadata: asset_info.metadata.clone(),
+                source_account_ids: Vec::new(),
             };
             holdings.push(holding_view);
         }
@@ -339,6 +340,7 @@ impl HoldingsService {
                 weight: Decimal::ZERO,
                 as_of_date: today,
                 metadata: None,
+                source_account_ids: Vec::new(),
             };
             holdings.push(holding_view);
         }
@@ -675,6 +677,9 @@ impl HoldingsServiceTrait for HoldingsService {
             match merged.entry(key.clone()) {
                 std::collections::hash_map::Entry::Occupied(mut occ) => {
                     let acc = occ.get_mut();
+                    if !acc.source_account_ids.contains(&holding.account_id) {
+                        acc.source_account_ids.push(holding.account_id.clone());
+                    }
                     acc.quantity += holding.quantity;
                     add_monetary(&mut acc.market_value, &holding.market_value);
                     add_optional_monetary(&mut acc.cost_basis, &holding.cost_basis);
@@ -696,9 +701,11 @@ impl HoldingsServiceTrait for HoldingsService {
                     }
                 }
                 std::collections::hash_map::Entry::Vacant(vac) => {
+                    let original_account_id = holding.account_id.clone();
                     let mut h = holding;
                     h.id = format!("AGG-{}", key);
                     h.account_id = aggregated_account_id.to_string();
+                    h.source_account_ids = vec![original_account_id];
                     vac.insert(h);
                 }
             }
@@ -946,6 +953,7 @@ impl HoldingsServiceTrait for HoldingsService {
                 weight: Decimal::ZERO,
                 as_of_date: snapshot.snapshot_date,
                 metadata: asset.metadata.clone(),
+                source_account_ids: Vec::new(),
             };
             holdings.push(holding);
         }
@@ -991,6 +999,7 @@ impl HoldingsServiceTrait for HoldingsService {
                 weight: Decimal::ZERO,
                 as_of_date: snapshot.snapshot_date,
                 metadata: None,
+                source_account_ids: Vec::new(),
             };
             holdings.push(holding);
         }

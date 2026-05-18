@@ -622,6 +622,8 @@ export interface Holding {
   prevCloseValue?: MonetaryValue | null;
   weight: number;
   asOfDate: string;
+  /** Source account IDs for aggregated holdings (portfolio/multi-account scope). Empty for single-account. */
+  sourceAccountIds?: string[];
 }
 
 /**

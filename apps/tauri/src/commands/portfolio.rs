@@ -1201,6 +1201,7 @@ pub async fn get_snapshot_by_date(
             weight: Decimal::ZERO,
             as_of_date: target_date,
             metadata: asset.metadata.clone(),
+            source_account_ids: Vec::new(),
         };
         holdings.push(holding);
     }
@@ -1246,6 +1247,7 @@ pub async fn get_snapshot_by_date(
             weight: Decimal::ZERO,
             as_of_date: target_date,
             metadata: None,
+            source_account_ids: Vec::new(),
         };
         holdings.push(holding);
     }
