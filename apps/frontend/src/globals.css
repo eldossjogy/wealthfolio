@@ -9,11 +9,11 @@
 @import "@fontsource/merriweather/400.css";
 @import "@fontsource/merriweather/400-italic.css";
 @import "@fontsource/merriweather/700.css";
-/* IBM Plex Mono (mono) - selective weights */
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
-@import "@fontsource/ibm-plex-mono/600.css";
-@import "@fontsource/ibm-plex-mono/700.css";
+/* JetBrains Mono (mono) - selective weights */
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/700.css";
 
 /* Enable class-based dark mode across the subtree (Tailwind v4 pattern) */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -60,7 +60,7 @@
   /* Font families */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Merriweather", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Disable default colors to prevent their use; feel free to re-enable as needed. */
   --color-amber-50: #fef3c7;
