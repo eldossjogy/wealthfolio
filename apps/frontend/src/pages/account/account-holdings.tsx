@@ -2,7 +2,7 @@ import { getHoldings } from "@/adapters";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { QueryKeys } from "@/lib/query-keys";
-import { Account, Holding, HoldingType } from "@/lib/types";
+import { Holding, HoldingType } from "@/lib/types";
 import { canAddHoldings } from "@/lib/activity-restrictions";
 import { HoldingsTable } from "@/pages/holdings/components/holdings-table";
 import { HoldingsTableMobile } from "@/pages/holdings/components/holdings-table-mobile";
