@@ -8,12 +8,14 @@ import {
   createEventType,
   deleteEvent,
   deleteEventType,
+  getEventSpendingSummaries,
   listEventTypes,
   listEvents,
   updateEvent,
   updateEventType,
 } from "../adapters/events";
 import type {
+  EventSpendingSummary,
   EventType,
   NewEventType,
   NewSpendingEvent,
@@ -21,10 +23,15 @@ import type {
   UpdateSpendingEvent,
 } from "../types/event";
 
+// Event types and the full events list rarely change — keep them around so
+// multi-page navigation doesn't refetch unnecessarily.
+const STALE_TIME = 60_000;
+
 export function useEventTypes() {
   return useQuery<EventType[], Error>({
     queryKey: [QueryKeys.SPENDING_EVENT_TYPES],
     queryFn: listEventTypes,
+    staleTime: STALE_TIME,
   });
 }
 
@@ -32,6 +39,14 @@ export function useSpendingEvents() {
   return useQuery<SpendingEvent[], Error>({
     queryKey: [QueryKeys.SPENDING_EVENTS],
     queryFn: listEvents,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useEventSpendingSummaries(request: { startDate: string; endDate: string }) {
+  return useQuery<EventSpendingSummary[], Error>({
+    queryKey: [QueryKeys.SPENDING_EVENTS, "summaries", request],
+    queryFn: () => getEventSpendingSummaries(request),
   });
 }
 

@@ -1,10 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useAccounts } from "@/hooks/use-accounts";
-import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 
 import {
@@ -15,7 +13,6 @@ import {
   usePersistentState,
 } from "@wealthfolio/ui";
 
-import { getEventSpendingSummaries } from "../adapters/events";
 import { CategoryTransactionsSheet } from "../components/reports/category-transactions-sheet";
 import { HeatmapCellSheet } from "../components/reports/heatmap-cell-sheet";
 import { StageNav, type InsightsStage } from "../components/reports/insights/stage-nav";
@@ -25,6 +22,7 @@ import { WhereIAmStage } from "../components/reports/insights/where-i-am-stage";
 import { useBudget } from "../hooks/use-budget";
 import { useCashActivities } from "../hooks/use-cash-activities";
 import { useMonthlyHistory } from "../hooks/use-monthly-history";
+import { useEventSpendingSummaries } from "../hooks/use-spending-events";
 import { useSpendingReport } from "../hooks/use-spending-report";
 import {
   DEFAULT_REPORTS_PERIOD,
@@ -34,7 +32,6 @@ import {
   rangeToReportRequest,
   type ReportsPeriod,
 } from "../lib/reports-period";
-import type { EventSpendingSummary } from "../types/event";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const PERIOD_STORAGE_KEY = "spending-insights-period";
@@ -43,6 +40,7 @@ const EMPTY_TAXONOMY: never[] = [];
 /** Heatmap window — last 12 weeks regardless of selected period. */
 const HEATMAP_WEEKS = 12;
 const DAILY_GRANULARITY_THRESHOLD_DAYS = 35;
+const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 /**
  * Spending insights — narrative-first, three-stage page.
@@ -106,10 +104,7 @@ export default function SpendingInsightsPage() {
     () => ({ startDate: range.start.toISOString(), endDate: range.end.toISOString() }),
     [range],
   );
-  const { data: events = [] } = useQuery<EventSpendingSummary[]>({
-    queryKey: [QueryKeys.SPENDING_EVENTS, "summaries", eventsRequest],
-    queryFn: () => getEventSpendingSummaries(eventsRequest),
-  });
+  const { data: events = [] } = useEventSpendingSummaries(eventsRequest);
 
   // Header context — Mon D – Mon D, YYYY · N tx
   const contextLabel = useMemo(() => {
@@ -156,7 +151,6 @@ export default function SpendingInsightsPage() {
       return weekday === heatmapCell.weekday && d.getHours() === heatmapCell.hour;
     });
   }, [heatmapActivities, heatmapCell]);
-  const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
   const useDailyForHistory = range.days <= DAILY_GRANULARITY_THRESHOLD_DAYS;
   const taxonomyCategories = taxonomy.data?.categories ?? EMPTY_TAXONOMY;
