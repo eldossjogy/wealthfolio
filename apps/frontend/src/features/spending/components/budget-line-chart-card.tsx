@@ -61,6 +61,9 @@ export function BudgetLineChartCard({
   categoriesMeta: CategoryMetaMap;
   monthByDay: { date: string; outflow: number }[];
 }) {
+  // All hooks must run unconditionally — the `target <= 0` early return below
+  // sits between hooks otherwise, which trips "Rendered more hooks than during
+  // the previous render" when a target is added or cleared.
   const monthMeta = useMemo(() => {
     const now = new Date();
     const dayOfMonth = now.getDate();
@@ -74,46 +77,7 @@ export function BudgetLineChartCard({
       shortLabel: now.toLocaleString("en-US", { month: "short", year: "numeric" }).toUpperCase(),
     };
   }, []);
-  const { now, dayOfMonth, daysInMonth, daysRemaining, monthLabel } = monthMeta;
-
-  const haveHistory = historicalDailyAvg > 0;
-  const forecast =
-    target > 0
-      ? haveHistory
-        ? spent + historicalDailyAvg * daysRemaining
-        : dayOfMonth > 0
-          ? (spent / dayOfMonth) * daysInMonth
-          : 0
-      : 0;
-
-  if (target <= 0) {
-    return (
-      <div className="w-full">
-        <BudgetCardHeader
-          monthLabel={now
-            .toLocaleString("en-US", { month: "short", year: "numeric" })
-            .toUpperCase()}
-        />
-        <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
-          <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
-          <Link
-            to="/settings/spending/setup"
-            className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
-          >
-            Set a budget
-            <Icons.ChevronRight className="h-3 w-3" />
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const remaining = Math.max(0, target - spent);
-  const overBy = spent - target;
-  const isOver = overBy > 0;
-  const forecastReliable = haveHistory || dayOfMonth >= 7;
-  const forecastDelta = forecast - target;
-  const willOverspend = forecastReliable && forecastDelta > 0;
+  const { dayOfMonth, daysInMonth, daysRemaining, monthLabel } = monthMeta;
 
   const cumulative = useMemo(() => {
     const byDay = new Map<number, number>();
@@ -129,59 +93,6 @@ export function BudgetLineChartCard({
     }
     return out;
   }, [monthByDay, dayOfMonth]);
-
-  const paceAtToday = (target * dayOfMonth) / daysInMonth;
-  const gapVsPace = spent - paceAtToday;
-  const aheadOfPace = gapVsPace < 0;
-
-  const status: Status = isOver ? "over" : !aheadOfPace ? "warn" : "ok";
-  const a = STATUS_ACCENTS[status];
-  const { Icon } = a;
-
-  const chartW = 320;
-  const chartH = 110;
-  const padL = 0;
-  const padR = 0;
-  const padT = 24;
-  const padB = 14;
-  const innerW = chartW - padL - padR;
-  const innerH = chartH - padT - padB;
-
-  const yMax = Math.max(target, spent, target) * 1.05;
-  const xForDay = (day: number) => padL + ((day - 1) / Math.max(1, daysInMonth - 1)) * innerW;
-  const yForVal = (v: number) => padT + (1 - v / yMax) * innerH;
-
-  const paceX1 = xForDay(1);
-  const paceY1 = yForVal(0);
-  const paceX2 = xForDay(daysInMonth);
-  const paceY2 = yForVal(target);
-
-  const actualPath = useMemo(
-    () =>
-      cumulative.length
-        ? "M " +
-          cumulative
-            .map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`)
-            .join(" L ")
-        : "",
-    // xForDay/yForVal depend on target/daysInMonth/innerW/innerH/padL/padT and yMax;
-    // captured here as primitives so the path rebuilds only when geometry shifts.
-    [cumulative, daysInMonth, innerW, innerH, padL, padT, yMax],
-  );
-
-  const endX = cumulative.length ? xForDay(cumulative[cumulative.length - 1].day) : padL;
-  const endY = cumulative.length ? yForVal(cumulative[cumulative.length - 1].value) : padT + innerH;
-
-  const gapAbs = Math.abs(gapVsPace);
-  const gapLabel = isOver
-    ? `${formatCompactAmount(overBy, currency)} over budget`
-    : aheadOfPace
-      ? `${formatCompactAmount(gapAbs, currency)} under budget`
-      : `${formatCompactAmount(gapAbs, currency)} over pace`;
-
-  const pillLeftPctRaw = (endX / chartW) * 100;
-  const pillLeftPct = Math.min(78, Math.max(8, pillLeftPctRaw - 4));
-  const pillTopPx = Math.max(0, endY - 28);
 
   const rings = useMemo(() => {
     const spentByTop = new Map<string, number>();
@@ -210,6 +121,95 @@ export function BudgetLineChartCard({
       .filter((r): r is NonNullable<typeof r> => r !== null)
       .sort((x, y) => y.pct - x.pct);
   }, [allocations, spendingBreakdown, categoriesMeta]);
+
+  // Chart geometry derived from target — captured here so actualPath useMemo
+  // can depend on stable primitives instead of recomputing each render.
+  const chartW = 320;
+  const chartH = 110;
+  const padL = 0;
+  const padR = 0;
+  const padT = 24;
+  const padB = 14;
+  const innerW = chartW - padL - padR;
+  const innerH = chartH - padT - padB;
+  const yMax = Math.max(target, spent, target) * 1.05;
+
+  const actualPath = useMemo(() => {
+    if (!cumulative.length) return "";
+    const xForDay = (day: number) => padL + ((day - 1) / Math.max(1, daysInMonth - 1)) * innerW;
+    const yForVal = (v: number) => padT + (1 - v / yMax) * innerH;
+    return (
+      "M " +
+      cumulative
+        .map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`)
+        .join(" L ")
+    );
+  }, [cumulative, daysInMonth, innerW, innerH, padL, padT, yMax]);
+
+  const haveHistory = historicalDailyAvg > 0;
+  const forecast =
+    target > 0
+      ? haveHistory
+        ? spent + historicalDailyAvg * daysRemaining
+        : dayOfMonth > 0
+          ? (spent / dayOfMonth) * daysInMonth
+          : 0
+      : 0;
+
+  if (target <= 0) {
+    return (
+      <div className="w-full">
+        <BudgetCardHeader monthLabel={monthMeta.shortLabel} />
+        <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
+          <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
+          <Link
+            to="/settings/spending/setup"
+            className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+          >
+            Set a budget
+            <Icons.ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const remaining = Math.max(0, target - spent);
+  const overBy = spent - target;
+  const isOver = overBy > 0;
+  const forecastReliable = haveHistory || dayOfMonth >= 7;
+  const forecastDelta = forecast - target;
+  const willOverspend = forecastReliable && forecastDelta > 0;
+
+  const paceAtToday = (target * dayOfMonth) / daysInMonth;
+  const gapVsPace = spent - paceAtToday;
+  const aheadOfPace = gapVsPace < 0;
+
+  const status: Status = isOver ? "over" : !aheadOfPace ? "warn" : "ok";
+  const a = STATUS_ACCENTS[status];
+  const { Icon } = a;
+
+  const xForDay = (day: number) => padL + ((day - 1) / Math.max(1, daysInMonth - 1)) * innerW;
+  const yForVal = (v: number) => padT + (1 - v / yMax) * innerH;
+
+  const paceX1 = xForDay(1);
+  const paceY1 = yForVal(0);
+  const paceX2 = xForDay(daysInMonth);
+  const paceY2 = yForVal(target);
+
+  const endX = cumulative.length ? xForDay(cumulative[cumulative.length - 1].day) : padL;
+  const endY = cumulative.length ? yForVal(cumulative[cumulative.length - 1].value) : padT + innerH;
+
+  const gapAbs = Math.abs(gapVsPace);
+  const gapLabel = isOver
+    ? `${formatCompactAmount(overBy, currency)} over budget`
+    : aheadOfPace
+      ? `${formatCompactAmount(gapAbs, currency)} under budget`
+      : `${formatCompactAmount(gapAbs, currency)} over pace`;
+
+  const pillLeftPctRaw = (endX / chartW) * 100;
+  const pillLeftPct = Math.min(78, Math.max(8, pillLeftPctRaw - 4));
+  const pillTopPx = Math.max(0, endY - 28);
 
   return (
     <div className="w-full">
