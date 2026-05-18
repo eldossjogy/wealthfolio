@@ -48,18 +48,29 @@ pub struct AccountFilterInput {
 }
 
 impl AccountFilterInput {
-    fn into_account_filter(self) -> AccountFilter {
+    fn into_account_filter(self) -> Result<AccountFilter, String> {
         match self.kind.as_str() {
-            "account" => AccountFilter::Account {
-                account_id: self.account_id.unwrap_or_default(),
-            },
-            "portfolio" => AccountFilter::Portfolio {
-                portfolio_id: self.portfolio_id.unwrap_or_default(),
-            },
-            "adHoc" => AccountFilter::AdHoc {
-                account_ids: self.account_ids.unwrap_or_default(),
-            },
-            _ => AccountFilter::All,
+            "all" => Ok(AccountFilter::All),
+            "account" => {
+                let id = self
+                    .account_id
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| "accountId required for filter type 'account'".to_string())?;
+                Ok(AccountFilter::Account { account_id: id })
+            }
+            "portfolio" => {
+                let id = self.portfolio_id.filter(|s| !s.is_empty()).ok_or_else(|| {
+                    "portfolioId required for filter type 'portfolio'".to_string()
+                })?;
+                Ok(AccountFilter::Portfolio { portfolio_id: id })
+            }
+            "adHoc" | "accounts" => {
+                let ids = self.account_ids.filter(|v| !v.is_empty()).ok_or_else(|| {
+                    "accountIds required and must be non-empty for filter type 'adHoc'".to_string()
+                })?;
+                Ok(AccountFilter::AdHoc { account_ids: ids })
+            }
+            other => Err(format!("unknown filter type: '{other}'")),
         }
     }
 }
@@ -133,7 +144,7 @@ pub async fn get_holdings(
     debug!("Get holdings...");
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
-    let filter = filter.into_account_filter();
+    let filter = filter.into_account_filter()?;
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -200,7 +211,7 @@ pub async fn get_portfolio_allocations(
 ) -> Result<PortfolioAllocations, String> {
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
-    let filter = filter.into_account_filter();
+    let filter = filter.into_account_filter()?;
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -226,7 +237,7 @@ pub async fn get_holdings_by_allocation(
 ) -> Result<AllocationHoldings, String> {
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
-    let filter = filter.into_account_filter();
+    let filter = filter.into_account_filter()?;
     let ids = resolve_filter_to_ids(&filter, &state).await?;
     if ids.len() == 1 {
         state
@@ -315,7 +326,7 @@ pub async fn get_income_summary(
 ) -> Result<Vec<IncomeSummary>, String> {
     debug!("Fetching income summary...");
     let account_ids: Option<Vec<String>> = if let Some(input) = filter {
-        let af = input.into_account_filter();
+        let af = input.into_account_filter()?;
         match &af {
             AccountFilter::All => None,
             AccountFilter::Account { account_id } => Some(vec![account_id.clone()]),

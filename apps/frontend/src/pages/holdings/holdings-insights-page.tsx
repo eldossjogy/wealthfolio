@@ -309,7 +309,7 @@ export const HoldingsInsightsPage = ({
         isOpen={isSheetOpen}
         onOpenChange={setIsSheetOpen}
         allocation={selectedAllocation}
-        accountId={accountId}
+        accountFilter={accountFilter}
         baseCurrency={baseCurrency}
         initialCategoryId={initialCategoryId}
       />

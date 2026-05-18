@@ -712,6 +712,34 @@ impl HoldingsServiceTrait for HoldingsService {
             a_cash.cmp(&b_cash).then_with(|| a.id.cmp(&b.id))
         });
 
+        // Recompute percentage fields from the summed base values.
+        // The merge loop accumulates monetary values but percentages from the first
+        // account seen are no longer correct for the aggregated position.
+        for h in result.iter_mut() {
+            let cost_base = h
+                .cost_basis
+                .as_ref()
+                .map(|c| c.base)
+                .unwrap_or(Decimal::ZERO);
+            if cost_base > Decimal::ZERO {
+                h.unrealized_gain_pct = h.unrealized_gain.as_ref().map(|v| v.base / cost_base);
+                h.total_gain_pct = h.total_gain.as_ref().map(|v| v.base / cost_base);
+            } else {
+                h.unrealized_gain_pct = None;
+                h.total_gain_pct = None;
+            }
+            let prev_close_base = h
+                .prev_close_value
+                .as_ref()
+                .map(|p| p.base)
+                .unwrap_or(Decimal::ZERO);
+            if prev_close_base > Decimal::ZERO {
+                h.day_change_pct = h.day_change.as_ref().map(|v| v.base / prev_close_base);
+            } else {
+                h.day_change_pct = None;
+            }
+        }
+
         apply_portfolio_weights(aggregated_account_id, &mut result);
         Ok(result)
     }

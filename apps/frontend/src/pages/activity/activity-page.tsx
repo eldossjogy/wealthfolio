@@ -112,11 +112,20 @@ const ActivityPage = () => {
 
   const isDatagridView = viewMode === "datagrid";
 
+  // Resolve account IDs at render time so portfolio membership changes are
+  // picked up immediately without stale persisted state.
+  const effectiveAccountIds = useMemo(() => {
+    if (selectedPortfolioId) {
+      return portfolios.find((p) => p.id === selectedPortfolioId)?.accountIds ?? [];
+    }
+    return selectedAccounts;
+  }, [selectedPortfolioId, portfolios, selectedAccounts]);
+
   // Infinite scroll search for table view
   const infiniteSearch = useActivitySearch({
     mode: "infinite",
     filters: {
-      accountIds: selectedAccounts,
+      accountIds: effectiveAccountIds,
       activityTypes: selectedActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
@@ -129,7 +138,7 @@ const ActivityPage = () => {
   const paginatedSearch = useActivitySearch({
     mode: "paginated",
     filters: {
-      accountIds: selectedAccounts,
+      accountIds: effectiveAccountIds,
       activityTypes: selectedActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
@@ -147,7 +156,7 @@ const ActivityPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    selectedAccounts,
+    effectiveAccountIds,
     selectedActivityTypes,
     selectedInstrumentTypes,
     statusFilter,
@@ -269,12 +278,7 @@ const ActivityPage = () => {
                 onChange={(e) => {
                   const id = e.target.value || null;
                   setSelectedPortfolioId(id);
-                  if (id) {
-                    const p = portfolios.find((p) => p.id === id);
-                    if (p) setSelectedAccounts(p.accountIds);
-                  } else {
-                    setSelectedAccounts([]);
-                  }
+                  if (!id) setSelectedAccounts([]);
                 }}
               >
                 <option value="">All</option>
