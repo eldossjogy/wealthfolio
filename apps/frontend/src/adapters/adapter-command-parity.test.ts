@@ -91,15 +91,18 @@ describe("adapter command parity", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await invoke("get_holdings_by_allocation", {
-      accountId: "PORTFOLIO",
+      filter: { type: "all" },
       taxonomyId: "asset_classes",
       categoryId: "EQUITY",
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(
-      "/api/v1/allocations/holdings?accountId=PORTFOLIO&taxonomyId=asset_classes&categoryId=EQUITY",
-    );
-    expect(init.method).toBe("GET");
+    expect(url).toBe("/api/v1/allocations/holdings");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      filter: { type: "all" },
+      taxonomyId: "asset_classes",
+      categoryId: "EQUITY",
+    });
   });
 });
