@@ -23,7 +23,7 @@ use wealthfolio_core::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
         SnapshotSource,
     },
-    portfolios::AccountScope,
+    portfolios::{AccountScope, ResolvedAccountScope},
     quotes::MarketSyncMode,
     valuation::DailyAccountValuation,
 };
@@ -120,19 +120,26 @@ pub async fn update_portfolio(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolves `AccountScope` to account IDs. `All` returns `["TOTAL"]` to use the fast
-/// pre-computed snapshot; `Portfolio`/`Accounts` return resolved member IDs for aggregation.
-async fn resolve_filter_to_ids(
+/// Resolves an `AccountScope` to a `ResolvedAccountScope`.
+/// `All` → `TotalSnapshot` (fast precomputed path, no TOTAL string leak).
+/// `Account` → `Account(id)`.
+/// `Portfolio`/`Accounts` → `Accounts(ids)` via membership resolution.
+async fn resolve_scope(
     filter: &AccountScope,
     state: &ServiceContext,
-) -> Result<Vec<String>, String> {
+) -> Result<ResolvedAccountScope, String> {
     match filter {
-        AccountScope::All => Ok(vec!["TOTAL".to_string()]),
-        AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
-        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => state
-            .portfolio_service()
-            .resolve_account_filter(filter)
-            .map_err(|e| e.to_string()),
+        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
+        AccountScope::Account { account_id } => {
+            Ok(ResolvedAccountScope::Account(account_id.clone()))
+        }
+        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
+            let ids = state
+                .portfolio_service()
+                .resolve_account_filter(filter)
+                .map_err(|e| e.to_string())?;
+            Ok(ResolvedAccountScope::Accounts(ids))
+        }
     }
 }
 
@@ -145,19 +152,22 @@ pub async fn get_holdings(
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
-    let ids = resolve_filter_to_ids(&filter, &state).await?;
-    if ids.len() == 1 {
-        state
+    match resolve_scope(&filter, &state).await? {
+        ResolvedAccountScope::TotalSnapshot => state
             .holdings_service()
-            .get_holdings(&ids[0], &base_currency)
+            .get_holdings("TOTAL", &base_currency)
             .await
-            .map_err(|e| e.to_string())
-    } else {
-        state
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Account(id) => state
+            .holdings_service()
+            .get_holdings(&id, &base_currency)
+            .await
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Accounts(ids) => state
             .holdings_service()
             .get_holdings_for_accounts(&ids, &base_currency, &aggregated_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -212,19 +222,22 @@ pub async fn get_portfolio_allocations(
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
-    let ids = resolve_filter_to_ids(&filter, &state).await?;
-    if ids.len() == 1 {
-        state
+    match resolve_scope(&filter, &state).await? {
+        ResolvedAccountScope::TotalSnapshot => state
             .allocation_service()
-            .get_portfolio_allocations(&ids[0], &base_currency)
+            .get_portfolio_allocations("TOTAL", &base_currency)
             .await
-            .map_err(|e| e.to_string())
-    } else {
-        state
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Account(id) => state
+            .allocation_service()
+            .get_portfolio_allocations(&id, &base_currency)
+            .await
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Accounts(ids) => state
             .allocation_service()
             .get_portfolio_allocations_for_accounts(&ids, &base_currency, &aggregated_id)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -238,15 +251,18 @@ pub async fn get_holdings_by_allocation(
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
-    let ids = resolve_filter_to_ids(&filter, &state).await?;
-    if ids.len() == 1 {
-        state
+    match resolve_scope(&filter, &state).await? {
+        ResolvedAccountScope::TotalSnapshot => state
             .allocation_service()
-            .get_holdings_by_allocation(&ids[0], &base_currency, &taxonomy_id, &category_id)
+            .get_holdings_by_allocation("TOTAL", &base_currency, &taxonomy_id, &category_id)
             .await
-            .map_err(|e| e.to_string())
-    } else {
-        state
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Account(id) => state
+            .allocation_service()
+            .get_holdings_by_allocation(&id, &base_currency, &taxonomy_id, &category_id)
+            .await
+            .map_err(|e| e.to_string()),
+        ResolvedAccountScope::Accounts(ids) => state
             .allocation_service()
             .get_holdings_by_allocation_for_accounts(
                 &ids,
@@ -256,7 +272,7 @@ pub async fn get_holdings_by_allocation(
                 &aggregated_id,
             )
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -327,15 +343,10 @@ pub async fn get_income_summary(
     debug!("Fetching income summary...");
     let account_ids: Option<Vec<String>> = if let Some(input) = filter {
         let af = input.into_account_filter()?;
-        match &af {
-            AccountScope::All => None,
-            AccountScope::Account { account_id } => Some(vec![account_id.clone()]),
-            AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => Some(
-                state
-                    .portfolio_service()
-                    .resolve_account_filter(&af)
-                    .map_err(|e| e.to_string())?,
-            ),
+        match resolve_scope(&af, &state).await? {
+            ResolvedAccountScope::TotalSnapshot => None,
+            ResolvedAccountScope::Account(id) => Some(vec![id]),
+            ResolvedAccountScope::Accounts(ids) => Some(ids),
         }
     } else {
         None

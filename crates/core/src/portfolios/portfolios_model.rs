@@ -105,6 +105,19 @@ impl PortfolioUpdate {
     }
 }
 
+/// The resolved form of an `AccountScope` after service-layer resolution.
+/// Makes the "use precomputed TOTAL snapshot" path explicit instead of
+/// leaking the fake account ID `"TOTAL"` through downstream code.
+#[derive(Debug, Clone)]
+pub enum ResolvedAccountScope {
+    /// Use the precomputed all-accounts snapshot (fast path).
+    TotalSnapshot,
+    /// A single real account.
+    Account(String),
+    /// Multiple accounts — requires on-read aggregation.
+    Accounts(Vec<String>),
+}
+
 /// Typed account scope filter — resolved once at the service boundary.
 ///
 /// Repositories receive `&[String]` account IDs and must not parse

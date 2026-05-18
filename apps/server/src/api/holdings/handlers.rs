@@ -6,7 +6,7 @@ use axum::{
 };
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
-use wealthfolio_core::portfolios::AccountScope;
+use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     portfolio::{
@@ -30,17 +30,22 @@ use super::dto::{
 };
 use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
 
-fn resolve_filter(
+fn resolve_scope(
     filter: &AccountScope,
     state: &AppState,
-) -> Result<Vec<String>, crate::error::ApiError> {
+) -> Result<ResolvedAccountScope, crate::error::ApiError> {
     match filter {
-        AccountScope::All => Ok(vec!["TOTAL".to_string()]),
-        AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
-        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => state
-            .portfolio_service
-            .resolve_account_filter(filter)
-            .map_err(Into::into),
+        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
+        AccountScope::Account { account_id } => {
+            Ok(ResolvedAccountScope::Account(account_id.clone()))
+        }
+        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
+            let ids = state
+                .portfolio_service
+                .resolve_account_filter(filter)
+                .map_err(crate::error::ApiError::from)?;
+            Ok(ResolvedAccountScope::Accounts(ids))
+        }
     }
 }
 
@@ -57,14 +62,19 @@ pub async fn get_holdings(
     Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<Vec<Holding>>> {
     let base = state.base_currency.read().unwrap().clone();
-    let ids = resolve_filter(&body.filter, &state)?;
-    let holdings = if ids.len() == 1 {
-        state.holdings_service.get_holdings(&ids[0], &base).await?
-    } else {
-        state
-            .holdings_service
-            .get_holdings_for_accounts(&ids, &base, &aggregated_id(&body.filter))
-            .await?
+    let holdings = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state.holdings_service.get_holdings("TOTAL", &base).await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state.holdings_service.get_holdings(&id, &base).await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .holdings_service
+                .get_holdings_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+                .await?
+        }
     };
     Ok(Json(holdings))
 }
@@ -163,17 +173,25 @@ pub async fn get_portfolio_allocations(
     Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<PortfolioAllocations>> {
     let base = state.base_currency.read().unwrap().clone();
-    let ids = resolve_filter(&body.filter, &state)?;
-    let allocations = if ids.len() == 1 {
-        state
-            .allocation_service
-            .get_portfolio_allocations(&ids[0], &base)
-            .await?
-    } else {
-        state
-            .allocation_service
-            .get_portfolio_allocations_for_accounts(&ids, &base, &aggregated_id(&body.filter))
-            .await?
+    let allocations = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state
+                .allocation_service
+                .get_portfolio_allocations("TOTAL", &base)
+                .await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state
+                .allocation_service
+                .get_portfolio_allocations(&id, &base)
+                .await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .allocation_service
+                .get_portfolio_allocations_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+                .await?
+        }
     };
     Ok(Json(allocations))
 }
@@ -183,23 +201,31 @@ pub async fn get_holdings_by_allocation(
     Json(body): Json<AllocationFilterBody>,
 ) -> ApiResult<Json<AllocationHoldings>> {
     let base = state.base_currency.read().unwrap().clone();
-    let ids = resolve_filter(&body.filter, &state)?;
-    let result = if ids.len() == 1 {
-        state
-            .allocation_service
-            .get_holdings_by_allocation(&ids[0], &base, &body.taxonomy_id, &body.category_id)
-            .await?
-    } else {
-        state
-            .allocation_service
-            .get_holdings_by_allocation_for_accounts(
-                &ids,
-                &base,
-                &body.taxonomy_id,
-                &body.category_id,
-                &aggregated_id(&body.filter),
-            )
-            .await?
+    let result = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation("TOTAL", &base, &body.taxonomy_id, &body.category_id)
+                .await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation(&id, &base, &body.taxonomy_id, &body.category_id)
+                .await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation_for_accounts(
+                    &ids,
+                    &base,
+                    &body.taxonomy_id,
+                    &body.category_id,
+                    &aggregated_id(&body.filter),
+                )
+                .await?
+        }
     };
     Ok(Json(result))
 }
