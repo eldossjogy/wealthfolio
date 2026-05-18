@@ -56,10 +56,6 @@ const AccountHoldings = ({
     return canAddHoldings(selectedAccount ?? undefined);
   }, [selectedAccount]);
 
-  const dummyAccounts = useMemo(() => {
-    return selectedAccount ? [selectedAccount] : [];
-  }, [selectedAccount]);
-
   const filteredHoldings = holdings?.filter((holding) => holding.holdingType !== HoldingType.CASH);
 
   const typeOptions = useMemo(() => {
@@ -154,10 +150,6 @@ const AccountHoldings = ({
       </div>
     );
   }
-
-  const handleAccountChange = (_account: Account) => {
-    // No-op for account page since we're already on a specific account
-  };
 
   return (
     <div>

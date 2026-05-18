@@ -4,12 +4,6 @@ use serde::{Deserialize, Serialize};
 use wealthfolio_core::portfolios::AccountFilter;
 
 #[derive(Deserialize)]
-pub struct HoldingsQuery {
-    #[serde(rename = "accountId")]
-    pub account_id: String,
-}
-
-#[derive(Deserialize)]
 pub struct FilterBody {
     pub filter: AccountFilter,
 }
@@ -45,16 +39,6 @@ pub struct HistoryQuery {
     pub start_date: Option<String>,
     #[serde(rename = "endDate")]
     pub end_date: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct AllocationHoldingsQuery {
-    #[serde(rename = "accountId")]
-    pub account_id: String,
-    #[serde(rename = "taxonomyId")]
-    pub taxonomy_id: String,
-    #[serde(rename = "categoryId")]
-    pub category_id: String,
 }
 
 #[derive(Deserialize)]

@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use crate::{error::ApiResult, main_lib::AppState};
-use axum::{
-    extract::{Query, State},
-    routing::post,
-    Json, Router,
-};
+use axum::{extract::State, routing::post, Json, Router};
 use wealthfolio_core::{
     accounts::{AccountServiceTrait, TrackingMode},
     portfolio::{
@@ -112,7 +108,7 @@ async fn get_income_summary(
             state
                 .portfolio_service
                 .resolve_account_filter(body.filter.as_ref().unwrap())
-                .map_err(|e| crate::error::ApiError::from(e))?,
+                .map_err(crate::error::ApiError::from)?,
         ),
     };
     let items = state
