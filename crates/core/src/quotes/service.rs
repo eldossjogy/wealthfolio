@@ -3235,7 +3235,10 @@ mod tests {
             unimplemented!("unused in this test")
         }
 
-        fn get_income_activities_data(&self, _account_ids: Option<&[String]>) -> Result<Vec<IncomeData>> {
+        fn get_income_activities_data(
+            &self,
+            _account_ids: Option<&[String]>,
+        ) -> Result<Vec<IncomeData>> {
             unimplemented!("unused in this test")
         }
 
