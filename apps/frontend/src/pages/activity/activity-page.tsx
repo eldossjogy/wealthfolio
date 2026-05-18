@@ -5,7 +5,7 @@ import { useIsMobileViewport } from "@/hooks/use-platform";
 import { debounce } from "@/lib/debounce";
 import { ActivityType } from "@/lib/constants";
 import { QueryKeys } from "@/lib/query-keys";
-import { Account, ActivityDetails } from "@/lib/types";
+import { Account, AccountScope, ActivityDetails } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import type { SortingState } from "@tanstack/react-table";
 import { Button, Icons, Page, PageContent, PageHeader } from "@wealthfolio/ui";
@@ -37,13 +37,9 @@ const ActivityPage = () => {
   const [showActionPalette, setShowActionPalette] = useState(false);
 
   // Filter and search state
-  const [selectedAccounts, setSelectedAccounts] = usePersistentState<string[]>(
-    "activity-filter-accounts",
-    [],
-  );
-  const [selectedPortfolioId, setSelectedPortfolioId] = usePersistentState<string | null>(
-    "activity-filter-portfolio",
-    null,
+  const [accountScope, setAccountScope] = usePersistentState<AccountScope>(
+    "activity-filter-scope",
+    { type: "all" },
   );
   const { data: portfolios = [] } = usePortfolios();
   const [selectedActivityTypes, setSelectedActivityTypes] = usePersistentState<ActivityType[]>(
@@ -112,14 +108,15 @@ const ActivityPage = () => {
 
   const isDatagridView = viewMode === "datagrid";
 
-  // Resolve account IDs at render time so portfolio membership changes are
-  // picked up immediately without stale persisted state.
+  // Resolve the typed scope to a flat account ID list for the activity search.
   const effectiveAccountIds = useMemo(() => {
-    if (selectedPortfolioId) {
-      return portfolios.find((p) => p.id === selectedPortfolioId)?.accountIds ?? [];
+    if (accountScope.type === "account") return [accountScope.accountId];
+    if (accountScope.type === "accounts") return accountScope.accountIds;
+    if (accountScope.type === "portfolio") {
+      return portfolios.find((p) => p.id === accountScope.portfolioId)?.accountIds ?? [];
     }
-    return selectedAccounts;
-  }, [selectedPortfolioId, portfolios, selectedAccounts]);
+    return []; // "all" → no filter
+  }, [accountScope, portfolios]);
 
   // Infinite scroll search for table view
   const infiniteSearch = useActivitySearch({
@@ -268,37 +265,16 @@ const ActivityPage = () => {
       <PageHeader heading="Activity" actions={headerActions} />
       <PageContent className="pb-2 md:pb-4 lg:pb-5">
         <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
-          {/* Unified Controls */}
-          {portfolios.length > 0 && !isMobileViewport && (
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs">Portfolio:</span>
-              <select
-                className="border-input bg-background rounded-md border px-2 py-1 text-xs"
-                value={selectedPortfolioId ?? ""}
-                onChange={(e) => {
-                  const id = e.target.value || null;
-                  setSelectedPortfolioId(id);
-                  if (!id) setSelectedAccounts([]);
-                }}
-              >
-                <option value="">All</option>
-                {portfolios.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           {isMobileViewport ? (
             <ActivityMobileControls
               accounts={accounts}
               searchQuery={searchInput}
               onSearchQueryChange={handleSearchChange}
-              selectedAccountIds={selectedAccounts}
+              selectedAccountIds={effectiveAccountIds}
               onAccountIdsChange={(ids) => {
-                setSelectedAccounts(ids);
-                setSelectedPortfolioId(null);
+                if (ids.length === 0) setAccountScope({ type: "all" });
+                else if (ids.length === 1) setAccountScope({ type: "account", accountId: ids[0] });
+                else setAccountScope({ type: "accounts", accountIds: ids });
               }}
               selectedActivityTypes={selectedActivityTypes}
               onActivityTypesChange={setSelectedActivityTypes}
@@ -307,14 +283,10 @@ const ActivityPage = () => {
             />
           ) : (
             <ActivityViewControls
-              accounts={accounts}
               searchQuery={searchInput}
               onSearchQueryChange={handleSearchChange}
-              selectedAccountIds={selectedAccounts}
-              onAccountIdsChange={(ids) => {
-                setSelectedAccounts(ids);
-                setSelectedPortfolioId(null);
-              }}
+              accountScope={accountScope}
+              onAccountScopeChange={setAccountScope}
               selectedActivityTypes={selectedActivityTypes}
               onActivityTypesChange={setSelectedActivityTypes}
               selectedInstrumentTypes={selectedInstrumentTypes}
