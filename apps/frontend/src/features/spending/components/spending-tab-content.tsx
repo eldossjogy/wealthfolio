@@ -34,6 +34,7 @@ import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-acti
 import { useSpendingReport } from "../hooks/use-spending-report";
 import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
 import { BudgetLineChartCard } from "./budget-line-chart-card";
+import { CashFlowStrip } from "./cash-flow-strip";
 import { EventsCard } from "./events-card";
 import { RecentActivityCard } from "./recent-activity-card";
 
@@ -653,78 +654,6 @@ function SegmentedToggle({
           </button>
         );
       })}
-    </div>
-  );
-}
-
-function CashFlowStrip({
-  income,
-  spending,
-  currency,
-  isLoading,
-}: {
-  income: number;
-  spending: number;
-  currency: string;
-  isLoading?: boolean;
-}) {
-  const net = income - spending;
-  const netPositive = net >= 0;
-
-  if (isLoading) {
-    return (
-      <div className="flex items-end gap-6 sm:gap-8">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="flex flex-col gap-1">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-6 w-24" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-end gap-6 sm:gap-8">
-      <KpiStat label="Income" value={income} sign="+" currency={currency} tone="success" />
-      <KpiStat label="Spending" value={spending} currency={currency} tone="muted" />
-      <KpiStat
-        label="Net"
-        value={Math.abs(net)}
-        sign={netPositive ? "+" : "−"}
-        currency={currency}
-        tone={netPositive ? "success" : "destructive"}
-      />
-    </div>
-  );
-}
-
-function KpiStat({
-  label,
-  value,
-  sign,
-  currency,
-  tone,
-}: {
-  label: string;
-  value: number;
-  sign?: "+" | "−";
-  currency: string;
-  tone: "success" | "destructive" | "muted";
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-success"
-      : tone === "destructive"
-        ? "text-destructive"
-        : "text-foreground";
-  return (
-    <div className="flex flex-col">
-      <span className="text-muted-foreground text-[11px] font-light tracking-wide">{label}</span>
-      <span className={cn("text-sm font-medium tabular-nums", toneClass)}>
-        {sign}
-        {formatCompactAmount(value, currency)}
-      </span>
     </div>
   );
 }
