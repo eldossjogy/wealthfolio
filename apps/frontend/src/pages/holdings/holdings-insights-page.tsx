@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useHoldings } from "@/hooks/use-holdings";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { usePortfolios } from "@/hooks/use-portfolios";
-import { PORTFOLIO_ACCOUNT_ID, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
+import { isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { AccountScope, TaxonomyAllocation } from "@/lib/types";
 import { useNavigate } from "react-router-dom";
@@ -35,17 +35,17 @@ export const HoldingsInsightsPage = ({
 
   const accountFilter: AccountScope =
     filterProp ?? (accountIdProp ? { type: "account", accountId: accountIdProp } : { type: "all" });
-  const accountId = accountIdProp ?? PORTFOLIO_ACCOUNT_ID;
   const { holdings, isLoading: holdingsLoading } = useHoldings(accountFilter);
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountFilter);
 
   const { data: portfolios = [] } = usePortfolios();
   const filteredAccountIds = useMemo(() => {
     if (accountFilter.type === "account") return [accountFilter.accountId];
+    if (accountFilter.type === "accounts") return accountFilter.accountIds;
     if (accountFilter.type === "portfolio") {
       return portfolios.find((p) => p.id === accountFilter.portfolioId)?.accountIds;
     }
-    return undefined;
+    return undefined; // "all" → DrillableAccountChart shows every account
   }, [accountFilter, portfolios]);
 
   const isLoading = holdingsLoading || allocationsLoading;
