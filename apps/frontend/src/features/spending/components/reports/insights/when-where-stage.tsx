@@ -844,7 +844,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
     () => buildEventCategoryRows(event, taxonomyCategories),
     [event, taxonomyCategories],
   );
-  const maxCategoryAmount = Math.max(1, ...categories.map((c) => c.amount));
+  const categoriesTotal = categories.reduce((sum, c) => sum + c.amount, 0);
 
   const dailySeries = useMemo(() => buildEventDailySeries(event, days), [event, days]);
   const peak = useMemo(() => findPeakDay(event, dailySeries), [event, dailySeries]);
@@ -970,7 +970,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
       {/* STAT BLOCK */}
       <div className="bg-muted/30 border-border/40 mt-4 grid grid-cols-2 gap-y-3 rounded-md border p-4 md:grid-cols-4 md:gap-x-0">
         <StatCell label="EVENT TOTAL">
-          <div className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
             {formatAmount(event.totalSpending, currency)}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
@@ -980,7 +980,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
         <StatCell label="LIFT VS NORMAL" divided>
           <div
             className={cn(
-              "text-xl font-semibold tabular-nums tracking-tight",
+              "text-base font-semibold tabular-nums tracking-tight",
               lift >= 0 ? "text-destructive" : "text-success",
             )}
           >
@@ -992,7 +992,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
           </div>
         </StatCell>
         <StatCell label="DAILY DURING" divided>
-          <div className="text-foreground text-xl font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
             {formatAmount(dailyDuring, currency)}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
@@ -1017,72 +1017,79 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
         {caption}
       </p>
 
-      {/* WHAT DROVE IT */}
-      <SubLabel right={`${categories.length} CATEGOR${categories.length === 1 ? "Y" : "IES"}`}>
-        WHAT DROVE IT
-      </SubLabel>
-      {categories.length > 0 && (
-        <>
-          <div className="bg-foreground/5 mb-3 mt-2 flex h-2.5 gap-px overflow-hidden rounded-sm">
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                title={`${c.name} · ${formatAmount(c.amount, currency)}`}
-                style={{ flex: `${c.amount} 0 0`, background: c.color }}
-              />
-            ))}
+      {/* DAY BY DAY · WHAT DROVE IT */}
+      <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
+        {/* LEFT: DAY BY DAY */}
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className={LABEL_CLASS}>DAY BY DAY</div>
+            <div className={cn(LABEL_CLASS, "text-right")}>
+              {peak
+                ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
+                : `BASELINE ${formatAmount(baseline, currency)}`}
+            </div>
           </div>
-          <div>
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                className="border-border/30 grid grid-cols-[120px_1fr_100px] items-center gap-3 border-b py-2 last:border-b-0 md:grid-cols-[160px_1fr_120px]"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
-                    style={{ background: c.color }}
-                  />
-                  <span className="text-foreground/90 truncate text-[12px]">{c.name}</span>
-                </div>
-                <div className="bg-foreground/5 relative h-3.5 overflow-hidden rounded-sm">
+          <DailyBars
+            beforeSeries={beforeSeries}
+            duringSeries={dailySeries}
+            afterSeries={afterSeries}
+            startDate={startDate}
+            endDate={endDate}
+            baseline={baseline}
+            currency={currency}
+          />
+        </div>
+
+        {/* RIGHT: WHAT DROVE IT */}
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className={LABEL_CLASS}>WHAT DROVE IT</div>
+            <div className={cn(LABEL_CLASS, "text-right")}>
+              {categories.length} CATEGOR{categories.length === 1 ? "Y" : "IES"}
+            </div>
+          </div>
+          {categories.length > 0 && (
+            <>
+              <div className="mt-3 flex h-1.5 items-stretch gap-0.5">
+                {categories.map((c) => (
                   <div
-                    className="h-full"
-                    style={{
-                      width: `${Math.max(2, (c.amount / maxCategoryAmount) * 100)}%`,
-                      background: c.color,
-                      opacity: 0.85,
-                    }}
+                    key={c.id}
+                    className="rounded-full"
+                    title={`${c.name} · ${formatAmount(c.amount, currency)}`}
+                    style={{ flex: `${c.amount} 0 0`, background: c.color }}
                   />
-                </div>
-                <span className="text-foreground/90 text-right text-[12px] font-medium tabular-nums">
-                  {formatAmount(c.amount, currency)}
-                </span>
+                ))}
               </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <Hr />
-
-      {/* DAY BY DAY */}
-      <SubLabel
-        right={
-          peak
-            ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
-            : `BASELINE ${formatAmount(baseline, currency)}`
-        }
-      >
-        DAY BY DAY
-      </SubLabel>
-      <DailyBars
-        data={dailySeries}
-        startDate={startDate}
-        endDate={endDate}
-        baseline={baseline}
-        currency={currency}
-      />
+              <div className="mt-2">
+                {categories.map((c) => {
+                  const pct =
+                    categoriesTotal > 0 ? Math.round((c.amount / categoriesTotal) * 1000) / 10 : 0;
+                  return (
+                    <div
+                      key={c.id}
+                      className="border-border/30 flex items-center gap-3 border-b py-1.5 last:border-b-0"
+                    >
+                      <span
+                        className="inline-block h-2 w-2 shrink-0 rounded-full"
+                        style={{ background: c.color }}
+                      />
+                      <span className="text-foreground/90 min-w-0 flex-1 truncate text-[12px]">
+                        {c.name}
+                      </span>
+                      <span className="text-muted-foreground/80 text-[11px] tabular-nums">
+                        {pct.toFixed(1)}%
+                      </span>
+                      <span className="text-foreground/90 text-right text-[12px] font-medium tabular-nums">
+                        {formatAmount(c.amount, currency)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       <Hr />
 
@@ -1184,44 +1191,84 @@ function Hr() {
 }
 
 function DailyBars({
-  data,
+  beforeSeries,
+  duringSeries,
+  afterSeries,
   startDate,
   endDate,
   baseline,
   currency,
 }: {
-  data: number[];
+  beforeSeries: number[];
+  duringSeries: number[];
+  afterSeries: number[];
   startDate: Date;
   endDate: Date;
   baseline: number;
   currency: string;
 }) {
-  const max = Math.max(1, baseline, ...data);
-  const days = data.length;
+  const max = Math.max(1, baseline, ...beforeSeries, ...duringSeries, ...afterSeries);
+  const duringDays = duringSeries.length;
+
+  const leftDate = useMemo(() => {
+    if (beforeSeries.length === 0) return startDate;
+    const d = new Date(startDate);
+    d.setDate(d.getDate() - beforeSeries.length);
+    return d;
+  }, [startDate, beforeSeries.length]);
+  const rightDate = useMemo(() => {
+    if (afterSeries.length === 0) return endDate;
+    const d = new Date(endDate);
+    d.setDate(d.getDate() + afterSeries.length);
+    return d;
+  }, [endDate, afterSeries.length]);
+
+  const segments: { key: string; data: number[]; className: string }[] = [];
+  if (beforeSeries.length > 0)
+    segments.push({ key: "before", data: beforeSeries, className: "bg-foreground/35" });
+  segments.push({ key: "during", data: duringSeries, className: "bg-success/80" });
+  if (afterSeries.length > 0)
+    segments.push({ key: "after", data: afterSeries, className: "bg-foreground/35" });
+
   return (
     <div className="mt-3">
-      <div className="relative flex h-28 items-end gap-[3px]">
+      <div className="relative flex h-28 items-end gap-2">
         {baseline > 0 && (
           <div
             className="border-foreground/30 pointer-events-none absolute left-0 right-0 border-t border-dashed"
             style={{ bottom: `${(baseline / max) * 100}%` }}
           />
         )}
-        {data.map((v, i) => (
-          <div
-            key={i}
-            className="bg-foreground/85 min-w-[2px] flex-1 rounded-t-[2px]"
-            style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
-            title={formatAmount(v, currency)}
-          />
-        ))}
+        {segments.flatMap((seg, segIdx) => {
+          const nodes = [
+            <div
+              key={seg.key}
+              className="flex h-full items-end gap-[3px]"
+              style={{ flex: seg.data.length }}
+            >
+              {seg.data.map((v, i) => (
+                <div
+                  key={i}
+                  className={cn("min-w-[2px] flex-1 rounded-t-[2px]", seg.className)}
+                  style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
+                  title={formatAmount(v, currency)}
+                />
+              ))}
+            </div>,
+          ];
+          if (segIdx > 0)
+            nodes.unshift(
+              <div key={`sep-${seg.key}`} className="bg-foreground/40 -my-1 w-px self-stretch" />,
+            );
+          return nodes;
+        })}
       </div>
       <div className="text-muted-foreground/80 mt-2 flex items-center justify-between text-[10px] tracking-wide">
-        <span className="tabular-nums">{formatPeakDay(startDate)}</span>
+        <span className="tabular-nums">{formatPeakDay(leftDate)}</span>
         <span className="text-muted-foreground/60">
-          {days} day{days === 1 ? "" : "s"}
+          {duringDays} day{duringDays === 1 ? "" : "s"}
         </span>
-        <span className="tabular-nums">{formatPeakDay(endDate)}</span>
+        <span className="tabular-nums">{formatPeakDay(rightDate)}</span>
       </div>
     </div>
   );
@@ -1272,13 +1319,13 @@ function RhythmCard({
   }[accent];
 
   return (
-    <div className={cn("rounded-md border p-3", palette.bg, palette.border)}>
+    <div className={cn("rounded-md border px-3 py-2", palette.bg, palette.border)}>
       <div className="flex items-baseline justify-between gap-2">
         <div className={LABEL_CLASS}>{label}</div>
         {typeof hangoverPct === "number" && Math.abs(hangoverPct) > 5 && (
           <span
             className={cn(
-              "rounded-sm px-1.5 py-0.5 text-[9px] tracking-wider",
+              "rounded-sm px-1 py-0.5 text-[9px] tracking-wider",
               hangoverPct > 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success",
             )}
           >
@@ -1286,9 +1333,16 @@ function RhythmCard({
           </span>
         )}
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        <span className="text-foreground text-base font-semibold tabular-nums">
-          {series.length === 0 ? "—" : `${formatAmount(value, currency)}/d`}
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <span className="text-foreground text-[13px] font-medium tabular-nums">
+          {series.length === 0 ? (
+            "—"
+          ) : (
+            <>
+              {formatAmount(value, currency)}
+              <span className="text-muted-foreground/70 font-normal">/d</span>
+            </>
+          )}
         </span>
         {series.length > 0 && (
           <Sparkline data={series} stroke={palette.stroke} fill={palette.fill} />
