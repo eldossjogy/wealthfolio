@@ -67,7 +67,7 @@ export function OverallBudgetMeter({
     status === "over"
       ? "var(--destructive)"
       : status === "approaching"
-        ? "#C28B47"
+        ? "var(--status-warn)"
         : "var(--success)";
 
   const monthsLabel = monthsInRange === 1 ? "month" : "months";
@@ -111,7 +111,7 @@ export function OverallBudgetMeter({
               backgroundColor: "var(--destructive)",
               opacity: 0.5,
               backgroundImage:
-                "repeating-linear-gradient(135deg, rgba(255,255,255,0.25) 0 4px, transparent 4px 8px)",
+                "repeating-linear-gradient(135deg, var(--bar-stripe) 0 4px, transparent 4px 8px)",
             }}
           />
         )}

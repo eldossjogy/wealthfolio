@@ -10,7 +10,6 @@ import type { Activity } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { getActivitySpendingAmount } from "../../../lib/constants";
-import { FOREST_THEME } from "../../../lib/theme";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS = "text-muted-foreground/70 text-[10px] font-normal uppercase tracking-[0.12em]";
@@ -35,7 +34,6 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
     () => buildWeekdayHourGrid(activities, accountTypeById),
     [accountTypeById, activities],
   );
-  const accent = FOREST_THEME.deep;
 
   if (activities.length === 0) {
     return (
@@ -88,7 +86,6 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
               weekdayIndex={di}
               cells={row}
               max={grid.max}
-              accent={accent}
               median={median}
               currency={currency}
               onCellClick={onCellClick}
@@ -99,9 +96,10 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
 
       <div className="border-border/40 mt-4 flex items-center justify-between border-t pt-3 text-[11px]">
         <span className="text-muted-foreground/70">
-          Each cell is one weekday-hour over 12 weeks. Darker = more spend.
+          Each cell is one weekday-hour over 12 weeks. <span className="dark:hidden">Darker</span>
+          <span className="hidden dark:inline">Brighter</span> = more spend.
         </span>
-        <Legend accent={accent} />
+        <Legend />
       </div>
     </div>
   );
@@ -112,7 +110,6 @@ function Row({
   weekdayIndex,
   cells,
   max,
-  accent,
   median,
   currency,
   onCellClick,
@@ -121,7 +118,6 @@ function Row({
   weekdayIndex: number;
   cells: number[];
   max: number;
-  accent: string;
   median: number;
   currency: string;
   onCellClick?: (weekday: number, hour: number) => void;
@@ -135,14 +131,17 @@ function Row({
       >
         {cells.map((amount, i) => {
           const t = max > 0 ? amount / max : 0;
-          const opacity = amount === 0 ? 0.07 : 0.18 + t * 0.75;
+          const opacity =
+            amount === 0
+              ? "var(--heatmap-empty-opacity)"
+              : `calc(var(--heatmap-min-opacity) + ${t} * var(--heatmap-range-opacity))`;
           const label = `${day} ${formatHour(i)} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`;
           if (!onCellClick) {
             return (
               <div
                 key={i}
                 className="aspect-square rounded-[3px]"
-                style={{ backgroundColor: accent, opacity }}
+                style={{ backgroundColor: "var(--heatmap-accent)", opacity }}
                 title={label}
               />
             );
@@ -153,7 +152,7 @@ function Row({
               type="button"
               onClick={() => onCellClick(weekdayIndex, i)}
               className="aspect-square rounded-[3px] transition-all hover:scale-110 hover:ring-1 hover:ring-[var(--ring)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
-              style={{ backgroundColor: accent, opacity }}
+              style={{ backgroundColor: "var(--heatmap-accent)", opacity }}
               title={label}
               aria-label={label}
             />
@@ -168,15 +167,15 @@ function Row({
   );
 }
 
-function Legend({ accent }: { accent: string }) {
+function Legend() {
   return (
     <span className="text-muted-foreground/70 inline-flex items-center gap-1.5">
       <span>less</span>
-      {[0.15, 0.35, 0.6, 0.9].map((o, i) => (
+      {[0.18, 0.4, 0.65, 0.95].map((o, i) => (
         <span
           key={i}
           className="h-2.5 w-2.5 rounded-[2px]"
-          style={{ backgroundColor: accent, opacity: o }}
+          style={{ backgroundColor: "var(--heatmap-accent)", opacity: o }}
         />
       ))}
       <span>more</span>

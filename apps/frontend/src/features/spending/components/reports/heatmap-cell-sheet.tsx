@@ -13,7 +13,6 @@ import { useAccounts } from "@/hooks/use-accounts";
 import type { Account, Activity } from "@/lib/types";
 import { cn, formatAmount, formatDate, formatTime } from "@/lib/utils";
 
-import { FOREST_THEME } from "../../lib/theme";
 import { isCashActivityOutflow } from "../../lib/constants";
 
 interface HeatmapCellSheetProps {
@@ -81,11 +80,6 @@ export function HeatmapCellSheet({
   const grouped = useMemo(() => groupByWeek(activities), [activities]);
 
   const hourLabel = hour == null ? "" : formatHourRange(hour);
-  const accent = FOREST_THEME.deep;
-  // Strong, clearly-visible top wash that fades out by the time the body starts.
-  const headerFill = `${accent}40`; // ~25% alpha
-  const headerFillMid = `${accent}1A`; // ~10% alpha
-  const tintBg = `${accent}1F`; // ~12% alpha
 
   // The transactions page filters can't pin to a specific weekday+hour, but we
   // can deep-link to the same 12-week window so the user keeps context.
@@ -114,19 +108,23 @@ export function HeatmapCellSheet({
           className="border-border/60 relative border-b px-6 pb-5"
           style={{
             paddingTop: "calc(env(safe-area-inset-top, 0px) + 1.5rem)",
-            backgroundImage: `linear-gradient(to bottom, ${headerFill} 0%, ${headerFillMid} 55%, transparent 100%)`,
+            backgroundImage:
+              "linear-gradient(to bottom, color-mix(in oklch, var(--heatmap-accent) 25%, transparent) 0%, color-mix(in oklch, var(--heatmap-accent) 10%, transparent) 55%, transparent 100%)",
           }}
         >
           <div
             className="text-[10px] font-semibold uppercase tracking-[0.14em]"
-            style={{ color: accent }}
+            style={{ color: "var(--heatmap-accent)" }}
           >
             When you spend
           </div>
           <div className="mt-2 flex items-start gap-3">
             <span
               className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-              style={{ backgroundColor: tintBg, color: accent }}
+              style={{
+                backgroundColor: "color-mix(in oklch, var(--heatmap-accent) 12%, transparent)",
+                color: "var(--heatmap-accent)",
+              }}
             >
               <Icons.Calendar className="h-5 w-5" />
             </span>

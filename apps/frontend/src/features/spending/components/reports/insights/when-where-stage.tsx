@@ -7,7 +7,6 @@ import { cn, formatAmount } from "@/lib/utils";
 
 import { useSpendingEventMutations } from "../../../hooks/use-spending-events";
 import { getActivitySpendingAmount } from "../../../lib/constants";
-import { FOREST_THEME } from "../../../lib/theme";
 import type { EventSpendingSummary } from "../../../types/event";
 import { formatMonthDay } from "./format";
 import { WhenYouSpendCard } from "./when-you-spend-card";
@@ -122,7 +121,9 @@ const MONTH_LABELS = [
   "DEC",
 ];
 
-// Kind palette lifted from the Events Tracking design — muted, warm tones.
+// Kind palette — fallback only. In practice the user picks a color when
+// creating an event type, so `getEventColors` returns the user color and this
+// table is only hit for legacy/imported events with no color set.
 const KIND_COLORS = {
   trip: { stroke: "#4F6B92", fill: "#D8E1EE" },
   wedding: { stroke: "#B0552E", fill: "#EFD2C2" },
@@ -572,11 +573,11 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                 x2={todayX}
                 y1={4}
                 y2={chartTop + chartH}
-                stroke="#EAC91F"
+                stroke="var(--event-today)"
                 strokeWidth={1.5}
               />
-              <circle cx={todayX} cy={4} r={3} fill="#EAC91F" />
-              <text x={todayX + 6} y={14} fontSize={9.5} fontWeight={600} fill="#EAC91F">
+              <circle cx={todayX} cy={4} r={3} fill="var(--event-today)" />
+              <text x={todayX + 6} y={14} fontSize={9.5} fontWeight={600} fill="var(--event-today)">
                 TODAY
               </text>
             </>
@@ -861,8 +862,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   const afterAvg = avgSeries(afterSeries);
   const hangoverPct = baseline > 0 ? Math.round((afterAvg / baseline - 1) * 100) : 0;
 
-  const tagColor = event.eventTypeColor ?? FOREST_THEME.deep;
-  const HeaderIcon = pickEventIcon(event.eventTypeName ?? "Event");
+  const tagColor = event.eventTypeColor ?? "var(--event-default)";
 
   const currentIdx = events.findIndex((e) => e.eventId === event.eventId);
   const canNav = events.length > 1;
@@ -902,22 +902,20 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   return (
     <div className={cn(CARD_CLASS, "font-mono")}>
       {/* HEADER */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3.5">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md"
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
             style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
-          >
-            <HeaderIcon className="h-5 w-5" style={{ color: tagColor }} />
-          </span>
+          />
           <div className="min-w-0">
-            <div className="text-foreground truncate text-xl font-semibold tracking-tight">
+            <div className="text-foreground truncate text-base font-semibold tracking-tight">
               {event.eventName}
             </div>
-            <div className="text-muted-foreground/80 mt-1 text-[11px] uppercase tabular-nums tracking-wide">
-              {formatRange(startDate, endDate)} · {days} DAY{days === 1 ? "" : "S"} ·{" "}
-              {event.transactionCount} TX
-              {event.eventTypeName ? ` · ${event.eventTypeName.toUpperCase()}` : ""}
+            <div className="text-muted-foreground/80 mt-0.5 text-[11px]">
+              {formatRange(startDate, endDate)} · {days} day{days === 1 ? "" : "s"} ·{" "}
+              {event.transactionCount} tx
+              {event.eventTypeName ? ` · ${event.eventTypeName.toLowerCase()}` : ""}
             </div>
           </div>
         </div>
@@ -925,7 +923,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-[11px]"
+            className="h-7 text-[11px]"
             onClick={() => prevEvent && onSelect(prevEvent.eventId)}
             disabled={!canNav}
           >
@@ -934,7 +932,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-[11px]"
+            className="h-7 text-[11px]"
             onClick={() => nextEvent && onSelect(nextEvent.eventId)}
             disabled={!canNav}
           >
@@ -968,7 +966,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
       )}
 
       {/* STAT BLOCK */}
-      <div className="bg-muted/30 border-border/40 mt-4 grid grid-cols-2 gap-y-3 rounded-md border p-4 md:grid-cols-4 md:gap-x-0">
+      <div className="mt-2 grid grid-cols-2 gap-y-4 md:grid-cols-4 md:gap-x-0">
         <StatCell label="EVENT TOTAL">
           <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
             {formatAmount(event.totalSpending, currency)}
@@ -1012,13 +1010,13 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
       </div>
 
       {/* TAKEAWAY */}
-      <p className="text-foreground/90 mt-5 text-[13px] leading-relaxed">
+      <p className="text-foreground/90 mt-6 text-[13px] leading-relaxed">
         <span className={cn(LABEL_CLASS, "mr-2")}>TAKEAWAY</span>
         {caption}
       </p>
 
       {/* DAY BY DAY · WHAT DROVE IT */}
-      <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
         {/* LEFT: DAY BY DAY */}
         <div>
           <div className="flex items-center justify-between gap-3">

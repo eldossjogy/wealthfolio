@@ -108,7 +108,7 @@ export function CashflowDivergingBars({ points, currency, isLoading }: CashflowD
           {/* Zero baseline — solid, slightly stronger than the gridlines */}
           <ReferenceLine y={0} stroke="var(--border)" strokeOpacity={0.9} />
           <Tooltip
-            cursor={{ fill: "rgba(0,0,0,0.04)" }}
+            cursor={{ fill: "var(--chart-cursor)" }}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload as CashflowDatum;

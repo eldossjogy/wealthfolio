@@ -254,7 +254,11 @@ function ProgressBar({ spent, budget }: { spent: number; budget: number }) {
   const pct = (spent / budget) * 100;
   const isOver = pct > 100;
   const isClose = pct >= 85 && !isOver;
-  const fillColor = isOver ? "var(--destructive)" : isClose ? "#C28B47" : "var(--success)";
+  const fillColor = isOver
+    ? "var(--destructive)"
+    : isClose
+      ? "var(--status-warn)"
+      : "var(--success)";
   return (
     <div className="flex items-center gap-2">
       <div className="bg-foreground/10 relative h-1.5 min-w-[60px] flex-1 overflow-hidden rounded-full">

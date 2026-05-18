@@ -47,7 +47,7 @@ const STATUS_TONE: Record<Status, string> = {
 
 const STATUS_FILL: Record<Status, string> = {
   over: "var(--destructive)",
-  approaching: "#C28B47",
+  approaching: "var(--status-warn)",
   comfortable: "var(--success)",
   underused: "var(--muted-foreground)",
 };
@@ -191,7 +191,7 @@ function BudgetRow({ row, currency }: { row: BudgetRow; currency: string }) {
                 backgroundColor: "var(--destructive)",
                 opacity: 0.5,
                 backgroundImage:
-                  "repeating-linear-gradient(135deg, rgba(255,255,255,0.25) 0 4px, transparent 4px 8px)",
+                  "repeating-linear-gradient(135deg, var(--bar-stripe) 0 4px, transparent 4px 8px)",
               }}
             />
           )}
@@ -234,7 +234,7 @@ function SummaryStat({
     tone === "destructive"
       ? "bg-destructive"
       : tone === "warning"
-        ? "bg-[#C28B47]"
+        ? "bg-[var(--status-warn)]"
         : tone === "success"
           ? "bg-success"
           : "bg-muted-foreground/60";
@@ -252,7 +252,7 @@ function statusPillBg(status: Status): string {
     case "over":
       return "bg-destructive/10";
     case "approaching":
-      return "bg-[#C28B47]/15";
+      return "bg-[var(--status-warn)]/15";
     case "comfortable":
       return "bg-success/10";
     case "underused":

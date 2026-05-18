@@ -125,7 +125,11 @@ const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading
 
   const status = pace.status;
   const statusColor =
-    status === "over" ? "var(--destructive)" : status === "approach" ? "#C28B47" : "var(--success)";
+    status === "over"
+      ? "var(--destructive)"
+      : status === "approach"
+        ? "var(--status-warn)"
+        : "var(--success)";
   const statusLabel =
     status === "over" ? "OVER BUDGET" : status === "approach" ? "TRENDING HIGH" : "ON TRACK";
 

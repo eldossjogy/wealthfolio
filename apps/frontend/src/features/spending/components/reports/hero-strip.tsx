@@ -244,7 +244,11 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
 
   const status = isOver ? "over" : pct >= 0.85 ? "approach" : "ok";
   const fillColor =
-    status === "over" ? "var(--destructive)" : status === "approach" ? "#C28B47" : "var(--success)";
+    status === "over"
+      ? "var(--destructive)"
+      : status === "approach"
+        ? "var(--status-warn)"
+        : "var(--success)";
   const statusLabel = isOver ? "Over budget" : pct >= 0.85 ? "Trending high" : "On track";
 
   // Pace marker position (clamped 0–100% of bar width).
