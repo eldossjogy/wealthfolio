@@ -121,21 +121,14 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
     <div className={cn(CARD_CLASS, "font-mono")}>
       {/* HEADER */}
       <div className="mb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
-              />
-              <div className="text-foreground truncate text-base font-semibold tracking-tight">
-                {event.eventName}
-              </div>
-            </div>
-            <div className="text-muted-foreground/80 mt-0.5 text-[11px]">
-              {formatRange(startDate, endDate)} · {days} day{days === 1 ? "" : "s"} ·{" "}
-              {event.transactionCount} transaction{event.transactionCount === 1 ? "" : "s"}
-              {event.eventTypeName ? ` · ${event.eventTypeName.toLowerCase()}` : ""}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+              style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
+            />
+            <div className="text-foreground truncate text-base font-semibold tracking-tight">
+              {event.eventName}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -200,6 +193,11 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
             </Tooltip>
           </div>
         </div>
+        <div className="text-muted-foreground/80 mt-1 text-[11px]">
+          {formatRange(startDate, endDate)} · {days} day{days === 1 ? "" : "s"} ·{" "}
+          {event.transactionCount} transaction{event.transactionCount === 1 ? "" : "s"}
+          {event.eventTypeName ? ` · ${event.eventTypeName.toLowerCase()}` : ""}
+        </div>
       </div>
 
       {outOfRange.length > 0 && (
@@ -227,9 +225,9 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
       )}
 
       {/* STAT BLOCK */}
-      <div className="mt-2 grid grid-cols-2 gap-y-4 md:grid-cols-4 md:gap-x-0">
+      <div className="mt-2 grid grid-cols-2 gap-y-3 md:grid-cols-4 md:gap-x-0 md:gap-y-4">
         <StatCell label="EVENT TOTAL">
-          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
             {formatAmount(event.totalSpending, currency)}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
@@ -239,7 +237,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
         <StatCell label={isPhone ? "LIFT" : "LIFT VS NORMAL"} divided>
           <div
             className={cn(
-              "text-base font-semibold tabular-nums tracking-tight",
+              "text-sm font-semibold tabular-nums tracking-tight md:text-base",
               lift >= 0 ? "text-destructive" : "text-success",
             )}
           >
@@ -251,7 +249,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
           </div>
         </StatCell>
         <StatCell label={isPhone ? "DAILY" : "DAILY DURING"} divided>
-          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
             {formatAmount(dailyDuring, currency)}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
@@ -261,7 +259,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
           </div>
         </StatCell>
         <StatCell label="PEAK DAY" divided>
-          <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
             {peak ? formatAmount(peak.amount, currency) : "—"}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
