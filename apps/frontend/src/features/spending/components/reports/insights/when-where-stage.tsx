@@ -15,6 +15,8 @@ import { cn, formatAmount } from "@/lib/utils";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 
 import { useEventDialog } from "../../event-dialog-provider";
+import { useEventChartData, type EventCategoryRow } from "../../../hooks/use-event-chart-data";
+import { useEventsAggregate } from "../../../hooks/use-events-aggregate";
 import { useSpendingEvents, useSpendingEventMutations } from "../../../hooks/use-spending-events";
 import { buildCashflowUrl } from "../../../lib/navigation";
 import { getActivitySpendingAmount } from "../../../lib/constants";
@@ -172,10 +174,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  const computed = useMemo(
-    () => computeEventsAggregate(events, heatmapActivities, accountTypeById),
-    [accountTypeById, events, heatmapActivities],
-  );
+  const computed = useEventsAggregate(events, heatmapActivities, accountTypeById);
 
   const dailySeries = useMemo(
     () => buildDailySeries(heatmapActivities, events, accountTypeById, rangeStart, rangeEnd),
@@ -696,64 +695,6 @@ function SummaryCell({
   );
 }
 
-interface EventsAggregate {
-  totalSpent: number;
-  totalEventDays: number;
-  normalPace: number;
-  lift: number;
-  topEventName: string | null;
-}
-
-function computeEventsAggregate(
-  events: EventSpendingSummary[],
-  heatmapActivities: Activity[],
-  accountTypeById?: Map<string, string>,
-): EventsAggregate {
-  let totalSpent = 0;
-  let totalEventDays = 0;
-  let topEvent: EventSpendingSummary | null = null;
-  for (const ev of events) {
-    totalSpent += ev.totalSpending;
-    const days = Math.max(1, inclusiveDays(new Date(ev.startDate), new Date(ev.endDate)));
-    totalEventDays += days;
-    if (!topEvent || ev.totalSpending > topEvent.totalSpending) topEvent = ev;
-  }
-
-  // Normal pace = average daily outflow over the heatmap activity window
-  // (last 12 weeks), excluding event days.
-  const eventDayKeys = new Set<string>();
-  for (const ev of events) {
-    const start = new Date(ev.startDate);
-    const end = new Date(ev.endDate);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      eventDayKeys.add(d.toISOString().slice(0, 10));
-    }
-  }
-  let baselineTotal = 0;
-  let baselineDays = 0;
-  const baselineDaySeen = new Set<string>();
-  for (const a of heatmapActivities) {
-    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (spendingAmount === 0) continue;
-    const dayKey = new Date(a.activityDate).toISOString().slice(0, 10);
-    if (eventDayKeys.has(dayKey)) continue;
-    baselineTotal += spendingAmount;
-    baselineDaySeen.add(dayKey);
-  }
-  baselineDays = Math.max(1, baselineDaySeen.size);
-  const normalPace = Math.max(0, baselineTotal) / baselineDays;
-  const expected = normalPace * totalEventDays;
-  const lift = totalSpent - expected;
-
-  return {
-    totalSpent,
-    totalEventDays,
-    normalPace,
-    lift,
-    topEventName: topEvent?.eventName ?? null,
-  };
-}
-
 /** Inclusive day count between A and B — same day = 1, next day = 2, etc. */
 function inclusiveDays(a: Date, b: Date): number {
   return Math.max(0, Math.round((b.getTime() - a.getTime()) / (24 * 3600 * 1000))) + 1;
@@ -839,44 +780,28 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   onSelect,
 }) => {
   const isPhone = useIsMobileViewport();
-  const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
-  const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
-  const days = Math.max(1, inclusiveDays(startDate, endDate));
-  const dailyDuring = days > 0 ? event.totalSpending / days : 0;
-
-  const baseline = useMemo(
-    () => computeBaselinePace(heatmapActivities, [event], accountTypeById),
-    [accountTypeById, heatmapActivities, event],
-  );
-
-  const expected = baseline * days;
-  const lift = event.totalSpending - expected;
-  const dailyDeltaPct = baseline > 0 ? Math.round((dailyDuring / baseline - 1) * 100) : 0;
-
-  const categories = useMemo(
-    () => buildEventCategoryRows(event, taxonomyCategories),
-    [event, taxonomyCategories],
-  );
-  const categoriesTotal = categories.reduce((sum, c) => sum + c.amount, 0);
-
-  const dailySeries = useMemo(() => buildEventDailySeries(event, days), [event, days]);
-  const tagged = useMemo(() => buildEventTaggedSeries(event), [event]);
-  const peak = useMemo(
-    () => findPeakDayAt(tagged.series, tagged.chartStartDate),
-    [tagged.series, tagged.chartStartDate],
-  );
-
-  const beforeSeries = useMemo(
-    () => buildWindowSeries(heatmapActivities, accountTypeById, startDate, -7, 7),
-    [heatmapActivities, accountTypeById, startDate],
-  );
-  const afterSeries = useMemo(
-    () => buildWindowSeries(heatmapActivities, accountTypeById, endDate, 1, 3),
-    [heatmapActivities, accountTypeById, endDate],
-  );
-  const beforeAvg = avgSeries(beforeSeries);
-  const afterAvg = avgSeries(afterSeries);
-  const hangoverPct = baseline > 0 ? Math.round((afterAvg / baseline - 1) * 100) : 0;
+  const chart = useEventChartData(event, heatmapActivities, accountTypeById, taxonomyCategories);
+  const {
+    startDate,
+    endDate,
+    days,
+    dailyDuring,
+    baseline,
+    expected,
+    lift,
+    dailyDeltaPct,
+    categories,
+    categoriesTotal,
+    dailySeries,
+    tagged,
+    peak,
+    beforeSeries,
+    afterSeries,
+    beforeAvg,
+    afterAvg,
+    hangoverPct,
+    outOfRange,
+  } = chart;
 
   const tagColor = event.eventTypeColor ?? "var(--event-default)";
 
@@ -889,21 +814,6 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
     () => buildEventCaption({ days, lift, currency, top: categories }),
     [days, lift, currency, categories],
   );
-
-  // Detect tagged transactions falling outside the event's date window. The
-  // backend's `dailySpending` covers every day with tagged spend, including
-  // dates outside the event's own [start, end].
-  const outOfRange = useMemo(() => {
-    const s = event.startDate.slice(0, 10);
-    const e = event.endDate.slice(0, 10);
-    const dates: string[] = [];
-    for (const dateKey of Object.keys(event.dailySpending ?? {})) {
-      const k = dateKey.slice(0, 10);
-      if (k < s || k > e) dates.push(k);
-    }
-    dates.sort();
-    return dates;
-  }, [event.dailySpending, event.startDate, event.endDate]);
 
   const { update } = useSpendingEventMutations();
   const expandWindow = () => {
@@ -1448,98 +1358,6 @@ function Sparkline({
   );
 }
 
-// ─── EventDetailPanel data helpers ───────────────────────────────────────
-
-function buildEventDailySeries(event: EventSpendingSummary, days: number): number[] {
-  const start = new Date(event.startDate);
-  const series = new Array(days).fill(0);
-  for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
-    const d = new Date(`${dateKey}T12:00:00`);
-    const idx = Math.round((d.getTime() - start.getTime()) / 86_400_000);
-    if (idx >= 0 && idx < days) series[idx] = amount;
-  }
-  return series;
-}
-
-function findPeakDayAt(series: number[], base: Date): { date: Date; amount: number } | null {
-  let bestIdx = -1;
-  let best = -Infinity;
-  series.forEach((v, i) => {
-    if (v > best) {
-      best = v;
-      bestIdx = i;
-    }
-  });
-  if (bestIdx < 0 || best <= 0) return null;
-  const d = new Date(base);
-  d.setDate(d.getDate() + bestIdx);
-  return { date: d, amount: best };
-}
-
-/**
- * Build a per-day tagged-spend series covering the union of the event window
- * and any tagged transactions outside it. The `inWindow` mask flags which
- * indices fall within the event's own [startDate, endDate].
- */
-function buildEventTaggedSeries(event: EventSpendingSummary): {
-  series: number[];
-  inWindow: boolean[];
-  chartStartDate: Date;
-  chartEndDate: Date;
-} {
-  const evStartKey = event.startDate.slice(0, 10);
-  const evEndKey = event.endDate.slice(0, 10);
-  const allKeys = [
-    evStartKey,
-    evEndKey,
-    ...Object.keys(event.dailySpending ?? {}).map((k) => k.slice(0, 10)),
-  ].sort();
-  const chartStartDate = new Date(`${allKeys[0]}T12:00:00`);
-  const chartEndDate = new Date(`${allKeys[allKeys.length - 1]}T12:00:00`);
-  const days = Math.round((chartEndDate.getTime() - chartStartDate.getTime()) / 86_400_000) + 1;
-
-  const series = new Array(days).fill(0);
-  const inWindow = new Array(days).fill(false);
-  const evStartMs = new Date(`${evStartKey}T12:00:00`).getTime();
-  const evEndMs = new Date(`${evEndKey}T12:00:00`).getTime();
-
-  for (let i = 0; i < days; i++) {
-    const ms = chartStartDate.getTime() + i * 86_400_000;
-    inWindow[i] = ms >= evStartMs && ms <= evEndMs;
-  }
-  for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
-    const d = new Date(`${dateKey.slice(0, 10)}T12:00:00`);
-    const idx = Math.round((d.getTime() - chartStartDate.getTime()) / 86_400_000);
-    if (idx >= 0 && idx < days) series[idx] = amount;
-  }
-  return { series, inWindow, chartStartDate, chartEndDate };
-}
-
-function buildWindowSeries(
-  activities: Activity[],
-  accountTypeById: Map<string, string> | undefined,
-  anchor: Date,
-  offsetDays: number,
-  windowDays: number,
-): number[] {
-  const start = new Date(anchor);
-  start.setDate(start.getDate() + offsetDays);
-  start.setHours(0, 0, 0, 0);
-  const series = new Array(windowDays).fill(0);
-  for (const a of activities) {
-    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (amt <= 0) continue;
-    const idx = Math.floor((new Date(a.activityDate).getTime() - start.getTime()) / 86_400_000);
-    if (idx >= 0 && idx < windowDays) series[idx] += amt;
-  }
-  return series.some((v) => v > 0) ? series : [];
-}
-
-function avgSeries(series: number[]): number {
-  if (series.length === 0) return 0;
-  return series.reduce((a, b) => a + b, 0) / series.length;
-}
-
 function formatPeakDay(d: Date): string {
   const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
   return `${dayNames[d.getDay()]}, ${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
@@ -1547,60 +1365,6 @@ function formatPeakDay(d: Date): string {
 
 function formatChipDate(d: Date): string {
   return `${MONTH_LABELS[d.getMonth()]} ${d.getDate()}`;
-}
-
-interface EventCategoryRow {
-  id: string;
-  name: string;
-  color: string;
-  amount: number;
-}
-
-function buildEventCategoryRows(
-  event: EventSpendingSummary,
-  taxonomyCategories: TaxonomyCategory[],
-): EventCategoryRow[] {
-  const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
-  const byTop = new Map<string, EventCategoryRow>();
-  for (const cat of Object.values(event.byCategory)) {
-    const m = cat.categoryId ? meta.get(cat.categoryId) : undefined;
-    const topId = m?.parentId ?? cat.categoryId ?? cat.categoryName;
-    const top = (m?.parentId && meta.get(m.parentId)) || m;
-    const name = top?.name ?? cat.categoryName ?? "Uncategorized";
-    const color = top?.color ?? cat.color ?? "#9CA3AF";
-    const e = byTop.get(topId) ?? { id: topId, name, color, amount: 0 };
-    e.amount += cat.amount;
-    byTop.set(topId, e);
-  }
-  return Array.from(byTop.values())
-    .filter((row) => row.amount > 0)
-    .sort((a, b) => b.amount - a.amount);
-}
-
-function computeBaselinePace(
-  activities: Activity[],
-  excludeEvents: EventSpendingSummary[],
-  accountTypeById?: Map<string, string>,
-): number {
-  const exclude = new Set<string>();
-  for (const ev of excludeEvents) {
-    const start = new Date(ev.startDate);
-    const end = new Date(ev.endDate);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      exclude.add(d.toISOString().slice(0, 10));
-    }
-  }
-  let total = 0;
-  const seen = new Set<string>();
-  for (const a of activities) {
-    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (spendingAmount === 0) continue;
-    const dayKey = new Date(a.activityDate).toISOString().slice(0, 10);
-    if (exclude.has(dayKey)) continue;
-    total += spendingAmount;
-    seen.add(dayKey);
-  }
-  return seen.size === 0 ? 0 : Math.max(0, total) / seen.size;
 }
 
 function buildEventCaption({
