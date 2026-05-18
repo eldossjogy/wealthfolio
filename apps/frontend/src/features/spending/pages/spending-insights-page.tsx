@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useSettingsContext } from "@/lib/settings-provider";
 
 import {
@@ -106,19 +106,6 @@ export default function SpendingInsightsPage() {
   );
   const { data: events = [] } = useEventSpendingSummaries(eventsRequest);
 
-  // Header context — Mon D – Mon D, YYYY · N tx
-  const contextLabel = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-    const sameYear = range.start.getFullYear() === range.end.getFullYear();
-    const yearFmt = new Intl.DateTimeFormat(undefined, { year: "numeric" });
-    const startStr = fmt.format(range.start);
-    const endStr = fmt.format(range.end);
-    const yearStr = sameYear ? `, ${yearFmt.format(range.end)}` : "";
-    const txCount = currentReport?.current.count;
-    const txLabel = txCount != null ? ` · ${txCount.toLocaleString()} tx` : "";
-    return `${startStr} – ${endStr}${yearStr}${txLabel}`;
-  }, [range, currentReport]);
-
   const onJumpToBreakdown = useCallback(() => {
     const el = document.getElementById("breakdown");
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -173,7 +160,6 @@ export default function SpendingInsightsPage() {
     <Page>
       <PageHeader
         heading="Spending Insight"
-        text="Patterns, comparisons, and anomalies for your spending."
         onBack={() => {
           if (window.history.length > 1) navigate(-1);
           else navigate("/dashboard?tab=spending");
@@ -181,7 +167,7 @@ export default function SpendingInsightsPage() {
         actions={periodToggle}
       />
       <PageContent className="space-y-5">
-        <StageNav stage={stage} onStageChange={setStage} contextLabel={contextLabel} />
+        <StageNav stage={stage} onStageChange={setStage} />
 
         {stage === "where" && (
           <WhereIAmStage

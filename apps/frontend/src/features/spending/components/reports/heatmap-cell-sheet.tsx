@@ -129,7 +129,7 @@ export function HeatmapCellSheet({
               <Icons.Calendar className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <SheetTitle className="text-foreground text-2xl font-semibold tracking-tight">
+              <SheetTitle className="text-foreground text-lg font-semibold tracking-tight">
                 {dayLabel ? `${dayLabel} · ${hourLabel}` : "Activity"}
               </SheetTitle>
               <p className="text-muted-foreground mt-0.5 text-xs">

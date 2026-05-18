@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { Button, Icons, formatCompactAmount } from "@wealthfolio/ui";
+import {
+  Button,
+  Icons,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  formatCompactAmount,
+} from "@wealthfolio/ui";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
+import { useIsMobileViewport } from "@/hooks/use-platform";
+
 import { useEventDialog } from "../../event-dialog-provider";
-import { useSpendingEventMutations } from "../../../hooks/use-spending-events";
+import { useSpendingEvents, useSpendingEventMutations } from "../../../hooks/use-spending-events";
+import { buildCashflowUrl } from "../../../lib/navigation";
 import { getActivitySpendingAmount } from "../../../lib/constants";
 import type { EventSpendingSummary } from "../../../types/event";
+import { getEventColors } from "./event-colors";
+import { EventsCalendarCard } from "./events-calendar-card";
 import { formatMonthDay } from "./format";
 import { WhenYouSpendCard } from "./when-you-spend-card";
 
@@ -50,6 +63,11 @@ export function WhenWhereStage({
     [events, selectedId],
   );
 
+  // Phone-only calendar view. Viewport-based — < 768px (Tailwind md). This
+  // excludes iPad (768 portrait / 1024 landscape both fail the `<` check) and
+  // triggers correctly for a narrowed desktop browser during development.
+  const useCalendar = useIsMobileViewport();
+
   return (
     <div className="flex flex-col gap-6">
       <WhenYouSpendCard
@@ -61,16 +79,25 @@ export function WhenWhereStage({
       <div className="flex flex-col gap-4">
         {events.length > 0 ? (
           <>
-            <EventsTimelineCard
-              events={events}
-              currency={currency}
-              rangeStart={rangeStart}
-              rangeEnd={rangeEnd}
-              heatmapActivities={heatmapActivities}
-              accountTypeById={accountTypeById}
-              selectedId={selectedId}
-              onSelect={setOverride}
-            />
+            {useCalendar ? (
+              <EventsCalendarCard
+                events={events}
+                currency={currency}
+                selectedId={selectedId}
+                onSelect={setOverride}
+              />
+            ) : (
+              <EventsTimelineCard
+                events={events}
+                currency={currency}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                heatmapActivities={heatmapActivities}
+                accountTypeById={accountTypeById}
+                selectedId={selectedId}
+                onSelect={setOverride}
+              />
+            )}
             {selected && (
               <EventDetailPanel
                 event={selected}
@@ -120,39 +147,6 @@ const MONTH_LABELS = [
   "NOV",
   "DEC",
 ];
-
-// Kind palette — fallback only. In practice the user picks a color when
-// creating an event type, so `getEventColors` returns the user color and this
-// table is only hit for legacy/imported events with no color set.
-const KIND_COLORS = {
-  trip: { stroke: "#4F6B92", fill: "#D8E1EE" },
-  wedding: { stroke: "#B0552E", fill: "#EFD2C2" },
-  holiday: { stroke: "#6B8E54", fill: "#D4DEC7" },
-  move: { stroke: "#B89A4C", fill: "#EBDDB7" },
-  oneoff: { stroke: "#8E7CB3", fill: "#DCD3EA" },
-} as const;
-
-type EventKind = keyof typeof KIND_COLORS;
-
-function inferEventKind(typeName: string | null | undefined): EventKind {
-  const n = (typeName ?? "").toLowerCase();
-  if (n.includes("trip") || n.includes("travel") || n.includes("flight") || n.includes("vacation"))
-    return "trip";
-  if (n.includes("wedding")) return "wedding";
-  if (n.includes("holiday")) return "holiday";
-  if (n.includes("move") || n.includes("apartment") || n.includes("home")) return "move";
-  return "oneoff";
-}
-
-/** Resolve stroke/fill for an event. Prefers eventTypeColor; otherwise uses the kind palette. */
-function getEventColors(ev: EventSpendingSummary): { stroke: string; fill: string } {
-  const kind = inferEventKind(ev.eventTypeName);
-  if (ev.eventTypeColor) {
-    // Use custom stroke; derive a soft fill by appending alpha hex.
-    return { stroke: ev.eventTypeColor, fill: `${ev.eventTypeColor}33` };
-  }
-  return KIND_COLORS[kind];
-}
 
 const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   events,
@@ -347,24 +341,30 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               {t.name.toUpperCase()}
             </span>
           ))}
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-1 h-7 text-[11px]"
-            onClick={() =>
-              openEventDialog({
-                prefill: { startDate: rangeStart, endDate: rangeEnd },
-                onCreated: (ev) => onSelect(ev.id),
-              })
-            }
-          >
-            + TAG EVENT
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Create event"
+                className="ml-1 h-7 w-7 rounded-full"
+                onClick={() =>
+                  openEventDialog({
+                    prefill: { startDate: rangeStart, endDate: rangeEnd },
+                    onCreated: (ev) => onSelect(ev.id),
+                  })
+                }
+              >
+                <Icons.Plus className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Create event</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
       {/* TIMELINE CHART */}
-      <div className="relative w-full">
+      <div className="relative w-full overflow-x-auto">
         <svg width={W} height={totalH} style={{ display: "block", overflow: "visible" }}>
           {/* Month gridlines + labels */}
           {months.map((m, i) => {
@@ -620,9 +620,9 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
       </div>
 
       {/* Summary strip */}
-      <div className="border-border/40 mt-4 grid grid-cols-2 gap-x-0 gap-y-4 border-t pt-4 md:grid-cols-4">
+      <div className="border-border/40 mt-3 grid grid-cols-2 gap-x-0 gap-y-3 border-t pt-3 md:grid-cols-4">
         <SummaryCell label={`ACROSS ${events.length} EVENT${events.length === 1 ? "" : "S"}`}>
-          <div className="text-foreground text-lg font-semibold tabular-nums tracking-tight">
+          <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight">
             {formatAmount(computed.totalSpent, currency)}
           </div>
           <div className="text-muted-foreground/80 mt-0.5 text-[10px]">
@@ -633,7 +633,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
         <SummaryCell label="COMBINED LIFT" divided>
           <div
             className={cn(
-              "text-lg font-semibold tabular-nums tracking-tight",
+              "text-sm font-semibold tabular-nums tracking-tight",
               computed.lift >= 0 ? "text-destructive" : "text-success",
             )}
           >
@@ -646,7 +646,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
         </SummaryCell>
         {biggest && (
           <SummaryCell label="BIGGEST EVENT" divided>
-            <div className="text-foreground truncate text-lg font-semibold tracking-tight">
+            <div className="text-foreground truncate text-sm font-semibold tracking-tight">
               {biggest.eventName}
             </div>
             <div className="text-muted-foreground/80 mt-0.5 text-[10px] tabular-nums">
@@ -664,7 +664,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                   border: `1.5px solid ${getEventColors(selected).stroke}`,
                 }}
               />
-              <span className="text-foreground truncate text-lg font-semibold tracking-tight">
+              <span className="text-foreground truncate text-sm font-semibold tracking-tight">
                 {selected.eventName}
               </span>
             </div>
@@ -838,6 +838,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   accountTypeById,
   onSelect,
 }) => {
+  const isPhone = useIsMobileViewport();
   const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
   const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
   const days = Math.max(1, inclusiveDays(startDate, endDate));
@@ -859,7 +860,11 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   const categoriesTotal = categories.reduce((sum, c) => sum + c.amount, 0);
 
   const dailySeries = useMemo(() => buildEventDailySeries(event, days), [event, days]);
-  const peak = useMemo(() => findPeakDay(event, dailySeries), [event, dailySeries]);
+  const tagged = useMemo(() => buildEventTaggedSeries(event), [event]);
+  const peak = useMemo(
+    () => findPeakDayAt(tagged.series, tagged.chartStartDate),
+    [tagged.series, tagged.chartStartDate],
+  );
 
   const beforeSeries = useMemo(
     () => buildWindowSeries(heatmapActivities, accountTypeById, startDate, -7, 7),
@@ -910,53 +915,117 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
     });
   };
 
+  const navigate = useNavigate();
+  const { openEventDialog } = useEventDialog();
+  const { data: allEvents = [] } = useSpendingEvents();
+  const fullEvent = useMemo(
+    () => allEvents.find((e) => e.id === event.eventId),
+    [allEvents, event.eventId],
+  );
+
+  const handleEdit = () => {
+    if (!fullEvent) return;
+    openEventDialog({ event: fullEvent });
+  };
+  const handleViewTransactions = () => {
+    navigate(
+      buildCashflowUrl({
+        startDate: event.startDate.slice(0, 10),
+        endDate: event.endDate.slice(0, 10),
+      }),
+    );
+  };
+
   return (
     <div className={cn(CARD_CLASS, "font-mono")}>
       {/* HEADER */}
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
-            style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
-          />
-          <div className="min-w-0">
-            <div className="text-foreground truncate text-base font-semibold tracking-tight">
-              {event.eventName}
+      <div className="mb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                style={{ background: `${tagColor}26`, border: `1.5px solid ${tagColor}` }}
+              />
+              <div className="text-foreground truncate text-base font-semibold tracking-tight">
+                {event.eventName}
+              </div>
             </div>
             <div className="text-muted-foreground/80 mt-0.5 text-[11px]">
               {formatRange(startDate, endDate)} · {days} day{days === 1 ? "" : "s"} ·{" "}
-              {event.transactionCount} tx
+              {event.transactionCount} transaction{event.transactionCount === 1 ? "" : "s"}
               {event.eventTypeName ? ` · ${event.eventTypeName.toLowerCase()}` : ""}
             </div>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px]"
-            onClick={() => prevEvent && onSelect(prevEvent.eventId)}
-            disabled={!canNav}
-          >
-            ← PREV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px]"
-            onClick={() => nextEvent && onSelect(nextEvent.eventId)}
-            disabled={!canNav}
-          >
-            NEXT →
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Previous event"
+                  className="h-7 w-7"
+                  onClick={() => prevEvent && onSelect(prevEvent.eventId)}
+                  disabled={!canNav}
+                >
+                  <Icons.ChevronLeft className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Previous event</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Next event"
+                  className="h-7 w-7"
+                  onClick={() => nextEvent && onSelect(nextEvent.eventId)}
+                  disabled={!canNav}
+                >
+                  <Icons.ChevronRight className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Next event</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Edit event"
+                  className="h-7 w-7"
+                  onClick={handleEdit}
+                  disabled={!fullEvent}
+                >
+                  <Icons.Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit event</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Tag transactions in this period"
+                  className="h-7 w-7"
+                  onClick={handleViewTransactions}
+                >
+                  <Icons.Activity className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Tag transactions</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
 
       {outOfRange.length > 0 && (
         <div className="bg-warning/10 border-warning/40 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-[11px]">
           <span className="text-foreground/90">
-            <span className="font-medium tabular-nums">{outOfRange.length}</span> tagged tx outside
-            event dates
+            <span className="font-medium tabular-nums">{outOfRange.length}</span> tagged transaction
+            {outOfRange.length === 1 ? "" : "s"} outside event dates
             <span className="text-muted-foreground/80 ml-1 tabular-nums">
               ({formatOutOfRangeDate(outOfRange[0])}
               {outOfRange.length > 1
@@ -971,7 +1040,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
             disabled={update.isPending}
             className="text-foreground hover:bg-warning/15 rounded px-2 py-0.5 text-[11px] font-medium underline-offset-2 hover:underline disabled:opacity-50"
           >
-            {update.isPending ? "Expanding…" : "Expand window →"}
+            {update.isPending ? "Expanding…" : "Expand event window →"}
           </button>
         </div>
       )}
@@ -986,7 +1055,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
             across {event.transactionCount} transactions
           </div>
         </StatCell>
-        <StatCell label="LIFT VS NORMAL" divided>
+        <StatCell label={isPhone ? "LIFT" : "LIFT VS NORMAL"} divided>
           <div
             className={cn(
               "text-base font-semibold tabular-nums tracking-tight",
@@ -1000,7 +1069,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
             vs {formatAmount(Math.max(0, expected), currency)} expected
           </div>
         </StatCell>
-        <StatCell label="DAILY DURING" divided>
+        <StatCell label={isPhone ? "DAILY" : "DAILY DURING"} divided>
           <div className="text-foreground text-base font-semibold tabular-nums tracking-tight">
             {formatAmount(dailyDuring, currency)}
           </div>
@@ -1022,7 +1091,9 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
 
       {/* TAKEAWAY */}
       <p className="text-foreground/90 mt-6 text-[13px] leading-relaxed">
-        <span className={cn(LABEL_CLASS, "mr-2")}>TAKEAWAY</span>
+        <span className="text-primary mr-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+          TAKEAWAY
+        </span>
         {caption}
       </p>
 
@@ -1033,19 +1104,22 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
           <div className="flex items-center justify-between gap-3">
             <div className={LABEL_CLASS}>DAY BY DAY</div>
             <div className={cn(LABEL_CLASS, "text-right")}>
-              {peak
-                ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
-                : `BASELINE ${formatAmount(baseline, currency)}`}
+              {isPhone
+                ? `BASELINE ${formatCompactAmount(baseline, currency)}`
+                : peak
+                  ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
+                  : `BASELINE ${formatAmount(baseline, currency)}`}
             </div>
           </div>
           <DailyBars
-            beforeSeries={beforeSeries}
-            duringSeries={dailySeries}
-            afterSeries={afterSeries}
-            startDate={startDate}
-            endDate={endDate}
+            series={tagged.series}
+            inWindow={tagged.inWindow}
+            chartStartDate={tagged.chartStartDate}
+            chartEndDate={tagged.chartEndDate}
+            eventDays={days}
             baseline={baseline}
             currency={currency}
+            compact={isPhone}
           />
         </div>
 
@@ -1103,7 +1177,9 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
       <Hr />
 
       {/* AFTER */}
-      <SubLabel right={`${days}D EVENT WINDOW`}>AFTER · DID YOUR RHYTHM RETURN?</SubLabel>
+      <SubLabel right={isPhone ? `${days}D WINDOW` : `${days}D EVENT WINDOW`}>
+        {isPhone ? "AFTER" : "AFTER · DID YOUR RHYTHM RETURN?"}
+      </SubLabel>
       <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-3">
         <RhythmCard
           label="7D BEFORE"
@@ -1200,84 +1276,68 @@ function Hr() {
 }
 
 function DailyBars({
-  beforeSeries,
-  duringSeries,
-  afterSeries,
-  startDate,
-  endDate,
+  series,
+  inWindow,
+  chartStartDate,
+  chartEndDate,
+  eventDays,
   baseline,
   currency,
+  compact,
 }: {
-  beforeSeries: number[];
-  duringSeries: number[];
-  afterSeries: number[];
-  startDate: Date;
-  endDate: Date;
+  series: number[];
+  inWindow: boolean[];
+  chartStartDate: Date;
+  chartEndDate: Date;
+  eventDays: number;
   baseline: number;
   currency: string;
+  compact?: boolean;
 }) {
-  const max = Math.max(1, baseline, ...beforeSeries, ...duringSeries, ...afterSeries);
-  const duringDays = duringSeries.length;
-
-  const leftDate = useMemo(() => {
-    if (beforeSeries.length === 0) return startDate;
-    const d = new Date(startDate);
-    d.setDate(d.getDate() - beforeSeries.length);
-    return d;
-  }, [startDate, beforeSeries.length]);
-  const rightDate = useMemo(() => {
-    if (afterSeries.length === 0) return endDate;
-    const d = new Date(endDate);
-    d.setDate(d.getDate() + afterSeries.length);
-    return d;
-  }, [endDate, afterSeries.length]);
-
-  const segments: { key: string; data: number[]; className: string }[] = [];
-  if (beforeSeries.length > 0)
-    segments.push({ key: "before", data: beforeSeries, className: "bg-foreground/35" });
-  segments.push({ key: "during", data: duringSeries, className: "bg-success/80" });
-  if (afterSeries.length > 0)
-    segments.push({ key: "after", data: afterSeries, className: "bg-foreground/35" });
+  const max = Math.max(1, baseline, ...series);
+  const hasOutOfWindow = inWindow.some((v) => !v);
 
   return (
     <div className="mt-3">
-      <div className="relative flex h-28 items-end gap-2">
+      <div className={cn("relative flex items-end gap-[3px]", compact ? "h-20" : "h-28")}>
         {baseline > 0 && (
           <div
             className="border-foreground/30 pointer-events-none absolute left-0 right-0 border-t border-dashed"
             style={{ bottom: `${(baseline / max) * 100}%` }}
           />
         )}
-        {segments.flatMap((seg, segIdx) => {
-          const nodes = [
+        {series.map((v, i) => {
+          const isOut = !inWindow[i];
+          const boundary = i > 0 && inWindow[i - 1] !== inWindow[i];
+          const bar = (
             <div
-              key={seg.key}
-              className="flex h-full items-end gap-[3px]"
-              style={{ flex: seg.data.length }}
-            >
-              {seg.data.map((v, i) => (
-                <div
-                  key={i}
-                  className={cn("min-w-[2px] flex-1 rounded-t-[2px]", seg.className)}
-                  style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
-                  title={formatAmount(v, currency)}
-                />
-              ))}
-            </div>,
+              key={`bar-${i}`}
+              className={cn(
+                "min-w-[2px] flex-1 rounded-t-[2px]",
+                isOut ? "bg-warning/70" : "bg-success/80",
+              )}
+              style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
+              title={formatAmount(v, currency) + (isOut ? " · outside event window" : "")}
+            />
+          );
+          if (!boundary) return bar;
+          return [
+            <div
+              key={`sep-${i}`}
+              className="bg-foreground/40 -my-1 w-px self-stretch"
+              aria-hidden
+            />,
+            bar,
           ];
-          if (segIdx > 0)
-            nodes.unshift(
-              <div key={`sep-${seg.key}`} className="bg-foreground/40 -my-1 w-px self-stretch" />,
-            );
-          return nodes;
         })}
       </div>
       <div className="text-muted-foreground/80 mt-2 flex items-center justify-between text-[10px] tracking-wide">
-        <span className="tabular-nums">{formatPeakDay(leftDate)}</span>
+        <span className="tabular-nums">{formatPeakDay(chartStartDate)}</span>
         <span className="text-muted-foreground/60">
-          {duringDays} day{duringDays === 1 ? "" : "s"}
+          {eventDays} day{eventDays === 1 ? "" : "s"}
+          {hasOutOfWindow ? " · incl. outside window" : ""}
         </span>
-        <span className="tabular-nums">{formatPeakDay(rightDate)}</span>
+        <span className="tabular-nums">{formatPeakDay(chartEndDate)}</span>
       </div>
     </div>
   );
@@ -1401,10 +1461,7 @@ function buildEventDailySeries(event: EventSpendingSummary, days: number): numbe
   return series;
 }
 
-function findPeakDay(
-  event: EventSpendingSummary,
-  series: number[],
-): { date: Date; amount: number } | null {
+function findPeakDayAt(series: number[], base: Date): { date: Date; amount: number } | null {
   let bestIdx = -1;
   let best = -Infinity;
   series.forEach((v, i) => {
@@ -1414,10 +1471,48 @@ function findPeakDay(
     }
   });
   if (bestIdx < 0 || best <= 0) return null;
-  const start = new Date(event.startDate);
-  const d = new Date(start);
+  const d = new Date(base);
   d.setDate(d.getDate() + bestIdx);
   return { date: d, amount: best };
+}
+
+/**
+ * Build a per-day tagged-spend series covering the union of the event window
+ * and any tagged transactions outside it. The `inWindow` mask flags which
+ * indices fall within the event's own [startDate, endDate].
+ */
+function buildEventTaggedSeries(event: EventSpendingSummary): {
+  series: number[];
+  inWindow: boolean[];
+  chartStartDate: Date;
+  chartEndDate: Date;
+} {
+  const evStartKey = event.startDate.slice(0, 10);
+  const evEndKey = event.endDate.slice(0, 10);
+  const allKeys = [
+    evStartKey,
+    evEndKey,
+    ...Object.keys(event.dailySpending ?? {}).map((k) => k.slice(0, 10)),
+  ].sort();
+  const chartStartDate = new Date(`${allKeys[0]}T12:00:00`);
+  const chartEndDate = new Date(`${allKeys[allKeys.length - 1]}T12:00:00`);
+  const days = Math.round((chartEndDate.getTime() - chartStartDate.getTime()) / 86_400_000) + 1;
+
+  const series = new Array(days).fill(0);
+  const inWindow = new Array(days).fill(false);
+  const evStartMs = new Date(`${evStartKey}T12:00:00`).getTime();
+  const evEndMs = new Date(`${evEndKey}T12:00:00`).getTime();
+
+  for (let i = 0; i < days; i++) {
+    const ms = chartStartDate.getTime() + i * 86_400_000;
+    inWindow[i] = ms >= evStartMs && ms <= evEndMs;
+  }
+  for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
+    const d = new Date(`${dateKey.slice(0, 10)}T12:00:00`);
+    const idx = Math.round((d.getTime() - chartStartDate.getTime()) / 86_400_000);
+    if (idx >= 0 && idx < days) series[idx] = amount;
+  }
+  return { series, inWindow, chartStartDate, chartEndDate };
 }
 
 function buildWindowSeries(

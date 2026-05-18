@@ -6,6 +6,7 @@
 import { useMemo, type FC } from "react";
 
 import { formatCompactAmount } from "@wealthfolio/ui";
+import { useIsMobileViewport } from "@/hooks/use-platform";
 import type { Activity } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
@@ -30,9 +31,11 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   currency,
   onCellClick,
 }) => {
+  const isPhone = useIsMobileViewport();
+  const cols = isPhone ? 8 : 24;
   const grid = useMemo(
-    () => buildWeekdayHourGrid(activities, accountTypeById),
-    [accountTypeById, activities],
+    () => buildWeekdayHourGrid(activities, accountTypeById, cols),
+    [accountTypeById, activities, cols],
   );
 
   if (activities.length === 0) {
@@ -57,10 +60,10 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
         <div>
           <h3 className="text-foreground text-base font-semibold tracking-tight">When you spend</h3>
           <p className="text-muted-foreground text-xs">
-            Last 12 weeks · spending intensity by weekday and hour.
+            {isPhone ? "Last 12 weeks" : "Last 12 weeks · spending intensity by weekday and hour."}
           </p>
         </div>
-        <span className={LABEL_CLASS}>MEDIAN PER WEEKDAY</span>
+        {!isPhone && <span className={LABEL_CLASS}>MEDIAN PER WEEKDAY</span>}
       </header>
 
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1">
@@ -68,7 +71,7 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
         <div />
         <div className="text-muted-foreground/70 grid grid-cols-8 text-[10px]">
           {HOUR_LABELS.map((h, i) => (
-            <span key={i} className={cn(i === 0 ? "text-left" : "text-left")}>
+            <span key={i} className="text-left">
               {h}
             </span>
           ))}
@@ -88,6 +91,7 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
               max={grid.max}
               median={median}
               currency={currency}
+              isPhone={isPhone}
               onCellClick={onCellClick}
             />
           );
@@ -95,10 +99,12 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
       </div>
 
       <div className="border-border/40 mt-4 flex items-center justify-between border-t pt-3 text-[11px]">
-        <span className="text-muted-foreground/70">
-          Each cell is one weekday-hour over 12 weeks. <span className="dark:hidden">Darker</span>
-          <span className="hidden dark:inline">Brighter</span> = more spend.
-        </span>
+        {!isPhone && (
+          <span className="text-muted-foreground/70">
+            Each cell is one weekday-hour over 12 weeks. <span className="dark:hidden">Darker</span>
+            <span className="hidden dark:inline">Brighter</span> = more spend.
+          </span>
+        )}
         <Legend />
       </div>
     </div>
@@ -112,6 +118,7 @@ function Row({
   max,
   median,
   currency,
+  isPhone,
   onCellClick,
 }: {
   day: string;
@@ -120,14 +127,17 @@ function Row({
   max: number;
   median: number;
   currency: string;
+  isPhone: boolean;
   onCellClick?: (weekday: number, hour: number) => void;
 }) {
+  const cols = cells.length;
+  const hoursPerCell = Math.max(1, Math.round(24 / cols));
   return (
     <>
       <div className="text-muted-foreground/80 pr-1 text-right text-[11px]">{day}</div>
       <div
-        className="grid-cols-24 grid gap-[3px]"
-        style={{ gridTemplateColumns: "repeat(24, minmax(0,1fr))" }}
+        className="grid gap-[3px]"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
       >
         {cells.map((amount, i) => {
           const t = max > 0 ? amount / max : 0;
@@ -135,7 +145,13 @@ function Row({
             amount === 0
               ? "var(--heatmap-empty-opacity)"
               : `calc(var(--heatmap-min-opacity) + ${t} * var(--heatmap-range-opacity))`;
-          const label = `${day} ${formatHour(i)} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`;
+          const startHour = i * hoursPerCell;
+          const endHour = Math.min(23, startHour + hoursPerCell - 1);
+          const range =
+            hoursPerCell === 1
+              ? formatHour(startHour)
+              : `${formatHour(startHour)}–${formatHour(endHour + 1)}`;
+          const label = `${day} ${range} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`;
           if (!onCellClick) {
             return (
               <div
@@ -150,7 +166,7 @@ function Row({
             <button
               key={i}
               type="button"
-              onClick={() => onCellClick(weekdayIndex, i)}
+              onClick={() => onCellClick(weekdayIndex, startHour)}
               className="aspect-square rounded-[3px] transition-all hover:scale-110 hover:ring-1 hover:ring-[var(--ring)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
               style={{ backgroundColor: "var(--heatmap-accent)", opacity }}
               title={label}
@@ -159,8 +175,13 @@ function Row({
           );
         })}
       </div>
-      <div className="text-foreground/90 inline-flex items-center gap-2 pl-1 text-xs tabular-nums">
-        <span className="bg-foreground/30 inline-block h-px w-6" />
+      <div
+        className={cn(
+          "text-foreground/90 inline-flex items-center pl-1 text-xs tabular-nums",
+          !isPhone && "gap-2",
+        )}
+      >
+        {!isPhone && <span className="bg-foreground/30 inline-block h-px w-6" />}
         <span className="font-medium">{formatCompactAmount(median, currency)}</span>
       </div>
     </>
@@ -200,8 +221,11 @@ interface WeekdayHourGrid {
 function buildWeekdayHourGrid(
   activities: Activity[],
   accountTypeById?: Map<string, string>,
+  cols: number = 24,
 ): WeekdayHourGrid {
-  const cells: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const safeCols = cols > 0 && cols <= 24 ? cols : 24;
+  const hoursPerCell = Math.max(1, Math.round(24 / safeCols));
+  const cells: number[][] = Array.from({ length: 7 }, () => new Array(safeCols).fill(0));
   // Per (weekday, dayKey) → daily total. Used to compute the median per weekday.
   const dayTotals = new Map<string, number>();
 
@@ -212,7 +236,8 @@ function buildWeekdayHourGrid(
     if (isNaN(date.getTime())) continue;
     const weekday = (date.getDay() + 6) % 7; // Mon=0..Sun=6
     const hour = date.getHours();
-    cells[weekday][hour] += amt;
+    const bucket = Math.min(safeCols - 1, Math.floor(hour / hoursPerCell));
+    cells[weekday][bucket] += amt;
     const key = `${weekday}|${date.toISOString().slice(0, 10)}`;
     dayTotals.set(key, (dayTotals.get(key) ?? 0) + amt);
   }
