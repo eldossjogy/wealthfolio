@@ -20,10 +20,15 @@ export function computeBaselinePace(
 ): number {
   const exclude = new Set<string>();
   for (const ev of excludeEvents) {
-    const start = new Date(ev.startDate);
-    const end = new Date(ev.endDate);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      exclude.add(d.toISOString().slice(0, 10));
+    // Walk the date range using ISO-string arithmetic to avoid Date allocs in
+    // the inner loop. startDate/endDate are stored as ISO strings.
+    const startKey = ev.startDate.slice(0, 10);
+    const endKey = ev.endDate.slice(0, 10);
+    const cursor = new Date(`${startKey}T12:00:00`);
+    const endMs = new Date(`${endKey}T12:00:00`).getTime();
+    while (cursor.getTime() <= endMs) {
+      exclude.add(cursor.toISOString().slice(0, 10));
+      cursor.setDate(cursor.getDate() + 1);
     }
   }
   let total = 0;
@@ -31,7 +36,7 @@ export function computeBaselinePace(
   for (const a of activities) {
     const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
     if (spendingAmount === 0) continue;
-    const dayKey = new Date(a.activityDate).toISOString().slice(0, 10);
+    const dayKey = a.activityDate.slice(0, 10);
     if (exclude.has(dayKey)) continue;
     total += spendingAmount;
     seen.add(dayKey);

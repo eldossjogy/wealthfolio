@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 
 import { getActivitySpendingAmount } from "../lib/constants";
+import { inclusiveDays } from "../lib/date-utils";
 import type { EventSpendingSummary } from "../types/event";
 import { computeBaselinePace } from "./use-baseline-pace";
 
@@ -41,10 +42,6 @@ export interface EventChartData {
   hangoverPct: number;
   /** ISO date strings of tagged tx that fall outside the event's own window. */
   outOfRange: string[];
-}
-
-function inclusiveDays(a: Date, b: Date): number {
-  return Math.max(0, Math.round((b.getTime() - a.getTime()) / (24 * 3600 * 1000))) + 1;
 }
 
 function buildEventDailySeries(event: EventSpendingSummary, days: number): number[] {
