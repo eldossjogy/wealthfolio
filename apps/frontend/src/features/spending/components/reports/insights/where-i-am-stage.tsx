@@ -657,10 +657,15 @@ function BreakdownCanvas({
   const [filter, setFilter] = useState<BreakdownFilter>("all");
   const [sort, setSort] = useState<BreakdownSort>("spent");
 
-  const budgetRows = budget?.computed.groupRows.flatMap((row) => row.categories) ?? [];
-  const groupRows = budget?.computed.groupRows ?? [];
-  const breakdown = currentReport?.spendingBreakdown ?? [];
-  const priorBreakdown = priorReport?.spendingBreakdown ?? [];
+  // Memoize these so downstream `counts`/`filteredBreakdown` memos stay valid
+  // — otherwise a fresh array on every render busts memoization.
+  const budgetRows = useMemo(
+    () => budget?.computed.groupRows.flatMap((row) => row.categories) ?? [],
+    [budget],
+  );
+  const groupRows = useMemo(() => budget?.computed.groupRows ?? [], [budget]);
+  const breakdown = useMemo(() => currentReport?.spendingBreakdown ?? [], [currentReport]);
+  const priorBreakdown = useMemo(() => priorReport?.spendingBreakdown ?? [], [priorReport]);
 
   const counts = useMemo(
     () =>
@@ -686,16 +691,22 @@ function BreakdownCanvas({
   );
 
   const totalCats = counts.all;
-  const shownCats = countTopLevel(filteredBreakdown, taxonomyCategories);
+  const shownCats = useMemo(
+    () => countTopLevel(filteredBreakdown, taxonomyCategories),
+    [filteredBreakdown, taxonomyCategories],
+  );
 
   const periodLabel = useMemo(() => buildPeriodSubtitle(range), [range]);
 
-  const filterChips: { id: BreakdownFilter; label: string; count: number }[] = [
-    { id: "all", label: "All", count: counts.all },
-    { id: "over", label: "Over budget", count: counts.over },
-    { id: "movers", label: "Largest movers", count: counts.movers },
-    { id: "no_budget", label: "No budget set", count: counts.noBudget },
-  ];
+  const filterChips = useMemo<{ id: BreakdownFilter; label: string; count: number }[]>(
+    () => [
+      { id: "all", label: "All", count: counts.all },
+      { id: "over", label: "Over budget", count: counts.over },
+      { id: "movers", label: "Largest movers", count: counts.movers },
+      { id: "no_budget", label: "No budget set", count: counts.noBudget },
+    ],
+    [counts],
+  );
 
   return (
     <section id="breakdown">

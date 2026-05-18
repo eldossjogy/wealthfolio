@@ -36,13 +36,26 @@ export function WhatChangedStage({
   isLoading,
   onCategoryClick,
 }: WhatChangedStageProps) {
+  // Compute once and feed both the headline + comparison table to avoid two
+  // O(n) passes over the same breakdown arrays.
+  const movers = useMemo(
+    () =>
+      computeTopMovers(
+        currentReport?.spendingBreakdown ?? [],
+        priorReport?.spendingBreakdown ?? [],
+        taxonomyCategories,
+      ),
+    [currentReport, priorReport, taxonomyCategories],
+  );
+  const labels = useMemo(() => buildPeriodLabels(range), [range]);
+
   return (
     <div className="flex flex-col gap-6">
       <HeadlineCard
-        range={range}
         currentReport={currentReport}
         priorReport={priorReport}
-        taxonomyCategories={taxonomyCategories}
+        movers={movers}
+        labels={labels}
         currency={currency}
         isLoading={isLoading}
       />
@@ -57,10 +70,8 @@ export function WhatChangedStage({
         onCategoryClick={onCategoryClick}
       />
       <ComparisonTable
-        range={range}
-        currentReport={currentReport}
-        priorReport={priorReport}
-        taxonomyCategories={taxonomyCategories}
+        movers={movers}
+        labels={labels}
         currency={currency}
         isLoading={isLoading}
         onCategoryClick={onCategoryClick}
@@ -74,19 +85,19 @@ export function WhatChangedStage({
 // ═════════════════════════════════════════════════════════════════════════
 
 interface HeadlineCardProps {
-  range: ReportsRange;
   currentReport: MonthlyReport | undefined;
   priorReport: MonthlyReport | undefined;
-  taxonomyCategories: TaxonomyCategory[];
+  movers: MoverRow[];
+  labels: PeriodLabels;
   currency: string;
   isLoading: boolean;
 }
 
 const HeadlineCard: FC<HeadlineCardProps> = ({
-  range,
   currentReport,
   priorReport,
-  taxonomyCategories,
+  movers,
+  labels: labelPair,
   currency,
   isLoading,
 }) => {
@@ -94,18 +105,6 @@ const HeadlineCard: FC<HeadlineCardProps> = ({
   const prior = priorReport?.current.outflow ?? 0;
   const change = current - prior;
   const pct = prior > 0 ? (change / prior) * 100 : null;
-
-  const movers = useMemo(
-    () =>
-      computeTopMovers(
-        currentReport?.spendingBreakdown ?? [],
-        priorReport?.spendingBreakdown ?? [],
-        taxonomyCategories,
-      ),
-    [currentReport, priorReport, taxonomyCategories],
-  );
-
-  const labelPair = useMemo(() => buildPeriodLabels(range), [range]);
 
   if (isLoading) {
     return (
@@ -304,11 +303,13 @@ function buildHeadline({
   );
 }
 
-function buildPeriodLabels(range: ReportsRange): {
+interface PeriodLabels {
   current: string;
   prior: string;
   combined: string;
-} {
+}
+
+function buildPeriodLabels(range: ReportsRange): PeriodLabels {
   const priorEnd = new Date(range.start.getTime() - 1);
 
   // Single-month windows label by month name; multi-month windows by range bounds.
@@ -636,36 +637,24 @@ function SparklineRow({
 // ═════════════════════════════════════════════════════════════════════════
 
 interface ComparisonTableProps {
-  range: ReportsRange;
-  currentReport: MonthlyReport | undefined;
-  priorReport: MonthlyReport | undefined;
-  taxonomyCategories: TaxonomyCategory[];
+  movers: MoverRow[];
+  labels: PeriodLabels;
   currency: string;
   isLoading: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }
 
 function ComparisonTable({
-  range,
-  currentReport,
-  priorReport,
-  taxonomyCategories,
+  movers,
+  labels,
   currency,
   isLoading,
   onCategoryClick,
 }: ComparisonTableProps) {
-  const movers = useMemo(
-    () =>
-      computeTopMovers(
-        currentReport?.spendingBreakdown ?? [],
-        priorReport?.spendingBreakdown ?? [],
-        taxonomyCategories,
-      ),
-    [currentReport, priorReport, taxonomyCategories],
+  const maxDelta = useMemo(
+    () => movers.reduce((m, r) => Math.max(m, Math.abs(r.delta)), 1),
+    [movers],
   );
-
-  const labels = useMemo(() => buildPeriodLabels(range), [range]);
-  const maxDelta = movers.reduce((m, r) => Math.max(m, Math.abs(r.delta)), 1);
 
   if (isLoading && movers.length === 0) {
     return (

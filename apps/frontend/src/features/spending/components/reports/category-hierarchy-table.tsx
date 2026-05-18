@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Icons, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
@@ -123,15 +123,20 @@ export function CategoryHierarchyTable({
   }, [groups, tree]);
 
   const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
-  // Seed defaults whenever the set of groups changes — groups open, categories closed.
-  useEffect(() => {
+  // Re-seed when the set of expandable ids changes (groups default open,
+  // categories closed); preserve any user toggles. Done during render per
+  // React docs guidance to avoid an extra render from useEffect.
+  const expandableIdsKey = expandableGroupIds.join(",") + "|" + expandableCategoryIds.join(",");
+  const [lastIdsKey, setLastIdsKey] = useState(expandableIdsKey);
+  if (expandableIdsKey !== lastIdsKey) {
+    setLastIdsKey(expandableIdsKey);
     setExpandedById((prev) => {
       const next: Record<string, boolean> = {};
       for (const id of expandableGroupIds) next[id] = prev[id] ?? true;
       for (const id of expandableCategoryIds) next[id] = prev[id] ?? false;
       return next;
     });
-  }, [expandableGroupIds, expandableCategoryIds]);
+  }
 
   const hasExpandable = expandableGroupIds.length + expandableCategoryIds.length > 0;
   const allExpanded =

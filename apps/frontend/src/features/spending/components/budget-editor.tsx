@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -622,16 +622,7 @@ function GroupBudgetSection({
   );
 }
 
-function GroupEditDialog({
-  group,
-  color,
-  open,
-  onOpenChange,
-  onUpdate,
-  rolloverEnabled,
-  rolloverStartingBalance,
-  onSaveRollover,
-}: {
+interface GroupEditDialogProps {
   group: BudgetGroup;
   color: string;
   open: boolean;
@@ -640,22 +631,34 @@ function GroupEditDialog({
   rolloverEnabled: boolean;
   rolloverStartingBalance: string;
   onSaveRollover: (enabled: boolean, startingBalance?: string) => void;
-}) {
+}
+
+function GroupEditDialog(props: GroupEditDialogProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        {/* Mount the body only when open so its useState initializes from the
+            current props each time — kills the prop-to-state mirror effect. */}
+        {props.open && <GroupEditDialogBody {...props} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GroupEditDialogBody({
+  group,
+  color,
+  onOpenChange,
+  onUpdate,
+  rolloverEnabled,
+  rolloverStartingBalance,
+  onSaveRollover,
+}: GroupEditDialogProps) {
   const [draftName, setDraftName] = useState(group.name);
   const [draftColor, setDraftColor] = useState(color);
   const [draftIcon, setDraftIcon] = useState<string | null>(group.icon ?? null);
   const [draftRollover, setDraftRollover] = useState(rolloverEnabled);
   const [draftStartingBalance, setDraftStartingBalance] = useState(rolloverStartingBalance);
-
-  useEffect(() => {
-    if (open) {
-      setDraftName(group.name);
-      setDraftColor(color);
-      setDraftIcon(group.icon ?? null);
-      setDraftRollover(rolloverEnabled);
-      setDraftStartingBalance(rolloverStartingBalance);
-    }
-  }, [color, group.icon, group.name, open, rolloverEnabled, rolloverStartingBalance]);
 
   const handleSave = () => {
     const patch: { name?: string; color?: string | null; icon?: string | null } = {};
@@ -677,101 +680,99 @@ function GroupEditDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <span
-              className="flex h-7 w-7 items-center justify-center rounded-md"
-              style={{ backgroundColor: `${draftColor}1f`, color: draftColor }}
-            >
-              <CategoryIcon icon={draftIcon} className="h-4 w-4" />
-            </span>
-            Edit group
-          </DialogTitle>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-base">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-md"
+            style={{ backgroundColor: `${draftColor}1f`, color: draftColor }}
+          >
+            <CategoryIcon icon={draftIcon} className="h-4 w-4" />
+          </span>
+          Edit group
+        </DialogTitle>
+      </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
-              Name
-            </label>
-            <div className="bg-muted/60 border-border/60 focus-within:ring-ring/50 flex h-9 items-center rounded-md border px-3 transition-shadow focus-within:ring-2">
-              <input
-                type="text"
-                value={draftName}
-                onChange={(event) => setDraftName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") handleSave();
-                }}
-                className="text-foreground placeholder:text-muted-foreground/50 w-full bg-transparent text-sm outline-none"
-                autoFocus
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
-              Color
-            </label>
-            <GroupColorSwatchGrid value={draftColor} onChange={setDraftColor} />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
-              Icon
-            </label>
-            <IconPicker value={draftIcon} accent={draftColor} onChange={setDraftIcon} />
-          </div>
-
-          <div className="border-border/40 space-y-2 border-t pt-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
-                <div className="text-foreground text-sm font-medium">Monthly rollover</div>
-                <p className="text-muted-foreground text-[11px] leading-snug">
-                  Carry unspent budget into next month for this group.
-                </p>
-              </div>
-              <Switch
-                checked={draftRollover}
-                onCheckedChange={setDraftRollover}
-                aria-label="Enable monthly rollover"
-              />
-            </div>
-            {draftRollover && (
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <label
-                  htmlFor="rollover-starting-balance"
-                  className="text-muted-foreground text-[11px]"
-                >
-                  Starting balance
-                </label>
-                <div className="w-[120px]">
-                  <input
-                    id="rollover-starting-balance"
-                    type="text"
-                    inputMode="decimal"
-                    value={draftStartingBalance}
-                    onChange={(event) => setDraftStartingBalance(event.target.value)}
-                    placeholder="0"
-                    className="bg-background border-input focus-visible:ring-ring/40 text-foreground placeholder:text-muted-foreground/70 h-8 w-full rounded-md border px-2 text-right text-xs tabular-nums outline-none focus-visible:ring-2"
-                  />
-                </div>
-              </div>
-            )}
+      <div className="space-y-4 py-2">
+        <div className="space-y-1.5">
+          <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
+            Name
+          </label>
+          <div className="bg-muted/60 border-border/60 focus-within:ring-ring/50 flex h-9 items-center rounded-md border px-3 transition-shadow focus-within:ring-2">
+            <input
+              type="text"
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") handleSave();
+              }}
+              className="text-foreground placeholder:text-muted-foreground/50 w-full bg-transparent text-sm outline-none"
+              autoFocus
+            />
           </div>
         </div>
 
-        <DialogFooter className="gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!draftName.trim()}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="space-y-1.5">
+          <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
+            Color
+          </label>
+          <GroupColorSwatchGrid value={draftColor} onChange={setDraftColor} />
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wide">
+            Icon
+          </label>
+          <IconPicker value={draftIcon} accent={draftColor} onChange={setDraftIcon} />
+        </div>
+
+        <div className="border-border/40 space-y-2 border-t pt-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <div className="text-foreground text-sm font-medium">Monthly rollover</div>
+              <p className="text-muted-foreground text-[11px] leading-snug">
+                Carry unspent budget into next month for this group.
+              </p>
+            </div>
+            <Switch
+              checked={draftRollover}
+              onCheckedChange={setDraftRollover}
+              aria-label="Enable monthly rollover"
+            />
+          </div>
+          {draftRollover && (
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <label
+                htmlFor="rollover-starting-balance"
+                className="text-muted-foreground text-[11px]"
+              >
+                Starting balance
+              </label>
+              <div className="w-[120px]">
+                <input
+                  id="rollover-starting-balance"
+                  type="text"
+                  inputMode="decimal"
+                  value={draftStartingBalance}
+                  onChange={(event) => setDraftStartingBalance(event.target.value)}
+                  placeholder="0"
+                  className="bg-background border-input focus-visible:ring-ring/40 text-foreground placeholder:text-muted-foreground/70 h-8 w-full rounded-md border px-2 text-right text-xs tabular-nums outline-none focus-visible:ring-2"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <DialogFooter className="gap-2">
+        <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={handleSave} disabled={!draftName.trim()}>
+          Save
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
@@ -1440,11 +1441,16 @@ function AmountInput({
 }) {
   const [draft, setDraft] = useState(String(value || ""));
   const [focused, setFocused] = useState(false);
+  const [lastValue, setLastValue] = useState(value);
   const isEmpty = !focused && (!draft || Number.parseFloat(draft) === 0);
 
-  useEffect(() => {
-    if (!focused) setDraft(String(value || ""));
-  }, [focused, value]);
+  // Adjust draft when the parent commits a new value externally — but only while
+  // the user isn't actively editing. Done during render per React docs guidance
+  // (avoids the extra mount-time render of an Effect).
+  if (!focused && value !== lastValue) {
+    setLastValue(value);
+    setDraft(String(value || ""));
+  }
 
   return (
     <div

@@ -38,15 +38,17 @@ export function WhenWhereStage({
   rangeEnd,
   onHeatmapCellClick,
 }: WhenWhereStageProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(events[0]?.eventId ?? null);
-
-  useEffect(() => {
-    if (!selectedId || !events.some((e) => e.eventId === selectedId)) {
-      setSelectedId(events[0]?.eventId ?? null);
-    }
-  }, [events, selectedId]);
-
-  const selected = events.find((e) => e.eventId === selectedId) ?? null;
+  // Derived: user's pick wins if it's still in the list; otherwise fall back to
+  // the first event. Avoids the prop-mirror useEffect pattern.
+  const [override, setOverride] = useState<string | null>(null);
+  const selectedId =
+    override && events.some((e) => e.eventId === override)
+      ? override
+      : (events[0]?.eventId ?? null);
+  const selected = useMemo(
+    () => events.find((e) => e.eventId === selectedId) ?? null,
+    [events, selectedId],
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,7 +69,7 @@ export function WhenWhereStage({
               heatmapActivities={heatmapActivities}
               accountTypeById={accountTypeById}
               selectedId={selectedId}
-              onSelect={setSelectedId}
+              onSelect={setOverride}
             />
             {selected && (
               <EventDetailPanel
@@ -77,7 +79,7 @@ export function WhenWhereStage({
                 currency={currency}
                 heatmapActivities={heatmapActivities}
                 accountTypeById={accountTypeById}
-                onSelect={setSelectedId}
+                onSelect={setOverride}
               />
             )}
           </>
@@ -1069,7 +1071,7 @@ const EventDetailPanel: FC<EventDetailPanelProps> = ({
   const maxCategoryAmount = Math.max(1, ...categories.map((c) => c.amount));
 
   const dailySeries = useMemo(() => buildEventDailySeries(event, days), [event, days]);
-  const peak = useMemo(() => findPeakDay(event, days), [event, days]);
+  const peak = useMemo(() => findPeakDay(event, dailySeries), [event, dailySeries]);
 
   const beforeSeries = useMemo(
     () => buildWindowSeries(heatmapActivities, accountTypeById, startDate, -7, 7),
@@ -1562,9 +1564,8 @@ function buildEventDailySeries(event: EventSpendingSummary, days: number): numbe
 
 function findPeakDay(
   event: EventSpendingSummary,
-  days: number,
+  series: number[],
 ): { date: Date; amount: number } | null {
-  const series = buildEventDailySeries(event, days);
   let bestIdx = -1;
   let best = -Infinity;
   series.forEach((v, i) => {
