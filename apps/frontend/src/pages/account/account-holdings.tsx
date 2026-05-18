@@ -184,9 +184,10 @@ const AccountHoldings = ({
           isLoading={isLoading}
           selectedTypes={selectedTypes}
           setSelectedTypes={setSelectedTypes}
-          selectedAccount={selectedAccount}
-          accounts={dummyAccounts}
-          onAccountChange={handleAccountChange}
+          accountFilter={{ type: "account", accountId: selectedAccount?.id ?? "" }}
+          onAccountFilterChange={() => {}}
+          accounts={[]}
+          portfolios={[]}
           showAccountFilter={false}
           typeOptions={typeOptions}
         />

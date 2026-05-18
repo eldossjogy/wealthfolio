@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::debug;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -364,7 +363,7 @@ impl AllocationService {
                     // Asset classes include cash, use total_with_cash
                     // Cash holdings now have proper instruments with classifications
                     asset_classes_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         &taxonomy.name,
                         &taxonomy.color,
@@ -376,7 +375,7 @@ impl AllocationService {
                 }
                 "industries_gics" => {
                     sectors_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         "Sectors", // Use friendly name
                         &taxonomy.color,
@@ -388,7 +387,7 @@ impl AllocationService {
                 }
                 "regions" => {
                     regions_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         "Regions",
                         &taxonomy.color,
@@ -400,7 +399,7 @@ impl AllocationService {
                 }
                 "risk_category" => {
                     risk_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         "Risk Category",
                         &taxonomy.color,
@@ -412,7 +411,7 @@ impl AllocationService {
                 }
                 "instrument_type" => {
                     security_types_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         "Instrument Type",
                         &taxonomy.color,
@@ -425,7 +424,7 @@ impl AllocationService {
                 _ if !taxonomy.is_system => {
                     // User-created custom taxonomies only (skip system placeholder "custom_groups")
                     let custom_alloc = self.aggregate_by_taxonomy(
-                        &holdings,
+                        holdings,
                         &taxonomy.id,
                         &taxonomy.name,
                         &taxonomy.color,
