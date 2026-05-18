@@ -79,7 +79,7 @@ const ActivityPage = () => {
   const isMobileViewport = useIsMobileViewport();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isEnabled: isSpendingEnabled } = useSpendingSettings();
+  const { isEnabled: isSpendingEnabled, accountIds: spendingAccountIds } = useSpendingSettings();
 
   // Coerce "spending" URL state back to investments when the module is disabled.
   const urlTab = searchParams.get("tab");
@@ -126,11 +126,31 @@ const ActivityPage = () => {
 
   const isDatagridView = viewMode === "datagrid";
 
+  // Accounts opted into the Spending module are shown on the Spending tab; the
+  // Investments tab must exclude them so cash/credit-card activity doesn't double-up.
+  const investmentAccounts = useMemo(() => {
+    if (!isSpendingEnabled || spendingAccountIds.length === 0) return accounts;
+    const excluded = new Set(spendingAccountIds);
+    return accounts.filter((a) => !excluded.has(a.id));
+  }, [accounts, spendingAccountIds, isSpendingEnabled]);
+
+  const investmentAccountIds = useMemo(
+    () => investmentAccounts.map((a) => a.id),
+    [investmentAccounts],
+  );
+
+  const effectiveInvestmentAccountIds = useMemo(() => {
+    if (!isSpendingEnabled || spendingAccountIds.length === 0) return selectedAccounts;
+    if (selectedAccounts.length === 0) return investmentAccountIds;
+    const allowed = new Set(investmentAccountIds);
+    return selectedAccounts.filter((id) => allowed.has(id));
+  }, [selectedAccounts, investmentAccountIds, isSpendingEnabled, spendingAccountIds.length]);
+
   // Infinite scroll search for table view
   const infiniteSearch = useActivitySearch({
     mode: "infinite",
     filters: {
-      accountIds: selectedAccounts,
+      accountIds: effectiveInvestmentAccountIds,
       activityTypes: selectedActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
@@ -143,7 +163,7 @@ const ActivityPage = () => {
   const paginatedSearch = useActivitySearch({
     mode: "paginated",
     filters: {
-      accountIds: selectedAccounts,
+      accountIds: effectiveInvestmentAccountIds,
       activityTypes: selectedActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
@@ -297,7 +317,7 @@ const ActivityPage = () => {
     <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
       {isMobileViewport ? (
         <ActivityMobileControls
-          accounts={accounts}
+          accounts={investmentAccounts}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
           selectedAccountIds={selectedAccounts}
@@ -309,7 +329,7 @@ const ActivityPage = () => {
         />
       ) : (
         <ActivityViewControls
-          accounts={accounts}
+          accounts={investmentAccounts}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
           selectedAccountIds={selectedAccounts}
@@ -338,7 +358,7 @@ const ActivityPage = () => {
         />
       ) : isDatagridView ? (
         <ActivityDataGrid
-          accounts={accounts}
+          accounts={investmentAccounts}
           activities={datagridActivities}
           onRefetch={paginatedSearch.refetch}
           onEditActivity={handleEdit}
