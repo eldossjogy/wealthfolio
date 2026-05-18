@@ -1,4 +1,4 @@
-import { useMemo, useState, type FC, type ReactNode } from "react";
+import { memo, useMemo, useState, type FC, type ReactNode } from "react";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 
 import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
@@ -14,6 +14,9 @@ import { formatMonthName, formatMonthYear, formatPercentValue } from "./format";
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS =
   "text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-[0.12em]";
+
+// Hoist out of render so Recharts doesn't see a new reference each tick.
+const SPARK_MARGIN = { top: 2, right: 0, left: 0, bottom: 0 };
 
 export interface WhatChangedStageProps {
   range: ReportsRange;
@@ -541,7 +544,7 @@ function buildSparklineRows({
   });
 }
 
-function SparklineRow({
+const SparklineRow = memo(function SparklineRow({
   row,
   currency,
   onCategoryClick,
@@ -607,7 +610,7 @@ function SparklineRow({
       </div>
       <div className="-mx-1 mt-1 h-9">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={row.series} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+          <AreaChart data={row.series} margin={SPARK_MARGIN}>
             <defs>
               <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={0.45} />
@@ -630,7 +633,7 @@ function SparklineRow({
       </div>
     </div>
   );
-}
+});
 
 // ═════════════════════════════════════════════════════════════════════════
 // Comparison table — Category | This | Prior | Δ$ | direction bar | Δ%
@@ -708,7 +711,7 @@ function ComparisonTable({
   );
 }
 
-function ComparisonRow({
+const ComparisonRow = memo(function ComparisonRow({
   row,
   currency,
   maxDelta,
@@ -782,4 +785,4 @@ function ComparisonRow({
       </td>
     </tr>
   );
-}
+});

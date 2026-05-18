@@ -958,6 +958,38 @@ function CategoryRankedBar({
    */
   groupRows?: import("../types/budget").BudgetGroupRow[];
 }) {
+  // Memoize derivations so we don't rebuild the Map + reduce + slices on every
+  // parent re-render — this card lives inside a chart-heavy page.
+  const derived = useMemo(() => {
+    const categoryGroup = new Map<string, { id: string; name: string; color: string | null }>();
+    for (const g of groupRows) {
+      for (const cat of g.categories) {
+        categoryGroup.set(cat.categoryId, {
+          id: g.group.id,
+          name: g.group.name,
+          color: g.group.color,
+        });
+      }
+    }
+    const hasAnyGroup = rows.some((r) => categoryGroup.has(r.id));
+    const categorizedSum = rows.reduce((s, r) => s + r.amount, 0);
+    const uncategorizedAmount = Math.max(0, total - categorizedSum);
+
+    const top = rows.slice(0, 7);
+    const restAmount = rows.slice(7).reduce((s, r) => s + r.amount, 0);
+    const barSegments: CategoryRow[] = [...top];
+    if (restAmount > 0) {
+      barSegments.push({
+        id: "__other__",
+        name: "Other",
+        amount: restAmount,
+        color: null,
+        icon: null,
+      });
+    }
+    return { categoryGroup, hasAnyGroup, uncategorizedAmount, top, restAmount, barSegments };
+  }, [rows, total, groupRows]);
+
   if (rows.length === 0 || total <= 0) {
     return (
       <div className="border-border bg-card/40 rounded-lg border p-8 text-center">
@@ -966,36 +998,7 @@ function CategoryRankedBar({
     );
   }
 
-  // Build category → group map from budget. If nothing is assigned, fall back
-  // to the flat list (existing behavior).
-  const categoryGroup = new Map<string, { id: string; name: string; color: string | null }>();
-  for (const g of groupRows) {
-    for (const cat of g.categories) {
-      categoryGroup.set(cat.categoryId, {
-        id: g.group.id,
-        name: g.group.name,
-        color: g.group.color,
-      });
-    }
-  }
-  const hasAnyGroup = rows.some((r) => categoryGroup.has(r.id));
-
-  const categorizedSum = rows.reduce((s, r) => s + r.amount, 0);
-  const uncategorizedAmount = Math.max(0, total - categorizedSum);
-
-  // ── Bar segments — share the top-N slicing across both layouts. ─────
-  const top = rows.slice(0, 7);
-  const restAmount = rows.slice(7).reduce((s, r) => s + r.amount, 0);
-  const barSegments = [...top];
-  if (restAmount > 0) {
-    barSegments.push({
-      id: "__other__",
-      name: "Other",
-      amount: restAmount,
-      color: null,
-      icon: null,
-    });
-  }
+  const { categoryGroup, hasAnyGroup, uncategorizedAmount, top, restAmount, barSegments } = derived;
 
   const StackedBar = (
     <div className="bg-foreground/10 relative flex h-3 w-full overflow-hidden rounded-full">
@@ -1173,11 +1176,15 @@ function GroupedCategoryBlock({
   const accent = bucket.color ?? themeColor;
   // Sort categories by spend descending, but always pin the uncategorized
   // bucket to the end — it's a "to-do" row, not a normal category.
-  const sortedCats = bucket.categories.slice().sort((a, b) => {
-    if (a.id === "__uncategorized__") return 1;
-    if (b.id === "__uncategorized__") return -1;
-    return b.amount - a.amount;
-  });
+  const sortedCats = useMemo(
+    () =>
+      bucket.categories.slice().sort((a, b) => {
+        if (a.id === "__uncategorized__") return 1;
+        if (b.id === "__uncategorized__") return -1;
+        return b.amount - a.amount;
+      }),
+    [bucket.categories],
+  );
 
   return (
     <div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { Icons, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
@@ -150,8 +150,10 @@ export function CategoryHierarchyTable({
     for (const id of expandableCategoryIds) next[id] = target;
     setExpandedById(next);
   };
-  const setRowExpanded = (id: string, value: boolean) =>
-    setExpandedById((prev) => ({ ...prev, [id]: value }));
+  const setRowExpanded = useCallback(
+    (id: string, value: boolean) => setExpandedById((prev) => ({ ...prev, [id]: value })),
+    [],
+  );
 
   if (isLoading) {
     return (
@@ -292,7 +294,7 @@ function ProgressBar({ spent, budget }: { spent: number; budget: number }) {
   );
 }
 
-function GroupRow({
+const GroupRow = memo(function GroupRow({
   group,
   totalSpent,
   currency,
@@ -388,9 +390,9 @@ function GroupRow({
         ))}
     </>
   );
-}
+});
 
-function ParentRow({
+const ParentRow = memo(function ParentRow({
   node,
   currency,
   onCategoryClick,
@@ -492,9 +494,9 @@ function ParentRow({
         ))}
     </>
   );
-}
+});
 
-function ChildRow({
+const ChildRow = memo(function ChildRow({
   node,
   currency,
   parentColor,
@@ -544,7 +546,7 @@ function ChildRow({
       </td>
     </tr>
   );
-}
+});
 
 function formatDelta(delta: number, baseline: number): string {
   if (delta === 0) return "—";

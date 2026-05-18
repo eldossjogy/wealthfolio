@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   AlertDialog,
@@ -1008,12 +1008,19 @@ function IncomeSourcesPanel({
   onSaveTarget: (row: BudgetCategoryRow, amount: string) => void;
   onDeleteOverride: (target: BudgetTarget | undefined) => void;
 }) {
-  const total = rows.reduce((sum, row) => sum + row.target, 0);
   const title = mode === "setup" ? "Income defaults" : "Income";
   const isMonthly = mode === "monthly";
-  const nonZeroRows = rows.filter((row) => row.target > 0);
-  const hiddenCount = rows.length - nonZeroRows.length;
   const [showAll, setShowAll] = useState(false);
+
+  const { total, nonZeroRows, hiddenCount } = useMemo(() => {
+    let sum = 0;
+    const nonZero: BudgetCategoryRow[] = [];
+    for (const row of rows) {
+      sum += row.target;
+      if (row.target > 0) nonZero.push(row);
+    }
+    return { total: sum, nonZeroRows: nonZero, hiddenCount: rows.length - nonZero.length };
+  }, [rows]);
   const visibleRows = isMonthly && !showAll ? nonZeroRows : rows;
 
   return (
@@ -1119,67 +1126,71 @@ function OverridesSummary({
   currency: string;
   onRevert: (target: BudgetTarget) => void;
 }) {
-  const targets = budget.state.targets;
-  const monthTargets = targets.filter((t) => t.periodKey === periodKey);
-  if (monthTargets.length === 0) return null;
+  // Memoize the two-map build + flatMap so we don't redo the O(n*m) walks on
+  // every parent re-render of the budget editor.
+  const overrides = useMemo(() => {
+    const targets = budget.state.targets;
+    const monthTargets = targets.filter((t) => t.periodKey === periodKey);
+    if (monthTargets.length === 0) return [];
 
-  const categoryRowByKey = new Map<string, BudgetCategoryRow>();
-  for (const row of budget.computed.groupRows) {
-    for (const cat of row.categories) {
-      categoryRowByKey.set(`${cat.taxonomyId}:${cat.categoryId}`, cat);
+    const categoryRowByKey = new Map<string, BudgetCategoryRow>();
+    for (const row of budget.computed.groupRows) {
+      for (const cat of row.categories) {
+        categoryRowByKey.set(`${cat.taxonomyId}:${cat.categoryId}`, cat);
+      }
     }
-  }
-  for (const row of budget.computed.incomeRows) {
-    categoryRowByKey.set(`${row.taxonomyId}:${row.categoryId}`, row);
-  }
-  const groupById = new Map(budget.state.groups.map((g) => [g.id, g] as const));
+    for (const row of budget.computed.incomeRows) {
+      categoryRowByKey.set(`${row.taxonomyId}:${row.categoryId}`, row);
+    }
+    const groupById = new Map(budget.state.groups.map((g) => [g.id, g] as const));
 
-  const overrides = monthTargets.flatMap((target) => {
-    if (target.targetType === "category" && target.taxonomyId && target.categoryId) {
-      const row = categoryRowByKey.get(`${target.taxonomyId}:${target.categoryId}`);
-      if (!row) return [];
-      const defaultTarget = targets.find(
-        (t) =>
-          t.periodKey === "default" &&
-          t.targetType === "category" &&
-          t.taxonomyId === target.taxonomyId &&
-          t.categoryId === target.categoryId,
-      );
-      const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
-      const monthAmount = Number.parseFloat(target.amount) || 0;
-      return [
-        {
-          target,
-          name: row.name,
-          color: row.color,
-          monthAmount,
-          defaultAmount,
-        },
-      ];
-    }
-    if (target.targetType === "group_buffer" && target.groupId) {
-      const group = groupById.get(target.groupId);
-      if (!group) return [];
-      const defaultTarget = targets.find(
-        (t) =>
-          t.periodKey === "default" &&
-          t.targetType === "group_buffer" &&
-          t.groupId === target.groupId,
-      );
-      const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
-      const monthAmount = Number.parseFloat(target.amount) || 0;
-      return [
-        {
-          target,
-          name: `${group.name} · group buffer`,
-          color: group.color,
-          monthAmount,
-          defaultAmount,
-        },
-      ];
-    }
-    return [];
-  });
+    return monthTargets.flatMap((target) => {
+      if (target.targetType === "category" && target.taxonomyId && target.categoryId) {
+        const row = categoryRowByKey.get(`${target.taxonomyId}:${target.categoryId}`);
+        if (!row) return [];
+        const defaultTarget = targets.find(
+          (t) =>
+            t.periodKey === "default" &&
+            t.targetType === "category" &&
+            t.taxonomyId === target.taxonomyId &&
+            t.categoryId === target.categoryId,
+        );
+        const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
+        const monthAmount = Number.parseFloat(target.amount) || 0;
+        return [
+          {
+            target,
+            name: row.name,
+            color: row.color,
+            monthAmount,
+            defaultAmount,
+          },
+        ];
+      }
+      if (target.targetType === "group_buffer" && target.groupId) {
+        const group = groupById.get(target.groupId);
+        if (!group) return [];
+        const defaultTarget = targets.find(
+          (t) =>
+            t.periodKey === "default" &&
+            t.targetType === "group_buffer" &&
+            t.groupId === target.groupId,
+        );
+        const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
+        const monthAmount = Number.parseFloat(target.amount) || 0;
+        return [
+          {
+            target,
+            name: `${group.name} · group buffer`,
+            color: group.color,
+            monthAmount,
+            defaultAmount,
+          },
+        ];
+      }
+      return [];
+    });
+  }, [budget, periodKey]);
 
   if (overrides.length === 0) return null;
 
@@ -1261,12 +1272,12 @@ function CopyFromMonthRow({
   onCopy: (sourcePeriodKey: string, overwrite: boolean) => void;
   pending: boolean;
 }) {
-  const previousMonth = (() => {
+  const previousMonth = useMemo(() => {
     const [year, month] = currentPeriodKey.split("-").map(Number);
     if (!Number.isFinite(year) || !Number.isFinite(month)) return currentPeriodKey;
     const date = new Date(year, (month ?? 1) - 2, 1);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-  })();
+  }, [currentPeriodKey]);
   const [sourceMonth, setSourceMonth] = useState(previousMonth);
   const [overwrite, setOverwrite] = useState(false);
 

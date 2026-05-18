@@ -481,22 +481,35 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   const axisTop = chartTop + chartH;
   const totalH = axisTop + 30;
 
-  // Scale ceiling: ensure normal-pace sits visually in the middle, and a single
-  // large outlier doesn't squash the rest of the series against the x-axis.
-  const maxDaily = Math.max(1, ...dailySeries);
-  const scaleMax = Math.max(maxDaily * 1.1, computed.normalPace * 2.2);
-  const yDaily = (v: number) => chartTop + chartH - (Math.min(v, scaleMax) / scaleMax) * chartH;
-
-  const points = dailySeries.map((v, i) => [padL + (i + 0.5) * dayW, yDaily(v)] as const);
-  const linePath = points.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
-  const areaPath = `${linePath} L${padL + innerW},${chartTop + chartH} L${padL},${chartTop + chartH} Z`;
-  const yNormal = yDaily(computed.normalPace);
-
-  // Today marker — only show if today is within range.
-  const today = new Date();
-  const todayIdx = Math.round((today.getTime() - rangeStart.getTime()) / 86_400_000);
-  const showToday = todayIdx >= 0 && todayIdx <= periodDays - 1;
-  const todayX = padL + (todayIdx + 0.5) * dayW;
+  // Memoize SVG geometry — rebuilds only when daily series or chart dims change,
+  // not on every parent render (selectedId change, etc).
+  const { linePath, areaPath, yNormal, todayX, showToday } = useMemo(() => {
+    const maxDaily = Math.max(1, ...dailySeries);
+    const scaleMax = Math.max(maxDaily * 1.1, computed.normalPace * 2.2);
+    const yDaily = (v: number) => chartTop + chartH - (Math.min(v, scaleMax) / scaleMax) * chartH;
+    const points = dailySeries.map((v, i) => [padL + (i + 0.5) * dayW, yDaily(v)] as const);
+    const linePath = points.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
+    const areaPath = `${linePath} L${padL + innerW},${chartTop + chartH} L${padL},${chartTop + chartH} Z`;
+    const today = new Date();
+    const todayIdx = Math.round((today.getTime() - rangeStart.getTime()) / 86_400_000);
+    return {
+      linePath,
+      areaPath,
+      yNormal: yDaily(computed.normalPace),
+      todayX: padL + (todayIdx + 0.5) * dayW,
+      showToday: todayIdx >= 0 && todayIdx <= periodDays - 1,
+    };
+  }, [
+    dailySeries,
+    computed.normalPace,
+    chartTop,
+    chartH,
+    padL,
+    dayW,
+    innerW,
+    rangeStart,
+    periodDays,
+  ]);
 
   const labelRowByEventId = useMemo(() => {
     const result: Record<string, number> = {};
@@ -526,7 +539,10 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   }, [events, rangeStart, periodDays, dayW]);
 
   const selected = events.find((e) => e.eventId === selectedId) ?? events[events.length - 1];
-  const biggest = events.slice().sort((a, b) => b.totalSpending - a.totalSpending)[0];
+  const biggest = useMemo(
+    () => events.slice().sort((a, b) => b.totalSpending - a.totalSpending)[0],
+    [events],
+  );
 
   // Legend mirrors the actual event types present in the data — same color
   // source as the bands so the swatches always match what's drawn.

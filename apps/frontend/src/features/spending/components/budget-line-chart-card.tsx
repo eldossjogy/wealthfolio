@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import { cn, formatAmount } from "@/lib/utils";
@@ -5,6 +6,41 @@ import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@w
 
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
 import type { BudgetCategoryRow } from "../types/budget";
+
+type Status = "ok" | "warn" | "over";
+
+const STATUS_ACCENTS: Record<
+  Status,
+  {
+    lineColor: string;
+    pillBg: string;
+    accent: string;
+    Icon: typeof Icons.AlertCircle;
+    label: string;
+  }
+> = {
+  over: {
+    lineColor: "#B85544",
+    pillBg: "var(--destructive)",
+    accent: "var(--destructive)",
+    Icon: Icons.AlertTriangle,
+    label: "Over budget",
+  },
+  warn: {
+    lineColor: "#C28B47",
+    pillBg: "#C28B47",
+    accent: "#C28B47",
+    Icon: Icons.AlertCircle,
+    label: "Trending high",
+  },
+  ok: {
+    lineColor: "hsl(73 84% 27%)",
+    pillBg: "hsl(73 84% 27%)",
+    accent: "var(--success)",
+    Icon: Icons.CheckCircle ?? Icons.AlertCircle,
+    label: "On track",
+  },
+};
 
 export function BudgetLineChartCard({
   target,
@@ -25,11 +61,20 @@ export function BudgetLineChartCard({
   categoriesMeta: CategoryMetaMap;
   monthByDay: { date: string; outflow: number }[];
 }) {
-  const now = new Date();
-  const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" }).toUpperCase();
-  const dayOfMonth = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const daysRemaining = Math.max(0, daysInMonth - dayOfMonth);
+  const monthMeta = useMemo(() => {
+    const now = new Date();
+    const dayOfMonth = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return {
+      now,
+      dayOfMonth,
+      daysInMonth,
+      daysRemaining: Math.max(0, daysInMonth - dayOfMonth),
+      monthLabel: now.toLocaleString("en-US", { month: "long", year: "numeric" }).toUpperCase(),
+      shortLabel: now.toLocaleString("en-US", { month: "short", year: "numeric" }).toUpperCase(),
+    };
+  }, []);
+  const { now, dayOfMonth, daysInMonth, daysRemaining, monthLabel } = monthMeta;
 
   const haveHistory = historicalDailyAvg > 0;
   const forecast =
@@ -70,7 +115,7 @@ export function BudgetLineChartCard({
   const forecastDelta = forecast - target;
   const willOverspend = forecastReliable && forecastDelta > 0;
 
-  const cumulative = (() => {
+  const cumulative = useMemo(() => {
     const byDay = new Map<number, number>();
     for (const b of monthByDay) {
       const d = parseInt(b.date.split("-")[2], 10);
@@ -83,48 +128,14 @@ export function BudgetLineChartCard({
       out.push({ day: d, value: running });
     }
     return out;
-  })();
+  }, [monthByDay, dayOfMonth]);
 
   const paceAtToday = (target * dayOfMonth) / daysInMonth;
   const gapVsPace = spent - paceAtToday;
   const aheadOfPace = gapVsPace < 0;
 
-  type Status = "ok" | "warn" | "over";
   const status: Status = isOver ? "over" : !aheadOfPace ? "warn" : "ok";
-
-  const accents: Record<
-    Status,
-    {
-      lineColor: string;
-      pillBg: string;
-      accent: string;
-      Icon: typeof Icons.AlertCircle;
-      label: string;
-    }
-  > = {
-    over: {
-      lineColor: "#B85544",
-      pillBg: "var(--destructive)",
-      accent: "var(--destructive)",
-      Icon: Icons.AlertTriangle,
-      label: "Over budget",
-    },
-    warn: {
-      lineColor: "#C28B47",
-      pillBg: "#C28B47",
-      accent: "#C28B47",
-      Icon: Icons.AlertCircle,
-      label: "Trending high",
-    },
-    ok: {
-      lineColor: "hsl(73 84% 27%)",
-      pillBg: "hsl(73 84% 27%)",
-      accent: "var(--success)",
-      Icon: Icons.CheckCircle ?? Icons.AlertCircle,
-      label: "On track",
-    },
-  };
-  const a = accents[status];
+  const a = STATUS_ACCENTS[status];
   const { Icon } = a;
 
   const chartW = 320;
@@ -145,12 +156,18 @@ export function BudgetLineChartCard({
   const paceX2 = xForDay(daysInMonth);
   const paceY2 = yForVal(target);
 
-  const actualPath = cumulative.length
-    ? "M " +
-      cumulative
-        .map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`)
-        .join(" L ")
-    : "";
+  const actualPath = useMemo(
+    () =>
+      cumulative.length
+        ? "M " +
+          cumulative
+            .map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`)
+            .join(" L ")
+        : "",
+    // xForDay/yForVal depend on target/daysInMonth/innerW/innerH/padL/padT and yMax;
+    // captured here as primitives so the path rebuilds only when geometry shifts.
+    [cumulative, daysInMonth, innerW, innerH, padL, padT, yMax],
+  );
 
   const endX = cumulative.length ? xForDay(cumulative[cumulative.length - 1].day) : padL;
   const endY = cumulative.length ? yForVal(cumulative[cumulative.length - 1].value) : padT + innerH;
@@ -166,34 +183,33 @@ export function BudgetLineChartCard({
   const pillLeftPct = Math.min(78, Math.max(8, pillLeftPctRaw - 4));
   const pillTopPx = Math.max(0, endY - 28);
 
-  const spentByTop = (() => {
-    const m = new Map<string, number>();
+  const rings = useMemo(() => {
+    const spentByTop = new Map<string, number>();
     for (const row of spendingBreakdown) {
       const meta = categoriesMeta.get(row.categoryId);
       const topId = meta?.parentId ?? row.categoryId;
-      m.set(topId, (m.get(topId) ?? 0) + row.amount);
+      spentByTop.set(topId, (spentByTop.get(topId) ?? 0) + row.amount);
     }
-    return m;
-  })();
-  const rings = allocations
-    .map((al) => {
-      const t = al.target || 0;
-      if (t <= 0) return null;
-      const meta = categoriesMeta.get(al.categoryId);
-      const s = spentByTop.get(al.categoryId) ?? 0;
-      return {
-        id: al.categoryId,
-        categoryId: al.categoryId,
-        name: meta?.name ?? al.categoryId,
-        color: meta?.color ?? null,
-        icon: meta?.icon ?? null,
-        target: t,
-        spent: Math.max(0, s),
-        pct: Math.max(0, s) / t,
-      };
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
-    .sort((x, y) => y.pct - x.pct);
+    return allocations
+      .map((al) => {
+        const t = al.target || 0;
+        if (t <= 0) return null;
+        const meta = categoriesMeta.get(al.categoryId);
+        const s = spentByTop.get(al.categoryId) ?? 0;
+        return {
+          id: al.categoryId,
+          categoryId: al.categoryId,
+          name: meta?.name ?? al.categoryId,
+          color: meta?.color ?? null,
+          icon: meta?.icon ?? null,
+          target: t,
+          spent: Math.max(0, s),
+          pct: Math.max(0, s) / t,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((x, y) => y.pct - x.pct);
+  }, [allocations, spendingBreakdown, categoriesMeta]);
 
   return (
     <div className="w-full">
