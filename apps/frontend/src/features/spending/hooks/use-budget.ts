@@ -5,6 +5,7 @@ import { QueryKeys } from "@/lib/query-keys";
 
 import {
   assignCategoryToGroup,
+  copyBudgetTargets,
   createBudgetGroup,
   deleteBudgetGroup,
   deleteBudgetRolloverSetting,
@@ -91,6 +92,27 @@ export function useBudgetMutations(periodKey?: string) {
     onError: () => toast.error("Failed to reset budget groups."),
   });
 
+  const copyFromMonth = useMutation({
+    mutationFn: ({
+      sourcePeriodKey,
+      overwrite,
+    }: {
+      sourcePeriodKey: string;
+      overwrite: boolean;
+    }) => {
+      const target = periodKey && periodKey !== "default" ? periodKey : sourcePeriodKey;
+      return copyBudgetTargets(sourcePeriodKey, target, overwrite);
+    },
+    onSuccess: () => {
+      invalidate();
+      toast.success("Plan copied.");
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Failed to copy plan.";
+      toast.error(message);
+    },
+  });
+
   return {
     upsertTarget,
     removeTarget,
@@ -101,5 +123,6 @@ export function useBudgetMutations(periodKey?: string) {
     removeGroup,
     assignCategory,
     resetGroups,
+    copyFromMonth,
   };
 }

@@ -405,6 +405,7 @@ pub fn run() {
             commands::spending::delete_budget_group,
             commands::spending::assign_category_to_group,
             commands::spending::reset_budget_groups,
+            commands::spending::copy_budget_targets,
             commands::spending::get_spending_report,
             commands::spending::get_spending_summary,
             commands::spending::get_events_with_names,

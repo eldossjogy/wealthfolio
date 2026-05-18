@@ -571,6 +571,25 @@ impl BudgetService {
         self.get(period_key, currency).await
     }
 
+    pub async fn copy_period_targets(
+        &self,
+        source_period_key: &str,
+        target_period_key: &str,
+        overwrite: bool,
+        currency: &str,
+    ) -> Result<BudgetSnapshot> {
+        validate_period_key(source_period_key)?;
+        validate_month_key(target_period_key)?;
+        if source_period_key == target_period_key {
+            return Err(anyhow!("Source and target months must differ"));
+        }
+        self.repo
+            .copy_period_targets(source_period_key, target_period_key, overwrite)
+            .await?;
+        self.get(Some(target_period_key.to_string()), currency)
+            .await
+    }
+
     async fn ensure_system_groups(&self) -> Result<()> {
         let existing_keys: HashSet<String> = self
             .repo

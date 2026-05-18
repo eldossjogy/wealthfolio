@@ -223,6 +223,15 @@ pub struct BudgetSnapshot {
     pub computed: BudgetSnapshotComputed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyMonthRequest {
+    pub source_period_key: String,
+    pub target_period_key: String,
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
 fn default_spending_taxonomy() -> String {
     "spending_categories".to_string()
 }

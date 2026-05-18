@@ -181,6 +181,7 @@ export const COMMANDS: CommandMap = {
   delete_budget_group: { method: "DELETE", path: "/spending/budget/groups" },
   assign_category_to_group: { method: "POST", path: "/spending/budget/group-assignments" },
   reset_budget_groups: { method: "POST", path: "/spending/budget/groups/reset" },
+  copy_budget_targets: { method: "POST", path: "/spending/budget/copy" },
   // Health Center
   get_health_status: { method: "GET", path: "/health/status" },
   run_health_checks: { method: "POST", path: "/health/check" },
@@ -1064,6 +1065,15 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "reset_budget_groups": {
       const { periodKey } = (payload ?? {}) as { periodKey?: string };
       addPeriodKey(periodKey);
+      break;
+    }
+    case "copy_budget_targets": {
+      const { sourcePeriodKey, targetPeriodKey, overwrite } = payload as {
+        sourcePeriodKey: string;
+        targetPeriodKey: string;
+        overwrite?: boolean;
+      };
+      body = JSON.stringify({ sourcePeriodKey, targetPeriodKey, overwrite: !!overwrite });
       break;
     }
     // Health Center commands

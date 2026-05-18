@@ -670,4 +670,72 @@ impl BudgetRepositoryTrait for BudgetRepository {
             .map(|rows| rows.into_iter().map(Into::into).collect())
             .map_err(|e| anyhow::anyhow!(e))
     }
+
+    async fn copy_period_targets(
+        &self,
+        source_period_key: &str,
+        target_period_key: &str,
+        overwrite: bool,
+    ) -> Result<Vec<BudgetTarget>> {
+        let source = source_period_key.to_string();
+        let target = target_period_key.to_string();
+        self.writer
+            .exec_tx(move |tx| {
+                let source_rows = budget_targets::table
+                    .filter(budget_targets::period_key.eq(&source))
+                    .load::<BudgetTargetDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                if overwrite {
+                    let to_delete = budget_targets::table
+                        .filter(budget_targets::period_key.eq(&target))
+                        .load::<BudgetTargetDB>(tx.conn())
+                        .map_err(StorageError::from)?;
+                    diesel::delete(
+                        budget_targets::table.filter(budget_targets::period_key.eq(&target)),
+                    )
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+                    for row in &to_delete {
+                        tx.delete::<BudgetTargetDB>(row.id.clone());
+                    }
+                }
+
+                let now = chrono::Utc::now().to_rfc3339();
+                let mut inserted_rows: Vec<BudgetTargetDB> = Vec::new();
+                for source_row in source_rows {
+                    let new_row = NewBudgetTargetDB {
+                        id: Uuid::new_v4().to_string(),
+                        period_key: target.clone(),
+                        target_type: source_row.target_type.clone(),
+                        taxonomy_id: source_row.taxonomy_id.clone(),
+                        category_id: source_row.category_id.clone(),
+                        group_id: source_row.group_id.clone(),
+                        amount: source_row.amount.clone(),
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    };
+                    let inserted = diesel::insert_into(budget_targets::table)
+                        .values(&new_row)
+                        .on_conflict_do_nothing()
+                        .returning(BudgetTargetDB::as_returning())
+                        .get_result(tx.conn())
+                        .optional()
+                        .map_err(StorageError::from)?;
+                    if let Some(row) = inserted {
+                        tx.update(&row)?;
+                        inserted_rows.push(row);
+                    }
+                }
+
+                let all_target_rows = budget_targets::table
+                    .filter(budget_targets::period_key.eq(&target))
+                    .load::<BudgetTargetDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+                Ok(all_target_rows)
+            })
+            .await
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(|e| anyhow::anyhow!(e))
+    }
 }

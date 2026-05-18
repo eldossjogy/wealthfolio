@@ -39,4 +39,11 @@ pub trait BudgetRepositoryTrait: Send + Sync {
         taxonomy_id: &str,
         category_ids: &[String],
     ) -> Result<Vec<BudgetRolloverSetting>>;
+
+    async fn copy_period_targets(
+        &self,
+        source_period_key: &str,
+        target_period_key: &str,
+        overwrite: bool,
+    ) -> Result<Vec<BudgetTarget>>;
 }

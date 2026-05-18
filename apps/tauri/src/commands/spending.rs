@@ -498,6 +498,26 @@ pub async fn reset_budget_groups(
 }
 
 #[tauri::command]
+pub async fn copy_budget_targets(
+    source_period_key: String,
+    target_period_key: String,
+    overwrite: bool,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<BudgetSnapshot, String> {
+    let base_currency = state.get_base_currency();
+    state
+        .budget_service()
+        .copy_period_targets(
+            &source_period_key,
+            &target_period_key,
+            overwrite,
+            &base_currency,
+        )
+        .await
+        .map_err(|e| format!("Failed to copy budget targets: {}", e))
+}
+
+#[tauri::command]
 pub async fn get_spending_report(
     request: ReportRequest,
     state: State<'_, Arc<ServiceContext>>,

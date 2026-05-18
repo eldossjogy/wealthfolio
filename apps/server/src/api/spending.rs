@@ -436,6 +436,33 @@ async fn get_spending_report(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CopyBudgetTargetsBody {
+    source_period_key: String,
+    target_period_key: String,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+async fn copy_budget_targets(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CopyBudgetTargetsBody>,
+) -> ApiResult<Json<BudgetSnapshot>> {
+    let base = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .budget_service
+            .copy_period_targets(
+                &payload.source_period_key,
+                &payload.target_period_key,
+                payload.overwrite,
+                &base,
+            )
+            .await?,
+    ))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/spending/settings", get(get_spending_settings))
@@ -516,5 +543,6 @@ pub fn router() -> Router<Arc<AppState>> {
             "/v1/spending/budget/group-assignments",
             post(assign_category_to_group),
         )
+        .route("/v1/spending/budget/copy", post(copy_budget_targets))
         .route("/v1/spending/report", post(get_spending_report))
 }

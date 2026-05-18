@@ -131,3 +131,20 @@ export const resetBudgetGroups = async (periodKey?: string): Promise<BudgetSnaps
     throw e;
   }
 };
+
+export const copyBudgetTargets = async (
+  sourcePeriodKey: string,
+  targetPeriodKey: string,
+  overwrite: boolean,
+): Promise<BudgetSnapshot> => {
+  try {
+    return await invoke<BudgetSnapshot>("copy_budget_targets", {
+      sourcePeriodKey,
+      targetPeriodKey,
+      overwrite,
+    });
+  } catch (e) {
+    logger.error("Error copying budget targets.");
+    throw e;
+  }
+};
