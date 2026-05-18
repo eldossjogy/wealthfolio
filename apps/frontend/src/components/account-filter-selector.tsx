@@ -33,7 +33,13 @@ function filterLabel(
   if (filter.type === "portfolio") {
     return portfolios.find((p) => p.id === filter.portfolioId)?.name ?? "Portfolio";
   }
-  return `Custom (${filter.accountIds.length})`;
+  return `${filter.accountIds.length} Accounts`;
+}
+
+function isAccountChecked(value: AccountScope, accountId: string): boolean {
+  if (value.type === "account") return value.accountId === accountId;
+  if (value.type === "accounts") return value.accountIds.includes(accountId);
+  return false;
 }
 
 export function AccountScopeSelector({ value, onChange, className }: AccountScopeSelectorProps) {
@@ -46,6 +52,26 @@ export function AccountScopeSelector({ value, onChange, className }: AccountScop
   const select = (filter: AccountScope) => {
     onChange(filter);
     setOpen(false);
+  };
+
+  // Toggle a single account in/out of the selection without closing the popover,
+  // collapsing to account/all when the count reaches 1/0.
+  const toggleAccount = (accountId: string) => {
+    if (value.type === "account" && value.accountId === accountId) {
+      onChange({ type: "all" });
+    } else if (value.type === "account") {
+      onChange({ type: "accounts", accountIds: [value.accountId, accountId] });
+    } else if (value.type === "accounts") {
+      const ids = value.accountIds.includes(accountId)
+        ? value.accountIds.filter((id) => id !== accountId)
+        : [...value.accountIds, accountId];
+      if (ids.length === 0) onChange({ type: "all" });
+      else if (ids.length === 1) onChange({ type: "account", accountId: ids[0] });
+      else onChange({ type: "accounts", accountIds: ids });
+    } else {
+      // Currently all/portfolio — start a new single-account selection.
+      onChange({ type: "account", accountId });
+    }
   };
 
   return (
@@ -63,7 +89,7 @@ export function AccountScopeSelector({ value, onChange, className }: AccountScop
         >
           {value.type === "portfolio" ? (
             <Icons.Folder className="h-4 w-4 shrink-0 opacity-70" />
-          ) : value.type === "account" ? (
+          ) : value.type === "account" || value.type === "accounts" ? (
             <Icons.CreditCard className="h-4 w-4 shrink-0 opacity-70" />
           ) : (
             <Icons.Wallet className="h-4 w-4 shrink-0 opacity-70" />
@@ -117,26 +143,24 @@ export function AccountScopeSelector({ value, onChange, className }: AccountScop
 
             {accounts.length > 0 && (
               <CommandGroup heading="Accounts">
-                {accounts.map((a) => (
-                  <CommandItem
-                    key={a.id}
-                    value={a.id}
-                    keywords={[a.name, a.currency]}
-                    onSelect={() => select({ type: "account", accountId: a.id })}
-                  >
-                    <Icons.CreditCard className="mr-2 h-4 w-4" />
-                    {a.name}
-                    <span className="text-muted-foreground ml-1 text-xs">({a.currency})</span>
-                    <Icons.Check
-                      className={cn(
-                        "ml-auto h-4 w-4",
-                        value.type === "account" && value.accountId === a.id
-                          ? "opacity-100"
-                          : "opacity-0",
-                      )}
-                    />
-                  </CommandItem>
-                ))}
+                {accounts.map((a) => {
+                  const checked = isAccountChecked(value, a.id);
+                  return (
+                    <CommandItem
+                      key={a.id}
+                      value={a.id}
+                      keywords={[a.name, a.currency]}
+                      onSelect={() => toggleAccount(a.id)}
+                    >
+                      <Icons.CreditCard className="mr-2 h-4 w-4" />
+                      {a.name}
+                      <span className="text-muted-foreground ml-1 text-xs">({a.currency})</span>
+                      <Icons.Check
+                        className={cn("ml-auto h-4 w-4", checked ? "opacity-100" : "opacity-0")}
+                      />
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
             )}
           </CommandList>
