@@ -181,9 +181,8 @@ export default function SpendingInsightsPage() {
         heading="Spending Insight"
         text="Patterns, comparisons, and anomalies for your spending."
         onBack={() => {
-          // Prefer browser history; fall back to the spending hub for direct landings.
           if (window.history.length > 1) navigate(-1);
-          else navigate("/spending");
+          else navigate("/dashboard?tab=spending");
         }}
         actions={periodToggle}
       />

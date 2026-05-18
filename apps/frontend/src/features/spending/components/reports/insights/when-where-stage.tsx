@@ -568,7 +568,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
             </span>
           ))}
           <Button asChild variant="outline" size="sm" className="ml-1 h-7 text-[11px]">
-            <Link to="/spending/events">+ TAG EVENT</Link>
+            <Link to="/settings/spending/events">+ TAG EVENT</Link>
           </Button>
         </div>
       </div>
