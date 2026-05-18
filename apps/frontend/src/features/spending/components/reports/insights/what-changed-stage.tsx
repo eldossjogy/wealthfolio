@@ -9,13 +9,20 @@ import { CategoryIcon } from "../../category-chips";
 import type { MonthBucket } from "../../../hooks/use-monthly-history";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { CategoryBreakdownRow, DayCategoryBucket, MonthlyReport } from "../../../types/report";
+import {
+  MIN_PRIOR_FOR_PCT,
+  classifyPeriod,
+  describeCategories,
+  type ChangeDescriptor,
+  type PeriodState,
+} from "../../../lib/change-descriptor";
+import { buildHeadline, type HeadlineFragment, type HeadlineModel } from "../../../lib/headline";
 import { formatMonthName, formatMonthYear, formatPercentValue } from "./format";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS =
   "text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-[0.12em]";
 
-// Hoist out of render so Recharts doesn't see a new reference each tick.
 const SPARK_MARGIN = { top: 2, right: 0, left: 0, bottom: 0 };
 
 export interface WhatChangedStageProps {
@@ -29,6 +36,13 @@ export interface WhatChangedStageProps {
   onCategoryClick?: (categoryId: string) => void;
 }
 
+interface MoverDescriptor extends ChangeDescriptor {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+}
+
 export function WhatChangedStage({
   range,
   currentReport,
@@ -39,157 +53,235 @@ export function WhatChangedStage({
   isLoading,
   onCategoryClick,
 }: WhatChangedStageProps) {
-  // Compute once and feed both the headline + comparison table to avoid two
-  // O(n) passes over the same breakdown arrays.
-  const movers = useMemo(
+  const labels = useMemo(() => buildPeriodLabels(range), [range]);
+
+  const currentTotal = currentReport?.current.outflow ?? 0;
+  const priorTotal = priorReport?.current.outflow ?? 0;
+  const currentTxCount = currentReport?.current.count ?? 0;
+  const priorTxCount = priorReport?.current.count ?? 0;
+
+  const periodState = useMemo<PeriodState>(
     () =>
-      computeTopMovers(
+      classifyPeriod({
+        currentTotal,
+        priorTotal,
+        currentTransactionCount: currentTxCount,
+        priorTransactionCount: priorTxCount,
+      }),
+    [currentTotal, priorTotal, currentTxCount, priorTxCount],
+  );
+
+  const movers = useMemo<MoverDescriptor[]>(
+    () =>
+      computeMovers(
         currentReport?.spendingBreakdown ?? [],
         priorReport?.spendingBreakdown ?? [],
         taxonomyCategories,
+        currentTotal,
+        priorTotal,
       ),
-    [currentReport, priorReport, taxonomyCategories],
+    [currentReport, priorReport, taxonomyCategories, currentTotal, priorTotal],
   );
-  const labels = useMemo(() => buildPeriodLabels(range), [range]);
+
+  const headline = useMemo<HeadlineModel>(
+    () =>
+      buildHeadline({
+        periodState,
+        movers,
+        currentTotal,
+        priorTotal,
+        priorLabel: labels.prior,
+        metaLabel: `HEADLINE · ${labels.combined}`,
+      }),
+    [periodState, movers, currentTotal, priorTotal, labels],
+  );
 
   return (
     <div className="flex flex-col gap-6">
-      <HeadlineCard
-        currentReport={currentReport}
-        priorReport={priorReport}
-        movers={movers}
-        labels={labels}
-        currency={currency}
-        isLoading={isLoading}
-      />
-      <CategoryTrendsCard
+      <HeadlineCard headline={headline} currency={currency} isLoading={isLoading} />
+      <CategoryTrendsSection
         months={months}
         currentReport={currentReport}
         priorReport={priorReport}
         taxonomyCategories={taxonomyCategories}
+        movers={movers}
+        periodState={periodState}
         currency={currency}
         useDaily={range.days <= 35}
         isLoading={isLoading}
         onCategoryClick={onCategoryClick}
       />
-      <ComparisonTable
-        movers={movers}
-        labels={labels}
-        currency={currency}
-        isLoading={isLoading}
-        onCategoryClick={onCategoryClick}
-      />
+      {!isLoading && movers.length > 0 && (
+        <div>
+          <h3 className="text-foreground mb-4 text-base font-semibold tracking-tight">
+            Category details
+          </h3>
+          <ComparisonTable
+            movers={movers}
+            labels={labels}
+            periodState={periodState}
+            currency={currency}
+            onCategoryClick={onCategoryClick}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Headline card — narrative summary + 4-stat row
+// Headline card — narrative + compact comparison line
 // ═════════════════════════════════════════════════════════════════════════
 
 interface HeadlineCardProps {
-  currentReport: MonthlyReport | undefined;
-  priorReport: MonthlyReport | undefined;
-  movers: MoverRow[];
-  labels: PeriodLabels;
+  headline: HeadlineModel;
   currency: string;
   isLoading: boolean;
 }
 
-const HeadlineCard: FC<HeadlineCardProps> = ({
-  currentReport,
-  priorReport,
-  movers,
-  labels: labelPair,
-  currency,
-  isLoading,
-}) => {
-  const current = currentReport?.current.outflow ?? 0;
-  const prior = priorReport?.current.outflow ?? 0;
-  const change = current - prior;
-  const pct = prior > 0 ? (change / prior) * 100 : null;
-
+const HeadlineCard: FC<HeadlineCardProps> = ({ headline, currency, isLoading }) => {
   if (isLoading) {
     return (
       <div className={CARD_CLASS}>
         <Skeleton className="h-3 w-32" />
         <Skeleton className="mt-3 h-16 w-full" />
-        <Skeleton className="mt-6 h-10 w-1/2" />
+        <Skeleton className="mt-4 h-4 w-2/3" />
       </div>
     );
   }
 
   return (
     <div className={CARD_CLASS}>
-      <div className={LABEL_CLASS}>HEADLINE · {labelPair.combined}</div>
-      <p className="text-foreground mt-3 max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg">
-        {buildHeadline({ change, pct, movers, currency, priorLabel: labelPair.prior })}
+      {headline.metaLabel && <div className={LABEL_CLASS}>{headline.metaLabel}</div>}
+      <p
+        className={cn(
+          "text-foreground max-w-[95%] text-base font-normal leading-snug tracking-tight md:text-lg",
+          headline.metaLabel && "mt-3",
+        )}
+      >
+        {renderHeadlineFragments(headline.fragments, currency)}
       </p>
-
-      <div className="border-border/40 mt-5 grid grid-cols-2 gap-4 border-t pt-4 sm:grid-cols-4">
-        <Stat label="THIS PERIOD" value={formatAmount(current, currency)} />
-        <Stat label="PRIOR PERIOD" value={formatAmount(prior, currency)} muted />
-        <Stat
-          label="CHANGE"
-          value={`${change >= 0 ? "+" : "−"}${formatAmount(Math.abs(change), currency)}`}
-        />
-        <Stat
-          label="Δ %"
-          value={pct == null ? "—" : formatPercentValue(pct, { digits: 0, signDisplay: "always" })}
-          tone={pct == null ? "neutral" : pct >= 0 ? "warn" : "good"}
-        />
-      </div>
+      {headline.summary && <HeadlineSummaryLine summary={headline.summary} currency={currency} />}
     </div>
   );
 };
 
-function Stat({
-  label,
-  value,
-  muted,
-  tone = "neutral",
+function renderHeadlineFragments(fragments: HeadlineFragment[], currency: string): ReactNode {
+  return fragments.map((f, i) => {
+    switch (f.type) {
+      case "text":
+        return <span key={i}>{f.text}</span>;
+      case "amount":
+        return (
+          <span
+            key={i}
+            className={cn("whitespace-nowrap font-serif font-medium", toneClass(f.tone))}
+          >
+            {formatAmount(f.value, currency)}
+          </span>
+        );
+      case "mover": {
+        const d = f.descriptor.descriptor;
+        const phrase = describeMoverPhrase(d, currency);
+        return (
+          <span
+            key={i}
+            className={cn("whitespace-nowrap font-serif font-medium", toneClass(f.tone))}
+          >
+            {f.descriptor.name} {phrase}
+          </span>
+        );
+      }
+    }
+  });
+}
+
+function describeMoverPhrase(d: ChangeDescriptor, currency: string): string {
+  switch (d.kind) {
+    case "no_activity":
+      return "";
+    case "new":
+      return `appeared (+${formatAmount(d.absDelta, currency)})`;
+    case "ended":
+      return `dropped to zero (was ${formatAmount(d.prior, currency)})`;
+    case "valid": {
+      const verb = d.delta >= 0 ? "up" : "down";
+      if (d.showPct && d.pct != null) {
+        return `${verb} ${formatPercentValue(Math.abs(d.pct), { digits: 0 })}`;
+      }
+      return `${verb} ${formatAmount(d.absDelta, currency)}`;
+    }
+  }
+}
+
+function toneClass(tone: "up" | "down" | "neutral"): string {
+  if (tone === "up") return "text-destructive";
+  if (tone === "down") return "text-success";
+  return "text-foreground";
+}
+
+function HeadlineSummaryLine({
+  summary,
+  currency,
 }: {
-  label: string;
-  value: string;
-  muted?: boolean;
-  tone?: "neutral" | "warn" | "good" | "bad";
+  summary: NonNullable<HeadlineModel["summary"]>;
+  currency: string;
 }) {
-  const toneClass =
-    tone === "warn"
-      ? "text-amber-700 dark:text-amber-400"
-      : tone === "good"
-        ? "text-success"
-        : tone === "bad"
-          ? "text-destructive"
-          : muted
-            ? "text-muted-foreground/80"
-            : "text-foreground";
+  const parts: ReactNode[] = [
+    <span key="cur" className="tabular-nums">
+      <span className={LABEL_CLASS}>this </span>
+      {formatAmount(summary.current, currency)}
+    </span>,
+  ];
+  if (summary.prior != null) {
+    parts.push(
+      <span key="prior" className="text-muted-foreground/80 tabular-nums">
+        <span className={LABEL_CLASS}>prior </span>
+        {formatAmount(summary.prior, currency)}
+      </span>,
+    );
+  }
+  if (summary.delta != null) {
+    const sign = summary.delta >= 0 ? "+" : "−";
+    const tone = summary.delta === 0 ? "neutral" : summary.delta > 0 ? "up" : "down";
+    parts.push(
+      <span key="delta" className={cn("font-medium tabular-nums", toneClass(tone))}>
+        {sign}
+        {formatAmount(Math.abs(summary.delta), currency)}
+      </span>,
+    );
+  }
+  if (summary.showPct && summary.pct != null) {
+    const tone = summary.pct === 0 ? "neutral" : summary.pct > 0 ? "up" : "down";
+    parts.push(
+      <span key="pct" className={cn("font-medium tabular-nums", toneClass(tone))}>
+        {formatPercentValue(summary.pct, { digits: 0, signDisplay: "always" })}
+      </span>,
+    );
+  }
   return (
-    <div>
-      <div className={LABEL_CLASS}>{label}</div>
-      <div className={cn("mt-1.5 text-lg font-semibold tabular-nums tracking-tight", toneClass)}>
-        {value}
-      </div>
+    <div className="border-border/40 mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-sm">
+      {parts.map((p, i) => (
+        <span key={i} className="flex items-center gap-3">
+          {i > 0 && <span className="text-muted-foreground/40">·</span>}
+          {p}
+        </span>
+      ))}
     </div>
   );
 }
 
-interface MoverRow {
-  id: string;
-  name: string;
-  color: string | null;
-  icon: string | null;
-  current: number;
-  prior: number;
-  delta: number;
-  pct: number | null;
-}
+// ═════════════════════════════════════════════════════════════════════════
+// Movers — descriptor-backed comparison rows shared by every surface
+// ═════════════════════════════════════════════════════════════════════════
 
-function computeTopMovers(
+function computeMovers(
   current: CategoryBreakdownRow[],
   prior: CategoryBreakdownRow[],
   taxonomyCategories: TaxonomyCategory[],
-): MoverRow[] {
+  currentTotal: number,
+  priorTotal: number,
+): MoverDescriptor[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
   const roll = (rows: CategoryBreakdownRow[]) => {
     const m = new Map<string, number>();
@@ -202,183 +294,86 @@ function computeTopMovers(
   };
   const cur = roll(current);
   const pri = roll(prior);
-  const all = new Set<string>([...cur.keys(), ...pri.keys()]);
-  const rows: MoverRow[] = [];
-  for (const id of all) {
-    const c = cur.get(id) ?? 0;
-    const p = pri.get(id) ?? 0;
-    const delta = c - p;
-    const pct = p > 0 ? (delta / p) * 100 : null;
-    const m = meta.get(id);
-    rows.push({
-      id,
-      name: m?.name ?? id,
+  const ids = new Set<string>([...cur.keys(), ...pri.keys()]);
+  const aggregates = Array.from(ids).map((id) => ({
+    id,
+    current: cur.get(id) ?? 0,
+    prior: pri.get(id) ?? 0,
+  }));
+  const descriptors = describeCategories(aggregates, currentTotal, priorTotal);
+  return descriptors.map((d) => {
+    const m = meta.get(d.id);
+    return {
+      ...d,
+      name: m?.name ?? d.id,
       color: m?.color ?? null,
       icon: m?.icon ?? null,
-      current: c,
-      prior: p,
-      delta,
-      pct,
-    });
-  }
-  return rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-}
-
-function buildHeadline({
-  change,
-  pct,
-  movers,
-  currency,
-  priorLabel,
-}: {
-  change: number;
-  pct: number | null;
-  movers: MoverRow[];
-  currency: string;
-  priorLabel: string;
-}): ReactNode {
-  if (movers.length === 0 || change === 0) {
-    return <>No meaningful change vs prior period.</>;
-  }
-  const direction = change >= 0 ? "more" : "less";
-  const directionTone = change >= 0 ? "text-destructive" : "text-success";
-  const top = movers.find((m) => m.pct != null && Math.abs(m.pct) >= 10) ?? movers[0];
-  const second = movers
-    .filter((m) => m.id !== top.id && m.pct != null && Math.abs(m.pct) >= 10)
-    .find((m) => Math.sign(m.delta) !== Math.sign(top.delta));
-
-  const topPct = top.pct ?? 0;
-  const topTone = topPct >= 0 ? "text-destructive" : "text-success";
-  const topVerb = topPct >= 0 ? "up" : "down";
-
-  const totalPctSentence =
-    pct == null ? null : (
-      <span className={cn("font-medium", pct >= 0 ? "text-destructive" : "text-success")}>
-        Total spend {pct >= 0 ? "up" : "down"} {formatPercentValue(Math.abs(pct), { digits: 0 })}.
-      </span>
-    );
-
-  const lead = (
-    <>
-      You spent{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", directionTone)}>
-        {formatAmount(Math.abs(change), currency)} {direction}
-      </span>{" "}
-      than {priorLabel}.
-    </>
-  );
-
-  const drivers = second ? (
-    <>
-      Most of the {change >= 0 ? "rise" : "drop"} came from{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
-        {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
-      </span>
-      .{" "}
-      <span
-        className={cn(
-          "whitespace-nowrap font-serif font-medium",
-          (second.pct ?? 0) >= 0 ? "text-destructive" : "text-success",
-        )}
-      >
-        {second.name} {(second.pct ?? 0) >= 0 ? "up" : "down"}{" "}
-        {formatPercentValue(Math.abs(second.pct ?? 0), { digits: 0 })}
-      </span>
-      .
-    </>
-  ) : (
-    <>
-      Most of the {change >= 0 ? "rise" : "drop"} came from{" "}
-      <span className={cn("whitespace-nowrap font-serif font-medium", topTone)}>
-        {top.name} {topVerb} {formatPercentValue(Math.abs(topPct), { digits: 0 })}
-      </span>
-      .
-    </>
-  );
-
-  return (
-    <>
-      <span>{lead}</span>
-      <br />
-      <span>{drivers}</span>
-      {totalPctSentence && <> {totalPctSentence}</>}
-    </>
-  );
-}
-
-interface PeriodLabels {
-  current: string;
-  prior: string;
-  combined: string;
-}
-
-function buildPeriodLabels(range: ReportsRange): PeriodLabels {
-  const priorEnd = new Date(range.start.getTime() - 1);
-
-  // Single-month windows label by month name; multi-month windows by range bounds.
-  if (range.months <= 1) {
-    const current = formatMonthName(range.end);
-    const prior = formatMonthName(priorEnd);
-    return { current, prior, combined: `${current.toUpperCase()} VS ${prior.toUpperCase()}` };
-  }
-  const priorStart = new Date(priorEnd.getTime() - (range.end.getTime() - range.start.getTime()));
-  const current = `${formatMonthYear(range.start)} – ${formatMonthYear(range.end)}`;
-  const prior = `${formatMonthYear(priorStart)} – ${formatMonthYear(priorEnd)}`;
-  return { current, prior, combined: `${range.months}M VS PRIOR ${range.months}M` };
+    };
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Category trends card — sparkline grid (2-col), summary line, "show more"
+// Category trends — sparkline grid (no section chrome)
 // ═════════════════════════════════════════════════════════════════════════
 
-interface CategoryTrendsCardProps {
+interface CategoryTrendsSectionProps {
   months: MonthBucket[];
   currentReport: MonthlyReport | undefined;
   priorReport: MonthlyReport | undefined;
   taxonomyCategories: TaxonomyCategory[];
+  movers: MoverDescriptor[];
+  periodState: PeriodState;
   currency: string;
   useDaily: boolean;
   isLoading: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }
 
-const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
+const COLLAPSED_ROWS = 6;
+
+const CategoryTrendsSection: FC<CategoryTrendsSectionProps> = ({
   months,
   currentReport,
   priorReport,
   taxonomyCategories,
+  movers,
+  periodState,
   currency,
   useDaily,
   isLoading,
   onCategoryClick,
 }) => {
-  const rows = useMemo(
+  const showPills = periodState.kind === "valid_comparison";
+  const [expanded, setExpanded] = useState(false);
+
+  const sparkRows = useMemo(
     () =>
       buildSparklineRows({
         months,
-        byDayByCategory: currentReport?.byDayByCategory,
+        byDayByCategory: useDaily ? currentReport?.byDayByCategory : undefined,
         priorBreakdown: priorReport?.spendingBreakdown ?? [],
         taxonomyCategories,
         useDaily,
+        movers,
       }),
-    [months, currentReport, priorReport, taxonomyCategories, useDaily],
+    [
+      months,
+      currentReport?.byDayByCategory,
+      priorReport?.spendingBreakdown,
+      taxonomyCategories,
+      useDaily,
+      movers,
+    ],
   );
 
-  const [showAll, setShowAll] = useState(false);
-  const visible = showAll ? rows : rows.slice(0, 6);
-  const remaining = rows.length - visible.length;
+  const visible = expanded ? sparkRows : sparkRows.slice(0, COLLAPSED_ROWS);
+  const remaining = sparkRows.length - visible.length;
 
-  const movedMessage = useMemo(() => {
-    const moved = rows.filter((r) => r.deltaPct != null && Math.abs(r.deltaPct) >= 15).slice(0, 2);
-    if (moved.length === 0) return null;
-    return moved;
-  }, [rows]);
-
-  if (isLoading && rows.length === 0) {
+  if (isLoading) {
     return (
-      <div className={CARD_CLASS}>
+      <div>
         <Skeleton className="h-4 w-32" />
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-xl" />
           ))}
@@ -388,49 +383,24 @@ const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
   }
 
   return (
-    <div className={CARD_CLASS}>
+    <div>
       <header className="mb-4">
         <h3 className="text-foreground text-base font-semibold tracking-tight">Category trends</h3>
-        <p className="text-muted-foreground text-xs">Sorted by change vs prior period.</p>
-        {movedMessage && (
-          <p className="text-foreground/90 mt-2 text-sm">
-            <span className="font-semibold">
-              {movedMessage.length === 1
-                ? "One category moved"
-                : `${movedMessage.length} categories moved`}{" "}
-              this period:
-            </span>{" "}
-            {movedMessage.map((m, i) => (
-              <span key={m.id}>
-                {i > 0 && <span className="text-muted-foreground/60"> · </span>}
-                {m.name}{" "}
-                <span
-                  className={cn(
-                    "font-semibold",
-                    (m.deltaPct ?? 0) >= 0 ? "text-destructive" : "text-success",
-                  )}
-                >
-                  {(m.deltaPct ?? 0) >= 0 ? "↑" : "↓"}{" "}
-                  {formatPercentValue(Math.abs(m.deltaPct ?? 0), { digits: 0 })}
-                </span>
-              </span>
-            ))}
-          </p>
-        )}
       </header>
 
-      {rows.length === 0 ? (
+      {sparkRows.length === 0 ? (
         <div className="text-muted-foreground py-6 text-center text-sm">
           No category history yet for this window.
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((row) => (
               <SparklineRow
                 key={row.id}
                 row={row}
                 currency={currency}
+                showPill={showPills}
                 onCategoryClick={onCategoryClick}
               />
             ))}
@@ -439,8 +409,8 @@ const CategoryTrendsCard: FC<CategoryTrendsCardProps> = ({
             <div className="mt-4 text-center">
               <button
                 type="button"
-                onClick={() => setShowAll(true)}
-                className="text-foreground hover:text-foreground/80 inline-flex items-center gap-1 text-xs font-medium underline-offset-4 hover:underline"
+                onClick={() => setExpanded(true)}
+                className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline"
               >
                 Show {remaining} more →
               </button>
@@ -459,7 +429,7 @@ interface SparkRow {
   icon: string | null;
   series: { label: string; value: number }[];
   total: number;
-  deltaPct: number | null;
+  descriptor: ChangeDescriptor | null;
 }
 
 function buildSparklineRows({
@@ -468,21 +438,24 @@ function buildSparklineRows({
   priorBreakdown,
   taxonomyCategories,
   useDaily,
+  movers,
 }: {
   months: MonthBucket[];
   byDayByCategory: DayCategoryBucket[] | undefined;
   priorBreakdown: CategoryBreakdownRow[];
   taxonomyCategories: TaxonomyCategory[];
   useDaily: boolean;
+  movers: MoverDescriptor[];
 }): SparkRow[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
+  const descriptorById = new Map(movers.map((m) => [m.id, m]));
 
-  const priorByTop = new Map<string, number>();
-  for (const r of priorBreakdown) {
-    const c = meta.get(r.categoryId);
-    const top = c?.parentId ?? r.categoryId;
-    priorByTop.set(top, (priorByTop.get(top) ?? 0) + r.amount);
-  }
+  // Touch priorBreakdown so it's not flagged unused when buildSparklineRows
+  // is invoked with daily data. (Daily path computes spend directly from
+  // byDayByCategory; the descriptor — which already encodes prior — is the
+  // authoritative source of delta info, so we no longer need priorBreakdown
+  // here.)
+  void priorBreakdown;
 
   type Bucket = { name: string; color: string | null; icon: string | null; perBucket: number[] };
   const byCat = new Map<string, Bucket>();
@@ -531,32 +504,77 @@ function buildSparklineRows({
     const total = e.perBucket.reduce((s, x) => s + x, 0);
     if (total <= 0) continue;
     const series = e.perBucket.map((value, i) => ({ label: String(i), value }));
-    const prior = priorByTop.get(id) ?? 0;
-    const deltaPct = prior > 0 ? ((total - prior) / prior) * 100 : null;
-    rows.push({ id, name: e.name, color: e.color, icon: e.icon, series, total, deltaPct });
+    const descriptor = descriptorById.get(id) ?? null;
+    rows.push({ id, name: e.name, color: e.color, icon: e.icon, series, total, descriptor });
   }
 
-  // Sort by absolute delta vs prior — biggest movers first.
+  // Sort by descriptor rankValue (|delta|); categories without a descriptor
+  // (no prior or current row in either period) fall to the bottom.
   return rows.sort((a, b) => {
-    const da = a.deltaPct == null ? -Infinity : Math.abs(a.deltaPct);
-    const db = b.deltaPct == null ? -Infinity : Math.abs(b.deltaPct);
-    return db - da;
+    const ra = a.descriptor?.rankValue ?? -1;
+    const rb = b.descriptor?.rankValue ?? -1;
+    return rb - ra;
   });
+}
+
+interface PillModel {
+  label: string;
+  tone: "up" | "down" | "neutral";
+}
+
+function describePill(d: ChangeDescriptor): PillModel | null {
+  switch (d.kind) {
+    case "no_activity":
+      return null;
+    case "new":
+      return { label: "New", tone: "neutral" };
+    case "ended":
+      // Small-prior categories that ended read better as "No spend" than
+      // dramatic "Ended" — the change isn't meaningful.
+      return {
+        label: d.prior < MIN_PRIOR_FOR_PCT ? "No spend" : "Ended",
+        tone: "neutral",
+      };
+    case "valid": {
+      const tone: PillModel["tone"] = d.delta === 0 ? "neutral" : d.delta > 0 ? "up" : "down";
+      const arrow = d.delta >= 0 ? "↑" : "↓";
+      if (d.showPct && d.pct != null) {
+        return {
+          label: `${arrow} ${formatPercentValue(Math.abs(d.pct), { digits: 0 })}`,
+          tone,
+        };
+      }
+      // valid but pct suppressed → label with dollar delta
+      if (d.absDelta > 0) {
+        return { label: `${arrow} ${formatCompactDelta(d.absDelta)}`, tone };
+      }
+      return null;
+    }
+  }
+}
+
+/** Compact $-delta for pills (one decimal, K/M suffix), currency-agnostic. */
+function formatCompactDelta(amount: number): string {
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
+  return amount.toFixed(0);
 }
 
 const SparklineRow = memo(function SparklineRow({
   row,
   currency,
+  showPill,
   onCategoryClick,
 }: {
   row: SparkRow;
   currency: string;
+  showPill: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }) {
   const color = row.color ?? "var(--muted-foreground)";
   const tintBg = row.color ? `${row.color}14` : "var(--muted)";
   const gradId = `wc-spark-${row.id.replace(/[^a-z0-9]/gi, "_")}`;
-  const noChange = row.deltaPct == null || Math.abs(row.deltaPct) < 1;
+  const pill = showPill && row.descriptor ? describePill(row.descriptor) : null;
   const clickable = !!onCategoryClick;
   return (
     <div
@@ -589,22 +607,16 @@ const SparklineRow = memo(function SparklineRow({
           />
           <span className="text-foreground truncate text-sm font-medium">{row.name}</span>
         </div>
-        {!noChange && (
+        {pill && (
           <span
             className={cn(
               "rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
-              (row.deltaPct ?? 0) >= 0
-                ? "bg-destructive/10 text-destructive"
-                : "bg-success/15 text-success",
+              pill.tone === "up" && "bg-destructive/10 text-destructive",
+              pill.tone === "down" && "bg-success/15 text-success",
+              pill.tone === "neutral" && "text-muted-foreground/80 bg-muted/40",
             )}
           >
-            {(row.deltaPct ?? 0) >= 0 ? "↑" : "↓"}{" "}
-            {formatPercentValue(Math.abs(row.deltaPct ?? 0), { digits: 0 })}
-          </span>
-        )}
-        {noChange && (
-          <span className="text-muted-foreground/70 rounded-full px-2 py-0.5 text-[11px]">
-            no change
+            {pill.label}
           </span>
         )}
       </div>
@@ -636,51 +648,25 @@ const SparklineRow = memo(function SparklineRow({
 });
 
 // ═════════════════════════════════════════════════════════════════════════
-// Comparison table — Category | This | Prior | Δ$ | direction bar | Δ%
+// Comparison table
 // ═════════════════════════════════════════════════════════════════════════
 
 interface ComparisonTableProps {
-  movers: MoverRow[];
+  movers: MoverDescriptor[];
   labels: PeriodLabels;
+  periodState: PeriodState;
   currency: string;
-  isLoading: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }
 
 function ComparisonTable({
   movers,
   labels,
+  periodState,
   currency,
-  isLoading,
   onCategoryClick,
 }: ComparisonTableProps) {
-  const maxDelta = useMemo(
-    () => movers.reduce((m, r) => Math.max(m, Math.abs(r.delta)), 1),
-    [movers],
-  );
-
-  if (isLoading && movers.length === 0) {
-    return (
-      <div className={CARD_CLASS}>
-        <Skeleton className="h-3 w-32" />
-        <div className="mt-3 space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (movers.length === 0) {
-    return (
-      <div className={CARD_CLASS}>
-        <div className="text-muted-foreground py-6 text-center text-sm">
-          No data to compare across the two periods.
-        </div>
-      </div>
-    );
-  }
+  const hidePct = periodState.kind === "no_prior_period";
 
   return (
     <div className="border-border/60 bg-card/40 overflow-hidden rounded-2xl border backdrop-blur-xl">
@@ -691,8 +677,8 @@ function ComparisonTable({
             <th className="px-3 py-3 text-right">{labels.current}</th>
             <th className="px-3 py-3 text-right">{labels.prior}</th>
             <th className="px-3 py-3 text-right">Δ $</th>
-            <th className="px-3 py-3 text-left">Direction</th>
-            <th className="px-4 py-3 text-right">Δ %</th>
+            <th className="px-3 py-3 text-right">Impact</th>
+            {!hidePct && <th className="px-4 py-3 text-right">Δ %</th>}
           </tr>
         </thead>
         <tbody>
@@ -701,7 +687,7 @@ function ComparisonTable({
               key={row.id}
               row={row}
               currency={currency}
-              maxDelta={maxDelta}
+              hidePct={hidePct}
               onCategoryClick={onCategoryClick}
             />
           ))}
@@ -714,18 +700,18 @@ function ComparisonTable({
 const ComparisonRow = memo(function ComparisonRow({
   row,
   currency,
-  maxDelta,
+  hidePct,
   onCategoryClick,
 }: {
-  row: MoverRow;
+  row: MoverDescriptor;
   currency: string;
-  maxDelta: number;
+  hidePct: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }) {
   const color = row.color ?? "var(--muted-foreground)";
   const isUp = row.delta > 0;
-  const widthPct = (Math.abs(row.delta) / maxDelta) * 50; // each side max 50% of bar
   const clickable = !!onCategoryClick;
+  const impactPct = row.shareOfMovement != null ? Math.round(row.shareOfMovement * 100) : null;
   return (
     <tr
       className={cn(
@@ -744,10 +730,18 @@ const ComparisonRow = memo(function ComparisonRow({
         </div>
       </td>
       <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
-        {formatAmount(row.current, currency)}
+        {row.current === 0 ? (
+          <span className="text-muted-foreground/60">—</span>
+        ) : (
+          formatAmount(row.current, currency)
+        )}
       </td>
       <td className="text-muted-foreground/80 px-3 py-2.5 text-right text-xs tabular-nums">
-        {formatAmount(row.prior, currency)}
+        {row.prior === 0 ? (
+          <span className="text-muted-foreground/60">—</span>
+        ) : (
+          formatAmount(row.prior, currency)
+        )}
       </td>
       <td
         className={cn(
@@ -759,30 +753,49 @@ const ComparisonRow = memo(function ComparisonRow({
           ? "—"
           : `${isUp ? "+" : "−"}${formatAmount(Math.abs(row.delta), currency)}`}
       </td>
-      <td className="px-3 py-2.5">
-        <div className="relative h-2 w-full">
-          <div className="bg-foreground/10 absolute inset-y-1/2 left-1/2 h-px w-px" />
-          <div
-            className={cn(
-              "absolute inset-y-0 rounded-sm",
-              isUp ? "bg-destructive/70 left-1/2" : "bg-success/70 right-1/2",
-            )}
-            style={{ width: `${widthPct}%` }}
-          />
-        </div>
+      <td className="text-muted-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
+        {impactPct == null || impactPct === 0 ? "—" : `${impactPct}%`}
       </td>
-      <td
-        className={cn(
-          "px-4 py-2.5 text-right text-xs font-medium tabular-nums",
-          row.pct == null
-            ? "text-muted-foreground/70"
-            : row.pct >= 0
-              ? "text-destructive"
-              : "text-success",
-        )}
-      >
-        {row.pct == null ? "—" : formatPercentValue(row.pct, { digits: 0, signDisplay: "always" })}
-      </td>
+      {!hidePct && (
+        <td
+          className={cn(
+            "px-4 py-2.5 text-right text-xs font-medium tabular-nums",
+            !row.showPct || row.pct == null
+              ? "text-muted-foreground/70"
+              : row.pct >= 0
+                ? "text-destructive"
+                : "text-success",
+          )}
+        >
+          {!row.showPct || row.pct == null
+            ? "—"
+            : formatPercentValue(row.pct, { digits: 0, signDisplay: "always" })}
+        </td>
+      )}
     </tr>
   );
 });
+
+// ═════════════════════════════════════════════════════════════════════════
+// Period labels
+// ═════════════════════════════════════════════════════════════════════════
+
+interface PeriodLabels {
+  current: string;
+  prior: string;
+  combined: string;
+}
+
+function buildPeriodLabels(range: ReportsRange): PeriodLabels {
+  const priorEnd = new Date(range.start.getTime() - 1);
+
+  if (range.months <= 1) {
+    const current = formatMonthName(range.end);
+    const prior = formatMonthName(priorEnd);
+    return { current, prior, combined: `${current.toUpperCase()} VS ${prior.toUpperCase()}` };
+  }
+  const priorStart = new Date(priorEnd.getTime() - (range.end.getTime() - range.start.getTime()));
+  const current = `${formatMonthYear(range.start)} – ${formatMonthYear(range.end)}`;
+  const prior = `${formatMonthYear(priorStart)} – ${formatMonthYear(priorEnd)}`;
+  return { current, prior, combined: `${range.months}M VS PRIOR ${range.months}M` };
+}
