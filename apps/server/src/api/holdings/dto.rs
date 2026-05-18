@@ -18,6 +18,22 @@ pub struct AllocationFilterBody {
 }
 
 #[derive(Deserialize)]
+pub struct AccountIdQuery {
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct AllocationHoldingsQuery {
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    #[serde(rename = "taxonomyId")]
+    pub taxonomy_id: String,
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
+}
+
+#[derive(Deserialize)]
 pub struct HoldingItemQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,

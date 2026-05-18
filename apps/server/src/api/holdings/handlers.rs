@@ -23,10 +23,11 @@ use wealthfolio_core::{
 use crate::{error::ApiResult, main_lib::AppState};
 
 use super::dto::{
-    AllocationFilterBody, AssetHoldingsQuery, CheckHoldingsImportRequest,
-    CheckHoldingsImportResult, DeleteSnapshotQuery, FilterBody, HistoryQuery, HoldingItemQuery,
-    HoldingsSnapshotInput, ImportHoldingsCsvRequest, ImportHoldingsCsvResult,
-    SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo, SnapshotsQuery, SymbolCheckResult,
+    AccountIdQuery, AllocationFilterBody, AllocationHoldingsQuery, AssetHoldingsQuery,
+    CheckHoldingsImportRequest, CheckHoldingsImportResult, DeleteSnapshotQuery, FilterBody,
+    HistoryQuery, HoldingItemQuery, HoldingsSnapshotInput, ImportHoldingsCsvRequest,
+    ImportHoldingsCsvResult, SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo,
+    SnapshotsQuery, SymbolCheckResult,
 };
 use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
 
@@ -77,6 +78,45 @@ pub async fn get_holdings(
         }
     };
     Ok(Json(holdings))
+}
+
+/// GET /holdings?accountId=... — simple single-account scope
+pub async fn get_holdings_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AccountIdQuery>,
+) -> ApiResult<Json<Vec<Holding>>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let holdings = state
+        .holdings_service
+        .get_holdings(&q.account_id, &base)
+        .await?;
+    Ok(Json(holdings))
+}
+
+/// GET /allocations?accountId=... — simple single-account scope
+pub async fn get_allocations_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AccountIdQuery>,
+) -> ApiResult<Json<PortfolioAllocations>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let allocations = state
+        .allocation_service
+        .get_portfolio_allocations(&q.account_id, &base)
+        .await?;
+    Ok(Json(allocations))
+}
+
+/// GET /allocations/holdings?accountId=...&taxonomyId=...&categoryId=... — simple single-account scope
+pub async fn get_holdings_by_allocation_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AllocationHoldingsQuery>,
+) -> ApiResult<Json<AllocationHoldings>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let result = state
+        .allocation_service
+        .get_holdings_by_allocation(&q.account_id, &base, &q.taxonomy_id, &q.category_id)
+        .await?;
+    Ok(Json(result))
 }
 
 pub async fn get_holding(

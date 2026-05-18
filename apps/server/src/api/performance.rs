@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use crate::{error::ApiResult, main_lib::AppState};
-use axum::{extract::State, routing::post, Json, Router};
+use axum::{
+    extract::{Query, State},
+    routing::{get, post},
+    Json, Router,
+};
 use wealthfolio_core::{
     accounts::{AccountServiceTrait, TrackingMode},
     portfolio::{
@@ -92,10 +96,28 @@ async fn calculate_performance_summary(
 }
 
 #[derive(serde::Deserialize)]
+struct IncomeSummaryAccountQuery {
+    #[serde(rename = "accountId")]
+    account_id: String,
+}
+
+/// GET /income/summary?accountId=... — simple single-account scope
+async fn get_income_summary_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<IncomeSummaryAccountQuery>,
+) -> ApiResult<Json<Vec<IncomeSummary>>> {
+    let items = state
+        .income_service
+        .get_income_summary(Some(&[q.account_id]))?;
+    Ok(Json(items))
+}
+
+#[derive(serde::Deserialize)]
 struct IncomeSummaryBody {
     filter: Option<wealthfolio_core::portfolios::AccountScope>,
 }
 
+/// POST /income/summary/query — typed scope query (all, portfolio, multi-account)
 async fn get_income_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IncomeSummaryBody>,
@@ -125,5 +147,6 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/performance/history", post(calculate_performance_history))
         .route("/performance/summary", post(calculate_performance_summary))
-        .route("/income/summary", post(get_income_summary))
+        .route("/income/summary", get(get_income_summary_for_account))
+        .route("/income/summary/query", post(get_income_summary))
 }
