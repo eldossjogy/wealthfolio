@@ -177,10 +177,10 @@ const AccountHoldings = ({
           selectedTypes={selectedTypes}
           setSelectedTypes={setSelectedTypes}
           accountFilter={{ type: "account", accountId: selectedAccount?.id ?? "" }}
-          onAccountFilterChange={() => {}}
+          onAccountScopeChange={() => {}}
           accounts={[]}
           portfolios={[]}
-          showAccountFilter={false}
+          showAccountScope={false}
           typeOptions={typeOptions}
         />
       ) : (

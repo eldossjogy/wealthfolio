@@ -1,7 +1,7 @@
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { parseOccSymbol } from "@/lib/occ-symbol";
-import { Account, AccountFilter, Holding } from "@/lib/types";
+import { Account, AccountScope, Holding } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AmountDisplay, GainPercent, Input, Separator } from "@wealthfolio/ui";
 import { Button } from "@wealthfolio/ui/components/ui/button";
@@ -17,11 +17,11 @@ interface HoldingsTableMobileProps {
   isLoading: boolean;
   selectedTypes: string[];
   setSelectedTypes: (types: string[]) => void;
-  accountFilter: AccountFilter;
-  onAccountFilterChange: (filter: AccountFilter) => void;
+  accountFilter: AccountScope;
+  onAccountScopeChange: (filter: AccountScope) => void;
   accounts: Account[];
   portfolios: { id: string; name: string }[];
-  showAccountFilter?: boolean;
+  showAccountScope?: boolean;
   showSearch?: boolean;
   showFilterButton?: boolean;
   sortBy?: "symbol" | "marketValue";
@@ -37,10 +37,10 @@ export const HoldingsTableMobile = ({
   selectedTypes,
   setSelectedTypes,
   accountFilter,
-  onAccountFilterChange,
+  onAccountScopeChange,
   accounts,
   portfolios,
-  showAccountFilter = true,
+  showAccountScope = true,
   showSearch = true,
   showFilterButton = true,
   sortBy: controlledSortBy,
@@ -64,10 +64,10 @@ export const HoldingsTableMobile = ({
   const setShowTotalReturn = controlledSetShowTotalReturn ?? setInternalShowTotalReturn;
 
   const hasActiveFilters = useMemo(() => {
-    const hasAccountFilter = showAccountFilter && accountFilter.type !== "all";
+    const hasAccountScope = showAccountScope && accountFilter.type !== "all";
     const hasTypeFilter = selectedTypes.length > 0;
-    return hasAccountFilter || hasTypeFilter;
-  }, [accountFilter, selectedTypes, showAccountFilter]);
+    return hasAccountScope || hasTypeFilter;
+  }, [accountFilter, selectedTypes, showAccountScope]);
 
   const filteredHoldings = useMemo(() => {
     let result = [...holdings];
@@ -246,12 +246,12 @@ export const HoldingsTableMobile = ({
         open={isFilterSheetOpen}
         onOpenChange={setIsFilterSheetOpen}
         accountFilter={accountFilter}
-        onAccountFilterChange={onAccountFilterChange}
+        onAccountScopeChange={onAccountScopeChange}
         accounts={accounts}
         portfolios={portfolios}
         selectedTypes={selectedTypes}
         setSelectedTypes={setSelectedTypes}
-        showAccountFilter={showAccountFilter}
+        showAccountScope={showAccountScope}
         sortBy={sortBy}
         setSortBy={setSortBy}
         showTotalReturn={showTotalReturn}

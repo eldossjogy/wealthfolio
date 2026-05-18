@@ -16,7 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getHoldingsByAllocation } from "@/adapters";
 import { TickerAvatar } from "@/components/ticker-avatar";
 import type {
-  AccountFilter,
+  AccountScope,
   TaxonomyAllocation,
   CategoryAllocation,
   HoldingSummary,
@@ -28,7 +28,7 @@ interface AllocationDetailSheetProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   allocation?: TaxonomyAllocation;
-  accountFilter: AccountFilter;
+  accountFilter: AccountScope;
   baseCurrency: string;
   initialCategoryId?: string | null;
 }

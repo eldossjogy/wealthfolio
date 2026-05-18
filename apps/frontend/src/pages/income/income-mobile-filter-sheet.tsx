@@ -8,7 +8,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
-import type { AccountFilter } from "@/lib/types";
+import type { AccountScope } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@wealthfolio/ui";
 import { useAccounts } from "@/hooks/use-accounts";
@@ -17,21 +17,21 @@ import { usePortfolios } from "@/hooks/use-portfolios";
 interface IncomeMobileFilterSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  accountFilter: AccountFilter;
-  onAccountFilterChange: (filter: AccountFilter) => void;
+  accountFilter: AccountScope;
+  onAccountScopeChange: (filter: AccountScope) => void;
 }
 
 export const IncomeMobileFilterSheet = ({
   open,
   onOpenChange,
   accountFilter,
-  onAccountFilterChange,
+  onAccountScopeChange,
 }: IncomeMobileFilterSheetProps) => {
   const { accounts } = useAccounts();
   const { data: portfolios = [] } = usePortfolios();
 
-  const select = (filter: AccountFilter) => {
-    onAccountFilterChange(filter);
+  const select = (filter: AccountScope) => {
+    onAccountScopeChange(filter);
     onOpenChange(false);
   };
 

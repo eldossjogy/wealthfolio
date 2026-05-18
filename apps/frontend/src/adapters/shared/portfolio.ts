@@ -1,6 +1,6 @@
 // Portfolio Commands
 import type {
-  AccountFilter,
+  AccountScope,
   Holding,
   AllocationHoldings,
   IncomeSummary,
@@ -24,11 +24,11 @@ export const recalculatePortfolio = async (): Promise<void> => {
   return invoke<void>("recalculate_portfolio");
 };
 
-export const getHoldings = async (filter: AccountFilter): Promise<Holding[]> => {
+export const getHoldings = async (filter: AccountScope): Promise<Holding[]> => {
   return invoke<Holding[]>("get_holdings", { filter });
 };
 
-export const getIncomeSummary = async (filter?: AccountFilter): Promise<IncomeSummary[]> => {
+export const getIncomeSummary = async (filter?: AccountScope): Promise<IncomeSummary[]> => {
   return invoke<IncomeSummary[]>("get_income_summary", { filter });
 };
 
@@ -132,7 +132,7 @@ export const getAssetHoldings = async (assetId: string): Promise<Holding[]> => {
 };
 
 export const getPortfolioAllocations = async (
-  filter: AccountFilter,
+  filter: AccountScope,
 ): Promise<PortfolioAllocations> => {
   return invoke<PortfolioAllocations>("get_portfolio_allocations", { filter });
 };
@@ -143,7 +143,7 @@ export const getPortfolioAllocations = async (
  * Returns full category metadata along with the holdings.
  */
 export const getHoldingsByAllocation = async (
-  filter: AccountFilter,
+  filter: AccountScope,
   taxonomyId: string,
   categoryId: string,
 ): Promise<AllocationHoldings> => {

@@ -60,11 +60,11 @@ export interface NewPortfolio {
   accountIds: string[];
 }
 
-export type AccountFilter =
+export type AccountScope =
   | { type: "all" }
   | { type: "account"; accountId: string }
   | { type: "portfolio"; portfolioId: string }
-  | { type: "adHoc"; accountIds: string[] };
+  | { type: "accounts"; accountIds: string[] };
 
 export interface Account {
   id: string;

@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { AccountFilter, Holding } from "@/lib/types";
+import { AccountScope, Holding } from "@/lib/types";
 import { getHoldings } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
 
-export function useHoldings(filter: AccountFilter | string) {
-  const accountFilter: AccountFilter =
+export function useHoldings(filter: AccountScope | string) {
+  const accountFilter: AccountScope =
     typeof filter === "string" ? { type: "account", accountId: filter } : filter;
 
   const {

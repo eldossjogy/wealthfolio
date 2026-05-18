@@ -7,7 +7,7 @@ mod tests {
     use crate::accounts::{Account, AccountRepositoryTrait, AccountUpdate, NewAccount};
     use crate::errors::{DatabaseError, Error, Result};
     use crate::portfolios::{
-        AccountFilter, NewPortfolio, PortfolioRepositoryTrait, PortfolioService,
+        AccountScope, NewPortfolio, PortfolioRepositoryTrait, PortfolioService,
         PortfolioServiceTrait, PortfolioUpdate, PortfolioWithAccounts,
     };
 
@@ -85,14 +85,14 @@ mod tests {
             Ok(self.portfolios.lock().unwrap().clone())
         }
 
-        fn resolve_account_ids(&self, filter: &AccountFilter) -> Result<Vec<String>> {
+        fn resolve_account_ids(&self, filter: &AccountScope) -> Result<Vec<String>> {
             match filter {
-                AccountFilter::All => Ok(vec!["a1".to_string(), "a2".to_string()]),
-                AccountFilter::Account { account_id } => Ok(vec![account_id.clone()]),
-                AccountFilter::Portfolio { portfolio_id: _ } => {
+                AccountScope::All => Ok(vec!["a1".to_string(), "a2".to_string()]),
+                AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
+                AccountScope::Portfolio { portfolio_id: _ } => {
                     Ok(vec!["a1".to_string(), "a2".to_string()])
                 }
-                AccountFilter::AdHoc { account_ids } => Ok(account_ids.clone()),
+                AccountScope::Accounts { account_ids } => Ok(account_ids.clone()),
             }
         }
     }
@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_account_filter_all() {
         let svc = make_service_with(MockPortfolioRepo::default(), &[]);
-        let ids = svc.resolve_account_filter(&AccountFilter::All).unwrap();
+        let ids = svc.resolve_account_filter(&AccountScope::All).unwrap();
         assert_eq!(ids, vec!["a1", "a2"]);
     }
 
@@ -274,7 +274,7 @@ mod tests {
     async fn resolve_account_filter_single_account() {
         let svc = make_service_with(MockPortfolioRepo::default(), &[]);
         let ids = svc
-            .resolve_account_filter(&AccountFilter::Account {
+            .resolve_account_filter(&AccountScope::Account {
                 account_id: "a1".to_string(),
             })
             .unwrap();

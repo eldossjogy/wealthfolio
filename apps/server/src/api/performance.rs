@@ -93,18 +93,18 @@ async fn calculate_performance_summary(
 
 #[derive(serde::Deserialize)]
 struct IncomeSummaryBody {
-    filter: Option<wealthfolio_core::portfolios::AccountFilter>,
+    filter: Option<wealthfolio_core::portfolios::AccountScope>,
 }
 
 async fn get_income_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IncomeSummaryBody>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    use wealthfolio_core::portfolios::AccountFilter;
+    use wealthfolio_core::portfolios::AccountScope;
     let account_ids: Option<Vec<String>> = match &body.filter {
-        None | Some(AccountFilter::All) => None,
-        Some(AccountFilter::Account { account_id }) => Some(vec![account_id.clone()]),
-        Some(AccountFilter::Portfolio { .. }) | Some(AccountFilter::AdHoc { .. }) => Some(
+        None | Some(AccountScope::All) => None,
+        Some(AccountScope::Account { account_id }) => Some(vec![account_id.clone()]),
+        Some(AccountScope::Portfolio { .. }) | Some(AccountScope::Accounts { .. }) => Some(
             state
                 .portfolio_service
                 .resolve_account_filter(body.filter.as_ref().unwrap())

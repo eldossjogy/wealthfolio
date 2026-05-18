@@ -13,16 +13,16 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useAccounts } from "@/hooks/use-accounts";
 import { usePortfolios } from "@/hooks/use-portfolios";
-import type { AccountFilter } from "@/lib/types";
+import type { AccountScope } from "@/lib/types";
 
-interface AccountFilterSelectorProps {
-  value: AccountFilter;
-  onChange: (filter: AccountFilter) => void;
+interface AccountScopeSelectorProps {
+  value: AccountScope;
+  onChange: (filter: AccountScope) => void;
   className?: string;
 }
 
 function filterLabel(
-  filter: AccountFilter,
+  filter: AccountScope,
   accounts: { id: string; name: string }[],
   portfolios: { id: string; name: string }[],
 ): string {
@@ -36,14 +36,14 @@ function filterLabel(
   return `Custom (${filter.accountIds.length})`;
 }
 
-export function AccountFilterSelector({ value, onChange, className }: AccountFilterSelectorProps) {
+export function AccountScopeSelector({ value, onChange, className }: AccountScopeSelectorProps) {
   const [open, setOpen] = useState(false);
   const { accounts } = useAccounts({ filterActive: false, includeArchived: false });
   const { data: portfolios = [] } = usePortfolios();
 
   const label = filterLabel(value, accounts, portfolios);
 
-  const select = (filter: AccountFilter) => {
+  const select = (filter: AccountScope) => {
     onChange(filter);
     setOpen(false);
   };

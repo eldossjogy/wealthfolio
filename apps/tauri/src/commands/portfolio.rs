@@ -23,23 +23,23 @@ use wealthfolio_core::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
         SnapshotSource,
     },
-    portfolios::AccountFilter,
+    portfolios::AccountScope,
     quotes::MarketSyncMode,
     valuation::DailyAccountValuation,
 };
 
 // ============================================================================
-// AccountFilter IPC boundary struct
+// AccountScope IPC boundary struct
 // ============================================================================
 
-/// Flat struct that mirrors the TypeScript `AccountFilter` discriminated union.
+/// Flat struct that mirrors the TypeScript `AccountScope` discriminated union.
 /// Used only at the Tauri IPC boundary because serde internally-tagged enums
 /// fail deserialization in Tauri v2 (all variant fields are required simultaneously).
 /// The frontend sends `{ type: "account", accountId: "X" }` unchanged — this struct
-/// deserializes that format and converts to the internal `AccountFilter` enum.
+/// deserializes that format and converts to the internal `AccountScope` enum.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AccountFilterInput {
+pub struct AccountScopeInput {
     #[serde(rename = "type")]
     pub kind: String,
     pub account_id: Option<String>,
@@ -47,28 +47,28 @@ pub struct AccountFilterInput {
     pub account_ids: Option<Vec<String>>,
 }
 
-impl AccountFilterInput {
-    fn into_account_filter(self) -> Result<AccountFilter, String> {
+impl AccountScopeInput {
+    fn into_account_filter(self) -> Result<AccountScope, String> {
         match self.kind.as_str() {
-            "all" => Ok(AccountFilter::All),
+            "all" => Ok(AccountScope::All),
             "account" => {
                 let id = self
                     .account_id
                     .filter(|s| !s.is_empty())
                     .ok_or_else(|| "accountId required for filter type 'account'".to_string())?;
-                Ok(AccountFilter::Account { account_id: id })
+                Ok(AccountScope::Account { account_id: id })
             }
             "portfolio" => {
                 let id = self.portfolio_id.filter(|s| !s.is_empty()).ok_or_else(|| {
                     "portfolioId required for filter type 'portfolio'".to_string()
                 })?;
-                Ok(AccountFilter::Portfolio { portfolio_id: id })
+                Ok(AccountScope::Portfolio { portfolio_id: id })
             }
             "adHoc" | "accounts" => {
                 let ids = self.account_ids.filter(|v| !v.is_empty()).ok_or_else(|| {
                     "accountIds required and must be non-empty for filter type 'adHoc'".to_string()
                 })?;
-                Ok(AccountFilter::AdHoc { account_ids: ids })
+                Ok(AccountScope::Accounts { account_ids: ids })
             }
             other => Err(format!("unknown filter type: '{other}'")),
         }
@@ -120,16 +120,16 @@ pub async fn update_portfolio(handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolves `AccountFilter` to account IDs. `All` returns `["TOTAL"]` to use the fast
-/// pre-computed snapshot; `Portfolio`/`AdHoc` return resolved member IDs for aggregation.
+/// Resolves `AccountScope` to account IDs. `All` returns `["TOTAL"]` to use the fast
+/// pre-computed snapshot; `Portfolio`/`Accounts` return resolved member IDs for aggregation.
 async fn resolve_filter_to_ids(
-    filter: &AccountFilter,
+    filter: &AccountScope,
     state: &ServiceContext,
 ) -> Result<Vec<String>, String> {
     match filter {
-        AccountFilter::All => Ok(vec!["TOTAL".to_string()]),
-        AccountFilter::Account { account_id } => Ok(vec![account_id.clone()]),
-        AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => state
+        AccountScope::All => Ok(vec!["TOTAL".to_string()]),
+        AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
+        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => state
             .portfolio_service()
             .resolve_account_filter(filter)
             .map_err(|e| e.to_string()),
@@ -139,7 +139,7 @@ async fn resolve_filter_to_ids(
 #[tauri::command]
 pub async fn get_holdings(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilterInput,
+    filter: AccountScopeInput,
 ) -> Result<Vec<Holding>, String> {
     debug!("Get holdings...");
     let base_currency = state.get_base_currency();
@@ -207,7 +207,7 @@ pub async fn get_asset_holdings(
 #[tauri::command]
 pub async fn get_portfolio_allocations(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilterInput,
+    filter: AccountScopeInput,
 ) -> Result<PortfolioAllocations, String> {
     let base_currency = state.get_base_currency();
     let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
@@ -231,7 +231,7 @@ pub async fn get_portfolio_allocations(
 #[tauri::command]
 pub async fn get_holdings_by_allocation(
     state: State<'_, Arc<ServiceContext>>,
-    filter: AccountFilterInput,
+    filter: AccountScopeInput,
     taxonomy_id: String,
     category_id: String,
 ) -> Result<AllocationHoldings, String> {
@@ -322,15 +322,15 @@ pub async fn get_latest_valuations(
 #[tauri::command]
 pub async fn get_income_summary(
     state: State<'_, Arc<ServiceContext>>,
-    filter: Option<AccountFilterInput>,
+    filter: Option<AccountScopeInput>,
 ) -> Result<Vec<IncomeSummary>, String> {
     debug!("Fetching income summary...");
     let account_ids: Option<Vec<String>> = if let Some(input) = filter {
         let af = input.into_account_filter()?;
         match &af {
-            AccountFilter::All => None,
-            AccountFilter::Account { account_id } => Some(vec![account_id.clone()]),
-            AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => Some(
+            AccountScope::All => None,
+            AccountScope::Account { account_id } => Some(vec![account_id.clone()]),
+            AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => Some(
                 state
                     .portfolio_service()
                     .resolve_account_filter(&af)

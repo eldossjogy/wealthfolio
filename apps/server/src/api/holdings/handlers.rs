@@ -6,7 +6,7 @@ use axum::{
 };
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
-use wealthfolio_core::portfolios::AccountFilter;
+use wealthfolio_core::portfolios::AccountScope;
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     portfolio::{
@@ -31,21 +31,21 @@ use super::dto::{
 use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
 
 fn resolve_filter(
-    filter: &AccountFilter,
+    filter: &AccountScope,
     state: &AppState,
 ) -> Result<Vec<String>, crate::error::ApiError> {
     match filter {
-        AccountFilter::All => Ok(vec!["TOTAL".to_string()]),
-        AccountFilter::Account { account_id } => Ok(vec![account_id.clone()]),
-        AccountFilter::Portfolio { .. } | AccountFilter::AdHoc { .. } => state
+        AccountScope::All => Ok(vec!["TOTAL".to_string()]),
+        AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
+        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => state
             .portfolio_service
             .resolve_account_filter(filter)
             .map_err(Into::into),
     }
 }
 
-fn aggregated_id(filter: &AccountFilter) -> String {
-    if let AccountFilter::Portfolio { portfolio_id } = filter {
+fn aggregated_id(filter: &AccountScope) -> String {
+    if let AccountScope::Portfolio { portfolio_id } = filter {
         portfolio_id.clone()
     } else {
         String::new()

@@ -111,7 +111,7 @@ impl PortfolioUpdate {
 /// encoded strings like `MULTI:id,id` or `PORTFOLIO`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
-pub enum AccountFilter {
+pub enum AccountScope {
     /// All active, non-archived accounts.
     All,
     /// A single specific account.
@@ -119,5 +119,5 @@ pub enum AccountFilter {
     /// A saved portfolio — resolved to its member account IDs.
     Portfolio { portfolio_id: String },
     /// Ad-hoc list of account IDs (e.g. activity page multi-select).
-    AdHoc { account_ids: Vec<String> },
+    Accounts { account_ids: Vec<String> },
 }

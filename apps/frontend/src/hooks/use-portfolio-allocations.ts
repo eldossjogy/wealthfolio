@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { AccountFilter, PortfolioAllocations } from "@/lib/types";
+import { AccountScope, PortfolioAllocations } from "@/lib/types";
 import { getPortfolioAllocations } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
 
-export function usePortfolioAllocations(filter: AccountFilter | string) {
-  const accountFilter: AccountFilter =
+export function usePortfolioAllocations(filter: AccountScope | string) {
+  const accountFilter: AccountScope =
     typeof filter === "string" ? { type: "account", accountId: filter } : filter;
 
   const {

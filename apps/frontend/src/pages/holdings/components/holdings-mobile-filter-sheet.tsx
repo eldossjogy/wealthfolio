@@ -9,20 +9,20 @@ import {
   SheetTitle,
 } from "@wealthfolio/ui/components/ui/sheet";
 import { HOLDING_CATEGORY_FILTERS } from "@/lib/constants";
-import { Account, AccountFilter, HoldingCategoryFilterId } from "@/lib/types";
+import { Account, AccountScope, HoldingCategoryFilterId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AnimatedToggleGroup, ScrollArea, Separator } from "@wealthfolio/ui";
 
 interface HoldingsMobileFilterSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  accountFilter: AccountFilter;
-  onAccountFilterChange: (filter: AccountFilter) => void;
+  accountFilter: AccountScope;
+  onAccountScopeChange: (filter: AccountScope) => void;
   accounts: Account[];
   portfolios: { id: string; name: string }[];
   selectedTypes: string[];
   setSelectedTypes: (types: string[]) => void;
-  showAccountFilter?: boolean;
+  showAccountScope?: boolean;
   sortBy: "symbol" | "marketValue";
   setSortBy: (value: "symbol" | "marketValue") => void;
   showTotalReturn: boolean;
@@ -36,12 +36,12 @@ export const HoldingsMobileFilterSheet = ({
   open,
   onOpenChange,
   accountFilter,
-  onAccountFilterChange,
+  onAccountScopeChange,
   accounts,
   portfolios,
   selectedTypes,
   setSelectedTypes,
-  showAccountFilter = true,
+  showAccountScope = true,
   sortBy,
   setSortBy,
   showTotalReturn,
@@ -132,7 +132,7 @@ export const HoldingsMobileFilterSheet = ({
             {setCategoryFilter && <Separator />}
 
             {/* Account Filter Section */}
-            {showAccountFilter && (
+            {showAccountScope && (
               <div className="space-y-3">
                 <h4 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
                   Account
@@ -146,7 +146,7 @@ export const HoldingsMobileFilterSheet = ({
                         : "hover:bg-muted/50",
                     )}
                     onClick={() => {
-                      onAccountFilterChange({ type: "all" });
+                      onAccountScopeChange({ type: "all" });
                       onOpenChange(false);
                     }}
                   >
@@ -169,7 +169,7 @@ export const HoldingsMobileFilterSheet = ({
                           : "hover:bg-muted/50",
                       )}
                       onClick={() => {
-                        onAccountFilterChange({ type: "portfolio", portfolioId: portfolio.id });
+                        onAccountScopeChange({ type: "portfolio", portfolioId: portfolio.id });
                         onOpenChange(false);
                       }}
                     >
@@ -193,7 +193,7 @@ export const HoldingsMobileFilterSheet = ({
                           : "hover:bg-muted/50",
                       )}
                       onClick={() => {
-                        onAccountFilterChange({ type: "account", accountId: account.id });
+                        onAccountScopeChange({ type: "account", accountId: account.id });
                         onOpenChange(false);
                       }}
                     >
