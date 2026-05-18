@@ -52,7 +52,7 @@ export function BudgetLineChartCard({
         <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
           <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
           <Link
-            to="/settings/spending/budget"
+            to="/settings/spending/setup"
             className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
           >
             Set a budget
@@ -333,7 +333,7 @@ export function BudgetLineChartCard({
               By category
             </span>
             <Link
-              to="/settings/spending/budget"
+              to="/spending/budget"
               className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
             >
               Manage →
@@ -343,7 +343,7 @@ export function BudgetLineChartCard({
             <div className="text-muted-foreground py-2 text-center text-xs">
               No category budgets set yet.{" "}
               <Link
-                to="/settings/spending/budget"
+                to="/settings/spending/setup"
                 className="hover:text-foreground underline-offset-4 hover:underline"
               >
                 Set one
@@ -379,7 +379,7 @@ function BudgetCardHeader({ monthLabel }: { monthLabel: string }) {
         </span>
       </div>
       <Link
-        to="/settings/spending/budget"
+        to="/spending/budget"
         className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
       >
         Manage →

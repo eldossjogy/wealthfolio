@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Navigate } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -31,14 +30,11 @@ import {
   TooltipTrigger,
 } from "@wealthfolio/ui";
 import { Switch } from "@wealthfolio/ui/components/ui/switch";
+
 import { cn, formatAmount } from "@/lib/utils";
 
-import { useBudget, useBudgetMutations } from "@/features/spending/hooks/use-budget";
-import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
-import { FOREST_THEME } from "@/features/spending/lib/theme";
-import { CategoryIcon } from "@/features/spending/components/category-chips";
-import { EXTENDED_PALETTE } from "@/features/spending/components/color-picker";
-import { IconPicker } from "@/features/spending/components/icon-picker";
+import { useBudget, useBudgetMutations } from "../hooks/use-budget";
+import { FOREST_THEME } from "../lib/theme";
 import type {
   BudgetCategoryRow,
   BudgetGroup,
@@ -46,32 +42,33 @@ import type {
   BudgetRolloverSetting,
   BudgetSnapshot,
   BudgetTarget,
-} from "@/features/spending/types/budget";
+} from "../types/budget";
 
-import { SettingsHeader } from "../../settings-header";
-import { SpendingBackLink } from "../components/spending-back-link";
+import { CategoryIcon } from "./category-chips";
+import { EXTENDED_PALETTE } from "./color-picker";
+import { IconPicker } from "./icon-picker";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const CARD_CLASS = "border-border/60 bg-card/40 shadow-xs rounded-xl border backdrop-blur-xl";
+
+export type BudgetEditorMode = "setup" | "monthly";
+
+interface BudgetEditorProps {
+  mode: BudgetEditorMode;
+  periodKey: string;
+}
 
 function currentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default function SpendingBudgetPage() {
-  const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
-  const [periodKey, setPeriodKey] = useState("default");
+export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
   const { data: budget, isLoading: budgetLoading, error, refetch } = useBudget(periodKey);
   const mutations = useBudgetMutations(periodKey);
 
-  if (!settingsLoading && !isEnabled) {
-    return <Navigate to="/settings/spending" replace />;
-  }
-
-  const isLoading = settingsLoading || budgetLoading;
   const periodForWrite = periodKey || "default";
-  const monthMode = periodForWrite !== "default";
+  const monthMode = mode === "monthly";
   const currency = budget?.computed.currency ?? "USD";
   const targets = budget?.state.targets ?? [];
   const rolloverSettings = budget?.state.rolloverSettings ?? [];
@@ -100,171 +97,159 @@ export default function SpendingBudgetPage() {
     if (target) mutations.removeTarget.mutate(target.id);
   };
 
-  return (
-    <div className="space-y-5">
-      <SpendingBackLink />
+  if (budgetLoading) return <BudgetSkeleton />;
+  if (error) return <BudgetErrorState error={error} onRetry={() => refetch()} />;
+  if (!budget) return null;
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <SettingsHeader
-          heading="Budget"
-          text="Plan monthly spending by group."
-          backTo="/settings/spending"
+  const groupSection = (
+    <div className="space-y-2">
+      {budget.computed.groupRows.map((row) => (
+        <GroupBudgetSection
+          key={row.group.id}
+          row={row}
+          groups={groups}
+          targets={targets}
+          rolloverSettings={rolloverSettings}
+          currency={currency}
+          periodKey={periodForWrite}
+          monthMode={monthMode}
+          mode={mode}
+          onSaveGroupBuffer={saveGroupBuffer}
+          onSaveCategoryTarget={saveCategoryTarget}
+          onDeleteOverride={deleteMonthOverride}
+          onMoveCategory={(categoryId, groupId) =>
+            mutations.assignCategory.mutate({ categoryId, groupId })
+          }
+          onUpdateGroup={(patch) => mutations.updateGroup.mutate({ id: row.group.id, patch })}
+          onDeleteGroup={() => {
+            const target =
+              groups.find((g) => g.key === "other" && g.id !== row.group.id) ??
+              groups.find((g) => g.id !== row.group.id);
+            if (target) {
+              mutations.removeGroup.mutate({
+                id: row.group.id,
+                reassignToGroupId: target.id,
+              });
+            }
+          }}
+          canDelete={groups.some((g) => g.id !== row.group.id)}
+          deletePending={mutations.removeGroup.isPending}
+          onSaveGroupRollover={(enabled, startingBalance) =>
+            mutations.upsertRollover.mutate({
+              targetType: "group",
+              groupId: row.group.id,
+              enabled,
+              startMonth: monthMode ? periodForWrite : currentMonthKey(),
+              startingBalance:
+                startingBalance ??
+                findGroupRollover(rolloverSettings, row.group.id)?.startingBalance ??
+                "0",
+            })
+          }
+          onToggleCategoryRollover={(category, enabled) =>
+            mutations.upsertRollover.mutate({
+              targetType: "category",
+              taxonomyId: SPENDING_TAXONOMY,
+              categoryId: category.categoryId,
+              enabled,
+              startMonth: monthMode ? periodForWrite : currentMonthKey(),
+              startingBalance:
+                findCategoryRollover(rolloverSettings, category.categoryId)?.startingBalance ?? "0",
+            })
+          }
         />
-        <PeriodSelector periodKey={periodKey} onChange={setPeriodKey} />
-      </div>
+      ))}
 
-      {isLoading ? (
-        <BudgetSkeleton />
-      ) : error ? (
-        <BudgetErrorState error={error} onRetry={() => refetch()} />
-      ) : budget ? (
-        <div className="mx-auto max-w-2xl space-y-4">
-          <BudgetSummary budget={budget} currency={currency} />
-
-          <div className="space-y-2">
-            {budget.computed.groupRows.map((row) => (
-              <GroupBudgetSection
-                key={row.group.id}
-                row={row}
-                groups={groups}
-                targets={targets}
-                rolloverSettings={rolloverSettings}
-                currency={currency}
-                periodKey={periodForWrite}
-                monthMode={monthMode}
-                onSaveGroupBuffer={saveGroupBuffer}
-                onSaveCategoryTarget={saveCategoryTarget}
-                onDeleteOverride={deleteMonthOverride}
-                onMoveCategory={(categoryId, groupId) =>
-                  mutations.assignCategory.mutate({ categoryId, groupId })
-                }
-                onUpdateGroup={(patch) => mutations.updateGroup.mutate({ id: row.group.id, patch })}
-                onDeleteGroup={() => {
-                  const target =
-                    groups.find((g) => g.key === "other" && g.id !== row.group.id) ??
-                    groups.find((g) => g.id !== row.group.id);
-                  if (target) {
-                    mutations.removeGroup.mutate({
-                      id: row.group.id,
-                      reassignToGroupId: target.id,
-                    });
-                  }
-                }}
-                canDelete={groups.some((g) => g.id !== row.group.id)}
-                deletePending={mutations.removeGroup.isPending}
-                onSaveGroupRollover={(enabled, startingBalance) =>
-                  mutations.upsertRollover.mutate({
-                    targetType: "group",
-                    groupId: row.group.id,
-                    enabled,
-                    startMonth: monthMode ? periodForWrite : currentMonthKey(),
-                    startingBalance:
-                      startingBalance ??
-                      findGroupRollover(rolloverSettings, row.group.id)?.startingBalance ??
-                      "0",
-                  })
-                }
-                onToggleCategoryRollover={(category, enabled) =>
-                  mutations.upsertRollover.mutate({
-                    targetType: "category",
-                    taxonomyId: SPENDING_TAXONOMY,
-                    categoryId: category.categoryId,
-                    enabled,
-                    startMonth: monthMode ? periodForWrite : currentMonthKey(),
-                    startingBalance:
-                      findCategoryRollover(rolloverSettings, category.categoryId)
-                        ?.startingBalance ?? "0",
-                  })
-                }
-              />
-            ))}
-
-            <div className="flex items-center gap-2 pt-1">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  mutations.createGroup.mutate({
-                    name: "New group",
-                    color: FOREST_THEME.deep,
-                    icon: "Folder",
-                  })
-                }
-                className="text-muted-foreground hover:text-foreground h-8 gap-1.5 px-2 text-xs"
-              >
-                <Icons.Plus className="h-3.5 w-3.5" />
-                Add group
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => mutations.resetGroups.mutate()}
-                className="text-muted-foreground hover:text-foreground h-8 gap-1.5 px-2 text-xs"
-              >
-                <Icons.Refresh className="h-3.5 w-3.5" />
-                Reset to defaults
-              </Button>
-            </div>
-          </div>
-
-          <IncomeSourcesPanel
-            rows={budget.computed.incomeRows}
-            targets={targets}
-            currency={currency}
-            periodKey={periodForWrite}
-            monthMode={monthMode}
-            onSaveTarget={saveCategoryTarget}
-            onDeleteOverride={deleteMonthOverride}
-          />
-          <BudgetTotalsPanel totals={budget.computed.totals} currency={currency} />
+      {mode === "setup" && (
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              mutations.createGroup.mutate({
+                name: "New group",
+                color: FOREST_THEME.deep,
+                icon: "Folder",
+              })
+            }
+            className="text-muted-foreground hover:text-foreground h-8 gap-1.5 px-2 text-xs"
+          >
+            <Icons.Plus className="h-3.5 w-3.5" />
+            Add group
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => mutations.resetGroups.mutate()}
+            className="text-muted-foreground hover:text-foreground h-8 gap-1.5 px-2 text-xs"
+          >
+            <Icons.Refresh className="h-3.5 w-3.5" />
+            Reset to defaults
+          </Button>
         </div>
-      ) : null}
+      )}
     </div>
   );
-}
 
-function PeriodSelector({
-  periodKey,
-  onChange,
-}: {
-  periodKey: string;
-  onChange: (periodKey: string) => void;
-}) {
-  const isDefault = periodKey === "default";
-  return (
-    <div className="bg-card/40 border-border/60 shadow-xs inline-flex items-center gap-1 rounded-full border p-1">
-      <Button
-        variant="ghost"
-        size="sm"
-        className={cn(
-          "h-8 rounded-full px-3 text-xs font-medium",
-          isDefault && "bg-background text-foreground shadow-xs",
-        )}
-        onClick={() => onChange("default")}
-      >
-        Default
-      </Button>
-      <div
-        className={cn(
-          "flex items-center rounded-full px-2",
-          !isDefault && "bg-background shadow-xs",
-        )}
-      >
-        <Icons.Calendar
-          className={cn("h-3.5 w-3.5", isDefault ? "text-muted-foreground/60" : "text-foreground")}
-        />
-        <input
-          type="month"
-          value={isDefault ? currentMonthKey() : periodKey}
-          onChange={(event) => onChange(event.target.value || currentMonthKey())}
-          className="text-foreground h-7 w-[120px] bg-transparent px-2 text-xs outline-none"
-        />
+  const incomePanel = (
+    <IncomeSourcesPanel
+      rows={budget.computed.incomeRows}
+      targets={targets}
+      currency={currency}
+      periodKey={periodForWrite}
+      monthMode={monthMode}
+      mode={mode}
+      onSaveTarget={saveCategoryTarget}
+      onDeleteOverride={deleteMonthOverride}
+    />
+  );
+
+  if (mode === "monthly") {
+    return (
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          <BudgetSummary budget={budget} currency={currency} mode={mode} />
+          {groupSection}
+        </div>
+        <div className="space-y-4">
+          {incomePanel}
+          <CopyFromMonthRow
+            currentPeriodKey={periodForWrite}
+            onCopy={(sourcePeriodKey, overwrite) =>
+              mutations.copyFromMonth.mutate({ sourcePeriodKey, overwrite })
+            }
+            pending={mutations.copyFromMonth.isPending}
+          />
+          <OverridesSummary
+            budget={budget}
+            periodKey={periodForWrite}
+            currency={currency}
+            onRevert={(target) => mutations.removeTarget.mutate(target.id)}
+          />
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-4">
+      <BudgetSummary budget={budget} currency={currency} mode={mode} />
+      {groupSection}
+      {incomePanel}
+      <BudgetTotalsPanel totals={budget.computed.totals} currency={currency} />
     </div>
   );
 }
 
-function BudgetSummary({ budget, currency }: { budget: BudgetSnapshot; currency: string }) {
+function BudgetSummary({
+  budget,
+  currency,
+  mode,
+}: {
+  budget: BudgetSnapshot;
+  currency: string;
+  mode: BudgetEditorMode;
+}) {
   const totals = budget.computed.totals;
   const groupRows = budget.computed.groupRows;
   const planned = totals.spendingPlanned;
@@ -274,13 +259,14 @@ function BudgetSummary({ budget, currency }: { budget: BudgetSnapshot; currency:
   const fullyAllocated = income > 0 && Math.abs(income - planned) < 0.01;
   const overAllocated = income > 0 && planned > income;
   const hasPlan = planned > 0;
+  const headingLabel = mode === "setup" ? "Default monthly plan" : "Monthly plan";
 
   return (
     <section className={cn(CARD_CLASS, "overflow-hidden p-3 sm:p-4")}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-muted-foreground text-[10px] font-semibold uppercase tracking-[0.08em]">
-            Monthly plan
+            {headingLabel}
           </div>
           <div className="mt-0.5 flex items-baseline gap-1.5">
             <span className="text-foreground truncate text-lg font-semibold tabular-nums tracking-tight sm:text-xl">
@@ -400,6 +386,7 @@ function GroupBudgetSection({
   currency,
   periodKey,
   monthMode,
+  mode,
   canDelete,
   deletePending,
   onSaveGroupBuffer,
@@ -418,6 +405,7 @@ function GroupBudgetSection({
   currency: string;
   periodKey: string;
   monthMode: boolean;
+  mode: BudgetEditorMode;
   canDelete: boolean;
   deletePending: boolean;
   onSaveGroupBuffer: (row: BudgetGroupRow, amount: string) => void;
@@ -436,6 +424,7 @@ function GroupBudgetSection({
   const groupRollover = findGroupRollover(rolloverSettings, row.group.id);
   const accent = row.group.color ?? FOREST_THEME.deep;
   const spentPct = safePercent(Math.max(0, row.actual), row.plannedTotal);
+  const totalSuffix = mode === "setup" ? "/ default month" : "/ month";
 
   return (
     <section className={cn(CARD_CLASS, "overflow-hidden")}>
@@ -454,24 +443,27 @@ function GroupBudgetSection({
 
         <button
           type="button"
-          onClick={() => setEditOpen(true)}
-          className="ring-offset-background focus-visible:ring-ring flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          onClick={() => mode === "setup" && setEditOpen(true)}
+          disabled={mode !== "setup"}
+          className="ring-offset-background focus-visible:ring-ring flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 enabled:hover:scale-105 disabled:cursor-default disabled:hover:scale-100"
           style={{ backgroundColor: `${accent}1f`, color: accent }}
-          aria-label={`Edit ${row.group.name}`}
+          aria-label={mode === "setup" ? `Edit ${row.group.name}` : row.group.name}
         >
           <CategoryIcon icon={row.group.icon ?? null} className="h-3.5 w-3.5" />
         </button>
 
-        <GroupEditDialog
-          group={row.group}
-          color={accent}
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          onUpdate={onUpdateGroup}
-          rolloverEnabled={groupRollover?.enabled ?? false}
-          rolloverStartingBalance={groupRollover?.startingBalance ?? "0"}
-          onSaveRollover={onSaveGroupRollover}
-        />
+        {mode === "setup" && (
+          <GroupEditDialog
+            group={row.group}
+            color={accent}
+            open={editOpen}
+            onOpenChange={setEditOpen}
+            onUpdate={onUpdateGroup}
+            rolloverEnabled={groupRollover?.enabled ?? false}
+            rolloverStartingBalance={groupRollover?.startingBalance ?? "0"}
+            onSaveRollover={onSaveGroupRollover}
+          />
+        )}
 
         <button
           type="button"
@@ -499,92 +491,98 @@ function GroupBudgetSection({
           <div className="text-sm font-semibold tabular-nums">
             {formatAmount(row.plannedTotal, currency)}
           </div>
-          <div className="text-muted-foreground text-[9px] uppercase tracking-wide">/ month</div>
+          <div className="text-muted-foreground text-[9px] uppercase tracking-wide">
+            {totalSuffix}
+          </div>
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground hover:text-foreground h-7 w-7 shrink-0 p-0"
-              aria-label="Group actions"
-            >
-              <Icons.MoreVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="text-muted-foreground/70 text-[10px] font-normal uppercase tracking-wide">
-              {row.categories.length} {row.categories.length === 1 ? "category" : "categories"}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                setEditOpen(true);
-              }}
-              className="text-xs"
-            >
-              <Icons.Pencil className="mr-2 h-3.5 w-3.5" />
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                onSaveGroupRollover(!groupRollover?.enabled);
-              }}
-              className="text-xs"
-            >
-              <Icons.Refresh className="mr-2 h-3.5 w-3.5" />
-              <span className="flex-1">Group rollover</span>
-              <span className="text-muted-foreground text-[10px]">
-                {groupRollover?.enabled ? "On" : "Off"}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={!canDelete}
-              onSelect={(event) => {
-                event.preventDefault();
-                if (canDelete) setConfirmDeleteOpen(true);
-              }}
-              className="text-destructive focus:text-destructive text-xs"
-            >
-              <Icons.Trash className="mr-2 h-3.5 w-3.5" />
-              Delete group
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {mode === "setup" && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground h-7 w-7 shrink-0 p-0"
+                aria-label="Group actions"
+              >
+                <Icons.MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-muted-foreground/70 text-[10px] font-normal uppercase tracking-wide">
+                {row.categories.length} {row.categories.length === 1 ? "category" : "categories"}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setEditOpen(true);
+                }}
+                className="text-xs"
+              >
+                <Icons.Pencil className="mr-2 h-3.5 w-3.5" />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  onSaveGroupRollover(!groupRollover?.enabled);
+                }}
+                className="text-xs"
+              >
+                <Icons.Refresh className="mr-2 h-3.5 w-3.5" />
+                <span className="flex-1">Group rollover</span>
+                <span className="text-muted-foreground text-[10px]">
+                  {groupRollover?.enabled ? "On" : "Off"}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={!canDelete}
+                onSelect={(event) => {
+                  event.preventDefault();
+                  if (canDelete) setConfirmDeleteOpen(true);
+                }}
+                className="text-destructive focus:text-destructive text-xs"
+              >
+                <Icons.Trash className="mr-2 h-3.5 w-3.5" />
+                Delete group
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
-      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {row.group.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {row.categories.length > 0
-                ? `Its ${row.categories.length} ${
-                    row.categories.length === 1 ? "category" : "categories"
-                  } will be moved to another group. This can't be undone.`
-                : "This can't be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                onDeleteGroup();
-                setConfirmDeleteOpen(false);
-              }}
-              disabled={deletePending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deletePending ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {mode === "setup" && (
+        <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {row.group.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {row.categories.length > 0
+                  ? `Its ${row.categories.length} ${
+                      row.categories.length === 1 ? "category" : "categories"
+                    } will be moved to another group. This can't be undone.`
+                  : "This can't be undone."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  onDeleteGroup();
+                  setConfirmDeleteOpen(false);
+                }}
+                disabled={deletePending}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deletePending ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       {open && (
         <div className="border-border/30 border-t">
@@ -592,6 +590,7 @@ function GroupBudgetSection({
             row={row}
             target={groupOverride}
             monthMode={monthMode}
+            mode={mode}
             onSaveGroupBuffer={onSaveGroupBuffer}
             onDeleteOverride={onDeleteOverride}
           />
@@ -609,6 +608,7 @@ function GroupBudgetSection({
               currency={currency}
               groupTotal={row.plannedTotal}
               monthMode={monthMode}
+              mode={mode}
               groupRolloverEnabled={row.rolloverEnabled}
               onSaveTarget={onSaveCategoryTarget}
               onDeleteOverride={onDeleteOverride}
@@ -782,6 +782,7 @@ function BudgetCategoryLine({
   currency,
   groupTotal,
   monthMode,
+  mode,
   groupRolloverEnabled,
   onSaveTarget,
   onDeleteOverride,
@@ -794,6 +795,7 @@ function BudgetCategoryLine({
   currency: string;
   groupTotal: number;
   monthMode: boolean;
+  mode: BudgetEditorMode;
   groupRolloverEnabled: boolean;
   onSaveTarget: (row: BudgetCategoryRow, amount: string) => void;
   onDeleteOverride: (target: BudgetTarget | undefined) => void;
@@ -870,48 +872,55 @@ function BudgetCategoryLine({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wide">
-            Move to group
-          </DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={row.groupId ?? ""}
-            onValueChange={(value) => onMoveCategory(row.categoryId, value)}
-          >
-            {groups.map((group) => (
-              <DropdownMenuRadioItem key={group.id} value={group.id} className="text-xs">
-                <span className="flex items-center gap-2">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: group.color ?? FOREST_THEME.deep }}
-                  />
-                  {group.name}
+          {mode === "setup" && (
+            <>
+              <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wide">
+                Move to group
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={row.groupId ?? ""}
+                onValueChange={(value) => onMoveCategory(row.categoryId, value)}
+              >
+                {groups.map((group) => (
+                  <DropdownMenuRadioItem key={group.id} value={group.id} className="text-xs">
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: group.color ?? FOREST_THEME.deep }}
+                      />
+                      {group.name}
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={groupRolloverEnabled}
+                onSelect={(event) => {
+                  event.preventDefault();
+                  onToggleRollover(row, !row.rolloverEnabled);
+                }}
+                className="text-xs"
+              >
+                <Icons.Refresh className="mr-2 h-3.5 w-3.5" />
+                <span className="flex-1">Rollover</span>
+                <span className="text-muted-foreground text-[10px]">
+                  {groupRolloverEnabled ? "Group-wide" : row.rolloverEnabled ? "On" : "Off"}
                 </span>
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            disabled={groupRolloverEnabled}
-            onSelect={(event) => {
-              event.preventDefault();
-              onToggleRollover(row, !row.rolloverEnabled);
-            }}
-            className="text-xs"
-          >
-            <Icons.Refresh className="mr-2 h-3.5 w-3.5" />
-            <span className="flex-1">Rollover</span>
-            <span className="text-muted-foreground text-[10px]">
-              {groupRolloverEnabled ? "Group-wide" : row.rolloverEnabled ? "On" : "Off"}
-            </span>
-          </DropdownMenuItem>
+              </DropdownMenuItem>
+            </>
+          )}
           {hasOverride && (
-            <DropdownMenuItem
-              onSelect={() => onDeleteOverride(target)}
-              className="text-warning text-xs"
-            >
-              <Icons.X className="mr-2 h-3.5 w-3.5" />
-              Revert month override
-            </DropdownMenuItem>
+            <>
+              {mode === "setup" && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                onSelect={() => onDeleteOverride(target)}
+                className="text-warning text-xs"
+              >
+                <Icons.X className="mr-2 h-3.5 w-3.5" />
+                Revert month override
+              </DropdownMenuItem>
+            </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -923,17 +932,20 @@ function GroupBufferLine({
   row,
   target,
   monthMode,
+  mode,
   onSaveGroupBuffer,
   onDeleteOverride,
 }: {
   row: BudgetGroupRow;
   target: BudgetTarget | undefined;
   monthMode: boolean;
+  mode: BudgetEditorMode;
   onSaveGroupBuffer: (row: BudgetGroupRow, amount: string) => void;
   onDeleteOverride: (target: BudgetTarget | undefined) => void;
 }) {
   const hasOverride = monthMode && !!target;
   const sharePct = safePercent(row.buffer, row.plannedTotal);
+  const label = mode === "setup" ? "Group buffer default" : "Group buffer";
   return (
     <div className="hover:bg-muted/15 flex items-center gap-2 px-3 py-1.5 text-xs sm:gap-3 sm:px-4">
       <span
@@ -942,7 +954,7 @@ function GroupBufferLine({
       />
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="text-muted-foreground min-w-0 flex-1 truncate">Group buffer</span>
+          <span className="text-muted-foreground min-w-0 flex-1 truncate">{label}</span>
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4} className="max-w-[220px] text-xs">
           Extra headroom for this group that isn't assigned to a category.
@@ -982,6 +994,7 @@ function IncomeSourcesPanel({
   currency,
   periodKey,
   monthMode,
+  mode,
   onSaveTarget,
   onDeleteOverride,
 }: {
@@ -990,19 +1003,35 @@ function IncomeSourcesPanel({
   currency: string;
   periodKey: string;
   monthMode: boolean;
+  mode: BudgetEditorMode;
   onSaveTarget: (row: BudgetCategoryRow, amount: string) => void;
   onDeleteOverride: (target: BudgetTarget | undefined) => void;
 }) {
   const total = rows.reduce((sum, row) => sum + row.target, 0);
+  const title = mode === "setup" ? "Income defaults" : "Income";
+  const isMonthly = mode === "monthly";
+  const nonZeroRows = rows.filter((row) => row.target > 0);
+  const hiddenCount = rows.length - nonZeroRows.length;
+  const [showAll, setShowAll] = useState(false);
+  const visibleRows = isMonthly && !showAll ? nonZeroRows : rows;
 
   return (
     <section className={cn(CARD_CLASS, "p-3 sm:p-4")}>
-      <PanelHeader title="Income sources" icon={<Icons.Wallet className="h-3.5 w-3.5" />} />
+      <div className="flex items-center justify-between">
+        <PanelHeader title={title} icon={<Icons.Wallet className="h-3.5 w-3.5" />} />
+        {isMonthly && (
+          <span className="text-foreground text-xs font-semibold tabular-nums">
+            {formatAmount(total, currency)}
+          </span>
+        )}
+      </div>
       <div className="mt-2 space-y-0.5">
         {rows.length === 0 ? (
           <EmptyPanelLine>No income categories yet.</EmptyPanelLine>
+        ) : visibleRows.length === 0 ? (
+          <EmptyPanelLine>No income set for this month.</EmptyPanelLine>
         ) : (
-          rows.map((row) => {
+          visibleRows.map((row) => {
             const target = findCategoryTarget(targets, periodKey, row.taxonomyId, row.categoryId);
             const hasOverride = monthMode && !!target;
             return (
@@ -1027,10 +1056,24 @@ function IncomeSourcesPanel({
           })
         )}
       </div>
-      <div className="border-border/40 mt-2.5 flex items-center justify-between border-t pt-2.5">
-        <span className="text-muted-foreground text-xs">Total monthly</span>
-        <span className="text-sm font-semibold tabular-nums">{formatAmount(total, currency)}</span>
-      </div>
+      {isMonthly && hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-[11px] underline-offset-4 hover:underline"
+        >
+          <Icons.Plus className="h-3 w-3" />
+          {showAll ? "Hide empty sources" : `Add source (${hiddenCount} available)`}
+        </button>
+      )}
+      {!isMonthly && (
+        <div className="border-border/40 mt-2.5 flex items-center justify-between border-t pt-2.5">
+          <span className="text-muted-foreground text-xs">Total default</span>
+          <span className="text-sm font-semibold tabular-nums">
+            {formatAmount(total, currency)}
+          </span>
+        </div>
+      )}
     </section>
   );
 }
@@ -1061,6 +1104,214 @@ function GroupColorSwatchGrid({
         );
       })}
     </div>
+  );
+}
+
+function OverridesSummary({
+  budget,
+  periodKey,
+  currency,
+  onRevert,
+}: {
+  budget: BudgetSnapshot;
+  periodKey: string;
+  currency: string;
+  onRevert: (target: BudgetTarget) => void;
+}) {
+  const targets = budget.state.targets;
+  const monthTargets = targets.filter((t) => t.periodKey === periodKey);
+  if (monthTargets.length === 0) return null;
+
+  const categoryRowByKey = new Map<string, BudgetCategoryRow>();
+  for (const row of budget.computed.groupRows) {
+    for (const cat of row.categories) {
+      categoryRowByKey.set(`${cat.taxonomyId}:${cat.categoryId}`, cat);
+    }
+  }
+  for (const row of budget.computed.incomeRows) {
+    categoryRowByKey.set(`${row.taxonomyId}:${row.categoryId}`, row);
+  }
+  const groupById = new Map(budget.state.groups.map((g) => [g.id, g] as const));
+
+  const overrides = monthTargets.flatMap((target) => {
+    if (target.targetType === "category" && target.taxonomyId && target.categoryId) {
+      const row = categoryRowByKey.get(`${target.taxonomyId}:${target.categoryId}`);
+      if (!row) return [];
+      const defaultTarget = targets.find(
+        (t) =>
+          t.periodKey === "default" &&
+          t.targetType === "category" &&
+          t.taxonomyId === target.taxonomyId &&
+          t.categoryId === target.categoryId,
+      );
+      const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
+      const monthAmount = Number.parseFloat(target.amount) || 0;
+      return [
+        {
+          target,
+          name: row.name,
+          color: row.color,
+          monthAmount,
+          defaultAmount,
+        },
+      ];
+    }
+    if (target.targetType === "group_buffer" && target.groupId) {
+      const group = groupById.get(target.groupId);
+      if (!group) return [];
+      const defaultTarget = targets.find(
+        (t) =>
+          t.periodKey === "default" &&
+          t.targetType === "group_buffer" &&
+          t.groupId === target.groupId,
+      );
+      const defaultAmount = defaultTarget ? Number.parseFloat(defaultTarget.amount) : 0;
+      const monthAmount = Number.parseFloat(target.amount) || 0;
+      return [
+        {
+          target,
+          name: `${group.name} · group buffer`,
+          color: group.color,
+          monthAmount,
+          defaultAmount,
+        },
+      ];
+    }
+    return [];
+  });
+
+  if (overrides.length === 0) return null;
+
+  return (
+    <section className={cn(CARD_CLASS, "p-3 sm:p-4")}>
+      <div className="flex items-center justify-between gap-2">
+        <PanelHeader
+          title={`Overrides · ${overrides.length}`}
+          icon={<Icons.Pencil className="h-3.5 w-3.5" />}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => overrides.forEach((o) => onRevert(o.target))}
+          className="text-muted-foreground hover:text-foreground h-6 gap-1 px-1.5 text-[10px]"
+        >
+          <Icons.X className="h-3 w-3" />
+          Revert all
+        </Button>
+      </div>
+      <div className="mt-2 space-y-2">
+        {overrides.map((o) => {
+          const delta = o.monthAmount - o.defaultAmount;
+          const positive = delta > 0;
+          return (
+            <div key={o.target.id} className="group/override min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: o.color ?? "var(--muted-foreground)" }}
+                  aria-hidden
+                />
+                <span className="text-foreground min-w-0 flex-1 truncate text-xs">{o.name}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-5 w-5 shrink-0 p-0 opacity-0 transition-opacity group-hover/override:opacity-100"
+                  aria-label="Revert this override"
+                  onClick={() => onRevert(o.target)}
+                >
+                  <Icons.X className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-1.5 pl-3 text-[11px] tabular-nums">
+                <span className="text-foreground font-medium">
+                  {formatAmount(o.monthAmount, currency)}
+                </span>
+                <span className="text-muted-foreground/70">
+                  vs {formatAmount(o.defaultAmount, currency)}
+                </span>
+                <span
+                  className={cn(
+                    "ml-auto font-medium",
+                    delta === 0
+                      ? "text-muted-foreground"
+                      : positive
+                        ? "text-destructive"
+                        : "text-success",
+                  )}
+                >
+                  {delta === 0 ? "—" : `${positive ? "+" : ""}${formatAmount(delta, currency)}`}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CopyFromMonthRow({
+  currentPeriodKey,
+  onCopy,
+  pending,
+}: {
+  currentPeriodKey: string;
+  onCopy: (sourcePeriodKey: string, overwrite: boolean) => void;
+  pending: boolean;
+}) {
+  const previousMonth = (() => {
+    const [year, month] = currentPeriodKey.split("-").map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return currentPeriodKey;
+    const date = new Date(year, (month ?? 1) - 2, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const [sourceMonth, setSourceMonth] = useState(previousMonth);
+  const [overwrite, setOverwrite] = useState(false);
+
+  return (
+    <section className={cn(CARD_CLASS, "p-3 sm:p-4")}>
+      <PanelHeader
+        title="Copy plan from another month"
+        icon={<Icons.Copy className="h-3.5 w-3.5" />}
+      />
+      <p className="text-muted-foreground mt-1 text-[11px]">
+        Copies all overrides from the source month into this one.{" "}
+        {overwrite
+          ? "Existing overrides this month will be replaced."
+          : "Existing overrides are preserved."}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="bg-background border-input flex items-center rounded-md border px-2">
+          <Icons.Calendar className="text-muted-foreground h-3.5 w-3.5" />
+          <input
+            type="month"
+            value={sourceMonth}
+            max={currentPeriodKey}
+            onChange={(event) => setSourceMonth(event.target.value || previousMonth)}
+            className="text-foreground h-7 w-[120px] bg-transparent px-2 text-xs outline-none"
+          />
+        </div>
+        <label className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px]">
+          <input
+            type="checkbox"
+            checked={overwrite}
+            onChange={(event) => setOverwrite(event.target.checked)}
+            className="accent-foreground h-3 w-3"
+          />
+          Replace existing overrides
+        </label>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!sourceMonth || sourceMonth === currentPeriodKey || pending}
+          onClick={() => onCopy(sourceMonth, overwrite)}
+          className="ml-auto h-7 px-3 text-xs"
+        >
+          {pending ? "Copying…" : "Copy plan"}
+        </Button>
+      </div>
+    </section>
   );
 }
 

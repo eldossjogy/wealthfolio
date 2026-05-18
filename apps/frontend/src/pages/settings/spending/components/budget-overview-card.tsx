@@ -31,15 +31,15 @@ export function BudgetOverviewCard() {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 p-4 pb-3">
         <div className="min-w-0 space-y-0.5">
-          <CardTitle className="text-sm font-medium">Budget defaults</CardTitle>
+          <CardTitle className="text-sm font-medium">Budget setup</CardTitle>
           <CardDescription className="text-xs">
             {isEmpty
-              ? "Default monthly targets and category splits — used as the baseline when a month has no override."
-              : `Default monthly targets and category splits · ${visible.length + overflow} target${visible.length + overflow === 1 ? "" : "s"}`}
+              ? "Groups, default monthly targets, and rollover — the baseline used for every month."
+              : `Groups, default monthly targets, and rollover · ${visible.length + overflow} target${visible.length + overflow === 1 ? "" : "s"}`}
           </CardDescription>
         </div>
         <Button asChild variant="ghost" size="sm" className="-mt-1 shrink-0">
-          <Link to="/settings/spending/budget">
+          <Link to="/settings/spending/setup">
             Manage
             <Icons.ChevronRight className="ml-1 h-3.5 w-3.5" />
           </Link>
@@ -51,13 +51,13 @@ export function BudgetOverviewCard() {
         ) : isEmpty ? (
           <div className="space-y-3 py-2">
             <div>
-              <div className="text-foreground text-sm font-medium">No budget defaults yet</div>
+              <div className="text-foreground text-sm font-medium">No budget set up yet</div>
               <p className="text-muted-foreground text-xs">
-                Set monthly targets and category splits to use as the baseline.
+                Define groups and default targets to use as the baseline each month.
               </p>
             </div>
             <Button asChild size="sm">
-              <Link to="/settings/spending/budget">
+              <Link to="/settings/spending/setup">
                 <Icons.Plus className="mr-1.5 h-3.5 w-3.5" />
                 Set up budget
               </Link>

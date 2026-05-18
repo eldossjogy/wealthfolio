@@ -48,7 +48,7 @@ export function OverallBudgetMeter({
       <div className="border-border bg-card shadow-xs rounded-xl border p-4 text-center md:p-5">
         <p className="text-muted-foreground text-sm">No monthly budget target set.</p>
         <Link
-          to="/settings/spending/budget"
+          to="/settings/spending/setup"
           className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
         >
           Set a budget

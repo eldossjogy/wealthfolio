@@ -56,7 +56,7 @@ export function BudgetVsActualCard({ budgetData, currency, isLoading }: Props) {
           <Icons.Wallet className="text-muted-foreground mb-2 h-8 w-8" />
           <p className="text-muted-foreground text-sm">No budget set</p>
           <a
-            href="/settings/spending/budget"
+            href="/settings/spending/setup"
             className="text-primary mt-1 text-xs underline-offset-4 hover:underline"
           >
             Set up your budget

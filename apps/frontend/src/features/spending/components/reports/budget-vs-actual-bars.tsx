@@ -106,7 +106,7 @@ export function BudgetVsActualBars({
       <div className="text-muted-foreground py-8 text-center text-sm">
         No category budgets set yet.{" "}
         <Link
-          to="/settings/spending/budget"
+          to="/settings/spending/setup"
           className="hover:text-foreground underline-offset-4 hover:underline"
         >
           Set one
