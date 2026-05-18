@@ -433,7 +433,48 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
 
   const bandsTop = 48;
   const bandsH = 56;
-  const chartTop = bandsTop + bandsH + 18;
+  const LANE_STRIDE = bandsH + 6;
+
+  // Month markers
+  const months = useMemo(() => buildMonthMarkers(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
+
+  // Narrow-event label stacking — adjacent narrow bands stagger label rows.
+  const WIDE_THRESHOLD = 50;
+  const NARROW_LABEL_W = 110;
+
+  // Wide-band lane assignment — overlapping wide bands stack vertically so
+  // labels don't collide. Sorted by start x; each band claims the lowest lane
+  // whose previous occupant ended before this one starts.
+  const wideLaneByEventId = useMemo(() => {
+    const result: Record<string, number> = {};
+    const wide = events
+      .map((e) => {
+        const start = new Date(e.startDate);
+        const end = new Date(e.endDate);
+        const a = Math.max(0, Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000));
+        const b = Math.min(
+          periodDays - 1,
+          Math.round((end.getTime() - rangeStart.getTime()) / 86_400_000),
+        );
+        const x1 = padL + a * dayW;
+        const w = Math.max((b - a + 1) * dayW, 6);
+        return { id: e.eventId, x1, x2: x1 + w, wide: w > WIDE_THRESHOLD };
+      })
+      .filter((it) => it.wide)
+      .sort((a, b) => a.x1 - b.x1);
+    const laneRights: number[] = [];
+    for (const item of wide) {
+      let lane = 0;
+      while (laneRights[lane] != null && laneRights[lane] > item.x1) lane++;
+      laneRights[lane] = item.x2;
+      result[item.id] = lane;
+    }
+    return result;
+  }, [events, rangeStart, periodDays, dayW]);
+
+  const wideLaneCount = Math.max(1, ...Object.values(wideLaneByEventId).map((l) => l + 1));
+  const bandsAreaH = bandsH + (wideLaneCount - 1) * LANE_STRIDE;
+  const chartTop = bandsTop + bandsAreaH + 18;
   const chartH = 96;
   const axisTop = chartTop + chartH;
   const totalH = axisTop + 30;
@@ -444,11 +485,9 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   const scaleMax = Math.max(maxDaily * 1.1, computed.normalPace * 2.2);
   const yDaily = (v: number) => chartTop + chartH - (Math.min(v, scaleMax) / scaleMax) * chartH;
 
-  // Area + line paths
   const points = dailySeries.map((v, i) => [padL + (i + 0.5) * dayW, yDaily(v)] as const);
   const linePath = points.map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`)).join(" ");
   const areaPath = `${linePath} L${padL + innerW},${chartTop + chartH} L${padL},${chartTop + chartH} Z`;
-
   const yNormal = yDaily(computed.normalPace);
 
   // Today marker — only show if today is within range.
@@ -457,12 +496,6 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   const showToday = todayIdx >= 0 && todayIdx <= periodDays - 1;
   const todayX = padL + (todayIdx + 0.5) * dayW;
 
-  // Month markers
-  const months = useMemo(() => buildMonthMarkers(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
-
-  // Narrow-event label stacking — adjacent narrow bands stagger label rows.
-  const WIDE_THRESHOLD = 50;
-  const NARROW_LABEL_W = 110;
   const labelRowByEventId = useMemo(() => {
     const result: Record<string, number> = {};
     const rowEnds: number[] = [];
@@ -668,6 +701,10 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
             const kindLabel = (ev.eventTypeName ?? "").toUpperCase();
             const labelRowIdx = labelRowByEventId[ev.eventId] ?? 0;
             const labelYOffset = -4 - labelRowIdx * 12;
+            const isWide = w > WIDE_THRESHOLD;
+            const bandY = isWide
+              ? bandsTop + (wideLaneByEventId[ev.eventId] ?? 0) * LANE_STRIDE
+              : bandsTop;
 
             return (
               <g
@@ -677,7 +714,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               >
                 <rect
                   x={x1}
-                  y={bandsTop}
+                  y={bandY}
                   width={w}
                   height={bandsH - 4}
                   fill={c.fill}
@@ -688,18 +725,18 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                 />
                 <rect
                   x={x1}
-                  y={bandsTop}
+                  y={bandY}
                   width={3}
                   height={bandsH - 4}
                   fill={c.stroke}
                   opacity={isSel ? 1 : 0.7}
                 />
 
-                {w > WIDE_THRESHOLD ? (
+                {isWide ? (
                   <>
                     <text
                       x={x1 + 8}
-                      y={bandsTop + 16}
+                      y={bandY + 16}
                       fontSize={11}
                       className="fill-foreground"
                       fontWeight={isSel ? 700 : 600}
@@ -708,7 +745,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                     </text>
                     <text
                       x={x1 + 8}
-                      y={bandsTop + 32}
+                      y={bandY + 32}
                       fontSize={9.5}
                       fontWeight={600}
                       className={lift >= 0 ? "fill-destructive" : "fill-success"}
@@ -716,12 +753,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                       {lift >= 0 ? "+" : "−"}
                       {formatCompactAmount(Math.abs(lift), currency)}
                     </text>
-                    <text
-                      x={x1 + 8}
-                      y={bandsTop + 46}
-                      fontSize={9}
-                      className="fill-muted-foreground"
-                    >
+                    <text x={x1 + 8} y={bandY + 46} fontSize={9} className="fill-muted-foreground">
                       {days}D · {kindLabel}
                     </text>
                   </>
@@ -731,8 +763,8 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                       <line
                         x1={x1 + w / 2}
                         x2={x1 + w / 2}
-                        y1={bandsTop}
-                        y2={bandsTop + labelYOffset + 2}
+                        y1={bandY}
+                        y2={bandY + labelYOffset + 2}
                         stroke={c.stroke}
                         strokeWidth={1}
                         opacity={0.5}
@@ -740,7 +772,7 @@ const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                     )}
                     <text
                       x={x1 + w / 2}
-                      y={bandsTop + labelYOffset}
+                      y={bandY + labelYOffset}
                       fontSize={10}
                       fontWeight={isSel ? 700 : 500}
                       textAnchor="middle"
