@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -10,12 +10,12 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
   Button,
   Icons,
   Skeleton,
 } from "@wealthfolio/ui";
 
+import { ActionPalette, type ActionPaletteGroup } from "@/components/action-palette";
 import { useEventDialog } from "@/features/spending/components/event-dialog-provider";
 import {
   useEventTypeMutations,
@@ -24,7 +24,6 @@ import {
   useSpendingEvents,
 } from "@/features/spending/hooks/use-spending-events";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
-import { buildCashflowUrl } from "@/features/spending/lib/navigation";
 import type { EventType, SpendingEvent } from "@/features/spending/types/event";
 
 import { SettingsHeader } from "../../settings-header";
@@ -32,7 +31,6 @@ import { SpendingBackLink } from "../components/spending-back-link";
 
 export default function SpendingEventsPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
-  const navigate = useNavigate();
   const { data: events = [], isLoading: eventsLoading } = useSpendingEvents();
   const { data: eventTypes = [], isLoading: typesLoading } = useEventTypes();
   const { remove: removeEventType } = useEventTypeMutations();
@@ -87,12 +85,21 @@ export default function SpendingEventsPage() {
     <div className="space-y-6">
       <SpendingBackLink />
       <SettingsHeader
-        heading="Events"
+        heading="Spending Events"
         text="Manage event types and events used to tag cash transactions."
         backTo="/settings/spending"
+        actionsInline
       >
-        <Button onClick={handleAddEventType}>
-          <Icons.Plus className="mr-2 h-4 w-4" />
+        <Button
+          size="sm"
+          className="sm:hidden"
+          onClick={handleAddEventType}
+          aria-label="Add event type"
+        >
+          <Icons.Plus className="h-3.5 w-3.5" />
+        </Button>
+        <Button size="sm" className="hidden sm:inline-flex" onClick={handleAddEventType}>
+          <Icons.Plus className="mr-2 h-3.5 w-3.5" />
           Add event type
         </Button>
       </SettingsHeader>
@@ -111,160 +118,26 @@ export default function SpendingEventsPage() {
             const isExpanded = expandedTypes.has(type.id);
             return (
               <div key={type.id}>
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    {hasEvents ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => toggleExpanded(type.id)}
-                      >
-                        {isExpanded ? (
-                          <Icons.ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <Icons.ChevronRight className="h-4 w-4" />
-                        )}
-                      </Button>
-                    ) : (
-                      <div className="w-6" />
-                    )}
-                    {type.color && (
-                      <div
-                        className="h-3 w-3 rounded-full"
-                        style={{ backgroundColor: type.color }}
-                      />
-                    )}
-                    <span className="font-medium">{type.name}</span>
-                    {hasEvents && (
-                      <span className="text-muted-foreground text-xs">({typeEvents.length})</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleAddEvent(type)}
-                      title="Add event"
-                    >
-                      <Icons.Plus className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEditEventType(type)}
-                      title="Edit event type"
-                    >
-                      <Icons.Pencil className="h-4 w-4" />
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="sm" title="Delete event type">
-                          <Icons.Trash className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Delete event type</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to delete &quot;{type.name}&quot;?
-                            {hasEvents && (
-                              <span className="text-destructive mt-2 block font-medium">
-                                This will also delete all {typeEvents.length} event(s) under this
-                                type.
-                              </span>
-                            )}
-                            This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => removeEventType.mutate(type.id)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Delete
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </div>
+                <EventTypeRow
+                  type={type}
+                  typeEvents={typeEvents}
+                  hasEvents={hasEvents}
+                  isExpanded={isExpanded}
+                  onToggleExpanded={() => toggleExpanded(type.id)}
+                  onAddEvent={() => handleAddEvent(type)}
+                  onEditEventType={() => handleEditEventType(type)}
+                  onDeleteEventType={() => removeEventType.mutate(type.id)}
+                />
                 {hasEvents && isExpanded && (
                   <div className="space-y-0">
                     {typeEvents.map((event) => (
-                      <div key={event.id} className="ml-6 border-l pl-4">
-                        <div className="flex items-center justify-between py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-6" />
-                            {type.color && (
-                              <span
-                                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                style={{ backgroundColor: type.color }}
-                                aria-hidden="true"
-                              />
-                            )}
-                            <div>
-                              <span className="text-sm">{event.name}</span>
-                              <div className="text-muted-foreground flex items-center gap-2 text-xs">
-                                <span>
-                                  {event.startDate} – {event.endDate}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                navigate(
-                                  buildCashflowUrl({
-                                    startDate: event.startDate,
-                                    endDate: event.endDate,
-                                  }),
-                                )
-                              }
-                              title="View transactions"
-                            >
-                              <Icons.ExternalLink className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEditEvent(event)}
-                              title="Edit event"
-                            >
-                              <Icons.Pencil className="h-4 w-4" />
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="sm" title="Delete event">
-                                  <Icons.Trash className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete event</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Are you sure you want to delete &quot;{event.name}&quot;? This
-                                    action cannot be undone.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => removeEvent.mutate(event.id)}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                  >
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </div>
-                      </div>
+                      <EventRow
+                        key={event.id}
+                        event={event}
+                        color={type.color ?? null}
+                        onEdit={() => handleEditEvent(event)}
+                        onDelete={() => removeEvent.mutate(event.id)}
+                      />
                     ))}
                   </div>
                 )}
@@ -277,6 +150,252 @@ export default function SpendingEventsPage() {
           No event types yet. Click &quot;Add event type&quot; to create one.
         </div>
       )}
+    </div>
+  );
+}
+
+function EventTypeRow({
+  type,
+  typeEvents,
+  hasEvents,
+  isExpanded,
+  onToggleExpanded,
+  onAddEvent,
+  onEditEventType,
+  onDeleteEventType,
+}: {
+  type: EventType;
+  typeEvents: SpendingEvent[];
+  hasEvents: boolean;
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
+  onAddEvent: () => void;
+  onEditEventType: () => void;
+  onDeleteEventType: () => void;
+}) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  const paletteGroups: ActionPaletteGroup[] = [
+    {
+      items: [
+        { icon: Icons.Plus, label: "Add event", onClick: onAddEvent },
+        { icon: Icons.Pencil, label: "Edit", onClick: onEditEventType },
+      ],
+    },
+    {
+      items: [
+        {
+          icon: Icons.Trash,
+          label: "Delete",
+          variant: "destructive" as const,
+          onClick: () => setConfirmDeleteOpen(true),
+        },
+      ],
+    },
+  ];
+
+  return (
+    <div className="flex items-center justify-between gap-2 px-4 py-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {hasEvents ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 shrink-0 p-0"
+            onClick={onToggleExpanded}
+          >
+            {isExpanded ? (
+              <Icons.ChevronDown className="h-4 w-4" />
+            ) : (
+              <Icons.ChevronRight className="h-4 w-4" />
+            )}
+          </Button>
+        ) : (
+          <div className="w-6 shrink-0" />
+        )}
+        {type.color && (
+          <div className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: type.color }} />
+        )}
+        <span className="min-w-0 truncate text-sm font-medium">{type.name}</span>
+        {hasEvents && (
+          <span className="text-muted-foreground shrink-0 text-xs">({typeEvents.length})</span>
+        )}
+      </div>
+
+      {/* Desktop: inline actions */}
+      <div className="hidden shrink-0 items-center gap-1 sm:flex">
+        <Button variant="ghost" size="sm" onClick={onAddEvent} title="Add event">
+          <Icons.Plus className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onEditEventType} title="Edit event type">
+          <Icons.Pencil className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setConfirmDeleteOpen(true)}
+          title="Delete event type"
+        >
+          <Icons.Trash className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Mobile: ActionPalette kebab */}
+      <ActionPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        title={type.name}
+        groups={paletteGroups}
+        align="end"
+        trigger={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground h-8 w-8 shrink-0 p-0 sm:hidden"
+            aria-label="Event type actions"
+          >
+            <Icons.DotsThreeVertical className="h-4 w-4" />
+          </Button>
+        }
+      />
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete event type</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{type.name}&quot;?
+              {hasEvents && (
+                <span className="text-destructive mt-2 block font-medium">
+                  This will also delete all {typeEvents.length} event(s) under this type.
+                </span>
+              )}
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={onDeleteEventType}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function EventRow({
+  event,
+  color,
+  onEdit,
+  onDelete,
+}: {
+  event: SpendingEvent;
+  color: string | null;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  const paletteGroups: ActionPaletteGroup[] = [
+    {
+      items: [{ icon: Icons.Pencil, label: "Edit", onClick: onEdit }],
+    },
+    {
+      items: [
+        {
+          icon: Icons.Trash,
+          label: "Delete",
+          variant: "destructive" as const,
+          onClick: () => setConfirmDeleteOpen(true),
+        },
+      ],
+    },
+  ];
+
+  return (
+    <div className="ml-6 border-l pl-4">
+      <div className="flex items-center justify-between gap-2 py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="w-6 shrink-0" />
+          {color && (
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: color }}
+              aria-hidden="true"
+            />
+          )}
+          <div className="min-w-0">
+            <span className="block truncate text-sm">{event.name}</span>
+            <div className="text-muted-foreground flex items-center gap-2 truncate text-xs">
+              <span>
+                {event.startDate} – {event.endDate}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop: inline actions */}
+        <div className="hidden shrink-0 items-center gap-1 sm:flex">
+          <Button variant="ghost" size="sm" onClick={onEdit} title="Edit event">
+            <Icons.Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirmDeleteOpen(true)}
+            title="Delete event"
+          >
+            <Icons.Trash className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* Mobile: ActionPalette kebab */}
+        <ActionPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          title={event.name}
+          groups={paletteGroups}
+          align="end"
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-foreground h-8 w-8 shrink-0 p-0 sm:hidden"
+              aria-label="Event actions"
+            >
+              <Icons.DotsThreeVertical className="h-4 w-4" />
+            </Button>
+          }
+        />
+
+        <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete event</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete &quot;{event.name}&quot;? This action cannot be
+                undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={onDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
   );
 }
