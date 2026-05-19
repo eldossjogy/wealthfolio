@@ -72,7 +72,7 @@ export function RulePresetPicker({ compact = false }: RulePresetPickerProps) {
           </p>
         </div>
       )}
-      <div className="flex flex-wrap items-stretch gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
         {presets.map((preset) => {
           const flag = PRESET_FLAGS[preset.presetId] ?? "🌐";
           const isImporting =
@@ -91,7 +91,7 @@ export function RulePresetPicker({ compact = false }: RulePresetPickerProps) {
                     : `Import ${preset.name} preset (${preset.ruleCount} rules)`
                 }
                 className={cn(
-                  "border-input bg-card hover:bg-muted/50 group flex min-w-[160px] items-center gap-3 rounded-lg border py-2.5 pl-3 text-left transition-colors",
+                  "border-input bg-card hover:bg-muted/50 group flex w-full items-center gap-3 rounded-lg border py-2.5 pl-3 text-left transition-colors sm:w-auto sm:min-w-[160px]",
                   "focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
                   "disabled:cursor-not-allowed disabled:opacity-60",
                   preset.installed && "border-success/40 bg-success/5",
