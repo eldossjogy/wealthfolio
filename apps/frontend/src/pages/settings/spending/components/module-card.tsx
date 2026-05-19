@@ -94,46 +94,37 @@ export function ModuleCard() {
       aria-label="Tracker status"
       className="bg-foreground text-background relative overflow-hidden rounded-lg shadow-lg"
     >
-      <div className="px-6 py-6 sm:px-7">
-        {/* Top row: state + master toggle */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 space-y-3">
-            <div className="text-background/60 flex items-center gap-2 text-xs font-medium uppercase tracking-widest">
-              <span className="relative flex h-2 w-2">
-                <span
-                  className={cn(
-                    "absolute inline-flex h-full w-full rounded-full opacity-60",
-                    enabled ? "animate-ping bg-green-300" : "bg-background/40",
-                  )}
-                />
-                <span
-                  className={cn(
-                    "relative inline-flex h-2 w-2 rounded-full",
-                    enabled ? "bg-green-300" : "bg-background/40",
-                  )}
-                />
+      <div className="p-5 sm:px-7 sm:py-6">
+        {/* Top row: state pulse + master toggle share the full row so the
+            headline below gets full width on mobile. */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-background/60 flex min-w-0 items-center gap-2 text-xs font-medium uppercase tracking-widest">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span
+                className={cn(
+                  "absolute inline-flex h-full w-full rounded-full opacity-60",
+                  enabled ? "animate-ping bg-green-300" : "bg-background/40",
+                )}
+              />
+              <span
+                className={cn(
+                  "relative inline-flex h-2 w-2 rounded-full",
+                  enabled ? "bg-green-300" : "bg-background/40",
+                )}
+              />
+            </span>
+            <span className="text-background truncate font-medium">
+              {enabled ? "Tracking active" : "Tracking disabled"}
+            </span>
+            {enabled && tracked.length > 0 && (
+              <span className="text-background/45 hidden truncate sm:inline">
+                · {tracked.length} account{tracked.length === 1 ? "" : "s"}
               </span>
-              <span className="text-background font-medium">
-                {enabled ? "Tracking active" : "Tracking disabled"}
-              </span>
-              {enabled && tracked.length > 0 && (
-                <span className="text-background/45">
-                  · {tracked.length} account{tracked.length === 1 ? "" : "s"}
-                </span>
-              )}
-            </div>
-            <div className="text-base font-medium tracking-tight sm:text-lg">
-              {enabled
-                ? `Tracking ${tracked.length} of ${spendingAccounts.length} cash account${spendingAccounts.length === 1 ? "" : "s"}. Add transactions via import or manual entry.`
-                : "Spending tracking is off. Enable to start categorizing cash and credit-card activity."}
-            </div>
-            <div className="text-background/50 text-xs">
-              Disabling hides the spending UI without deleting any data.
-            </div>
+            )}
           </div>
 
           <label className="flex shrink-0 cursor-pointer select-none items-center gap-2">
-            <span className="text-background/55 text-xs font-medium uppercase tracking-widest">
+            <span className="text-background/55 hidden text-xs font-medium uppercase tracking-widest sm:inline">
               {enabled ? "Enabled" : "Disabled"}
             </span>
             <Switch
@@ -147,6 +138,16 @@ export function ModuleCard() {
               )}
             />
           </label>
+        </div>
+
+        {/* Headline + subtitle now span the full width. */}
+        <div className="mt-4 text-sm font-medium tracking-tight sm:text-base lg:text-lg">
+          {enabled
+            ? `Tracking ${tracked.length} of ${spendingAccounts.length} cash account${spendingAccounts.length === 1 ? "" : "s"}. Add transactions via import or manual entry.`
+            : "Spending tracking is off. Enable to start categorizing cash and credit-card activity."}
+        </div>
+        <div className="text-background/50 mt-2 hidden text-xs sm:block">
+          Disabling hides the spending UI without deleting any data.
         </div>
 
         {/* Stats grid */}

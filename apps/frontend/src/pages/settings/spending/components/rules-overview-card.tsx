@@ -62,7 +62,7 @@ export function RulesOverviewCard() {
     <Link
       to="/settings/spending/rules"
       aria-label="Open categorization rules"
-      className="bg-card hover:border-foreground/20 group flex items-stretch overflow-hidden rounded-lg border transition-all hover:shadow-md"
+      className="bg-card hover:border-foreground/20 group flex flex-col items-stretch overflow-hidden rounded-lg border transition-all hover:shadow-md sm:flex-row"
     >
       <div className="min-w-0 flex-1 p-6">
         <div className="mb-4">
@@ -72,7 +72,7 @@ export function RulesOverviewCard() {
           </p>
         </div>
 
-        <div className="border-border/60 mb-3.5 flex flex-wrap gap-8 border-y py-3.5">
+        <div className="border-border/60 mb-3.5 grid grid-cols-3 gap-3 border-y py-3.5 sm:flex sm:gap-8">
           <Stat value={total} label="Total rules" />
           <Stat value={presetRules.length} label="Installed regions" />
           <Stat value={userRulesCount} label="Custom rules" />
@@ -96,7 +96,7 @@ export function RulesOverviewCard() {
         )}
       </div>
 
-      <div className="bg-muted/30 group-hover:bg-foreground group-hover:text-background text-muted-foreground flex w-24 shrink-0 flex-col items-center justify-center gap-1.5 border-l text-xs font-medium uppercase tracking-widest transition-colors">
+      <div className="bg-muted/30 group-hover:bg-foreground group-hover:text-background text-muted-foreground flex shrink-0 items-center justify-center gap-1.5 border-t px-4 py-3 text-xs font-medium uppercase tracking-widest transition-colors sm:w-24 sm:flex-col sm:gap-2 sm:border-l sm:border-t-0 sm:px-0 sm:py-0">
         <span>Open rules</span>
         <Icons.ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
       </div>
@@ -107,7 +107,7 @@ export function RulesOverviewCard() {
 function Stat({ value, label }: { value: number; label: string }) {
   return (
     <div>
-      <div className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="text-foreground text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">
         {value}
       </div>
       <div className="text-muted-foreground mt-0.5 text-[10px] font-medium uppercase tracking-widest">

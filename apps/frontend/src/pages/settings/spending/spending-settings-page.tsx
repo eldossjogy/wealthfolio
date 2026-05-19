@@ -17,17 +17,18 @@ export default function SpendingSettingsPage() {
 
   return (
     <div className="font-mono text-sm leading-relaxed antialiased [&>*+*]:mt-9 [&>section+section]:mt-11">
-      <header className="grid grid-cols-[auto_1fr] items-start gap-2 lg:block">
+      <header className="flex items-center gap-1.5 lg:block">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          size="sm"
           onClick={() => navigate("/settings")}
-          className="ml-1 lg:hidden"
+          className="text-muted-foreground hover:text-foreground -ml-1 h-8 w-8 shrink-0 p-0 lg:hidden"
+          aria-label="Back to Settings"
         >
-          <Icons.ArrowLeft className="size-6" />
+          <Icons.ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <nav
             aria-label="Breadcrumb"
             className="text-muted-foreground mb-3 hidden items-center gap-1.5 text-xs lg:flex"
@@ -38,10 +39,10 @@ export default function SpendingSettingsPage() {
             <span className="text-muted-foreground/50">/</span>
             <span className="text-foreground">Spending Tracker</span>
           </nav>
-          <h1 className="text-foreground text-xl font-semibold tracking-tight lg:text-2xl">
+          <h1 className="text-foreground text-base font-semibold tracking-tight sm:text-lg lg:text-2xl">
             Spending Tracker
           </h1>
-          <p className="text-muted-foreground mt-1 max-w-[64ch] text-sm">
+          <p className="text-muted-foreground mt-1 hidden max-w-[64ch] text-sm sm:block">
             Track expenses on your cash accounts — categories, events, automation rules, and
             budgets.
           </p>
