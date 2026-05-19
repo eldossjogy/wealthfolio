@@ -150,39 +150,41 @@ export function ModuleCard() {
           Disabling hides the spending UI without deleting any data.
         </div>
 
-        {/* Stats grid */}
-        <div className="border-background/10 mt-6 grid grid-cols-2 gap-y-5 border-t pt-5 sm:grid-cols-4">
-          <HeroStat
-            label="Spending accounts"
-            value={tracked.length}
-            unit={`of ${spendingAccounts.length} cash`}
-            sub={trackedSummary}
-          />
-          <HeroStat
-            label="Categorization"
-            value={ruleCount}
-            unit={ruleCount === 1 ? "rule" : "rules"}
-            sub={regionCount > 0 ? `${regionCount} region${regionCount === 1 ? "" : "s"}` : "—"}
-          />
-          <HeroStat
-            label="Planned vs income"
-            value={plannedPct ?? "—"}
-            unit={plannedPct !== null ? "%" : undefined}
-            valueClassName={overPlan ? "text-warning" : undefined}
-            sub={
-              spendingPlanned > 0 || incomePlanned > 0
-                ? `${formatAmountWhole(spendingPlanned, currency)} / ${formatAmountWhole(incomePlanned, currency)}`
-                : "Set up budget"
-            }
-          />
-          <HeroStat
-            label="Budget groups"
-            value={activeGroups.length}
-            unit={activeGroups.length === 1 ? "active" : "active"}
-            sub={groupNamesSubline}
-            sublineClassName="truncate"
-          />
-        </div>
+        {/* Stats grid — only meaningful when tracking is enabled */}
+        {enabled && (
+          <div className="border-background/10 mt-6 grid grid-cols-2 gap-y-5 border-t pt-5 sm:grid-cols-4">
+            <HeroStat
+              label="Spending accounts"
+              value={tracked.length}
+              unit={`of ${spendingAccounts.length} cash`}
+              sub={trackedSummary}
+            />
+            <HeroStat
+              label="Categorization"
+              value={ruleCount}
+              unit={ruleCount === 1 ? "rule" : "rules"}
+              sub={regionCount > 0 ? `${regionCount} region${regionCount === 1 ? "" : "s"}` : "—"}
+            />
+            <HeroStat
+              label="Planned vs income"
+              value={plannedPct ?? "—"}
+              unit={plannedPct !== null ? "%" : undefined}
+              valueClassName={overPlan ? "text-warning" : undefined}
+              sub={
+                spendingPlanned > 0 || incomePlanned > 0
+                  ? `${formatAmountWhole(spendingPlanned, currency)} / ${formatAmountWhole(incomePlanned, currency)}`
+                  : "Set up budget"
+              }
+            />
+            <HeroStat
+              label="Budget groups"
+              value={activeGroups.length}
+              unit={activeGroups.length === 1 ? "active" : "active"}
+              sub={groupNamesSubline}
+              sublineClassName="truncate"
+            />
+          </div>
+        )}
       </div>
     </section>
   );
