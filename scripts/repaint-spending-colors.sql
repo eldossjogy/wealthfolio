@@ -70,6 +70,20 @@ UPDATE taxonomy_categories SET color = '#9C998E'
   WHERE id IN ('cat_income_gifts', 'cat_income_refunds',
                'cat_income_reimbursements', 'cat_income_tax_refund');
 
+-- Savings category (backfilled to align with the Savings budget group, which
+-- previously had no category assigned and rendered as buffer-only in the
+-- editor). No-op if already present.
+INSERT OR IGNORE INTO taxonomy_categories
+  (id, taxonomy_id, parent_id, name, key, color, icon, sort_order)
+VALUES
+  ('cat_savings', 'spending_categories', NULL, 'Savings', 'savings',
+   '#6B8E54', 'PiggyBank', 14);
+
+INSERT OR IGNORE INTO budget_group_assignments
+  (id, group_id, taxonomy_id, category_id)
+VALUES
+  ('bga_cat_savings', 'budget_group_savings', 'spending_categories', 'cat_savings');
+
 -- Event types
 UPDATE event_types SET color = '#7B96C9' WHERE id = 'event-type-travel';
 UPDATE event_types SET color = '#6B8E54' WHERE id = 'event-type-holiday';

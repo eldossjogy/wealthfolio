@@ -278,6 +278,7 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
   ('cat_travel',          'spending_categories', NULL, 'Travel',           'travel',          '#3171B2', 'Plane',         11),
   ('cat_gifts',           'spending_categories', NULL, 'Gifts & Donations','gifts',           '#AF3029', 'Gift',          12),
   ('cat_fees',            'spending_categories', NULL, 'Fees & Charges',   'fees',            '#9C998E', 'CreditCard',    13),
+  ('cat_savings',         'spending_categories', NULL, 'Savings',          'savings',         '#6B8E54', 'PiggyBank',     14),
   ('cat_other_expense',   'spending_categories', NULL, 'Other Expenses',   'other_expense',   '#B6B2A4', 'MoreHorizontal',99);
 
 INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id) VALUES
@@ -294,6 +295,7 @@ INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id) VA
   ('bga_cat_travel',        'budget_group_wants',    'spending_categories', 'cat_travel'),
   ('bga_cat_gifts',         'budget_group_giving',   'spending_categories', 'cat_gifts'),
   ('bga_cat_personal',      'budget_group_personal', 'spending_categories', 'cat_personal'),
+  ('bga_cat_savings',       'budget_group_savings',  'spending_categories', 'cat_savings'),
   ('bga_cat_other_expense', 'budget_group_other',    'spending_categories', 'cat_other_expense');
 
 -- ----------------------------------------------------------------------------
