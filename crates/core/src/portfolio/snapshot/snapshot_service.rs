@@ -307,7 +307,7 @@ impl SnapshotService {
             return Ok(0);
         }
 
-        let (_final_holdings_states, keyframes_to_save, calculation_warnings) = self
+        let (final_holdings_states, keyframes_to_save, calculation_warnings) = self
             .calculate_daily_holdings_snapshots(
                 &accounts_needing_calculation,
                 &activities_by_account_date,
@@ -355,22 +355,47 @@ impl SnapshotService {
                 }
             }
 
-            // Dual-write lots alongside the JSON snapshots. The latest keyframe
-            // for the account carries the current open-lot state; closures
-            // accumulated during this recalc are taken from the calculator
-            // and merged into the same sync call so partial-sell rows reach
-            // the database even when the lot was created and consumed within
-            // a single replay pass.
+            // Dual-write lots alongside the JSON snapshots. Use the
+            // calculator's final in-memory state rather than the saved
+            // keyframes — keyframes are sparse (one per significant date)
+            // and may not include today, but the final state always reflects
+            // current open lots after replay.
+            //
+            // Skipped for:
+            //   - the virtual TOTAL pseudo-account (no activities of its own;
+            //     positions are an aggregate of per-account state)
+            //   - TRANSACTIONS-mode accounts on non-Full recalcs.
+            //     Incremental modes seed starting state from the snapshot
+            //     positions JSON, which may carry stale lot quantities from
+            //     older app versions (e.g. pre-split-ratio quantities baked
+            //     in by the earlier calculator). Lots are reliably
+            //     reconstructed only by a Full replay; partial writes from
+            //     incremental modes would corrupt the table.
+            // HOLDINGS-mode accounts use a different write path
+            // (save_manual_snapshot) and don't go through here.
             if let Some(lot_repo) = &self.lot_repository {
-                if let Some(latest) = frames.iter().max_by_key(|s| s.snapshot_date) {
-                    let open_lots = extract_lot_records(latest);
-                    let _ = check_lot_quantity_consistency(latest, &open_lots);
-                    let closures = self.holdings_calculator.take_disposed_lots(acc_id);
-                    if let Err(e) = lot_repo
-                        .sync_lots_for_account(acc_id, &open_lots, &closures)
-                        .await
-                    {
-                        error!("Failed to sync lot rows for account {}: {}", acc_id, e);
+                if acc_id == PORTFOLIO_TOTAL_ACCOUNT_ID {
+                    continue;
+                }
+                let is_full_recalc = matches!(mode, SnapshotRecalcMode::Full);
+                let skip_for_transactions = !is_full_recalc
+                    && accounts_needing_calculation.get(acc_id).is_some_and(|a| {
+                        matches!(
+                            a.tracking_mode,
+                            TrackingMode::Transactions | TrackingMode::NotSet
+                        )
+                    });
+                if !skip_for_transactions {
+                    if let Some(snapshot) = final_holdings_states.get(acc_id) {
+                        let open_lots = extract_lot_records(snapshot);
+                        let _ = check_lot_quantity_consistency(snapshot, &open_lots);
+                        let closures = self.holdings_calculator.take_disposed_lots(acc_id);
+                        if let Err(e) = lot_repo
+                            .sync_lots_for_account(acc_id, &open_lots, &closures)
+                            .await
+                        {
+                            error!("Failed to sync lot rows for account {}: {}", acc_id, e);
+                        }
                     }
                 }
             }
@@ -395,6 +420,17 @@ impl SnapshotService {
                             &[], // empty = delete old snapshots, insert nothing
                         )
                         .await?;
+
+                    // The lots that were derived from those activities are
+                    // now orphaned — clear them so the table stays in sync.
+                    if let Some(lot_repo) = &self.lot_repository {
+                        if let Err(e) = lot_repo.replace_lots_for_account(acc_id, &[]).await {
+                            warn!(
+                                "Failed to clear lots for account {} after activity deletion: {}",
+                                acc_id, e
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -1694,13 +1730,14 @@ impl SnapshotServiceTrait for SnapshotService {
         // Dual-write lots for HOLDINGS-mode snapshots — but only when the
         // snapshot being saved is the latest for the account. Editing a
         // historical snapshot must not overwrite current open lots with
-        // stale state.
+        // stale state. The TOTAL pseudo-account has no lots of its own.
         if let Some(lot_repo) = &self.lot_repository {
-            let is_latest = self
-                .snapshot_repository
-                .get_snapshots_by_account(account_id, Some(snapshot.snapshot_date), None)?
-                .into_iter()
-                .all(|s| s.snapshot_date <= snapshot.snapshot_date);
+            let is_latest = account_id != PORTFOLIO_TOTAL_ACCOUNT_ID
+                && self
+                    .snapshot_repository
+                    .get_snapshots_by_account(account_id, Some(snapshot.snapshot_date), None)?
+                    .into_iter()
+                    .all(|s| s.snapshot_date <= snapshot.snapshot_date);
 
             if is_latest {
                 let open_lots = extract_lot_records(&snapshot);
@@ -1860,22 +1897,16 @@ impl SnapshotServiceTrait for SnapshotService {
         let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
         for acc in &holdings_accounts {
+            // Lots reflect current state, so derive them from the LATEST
+            // non-calculated snapshot rather than the earliest.
             let latest = match self
                 .snapshot_repository
-                .get_earliest_non_calculated_snapshot(&acc.id)?
+                .get_snapshots_by_account(&acc.id, None, None)?
+                .into_iter()
+                .filter(|s| s.source != SnapshotSource::Calculated)
+                .max_by_key(|s| s.snapshot_date)
             {
-                Some(s) => {
-                    // get_earliest gives us the earliest. We actually want the
-                    // latest non-calculated to reflect current state. Fetch
-                    // all non-calculated and pick the max.
-                    let all = self
-                        .snapshot_repository
-                        .get_snapshots_by_account(&acc.id, None, None)?;
-                    all.into_iter()
-                        .filter(|s| s.source != SnapshotSource::Calculated)
-                        .max_by_key(|s| s.snapshot_date)
-                        .unwrap_or(s)
-                }
+                Some(s) => s,
                 None => continue,
             };
 
