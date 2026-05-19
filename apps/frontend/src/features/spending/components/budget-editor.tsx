@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -24,10 +25,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Icons,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
   Skeleton,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  useIsMobile,
 } from "@wealthfolio/ui";
 import { Switch } from "@wealthfolio/ui/components/ui/switch";
 
@@ -102,6 +112,29 @@ export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
   if (error) return <BudgetErrorState error={error} onRetry={() => refetch()} />;
   if (!budget) return null;
 
+  // Pool of categories the user can pull *into* a given group. Other groups'
+  // top-level categories + any top-level ungrouped strays. Subcategories are
+  // excluded because they inherit a group through their parent and aren't
+  // valid direct targets for `budget_group_assignments`.
+  const allCategoryPool: CategoryPoolEntry[] = [
+    ...budget.computed.groupRows.flatMap((g) =>
+      g.categories
+        .filter((c) => !c.parentId)
+        .map((c) => ({
+          category: c,
+          fromGroupId: g.group.id,
+          fromGroupName: g.group.name,
+        })),
+    ),
+    ...budget.computed.ungroupedRows
+      .filter((c) => !c.parentId)
+      .map((c) => ({
+        category: c,
+        fromGroupId: null,
+        fromGroupName: null,
+      })),
+  ];
+
   const groupSection = (
     <div className="space-y-2">
       {budget.computed.groupRows.map((row) => (
@@ -115,6 +148,7 @@ export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
           periodKey={periodForWrite}
           monthMode={monthMode}
           mode={mode}
+          categoryPool={allCategoryPool}
           onSaveGroupBuffer={saveGroupBuffer}
           onSaveCategoryTarget={saveCategoryTarget}
           onDeleteOverride={deleteMonthOverride}
@@ -233,7 +267,7 @@ export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
+    <div className="max-w-2xl space-y-4">
       <BudgetSummary budget={budget} currency={currency} mode={mode} />
       {groupSection}
       {incomePanel}
@@ -379,6 +413,12 @@ function GroupSummaryCell({
   );
 }
 
+interface CategoryPoolEntry {
+  category: BudgetCategoryRow;
+  fromGroupId: string | null;
+  fromGroupName: string | null;
+}
+
 function GroupBudgetSection({
   row,
   groups,
@@ -388,6 +428,7 @@ function GroupBudgetSection({
   periodKey,
   monthMode,
   mode,
+  categoryPool,
   canDelete,
   deletePending,
   onSaveGroupBuffer,
@@ -407,6 +448,7 @@ function GroupBudgetSection({
   periodKey: string;
   monthMode: boolean;
   mode: BudgetEditorMode;
+  categoryPool: CategoryPoolEntry[];
   canDelete: boolean;
   deletePending: boolean;
   onSaveGroupBuffer: (row: BudgetGroupRow, amount: string) => void;
@@ -617,9 +659,221 @@ function GroupBudgetSection({
               onToggleRollover={onToggleCategoryRollover}
             />
           ))}
+          {mode === "setup" && (
+            <AddCategoryRow
+              groupId={row.group.id}
+              groupName={row.group.name}
+              pool={categoryPool.filter((entry) => entry.fromGroupId !== row.group.id)}
+              onMoveCategory={onMoveCategory}
+            />
+          )}
         </div>
       )}
     </section>
+  );
+}
+
+function AddCategoryRow({
+  groupId,
+  groupName,
+  pool,
+  onMoveCategory,
+}: {
+  groupId: string;
+  groupName: string;
+  pool: CategoryPoolEntry[];
+  onMoveCategory: (categoryId: string, groupId: string) => void;
+}) {
+  const isMobile = useIsMobile();
+  const [open, setOpen] = useState(false);
+  const [pendingMove, setPendingMove] = useState<{
+    categoryId: string;
+    categoryName: string;
+    fromGroupName: string;
+  } | null>(null);
+
+  const handlePick = (entry: CategoryPoolEntry) => {
+    if (entry.fromGroupName) {
+      // Always confirm when moving from another group — the source group
+      // loses the category, which can shift its allocation surface area.
+      setPendingMove({
+        categoryId: entry.category.categoryId,
+        categoryName: entry.category.name,
+        fromGroupName: entry.fromGroupName,
+      });
+      setOpen(false);
+    } else {
+      onMoveCategory(entry.category.categoryId, groupId);
+      setOpen(false);
+    }
+  };
+
+  const trigger = (
+    <button
+      type="button"
+      className="text-muted-foreground hover:text-foreground hover:bg-muted/40 border-border/40 group flex w-full items-center gap-2 border-t border-dashed px-3 py-2 text-left transition-colors sm:px-4"
+    >
+      <span className="border-border/50 group-hover:border-foreground/30 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-dashed">
+        <Icons.Plus className="h-3 w-3" />
+      </span>
+      <span className="text-xs">Add category</span>
+    </button>
+  );
+
+  const emptyState = (
+    <div className="text-muted-foreground p-4 text-xs">
+      No other categories available. Create one in{" "}
+      <Link
+        to="/settings/spending/categories?tab=expense"
+        className="text-foreground underline-offset-2 hover:underline"
+      >
+        Manage categories
+      </Link>
+      .
+    </div>
+  );
+
+  const list = (
+    <div className={cn("overflow-y-auto", isMobile ? "max-h-[55vh]" : "max-h-72")}>
+      {pool.map((entry, idx) => {
+        const accent = entry.category.color ?? FOREST_THEME.deep;
+        return (
+          <button
+            key={entry.category.categoryId}
+            type="button"
+            onClick={() => handlePick(entry)}
+            className={cn(
+              "active:bg-muted/80 hover:bg-muted/50 flex w-full items-center gap-3 text-left transition-colors",
+              isMobile ? "px-4 py-3" : "px-3 py-2",
+              idx > 0 && "border-border/40 border-t",
+            )}
+          >
+            <span
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-md",
+                isMobile ? "h-8 w-8" : "h-6 w-6",
+              )}
+              style={{ backgroundColor: `${accent}1f`, color: accent }}
+              aria-hidden
+            >
+              <CategoryIcon
+                icon={entry.category.icon ?? null}
+                className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"}
+              />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className={cn("text-foreground truncate", isMobile ? "text-base" : "text-sm")}>
+                {entry.category.name}
+              </div>
+              {entry.fromGroupName && (
+                <div className="text-muted-foreground truncate text-xs">
+                  from {entry.fromGroupName}
+                </div>
+              )}
+            </div>
+            <Icons.ChevronRight className="text-muted-foreground/60 h-4 w-4 shrink-0" />
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const footer = (
+    <Link
+      to="/settings/spending/categories?tab=expense"
+      className={cn(
+        "text-foreground hover:bg-muted/40 active:bg-muted/60 border-border/60 flex w-full items-center gap-3 border-t transition-colors",
+        isMobile ? "px-4 py-4" : "px-3 py-2.5 text-sm",
+      )}
+    >
+      <span
+        className={cn(
+          "border-border bg-muted/40 flex shrink-0 items-center justify-center rounded-md border border-dashed",
+          isMobile ? "h-8 w-8" : "h-6 w-6",
+        )}
+        aria-hidden
+      >
+        <Icons.Plus className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
+      </span>
+      <span className={cn("font-medium", isMobile ? "text-base" : "text-sm")}>
+        Create new category
+      </span>
+    </Link>
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetTrigger asChild>{trigger}</SheetTrigger>
+          <SheetContent side="bottom" showCloseButton={false} className="pb-safe rounded-t-2xl p-0">
+            {/* iOS-style drag indicator — backdrop tap and swipe-down dismiss the sheet */}
+            <div className="flex justify-center pb-1 pt-2">
+              <div className="bg-muted-foreground/30 h-1 w-10 rounded-full" />
+            </div>
+            <SheetHeader className="px-4 pb-3 pt-1 text-left">
+              <SheetTitle className="text-base">Add category to {groupName}</SheetTitle>
+            </SheetHeader>
+            {pool.length === 0 ? (
+              emptyState
+            ) : (
+              <div className="border-border/60 border-t">{list}</div>
+            )}
+            {pool.length > 0 && footer}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          <PopoverContent className="w-72 p-0" align="start">
+            {pool.length === 0 ? (
+              emptyState
+            ) : (
+              <>
+                <div className="text-muted-foreground border-border/60 border-b px-3 py-2 text-[10px] font-medium uppercase tracking-widest">
+                  Move existing category
+                </div>
+                {list}
+                {footer}
+              </>
+            )}
+          </PopoverContent>
+        </Popover>
+      )}
+
+      <AlertDialog
+        open={pendingMove !== null}
+        onOpenChange={(o) => {
+          if (!o) setPendingMove(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Move {pendingMove?.categoryName} to {groupName}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingMove?.categoryName} is currently in {pendingMove?.fromGroupName}. Moving it
+              re-groups its budget total under {groupName}. The category's target amount and history
+              are preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingMove) {
+                  onMoveCategory(pendingMove.categoryId, groupId);
+                  setPendingMove(null);
+                }
+              }}
+            >
+              Move category
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -813,10 +1067,12 @@ function BudgetCategoryLine({
   return (
     <div className="group/row hover:bg-muted/15 flex items-center gap-2 px-3 py-1.5 text-xs transition-colors sm:gap-3 sm:px-4">
       <span
-        className="h-4 w-0.5 shrink-0 rounded-full"
-        style={{ backgroundColor: accent }}
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+        style={{ backgroundColor: `${accent}1f`, color: accent }}
         aria-hidden
-      />
+      >
+        <CategoryIcon icon={row.icon ?? null} className="h-3 w-3" />
+      </span>
       <span className="text-foreground min-w-0 flex-1 truncate">{row.name}</span>
 
       <div className="relative w-[80px] shrink-0">
