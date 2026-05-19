@@ -198,6 +198,7 @@ export default function SpendingCategoriesPage() {
           heading="Categories"
           text="Manage expense and income categories used to categorize cash transactions."
           backTo="/settings/spending"
+          actionsInline
         >
           <Button
             size="sm"
