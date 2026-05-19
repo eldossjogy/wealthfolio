@@ -1048,6 +1048,20 @@ mod tests {
             }
             Ok(None)
         }
+
+        fn get_snapshot_positions(
+            &self,
+            _snapshot_id: &str,
+        ) -> AppResult<HashMap<String, Position>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_snapshot_positions_batch(
+            &self,
+            _snapshot_ids: &[String],
+        ) -> AppResult<HashMap<String, HashMap<String, Position>>> {
+            Ok(HashMap::new())
+        }
     }
 
     fn create_test_account(id: &str, currency: &str, name: &str) -> Account {
@@ -1361,10 +1375,13 @@ mod tests {
                 Utc,
             ),
             quantity: dec!(3),
+            original_quantity: dec!(3),
             cost_basis: dec!(300),
             acquisition_price: dec!(100),
             acquisition_fees: dec!(0),
             fx_rate_to_position: None,
+            source_activity_id: None,
+            split_ratio: Decimal::ONE,
         };
 
         let lot2 = Lot {
@@ -1379,10 +1396,13 @@ mod tests {
                 Utc,
             ),
             quantity: dec!(2),
+            original_quantity: dec!(2),
             cost_basis: dec!(220),
             acquisition_price: dec!(110),
             acquisition_fees: dec!(0),
             fx_rate_to_position: None,
+            source_activity_id: None,
+            split_ratio: Decimal::ONE,
         };
 
         let mut snap1 = create_blank_snapshot(&acc1.id, &acc1.currency, target_date_str);
@@ -4736,6 +4756,20 @@ mod tests {
                     .cloned());
             }
             Ok(None)
+        }
+
+        fn get_snapshot_positions(
+            &self,
+            _snapshot_id: &str,
+        ) -> AppResult<HashMap<String, Position>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_snapshot_positions_batch(
+            &self,
+            _snapshot_ids: &[String],
+        ) -> AppResult<HashMap<String, HashMap<String, Position>>> {
+            Ok(HashMap::new())
         }
     }
 

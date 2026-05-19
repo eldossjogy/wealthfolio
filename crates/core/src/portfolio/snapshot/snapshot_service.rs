@@ -9,6 +9,7 @@ use crate::constants::{DECIMAL_PRECISION, PORTFOLIO_TOTAL_ACCOUNT_ID};
 use crate::errors::{CalculatorError, Error, Result};
 use crate::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
 use crate::fx::FxServiceTrait;
+use crate::lots::{check_lot_quantity_consistency, extract_lot_records, LotRepositoryTrait};
 use crate::portfolio::performance::{classify_flow_for_scope, FlowType, PerformanceScope};
 use crate::portfolio::snapshot::{
     AccountStateSnapshot, HoldingsCalculationWarning, Lot, Position, SnapshotSource,
@@ -108,6 +109,12 @@ pub trait SnapshotServiceTrait: Send + Sync {
     /// If only 1 non-calculated snapshot exists, creates a synthetic snapshot 3 months prior.
     /// This enables history charting, valuation engines, and provides an inception boundary.
     async fn ensure_holdings_history(&self, account_id: &str) -> Result<()>;
+
+    /// Populate the `lots` table from current HOLDINGS-mode snapshots. Called
+    /// once on first launch after the lots table is introduced, since
+    /// HOLDINGS-mode accounts skip `recalculate_holdings_snapshots` and the
+    /// activity-driven lot-write hook never fires for them.
+    async fn backfill_lots_for_holdings_accounts(&self) -> Result<usize>;
 }
 
 // --- Service Implementation ---
@@ -121,6 +128,11 @@ pub struct SnapshotService {
     snapshot_repository: Arc<dyn SnapshotRepositoryTrait>,
     holdings_calculator: HoldingsCalculator,
     event_sink: Arc<dyn DomainEventSink>,
+    /// Optional handle to the lots table. When attached, every successful
+    /// snapshot computation also dual-writes lot rows alongside the existing
+    /// positions JSON. Reads of the lots table happen elsewhere (or not at
+    /// all in this PR — this is groundwork, not a read-path switchover).
+    lot_repository: Option<Arc<dyn LotRepositoryTrait>>,
 }
 
 // Type aliases to simplify function signatures
@@ -173,7 +185,16 @@ impl SnapshotService {
             snapshot_repository,
             holdings_calculator,
             event_sink: Arc::new(NoOpDomainEventSink),
+            lot_repository: None,
         }
+    }
+
+    /// Attaches a lot repository so that every snapshot computation also
+    /// writes lot rows. When unset, the lots table is not written by the
+    /// snapshot pipeline.
+    pub fn with_lot_repository(mut self, lot_repository: Arc<dyn LotRepositoryTrait>) -> Self {
+        self.lot_repository = Some(lot_repository);
+        self
     }
 
     fn user_date(&self, instant: chrono::DateTime<Utc>) -> NaiveDate {
@@ -333,6 +354,26 @@ impl SnapshotService {
                         .await?;
                 }
             }
+
+            // Dual-write lots alongside the JSON snapshots. The latest keyframe
+            // for the account carries the current open-lot state; closures
+            // accumulated during this recalc are taken from the calculator
+            // and merged into the same sync call so partial-sell rows reach
+            // the database even when the lot was created and consumed within
+            // a single replay pass.
+            if let Some(lot_repo) = &self.lot_repository {
+                if let Some(latest) = frames.iter().max_by_key(|s| s.snapshot_date) {
+                    let open_lots = extract_lot_records(latest);
+                    let _ = check_lot_quantity_consistency(latest, &open_lots);
+                    let closures = self.holdings_calculator.take_disposed_lots(acc_id);
+                    if let Err(e) = lot_repo
+                        .sync_lots_for_account(acc_id, &open_lots, &closures)
+                        .await
+                    {
+                        error!("Failed to sync lot rows for account {}: {}", acc_id, e);
+                    }
+                }
+            }
         }
 
         // Clean up stale snapshots for accounts that were explicitly requested but
@@ -452,34 +493,35 @@ impl SnapshotService {
     }
 
     // --- Step 5: Preprocess activities ---
-    // Compiles activities (expands DRIP, STAKING_REWARD, etc.), adjusts for splits, and groups.
-    // If "TOTAL" account exists in `accounts_to_process`, adds ALL activities to its key.
+    // Compiles activities (expands DRIP, STAKING_REWARD, etc.) and groups them
+    // by account/date.
+    //
+    // Note: this used to also pre-adjust historical BUY/SELL quantities and
+    // prices for subsequent SPLIT activities (so the calculator would see
+    // post-split units everywhere). Splits are now tracked per-lot via the
+    // `split_ratio` field — see `positions_model::Position::apply_split`. The
+    // calculator iterates activities in chronological order and the SPLIT
+    // handler multiplies each lot's stored ratio, leaving as-acquired
+    // `quantity` / `acquisition_price` / `cost_basis` immutable. Pre-adjusting
+    // here on top of the per-lot ratio would double-apply splits.
     fn preprocess_data(
         &self,
         accounts_to_process: &AccountsMap, // Includes virtual TOTAL if needed
         all_activities: &[Activity],
-        min_activity_date: NaiveDate,
-        calculation_end_date: NaiveDate,
+        _min_activity_date: NaiveDate,
+        _calculation_end_date: NaiveDate,
     ) -> Result<(ActivitiesByAccount, HashSet<String>)> {
         // First, compile activities to expand composite types (DRIP, STAKING_REWARD, DIVIDEND_IN_KIND)
         // into their constituent legs (e.g., INTEREST + BUY for staking rewards)
         let compiler = DefaultActivityCompiler::new();
         let compiled_activities = compiler.compile_all(all_activities)?;
 
-        // Perform split adjustments on the compiled activity list
-        let split_factors = self.calculate_split_factors(
-            &compiled_activities,
-            min_activity_date,
-            calculation_end_date,
-        );
-        let adjusted_activities =
-            self.adjust_activities_for_splits(&compiled_activities, &split_factors);
-
-        // Group adjusted activities by original account ID and date
+        // Group activities by original account ID and date. Splits are now
+        // tracked per-lot via split_ratio, so no pre-adjustment is needed.
         let mut activities_by_account_date: ActivitiesByAccount = HashMap::new();
         let mut account_ids_with_activity: HashSet<String> = HashSet::new();
 
-        for activity in &adjusted_activities {
+        for activity in &compiled_activities {
             activities_by_account_date
                 .entry(activity.account_id.clone())
                 .or_default()
@@ -492,8 +534,7 @@ impl SnapshotService {
         // If processing TOTAL (i.e., TOTAL account is present), aggregate all activities under the TOTAL key
         if accounts_to_process.contains_key(PORTFOLIO_TOTAL_ACCOUNT_ID) {
             let mut total_activities_by_date: BTreeMap<NaiveDate, Vec<Activity>> = BTreeMap::new();
-            for activity in &adjusted_activities {
-                // Use adjusted activities here
+            for activity in &compiled_activities {
                 total_activities_by_date
                     .entry(self.user_date(activity.activity_date))
                     .or_default()
@@ -727,8 +768,9 @@ impl SnapshotService {
         let mut all_warnings: Vec<HoldingsCalculationWarning> = Vec::new();
         let date_range = get_days_between(calculation_min_date, calculation_end_date);
 
-        // Clear lot-level transfer cache from any previous run
+        // Clear lot-level caches from any previous run
         self.holdings_calculator.clear_transfer_lots_cache();
+        self.holdings_calculator.clear_disposed_lots();
 
         for current_date in date_range {
             // Process only accounts whose effective start date is today or earlier.
@@ -1161,126 +1203,12 @@ impl SnapshotService {
 
     // (Helper function group_activities_by_account_and_date moved inside preprocess_data)
 
-    fn calculate_split_factors(
-        &self,
-        activities: &[Activity],
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-    ) -> HashMap<String, Vec<(NaiveDate, Decimal)>> {
-        use crate::activities::ACTIVITY_TYPE_SPLIT;
-        let mut split_factors: HashMap<String, Vec<(NaiveDate, Decimal)>> = HashMap::new();
-        for activity in activities.iter().filter(|a| {
-            a.activity_type == ACTIVITY_TYPE_SPLIT
-                && self.user_date(a.activity_date) >= start_date
-                && self.user_date(a.activity_date) <= end_date
-        }) {
-            // Check if the activity amount exists and represents a valid positive split ratio
-            let asset_id = match &activity.asset_id {
-                Some(id) => id,
-                None => {
-                    warn!(
-                        "Missing asset_id for Split activity {} on {}. Ignoring split.",
-                        activity.id, activity.activity_date
-                    );
-                    continue;
-                }
-            };
-            if let Some(split_ratio) = activity.amount {
-                if split_ratio.is_sign_positive() && !split_ratio.is_zero() {
-                    // Collect valid splits (date, ratio) for the asset
-                    split_factors
-                        .entry(asset_id.clone())
-                        .or_default() // Get the Vec, create if needed
-                        .push((self.user_date(activity.activity_date), split_ratio));
-                // Push (date, ratio) tuple
-                } else {
-                    // Log warning for invalid ratio (e.g., zero or negative)
-                    warn!(
-                        "Invalid split ratio {} for Split activity {} on {}. Ignoring split.",
-                        split_ratio, activity.id, activity.activity_date
-                    );
-                }
-            } else {
-                // Log warning if amount is missing for a split activity
-                warn!(
-                    "Missing amount for Split activity {} for asset {} on {}. Ignoring split.",
-                    activity.id, asset_id, activity.activity_date
-                );
-            }
-        }
-        for splits in split_factors.values_mut() {
-            splits.sort_by_key(|k| k.0);
-            // Splits are stored per-account but are asset-level events; deduplicate by date
-            // so that assets held in multiple accounts don't over-apply the same split.
-            splits.dedup_by_key(|k| k.0);
-        }
-        split_factors
-    }
-
-    fn adjust_activities_for_splits(
-        &self,
-        activities: &[Activity],
-        split_factors: &HashMap<String, Vec<(NaiveDate, Decimal)>>,
-    ) -> Vec<Activity> {
-        use crate::activities::ACTIVITY_TYPE_SPLIT;
-
-        let mut adjusted_activities = Vec::with_capacity(activities.len());
-        for activity in activities {
-            let mut adj_activity = activity.clone();
-            let asset_id = match &activity.asset_id {
-                Some(id) => id,
-                None => {
-                    // No asset_id, just push the activity as-is
-                    adjusted_activities.push(adj_activity);
-                    continue;
-                }
-            };
-            if let Some(splits) = split_factors.get(asset_id) {
-                // Do not adjust the SPLIT activity itself, only others
-                if adj_activity.activity_type != ACTIVITY_TYPE_SPLIT {
-                    let mut cumulative_factor = Decimal::ONE;
-                    // Apply splits that happened *after* the activity date
-                    for (split_date, split_ratio) in splits.iter() {
-                        // Iterate chronologically
-                        if *split_date > self.user_date(activity.activity_date) {
-                            // Split happened after this activity, need to adjust past quantity/price
-                            cumulative_factor *= split_ratio;
-                        }
-                    }
-
-                    if cumulative_factor != Decimal::ONE {
-                        debug!(
-                            "Adjusting activity {} on {} for asset {} due to future splits. Factor: {}",
-                            adj_activity.id, self.user_date(activity.activity_date), asset_id, cumulative_factor
-                        );
-                        // Adjust quantity
-                        // Use correct field name 'quantity'
-                        adj_activity.quantity =
-                            Some((activity.qty() * cumulative_factor).round_dp(DECIMAL_PRECISION));
-
-                        // Adjust unit price (inverse factor)
-                        // Use correct field name 'unit_price'
-                        let unit_price = activity.price();
-                        if !unit_price.is_zero() {
-                            if !cumulative_factor.is_zero() {
-                                // Avoid division by zero
-                                // Use correct field name 'unit_price'
-                                adj_activity.unit_price = Some(
-                                    (unit_price / cumulative_factor).round_dp(DECIMAL_PRECISION),
-                                );
-                            } else {
-                                warn!("Cumulative split factor is zero for activity {}. Cannot adjust unit price.", adj_activity.id);
-                                // Use correct field name 'unit_price'
-                                adj_activity.unit_price = Some(Decimal::ZERO); // Or handle as error?
-                            }
-                        }
-                    }
-                }
-            }
-            adjusted_activities.push(adj_activity);
-        }
-        adjusted_activities
-    }
+    // `calculate_split_factors` and `adjust_activities_for_splits` were removed:
+    // splits are now tracked per-lot via the immutable `split_ratio` field
+    // (see `positions_model::Position::apply_split`). Pre-adjusting historical
+    // BUY/SELL quantities and prices for subsequent splits, on top of the
+    // per-lot ratio that the calculator now applies, would double-apply the
+    // split factor.
 
     // --- New method to calculate and store TOTAL portfolio snapshots ---
     async fn calculate_total_portfolio_snapshots_impl(
@@ -1763,6 +1691,32 @@ impl SnapshotServiceTrait for SnapshotService {
             account_id, snapshot.snapshot_date
         );
 
+        // Dual-write lots for HOLDINGS-mode snapshots — but only when the
+        // snapshot being saved is the latest for the account. Editing a
+        // historical snapshot must not overwrite current open lots with
+        // stale state.
+        if let Some(lot_repo) = &self.lot_repository {
+            let is_latest = self
+                .snapshot_repository
+                .get_snapshots_by_account(account_id, Some(snapshot.snapshot_date), None)?
+                .into_iter()
+                .all(|s| s.snapshot_date <= snapshot.snapshot_date);
+
+            if is_latest {
+                let open_lots = extract_lot_records(&snapshot);
+                let _ = check_lot_quantity_consistency(&snapshot, &open_lots);
+                if let Err(e) = lot_repo
+                    .replace_lots_for_account(account_id, &open_lots)
+                    .await
+                {
+                    error!(
+                        "Failed to write lots for HOLDINGS account {} from manual snapshot: {}",
+                        account_id, e
+                    );
+                }
+            }
+        }
+
         // Emit HoldingsChanged event after successful save
         let asset_ids: Vec<String> = snapshot
             .positions
@@ -1874,6 +1828,112 @@ impl SnapshotServiceTrait for SnapshotService {
         );
 
         Ok(())
+    }
+
+    /// Populate the `lots` table from current HOLDINGS-mode snapshots.
+    ///
+    /// HOLDINGS-mode accounts skip `recalculate_holdings_snapshots` (they have
+    /// no activities to replay), so the lot-write hook in the calculator path
+    /// never fires for them. On first startup after this PR lands, the lots
+    /// table is empty for HOLDINGS accounts — this routine derives one
+    /// synthetic lot per (account, asset) from the latest non-calculated
+    /// snapshot and writes it.
+    ///
+    /// Returns the number of lot rows written across all accounts.
+    async fn backfill_lots_for_holdings_accounts(&self) -> Result<usize> {
+        let lot_repo = match &self.lot_repository {
+            Some(r) => r.clone(),
+            None => return Ok(0),
+        };
+
+        let accounts = self.account_repository.list(Some(true), None, None)?;
+        let holdings_accounts: Vec<_> = accounts
+            .into_iter()
+            .filter(|a| a.tracking_mode == TrackingMode::Holdings)
+            .collect();
+
+        if holdings_accounts.is_empty() {
+            return Ok(0);
+        }
+
+        let mut total = 0usize;
+        let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+        for acc in &holdings_accounts {
+            let latest = match self
+                .snapshot_repository
+                .get_earliest_non_calculated_snapshot(&acc.id)?
+            {
+                Some(s) => {
+                    // get_earliest gives us the earliest. We actually want the
+                    // latest non-calculated to reflect current state. Fetch
+                    // all non-calculated and pick the max.
+                    let all = self
+                        .snapshot_repository
+                        .get_snapshots_by_account(&acc.id, None, None)?;
+                    all.into_iter()
+                        .filter(|s| s.source != SnapshotSource::Calculated)
+                        .max_by_key(|s| s.snapshot_date)
+                        .unwrap_or(s)
+                }
+                None => continue,
+            };
+
+            let positions = self
+                .snapshot_repository
+                .get_snapshot_positions(&latest.id)?;
+
+            let open_date = latest.snapshot_date.format("%Y-%m-%d").to_string();
+            let lot_records: Vec<crate::lots::LotRecord> = positions
+                .values()
+                .filter(|p| p.quantity > rust_decimal::Decimal::ZERO)
+                .map(|p| crate::lots::LotRecord {
+                    id: format!("HOLDINGS-{}-{}", acc.id, p.asset_id),
+                    account_id: acc.id.clone(),
+                    asset_id: p.asset_id.clone(),
+                    open_date: open_date.clone(),
+                    open_activity_id: None,
+                    original_quantity: p.quantity.to_string(),
+                    remaining_quantity: p.quantity.to_string(),
+                    cost_per_unit: p.average_cost.to_string(),
+                    original_cost_basis: p.total_cost_basis.to_string(),
+                    remaining_cost_basis: p.total_cost_basis.to_string(),
+                    fee_allocated: "0".to_string(),
+                    split_ratio: "1".to_string(),
+                    is_closed: false,
+                    close_date: None,
+                    close_activity_id: None,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                })
+                .collect();
+
+            let count = lot_records.len();
+            if let Err(e) = lot_repo
+                .replace_lots_for_account(&acc.id, &lot_records)
+                .await
+            {
+                warn!(
+                    "Failed to backfill lots for HOLDINGS account {}: {}",
+                    acc.id, e
+                );
+                continue;
+            }
+            if count > 0 {
+                info!(
+                    "Backfilled {} lot(s) for HOLDINGS account {}",
+                    count, acc.id
+                );
+            }
+            total += count;
+        }
+
+        info!(
+            "HOLDINGS lot backfill complete: {} lot(s) across {} account(s)",
+            total,
+            holdings_accounts.len()
+        );
+        Ok(total)
     }
 }
 

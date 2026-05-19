@@ -48,6 +48,46 @@ pub fn start_broker_sync_scheduler(_state: Arc<AppState>) {
     info!("Broker sync scheduler disabled: connect-sync feature is not compiled");
 }
 
+/// Populates the lots table on first launch after it was introduced.
+///
+/// If the lots table is empty but the user has existing snapshots, a full
+/// holdings recalculation is triggered so every TRANSACTIONS-mode account
+/// gets its lot rows written. HOLDINGS-mode accounts (which skip the
+/// activity-replay path) are backfilled from their latest non-calculated
+/// snapshot. Mirrors the Tauri `backfill_lots_if_needed`.
+pub async fn backfill_lots_if_needed(state: &Arc<AppState>) {
+    use wealthfolio_core::portfolio::snapshot::SnapshotRecalcMode;
+
+    let count = match state.lots_repository.count_lots() {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!("Lot backfill skipped: could not count lots ({})", e);
+            return;
+        }
+    };
+
+    if count > 0 {
+        return;
+    }
+
+    tracing::info!("Lots table is empty — running full holdings recalculation to populate it");
+    if let Err(e) = state
+        .snapshot_service
+        .recalculate_holdings_snapshots(None, SnapshotRecalcMode::Full)
+        .await
+    {
+        tracing::warn!("Lot backfill recalculation failed: {}", e);
+    }
+
+    if let Err(e) = state
+        .snapshot_service
+        .backfill_lots_for_holdings_accounts()
+        .await
+    {
+        tracing::warn!("HOLDINGS lot backfill failed: {}", e);
+    }
+}
+
 /// Runs a single scheduled sync operation.
 #[cfg(feature = "connect-sync")]
 async fn run_scheduled_sync(state: &Arc<AppState>) {
