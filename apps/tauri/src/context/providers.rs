@@ -281,11 +281,28 @@ pub async fn initialize_context(
         Arc::new(wealthfolio_spending::analytics::AnalyticsService::new(
             activity_repository.clone(),
             account_repository.clone(),
-            analytics_assignment_repo,
+            analytics_assignment_repo.clone(),
             spending_settings_service.clone(),
             taxonomy_service.clone(),
             events_service.clone(),
         ));
+
+    // Spending: reconciled period insight (powers the Spending Insight dashboard).
+    let spending_insight_repo: Arc<dyn wealthfolio_spending::budget::BudgetRepositoryTrait> =
+        Arc::new(
+            wealthfolio_storage_sqlite::spending::budget::BudgetRepository::new(
+                pool.clone(),
+                writer.clone(),
+            ),
+        );
+    let spending_insight_service = Arc::new(wealthfolio_spending::insight::InsightService::new(
+        spending_insight_repo,
+        activity_repository.clone(),
+        account_repository.clone(),
+        analytics_assignment_repo,
+        spending_settings_service.clone(),
+        taxonomy_service.clone(),
+    ));
 
     // Import run repository for tracking CSV imports
     let import_run_repository: Arc<dyn ImportRunRepositoryTrait> =
@@ -511,6 +528,7 @@ pub async fn initialize_context(
             events_service,
             budget_service,
             spending_analytics_service,
+            spending_insight_service,
         },
         event_receiver,
         sync_outbox_wake_receiver,

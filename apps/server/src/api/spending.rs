@@ -21,6 +21,7 @@ use wealthfolio_spending::categorization_rules::{
     CategorizationRule, NewCategorizationRule, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
+use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
 async fn get_spending_settings(
@@ -436,6 +437,19 @@ async fn get_spending_report(
     ))
 }
 
+async fn get_spending_insight(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SpendingInsightRequest>,
+) -> ApiResult<Json<SpendingInsight>> {
+    let currency = state.base_currency.read().unwrap().clone();
+    Ok(Json(
+        state
+            .spending_insight_service
+            .compute(payload, &currency)
+            .await?,
+    ))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CopyBudgetTargetsBody {
@@ -545,4 +559,5 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/v1/spending/budget/copy", post(copy_budget_targets))
         .route("/v1/spending/report", post(get_spending_report))
+        .route("/v1/spending/insight", post(get_spending_insight))
 }

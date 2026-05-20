@@ -23,6 +23,7 @@ use wealthfolio_spending::categorization_rules::{
 use wealthfolio_spending::events::{
     Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
 };
+use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
 #[tauri::command]
@@ -527,6 +528,19 @@ pub async fn get_spending_report(
         .monthly_report(request)
         .await
         .map_err(|e| format!("Failed to compute spending report: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_spending_insight(
+    request: SpendingInsightRequest,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<SpendingInsight, String> {
+    let currency = state.get_base_currency();
+    state
+        .spending_insight_service()
+        .compute(request, &currency)
+        .await
+        .map_err(|e| format!("Failed to compute spending insight: {}", e))
 }
 
 #[tauri::command]

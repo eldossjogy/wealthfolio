@@ -112,6 +112,7 @@ pub struct AppState {
     pub events_service: Arc<wealthfolio_spending::events::EventsService>,
     pub budget_service: Arc<wealthfolio_spending::budget::BudgetService>,
     pub spending_analytics_service: Arc<wealthfolio_spending::analytics::AnalyticsService>,
+    pub spending_insight_service: Arc<wealthfolio_spending::insight::InsightService>,
 }
 
 pub fn init_tracing() {
@@ -476,11 +477,28 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         Arc::new(wealthfolio_spending::analytics::AnalyticsService::new(
             activity_repository.clone(),
             account_repo.clone(),
-            analytics_assignment_repo,
+            analytics_assignment_repo.clone(),
             spending_settings_service.clone(),
             taxonomy_service.clone(),
             events_service.clone(),
         ));
+
+    // Spending: reconciled period insight (powers the Spending Insight dashboard).
+    let spending_insight_repo: Arc<dyn wealthfolio_spending::budget::BudgetRepositoryTrait> =
+        Arc::new(
+            wealthfolio_storage_sqlite::spending::budget::BudgetRepository::new(
+                pool.clone(),
+                writer.clone(),
+            ),
+        );
+    let spending_insight_service = Arc::new(wealthfolio_spending::insight::InsightService::new(
+        spending_insight_repo,
+        activity_repository.clone(),
+        account_repo.clone(),
+        analytics_assignment_repo,
+        spending_settings_service.clone(),
+        taxonomy_service.clone(),
+    ));
 
     // Alternative asset repository for alternative assets operations
     let alternative_asset_repository: Arc<dyn AlternativeAssetRepositoryTrait + Send + Sync> =
@@ -660,6 +678,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         events_service,
         budget_service,
         spending_analytics_service,
+        spending_insight_service,
     });
 
     #[cfg(feature = "device-sync")]

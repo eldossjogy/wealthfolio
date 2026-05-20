@@ -14,6 +14,7 @@ use wealthfolio_spending::budget::BudgetService;
 use wealthfolio_spending::cash_activities::CashActivityService;
 use wealthfolio_spending::categorization_rules::CategorizationRulesService;
 use wealthfolio_spending::events::EventsService;
+use wealthfolio_spending::insight::InsightService;
 use wealthfolio_spending::settings::SpendingSettingsService;
 use wealthfolio_storage_sqlite::{
     portfolio::snapshot::SnapshotRepository, sync::AppSyncRepository,
@@ -70,6 +71,7 @@ pub struct ServiceContext {
     pub events_service: Arc<EventsService>,
     pub budget_service: Arc<BudgetService>,
     pub spending_analytics_service: Arc<AnalyticsService>,
+    pub spending_insight_service: Arc<InsightService>,
 }
 
 impl ServiceContext {
@@ -119,6 +121,10 @@ impl ServiceContext {
 
     pub fn spending_analytics_service(&self) -> Arc<AnalyticsService> {
         Arc::clone(&self.spending_analytics_service)
+    }
+
+    pub fn spending_insight_service(&self) -> Arc<InsightService> {
+        Arc::clone(&self.spending_insight_service)
     }
 
     pub fn account_service(&self) -> Arc<dyn accounts::AccountServiceTrait> {
