@@ -266,6 +266,7 @@ pub async fn initialize_context(
         activity_assignments_repo.clone(),
         spending_settings_service.clone(),
         taxonomy_service.clone(),
+        fx_service.clone(),
     ));
 
     // Spending: analytics — needs activity repo + assignment repo (re-built since the
@@ -286,6 +287,7 @@ pub async fn initialize_context(
             spending_settings_service.clone(),
             taxonomy_service.clone(),
             events_service.clone(),
+            fx_service.clone(),
         ));
 
     // Spending: reconciled period insight (powers the Spending Insight dashboard).

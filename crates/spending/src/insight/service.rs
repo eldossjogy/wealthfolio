@@ -331,6 +331,7 @@ impl InsightService {
             self.fx_service.as_ref(),
             currency,
             fx_as_of,
+            timezone,
         );
         let status = compute_health_status(
             total_spent,
@@ -870,6 +871,7 @@ fn compute_pace(
     fx: &dyn FxServiceTrait,
     target_currency: &str,
     fx_as_of: NaiveDate,
+    timezone: &str,
 ) -> PaceState {
     let start_d = start.date_naive();
     let end_d = end.date_naive();
@@ -900,7 +902,16 @@ fn compute_pace(
             let Some(account_type) = account_types.get(&a.account_id) else {
                 continue;
             };
-            let d = a.activity_date.naive_utc().date();
+            // Filter by user-local day so the trailing-7 window matches the
+            // days the user perceives, consistent with compute_by_day's
+            // bucketing convention. Both endpoints (`trail_start`,
+            // `elapsed_d`) are derived from `now.date_naive()` upstream — for
+            // TZ-consistency they should be in user-local too, which is the
+            // natural read of "today" / "7 days ago".
+            let d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+                a.activity_date,
+                timezone,
+            );
             if d < trail_start || d > elapsed_d {
                 continue;
             }
@@ -1378,6 +1389,7 @@ mod tests {
             &fx(),
             "USD",
             NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
+            "",
         );
         assert_eq!(pace.days_remaining, 0);
         assert_eq!(pace.projected_spend, 1000.0);
@@ -1415,6 +1427,7 @@ mod tests {
             &fx(),
             "USD",
             NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
+            "",
         );
         assert_eq!(pace.days_elapsed, 19);
         assert_eq!(pace.days_remaining, 12);

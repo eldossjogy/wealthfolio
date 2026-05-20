@@ -113,6 +113,7 @@ pub struct BudgetService {
     assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
     spending_settings: Arc<SpendingSettingsService>,
     taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+    fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
 }
 
 impl BudgetService {
@@ -123,6 +124,7 @@ impl BudgetService {
         assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
         spending_settings: Arc<SpendingSettingsService>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+        fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
     ) -> Self {
         Self {
             repo,
@@ -131,10 +133,16 @@ impl BudgetService {
             assignment_repo,
             spending_settings,
             taxonomy_service,
+            fx_service,
         }
     }
 
-    pub async fn get(&self, period_key: Option<String>, currency: &str) -> Result<BudgetSnapshot> {
+    pub async fn get(
+        &self,
+        period_key: Option<String>,
+        currency: &str,
+        timezone: &str,
+    ) -> Result<BudgetSnapshot> {
         self.ensure_system_groups().await?;
         let period_key = normalize_period_key(period_key)?;
         let groups = self.repo.list_groups().await?;
@@ -162,6 +170,8 @@ impl BudgetService {
                 &period_key,
                 &spending_category_meta,
                 &income_meta,
+                currency,
+                timezone,
             )
             .await?
         } else {
@@ -397,6 +407,7 @@ impl BudgetService {
         input: NewBudgetGroup,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         self.repo
             .create_group(NewBudgetGroup {
@@ -409,7 +420,7 @@ impl BudgetService {
                 is_system: false,
             })
             .await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn update_group(
@@ -418,9 +429,10 @@ impl BudgetService {
         patch: UpdateBudgetGroup,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         self.repo.update_group(id, patch).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn delete_group(
@@ -429,6 +441,7 @@ impl BudgetService {
         reassign_to_group_id: &str,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         let groups = self.repo.list_groups().await?;
         groups
@@ -456,7 +469,7 @@ impl BudgetService {
             .collect::<Vec<_>>();
         self.repo.upsert_group_assignments(reassignments).await?;
         self.repo.delete_group(id).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn assign_category_to_group(
@@ -465,6 +478,7 @@ impl BudgetService {
         group_id: String,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         self.repo
             .upsert_group_assignment(NewBudgetGroupAssignment {
@@ -474,13 +488,14 @@ impl BudgetService {
                 category_id,
             })
             .await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn reset_groups(
         &self,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         let groups = self
             .repo
@@ -491,7 +506,7 @@ impl BudgetService {
         self.repo
             .upsert_group_assignments(default_assignment_inputs(&group_by_key))
             .await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn upsert_target(
@@ -499,10 +514,11 @@ impl BudgetService {
         target: NewBudgetTarget,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         validate_period_key(&target.period_key)?;
         self.repo.upsert_target(target).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn delete_target(
@@ -510,9 +526,10 @@ impl BudgetService {
         id: &str,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         self.repo.delete_target(id).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn upsert_rollover_setting(
@@ -520,6 +537,7 @@ impl BudgetService {
         setting: NewBudgetRolloverSetting,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         validate_month_key(&setting.start_month)?;
         match setting.target_type {
@@ -558,7 +576,7 @@ impl BudgetService {
             _ => {}
         }
         self.repo.upsert_rollover_setting(setting).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn delete_rollover_setting(
@@ -566,9 +584,10 @@ impl BudgetService {
         id: &str,
         period_key: Option<String>,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         self.repo.delete_rollover_setting(id).await?;
-        self.get(period_key, currency).await
+        self.get(period_key, currency, timezone).await
     }
 
     pub async fn copy_period_targets(
@@ -577,6 +596,7 @@ impl BudgetService {
         target_period_key: &str,
         overwrite: bool,
         currency: &str,
+        timezone: &str,
     ) -> Result<BudgetSnapshot> {
         validate_period_key(source_period_key)?;
         validate_month_key(target_period_key)?;
@@ -586,7 +606,7 @@ impl BudgetService {
         self.repo
             .copy_period_targets(source_period_key, target_period_key, overwrite)
             .await?;
-        self.get(Some(target_period_key.to_string()), currency)
+        self.get(Some(target_period_key.to_string()), currency, timezone)
             .await
     }
 
@@ -672,12 +692,21 @@ impl BudgetService {
         ))
     }
 
+    /// `currency` is the FX target — every counted activity is converted to
+    /// it at `end_period`'s month-end (snapshot-date convention, matches
+    /// insight + monthly_report so per-month actuals reconcile with the
+    /// broader dashboard numbers).
+    /// `timezone` (IANA name, may be empty) drives per-month bucketing so a
+    /// midnight-local activity on the first/last day of a month lands in the
+    /// month the user perceives, not the UTC month.
     async fn actuals_by_month(
         &self,
         start_period: &str,
         end_period: &str,
         spending_meta: &HashMap<String, Category>,
         income_meta: &HashMap<String, Category>,
+        currency: &str,
+        timezone: &str,
     ) -> Result<HashMap<String, MonthActuals>> {
         let settings = self.spending_settings.get().await?;
         if !settings.enabled || settings.account_ids.is_empty() {
@@ -718,6 +747,11 @@ impl BudgetService {
                 .push(assignment);
         }
 
+        // FX: one as_of date for the entire window (end of the latest month
+        // covered). Mirrors net_worth / insight snapshot convention so all
+        // months in this window get the same rate per pair.
+        let fx_as_of = end.date_naive();
+        let fx = self.fx_service.as_ref();
         let mut actuals: HashMap<String, MonthActuals> = HashMap::new();
         for activity in activities {
             let Some(account_type) = account_types.get(&activity.account_id) else {
@@ -725,12 +759,21 @@ impl BudgetService {
             };
             let classification = classify_activity(&activity, account_type);
             let amount = activity_abs_amount(&activity);
-            let spending = classification.spending_amount(amount);
-            let income = classification.income_amount(amount);
-            if spending == 0.0 && income == 0.0 {
+            let spending_native = classification.spending_amount(amount);
+            let income_native = classification.income_amount(amount);
+            if spending_native == 0.0 && income_native == 0.0 {
                 continue;
             }
-            let month = period_key_for_date(activity.activity_date);
+            // Convert to the budget's target currency. Mirrors
+            // insight::aggregate_spend so headline.spent and
+            // BudgetSnapshot.spending_actual agree by construction.
+            let spending =
+                fx_to_target(fx, spending_native, &activity.currency, currency, fx_as_of);
+            let income = fx_to_target(fx, income_native, &activity.currency, currency, fx_as_of);
+            // Bucket by user-local month so a midnight-local activity on
+            // month boundaries lands in the month the user perceives,
+            // mirroring insight::compute_by_month.
+            let month = period_key_for_date_in_tz(activity.activity_date, timezone);
             let month_actuals = actuals.entry(month).or_default();
             // Spending + income taxonomies are single-select per (activity_id,
             // taxonomy_id) — enforced by the DB unique index and the
@@ -1042,6 +1085,45 @@ fn validate_month_key(period_key: &str) -> Result<()> {
 
 fn period_key_for_date(date: DateTime<Utc>) -> String {
     format!("{:04}-{:02}", date.year(), date.month())
+}
+
+fn period_key_for_date_in_tz(date: DateTime<Utc>, timezone: &str) -> String {
+    let d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(date, timezone);
+    format!("{:04}-{:02}", d.year(), d.month())
+}
+
+/// Convert a native amount to the budget's target currency at `as_of`.
+/// Mirrors `insight::service::fx_to_target` and `analytics::service::fx_to_target`
+/// — same convention (one rate per report, snapshot-date style) so all three
+/// services agree. Same-currency short-circuit; on FxService error, passes
+/// through the native amount with a warn-log (matches investments' posture).
+fn fx_to_target(
+    fx: &dyn wealthfolio_core::fx::FxServiceTrait,
+    amount: f64,
+    from: &str,
+    to: &str,
+    as_of: NaiveDate,
+) -> f64 {
+    if amount == 0.0 || from == to || from.is_empty() {
+        return amount;
+    }
+    let dec = rust_decimal::Decimal::from_f64_retain(amount).unwrap_or(rust_decimal::Decimal::ZERO);
+    match fx.convert_currency_for_date(dec, from, to, as_of) {
+        Ok(converted) => {
+            use rust_decimal::prelude::ToPrimitive;
+            converted.to_f64().unwrap_or(amount)
+        }
+        Err(e) => {
+            log::warn!(
+                "spending budget FX conversion {}→{} on {} failed ({}); passing through native amount",
+                from,
+                to,
+                as_of,
+                e,
+            );
+            amount
+        }
+    }
 }
 
 fn month_start(period_key: &str) -> Result<DateTime<Utc>> {

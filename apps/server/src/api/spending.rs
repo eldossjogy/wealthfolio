@@ -371,8 +371,12 @@ async fn get_budget(
     Query(query): Query<BudgetQuery>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
-        state.budget_service.get(query.period_key, &base).await?,
+        state
+            .budget_service
+            .get(query.period_key, &base, &timezone)
+            .await?,
     ))
 }
 
@@ -382,10 +386,11 @@ async fn upsert_budget_target(
     Json(payload): Json<NewBudgetTarget>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .upsert_target(payload, query.period_key, &base)
+            .upsert_target(payload, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -396,10 +401,11 @@ async fn delete_budget_target(
     Path(id): Path<String>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .delete_target(&id, query.period_key, &base)
+            .delete_target(&id, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -410,10 +416,11 @@ async fn upsert_budget_rollover_setting(
     Json(payload): Json<NewBudgetRolloverSetting>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .upsert_rollover_setting(payload, query.period_key, &base)
+            .upsert_rollover_setting(payload, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -424,10 +431,11 @@ async fn delete_budget_rollover_setting(
     Path(id): Path<String>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .delete_rollover_setting(&id, query.period_key, &base)
+            .delete_rollover_setting(&id, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -438,10 +446,11 @@ async fn create_budget_group(
     Json(payload): Json<NewBudgetGroup>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .create_group(payload, query.period_key, &base)
+            .create_group(payload, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -453,10 +462,11 @@ async fn update_budget_group(
     Json(payload): Json<UpdateBudgetGroup>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .update_group(&id, payload, query.period_key, &base)
+            .update_group(&id, payload, query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -474,10 +484,17 @@ async fn delete_budget_group(
     Json(payload): Json<DeleteBudgetGroupBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .delete_group(&id, &payload.reassign_to_group_id, query.period_key, &base)
+            .delete_group(
+                &id,
+                &payload.reassign_to_group_id,
+                query.period_key,
+                &base,
+                &timezone,
+            )
             .await?,
     ))
 }
@@ -495,6 +512,7 @@ async fn assign_category_to_group(
     Json(payload): Json<AssignCategoryToGroupBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
@@ -503,6 +521,7 @@ async fn assign_category_to_group(
                 payload.group_id,
                 query.period_key,
                 &base,
+                &timezone,
             )
             .await?,
     ))
@@ -513,10 +532,11 @@ async fn reset_budget_groups(
     Query(query): Query<BudgetQuery>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
-            .reset_groups(query.period_key, &base)
+            .reset_groups(query.period_key, &base, &timezone)
             .await?,
     ))
 }
@@ -526,10 +546,11 @@ async fn get_spending_report(
     Json(payload): Json<ReportRequest>,
 ) -> ApiResult<Json<MonthlyReport>> {
     let timezone = state.timezone.read().unwrap().clone();
+    let base_currency = state.base_currency.read().unwrap().clone();
     Ok(Json(
         state
             .spending_analytics_service
-            .monthly_report(payload, &timezone)
+            .monthly_report(payload, &timezone, &base_currency)
             .await?,
     ))
 }
@@ -562,6 +583,7 @@ async fn copy_budget_targets(
     Json(payload): Json<CopyBudgetTargetsBody>,
 ) -> ApiResult<Json<BudgetSnapshot>> {
     let base = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .budget_service
@@ -570,6 +592,7 @@ async fn copy_budget_targets(
                 &payload.target_period_key,
                 payload.overwrite,
                 &base,
+                &timezone,
             )
             .await?,
     ))
@@ -587,10 +610,11 @@ async fn get_event_spending_summaries(
     if req.currency.is_none() {
         req.currency = Some(state.base_currency.read().unwrap().clone());
     }
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .spending_analytics_service
-            .event_spending_summaries(req)
+            .event_spending_summaries(req, &timezone)
             .await?,
     ))
 }
@@ -608,10 +632,17 @@ async fn get_spending_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SpendingSummaryBody>,
 ) -> ApiResult<Json<Vec<SpendingSummary>>> {
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .spending_analytics_service
-            .spending_summary(body.include_event_ids, body.include_all_events)
+            .spending_summary(
+                body.include_event_ids,
+                body.include_all_events,
+                &base_currency,
+                &timezone,
+            )
             .await?,
     ))
 }

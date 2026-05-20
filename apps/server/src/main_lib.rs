@@ -463,6 +463,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         activity_assignments_repo.clone(),
         spending_settings_service.clone(),
         taxonomy_service.clone(),
+        fx_service.clone(),
     ));
 
     // Spending: analytics
@@ -482,6 +483,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             spending_settings_service.clone(),
             taxonomy_service.clone(),
             events_service.clone(),
+            fx_service.clone(),
         ));
 
     // Spending: reconciled period insight (powers the Spending Insight dashboard).

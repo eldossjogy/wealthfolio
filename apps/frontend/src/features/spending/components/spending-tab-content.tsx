@@ -140,7 +140,11 @@ export default function SpendingTabContent() {
     return total / days;
   }, [historyReport?.current.outflow]);
 
-  const currency = activities[0]?.currency ?? baseCurrency;
+  // Always render in the user's base currency. The backend FX-converts every
+  // activity in `report` to base at period end, so labeling by the first
+  // activity's currency (the pre-FX behavior) would mislabel multi-currency
+  // accounts. Single-currency users see the same number either way.
+  const currency = baseCurrency;
   const accountTypeById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account.accountType])),
     [accounts],

@@ -113,13 +113,26 @@ export interface MonthBucket {
 export interface SpendingInsight {
   period: PeriodMeta;
   prior: PeriodMeta;
+  /**
+   * Report/target currency. All monetary fields below are denominated in
+   * this currency: per-activity native amounts are FX-converted at
+   * `period.end` (snapshot-date convention, matches net_worth + holdings).
+   */
   currency: string;
   /**
-   * Currencies (other than `currency`) observed on activities counted in this
-   * report. The backend does not FX-convert; if non-empty, the totals are a
-   * naive sum across currencies and the UI should warn the user.
+   * Currencies (other than `currency`) observed on contributing activities,
+   * sorted alphabetically. Empty when every counted activity was already
+   * in `currency`. UI can show a "totals FX-converted using rates from
+   * <period.end>" notice when this is non-empty.
    */
   foreignCurrencies?: string[];
+  /**
+   * Per-currency outflow totals in activities' *native* units, before FX.
+   * Lets the UI render "source: €1,200 EUR" hints for single-foreign-
+   * currency reports, or a per-currency breakdown for multi-currency
+   * ones. Excludes `currency`.
+   */
+  nativeOutflowByCurrency?: Record<string, number>;
   headline: Headline;
   groups: GroupInsight[];
   uncategorized: UncategorizedBucket;

@@ -439,9 +439,10 @@ pub async fn get_budget(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .get(period_key, &base_currency)
+        .get(period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to load budget: {}", e))
 }
@@ -453,9 +454,10 @@ pub async fn upsert_budget_target(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .upsert_target(target, period_key, &base_currency)
+        .upsert_target(target, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to save budget target: {}", e))
 }
@@ -467,9 +469,10 @@ pub async fn delete_budget_target(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .delete_target(&id, period_key, &base_currency)
+        .delete_target(&id, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to delete budget target: {}", e))
 }
@@ -481,9 +484,10 @@ pub async fn upsert_budget_rollover_setting(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .upsert_rollover_setting(setting, period_key, &base_currency)
+        .upsert_rollover_setting(setting, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to save budget rollover setting: {}", e))
 }
@@ -495,9 +499,10 @@ pub async fn delete_budget_rollover_setting(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .delete_rollover_setting(&id, period_key, &base_currency)
+        .delete_rollover_setting(&id, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to delete budget rollover setting: {}", e))
 }
@@ -509,9 +514,10 @@ pub async fn create_budget_group(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .create_group(group, period_key, &base_currency)
+        .create_group(group, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to create budget group: {}", e))
 }
@@ -524,9 +530,10 @@ pub async fn update_budget_group(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .update_group(&id, patch, period_key, &base_currency)
+        .update_group(&id, patch, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to update budget group: {}", e))
 }
@@ -539,9 +546,16 @@ pub async fn delete_budget_group(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .delete_group(&id, &reassign_to_group_id, period_key, &base_currency)
+        .delete_group(
+            &id,
+            &reassign_to_group_id,
+            period_key,
+            &base_currency,
+            &timezone,
+        )
         .await
         .map_err(|e| format!("Failed to delete budget group: {}", e))
 }
@@ -554,9 +568,10 @@ pub async fn assign_category_to_group(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .assign_category_to_group(category_id, group_id, period_key, &base_currency)
+        .assign_category_to_group(category_id, group_id, period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to assign category to group: {}", e))
 }
@@ -567,9 +582,10 @@ pub async fn reset_budget_groups(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
-        .reset_groups(period_key, &base_currency)
+        .reset_groups(period_key, &base_currency, &timezone)
         .await
         .map_err(|e| format!("Failed to reset budget groups: {}", e))
 }
@@ -582,6 +598,7 @@ pub async fn copy_budget_targets(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<BudgetSnapshot, String> {
     let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .budget_service()
         .copy_period_targets(
@@ -589,6 +606,7 @@ pub async fn copy_budget_targets(
             &target_period_key,
             overwrite,
             &base_currency,
+            &timezone,
         )
         .await
         .map_err(|e| format!("Failed to copy budget targets: {}", e))
@@ -600,9 +618,10 @@ pub async fn get_spending_report(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<MonthlyReport, String> {
     let timezone = state.get_timezone();
+    let base_currency = state.get_base_currency();
     state
         .spending_analytics_service()
-        .monthly_report(request, &timezone)
+        .monthly_report(request, &timezone, &base_currency)
         .await
         .map_err(|e| format!("Failed to compute spending report: {}", e))
 }
@@ -627,9 +646,16 @@ pub async fn get_spending_summary(
     include_all_events: Option<bool>,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<SpendingSummary>, String> {
+    let base_currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .spending_analytics_service()
-        .spending_summary(include_event_ids, include_all_events)
+        .spending_summary(
+            include_event_ids,
+            include_all_events,
+            &base_currency,
+            &timezone,
+        )
         .await
         .map_err(|e| format!("Failed to compute spending summary: {}", e))
 }
@@ -658,9 +684,10 @@ pub async fn get_event_spending_summaries(
     if req.currency.is_none() {
         req.currency = Some(state.get_base_currency());
     }
+    let timezone = state.get_timezone();
     state
         .spending_analytics_service()
-        .event_spending_summaries(req)
+        .event_spending_summaries(req, &timezone)
         .await
         .map_err(|e| format!("Failed to compute event spending summaries: {}", e))
 }

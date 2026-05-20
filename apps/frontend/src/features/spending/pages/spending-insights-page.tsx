@@ -309,11 +309,12 @@ export default function SpendingInsightsPage() {
         <StageNav stage={stage} onStageChange={setStageAndUrl} />
 
         {insight?.foreignCurrencies && insight.foreignCurrencies.length > 0 && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            <span className="font-semibold">Mixed currencies:</span> activities in{" "}
-            {insight.foreignCurrencies.join(", ")} were summed alongside {insight.currency} without
-            conversion. Totals are approximate.
-          </div>
+          <ForeignCurrencyBanner
+            currency={insight.currency}
+            foreign={insight.foreignCurrencies}
+            nativeTotals={insight.nativeOutflowByCurrency ?? {}}
+            asOf={insight.period.end}
+          />
         )}
 
         {stage === "where" && (
@@ -411,4 +412,56 @@ function shiftRangeBack(range: ReportsRange, period: ReportsPeriod, offset: numb
   const end = new Date(range.end);
   end.setMonth(end.getMonth() - months);
   return { ...range, start, end };
+}
+
+/** Small notice rendered when activities in non-target currencies contributed.
+ *  Single-foreign-currency reports get a "source: €1,200 EUR" hint (shows the
+ *  pre-FX native total). Multi-currency reports get a list. Always names the
+ *  FX as-of date so the user knows what rate snapshot was used. */
+function ForeignCurrencyBanner({
+  currency,
+  foreign,
+  nativeTotals,
+  asOf,
+}: {
+  currency: string;
+  foreign: string[];
+  nativeTotals: Record<string, number>;
+  asOf: string; // RFC3339
+}) {
+  const fmtNative = (ccy: string) => {
+    const v = nativeTotals[ccy];
+    if (v == null) return ccy;
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: ccy,
+        maximumFractionDigits: 0,
+      }).format(Math.abs(v));
+    } catch {
+      // Unknown ISO code → fall back to bare magnitude + code.
+      return `${Math.abs(v).toFixed(0)} ${ccy}`;
+    }
+  };
+  const asOfDate = new Date(asOf).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+  const detail =
+    foreign.length === 1 ? (
+      <>
+        source: <span className="font-medium">{fmtNative(foreign[0])}</span>
+      </>
+    ) : (
+      <>
+        sources: {foreign.map((c) => fmtNative(c)).join(" + ")}
+      </>
+    );
+  return (
+    <div className="text-muted-foreground border-border/60 bg-muted/30 rounded-md border px-3 py-2 text-[11px]">
+      <span className="text-foreground/90 font-medium">Multi-currency:</span> totals shown in{" "}
+      {currency}, FX-converted from {foreign.join(", ")} using rates from {asOfDate}. {detail}.
+    </div>
+  );
 }

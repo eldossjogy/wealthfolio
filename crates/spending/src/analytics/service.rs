@@ -31,6 +31,7 @@ pub struct AnalyticsService {
     settings: Arc<SpendingSettingsService>,
     taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
     events_service: Arc<EventsService>,
+    fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
 }
 
 impl AnalyticsService {
@@ -41,6 +42,7 @@ impl AnalyticsService {
         settings: Arc<SpendingSettingsService>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         events_service: Arc<EventsService>,
+        fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
     ) -> Self {
         Self {
             activity_repo,
@@ -49,6 +51,7 @@ impl AnalyticsService {
             settings,
             taxonomy_service,
             events_service,
+            fx_service,
         }
     }
 
@@ -79,10 +82,13 @@ impl AnalyticsService {
     /// `timezone` (IANA name, may be empty) drives per-day bucketing so a
     /// midnight-local activity lands on the date the user perceives. Empty/
     /// invalid values fall back to UTC.
+    /// `base_currency` is the FX target — every activity amount is converted
+    /// to it at `end_date` (snapshot-date convention, matches insight).
     pub async fn monthly_report(
         &self,
         req: ReportRequest,
         timezone: &str,
+        base_currency: &str,
     ) -> Result<MonthlyReport> {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
@@ -154,21 +160,54 @@ impl AnalyticsService {
             .filter(|a| in_window(a, prior_start, prior_end))
             .collect();
 
-        let current = summarize(&current_acts, &account_types);
-        let prior = summarize(&prior_acts, &account_types);
+        // FX as-of: end of the active window for current, end of the prior
+        // window for prior. Matches insight's per-window snapshot convention.
+        let fx_as_of_current = end.date_naive();
+        let fx_as_of_prior = prior_end.date_naive();
+        let fx = self.fx_service.as_ref();
+        let current = summarize(
+            &current_acts,
+            &account_types,
+            fx,
+            base_currency,
+            fx_as_of_current,
+        );
+        let prior = summarize(
+            &prior_acts,
+            &account_types,
+            fx,
+            base_currency,
+            fx_as_of_prior,
+        );
 
-        // Per-day buckets (current period only)
+        // Per-day buckets (current period only). All amounts FX-converted to
+        // base_currency at fx_as_of_current so daily totals roll up to the
+        // headline outflow within rounding tolerance.
         let mut by_day_map: HashMap<NaiveDate, (f64, f64)> = HashMap::new();
         for a in &current_acts {
             let Some(classification) = classification_for(a, &account_types) else {
                 continue;
             };
             let amt = activity_abs_amount(a);
-            let income_amount = classification.income_amount(amt);
-            let spending_amount = classification.spending_amount(amt);
-            if income_amount == 0.0 && spending_amount == 0.0 {
+            let income_native = classification.income_amount(amt);
+            let spending_native = classification.spending_amount(amt);
+            if income_native == 0.0 && spending_native == 0.0 {
                 continue;
             }
+            let income_amount = fx_to_target(
+                fx,
+                income_native,
+                &a.currency,
+                base_currency,
+                fx_as_of_current,
+            );
+            let spending_amount = fx_to_target(
+                fx,
+                spending_native,
+                &a.currency,
+                base_currency,
+                fx_as_of_current,
+            );
             let d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
                 a.activity_date,
                 timezone,
@@ -203,11 +242,25 @@ impl AnalyticsService {
                 continue;
             };
             let amt = activity_abs_amount(a);
-            let income_amount = classification.income_amount(amt);
-            let spending_amount = classification.spending_amount(amt);
-            if income_amount == 0.0 && spending_amount == 0.0 {
+            let income_native = classification.income_amount(amt);
+            let spending_native = classification.spending_amount(amt);
+            if income_native == 0.0 && spending_native == 0.0 {
                 continue;
             }
+            let income_amount = fx_to_target(
+                fx,
+                income_native,
+                &a.currency,
+                base_currency,
+                fx_as_of_current,
+            );
+            let spending_amount = fx_to_target(
+                fx,
+                spending_native,
+                &a.currency,
+                base_currency,
+                fx_as_of_current,
+            );
             let day = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
                 a.activity_date,
                 timezone,
@@ -306,7 +359,13 @@ impl AnalyticsService {
     }
 }
 
-fn summarize(acts: &[&Activity], account_types: &HashMap<String, String>) -> PeriodSummary {
+fn summarize(
+    acts: &[&Activity],
+    account_types: &HashMap<String, String>,
+    fx: &dyn wealthfolio_core::fx::FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
+) -> PeriodSummary {
     let mut income = 0.0;
     let mut outflow = 0.0;
     let mut count = 0;
@@ -315,13 +374,15 @@ fn summarize(acts: &[&Activity], account_types: &HashMap<String, String>) -> Per
             continue;
         };
         let amt = activity_abs_amount(a);
-        let income_amount = classification.income_amount(amt);
-        let spending_amount = classification.spending_amount(amt);
-        if income_amount == 0.0 && spending_amount == 0.0 {
+        let income_native = classification.income_amount(amt);
+        let spending_native = classification.spending_amount(amt);
+        if income_native == 0.0 && spending_native == 0.0 {
             continue;
         }
-        income += income_amount;
-        outflow += spending_amount;
+        // FX-convert each activity to the report currency at `fx_as_of`,
+        // matching insight::aggregate_spend so the two services agree.
+        income += fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        outflow += fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
         count += 1;
     }
     // Display `outflow` as a non-negative magnitude (a refund-only period shows
@@ -346,6 +407,40 @@ fn classification_for(
         .map(|account_type| classify_activity(activity, account_type))
 }
 
+/// Convert a native amount to the report's target currency at `as_of`.
+/// Mirrors `insight::service::fx_to_target` — same convention (one rate per
+/// report, snapshot-date style) so analytics and insight surfaces agree.
+/// Same-currency short-circuit; on FxService error, passes through the
+/// native amount with a warn-log (matches investments' posture).
+fn fx_to_target(
+    fx: &dyn wealthfolio_core::fx::FxServiceTrait,
+    amount: f64,
+    from: &str,
+    to: &str,
+    as_of: NaiveDate,
+) -> f64 {
+    if amount == 0.0 || from == to || from.is_empty() {
+        return amount;
+    }
+    let dec = rust_decimal::Decimal::from_f64_retain(amount).unwrap_or(rust_decimal::Decimal::ZERO);
+    match fx.convert_currency_for_date(dec, from, to, as_of) {
+        Ok(converted) => {
+            use rust_decimal::prelude::ToPrimitive;
+            converted.to_f64().unwrap_or(amount)
+        }
+        Err(e) => {
+            log::warn!(
+                "spending analytics FX conversion {}→{} on {} failed ({}); passing through native amount",
+                from,
+                to,
+                as_of,
+                e,
+            );
+            amount
+        }
+    }
+}
+
 // ====================== SpendingSummary (PR-style multi-period rollup) ======================
 
 impl AnalyticsService {
@@ -354,10 +449,14 @@ impl AnalyticsService {
     ///
     /// `include_event_ids` — if Some(non-empty), only activities with `event_id` in this set are counted.
     /// `include_all_events` — if true, only activities that ARE tagged with any event are counted.
+    /// `base_currency` is the FX target (every amount is converted to it).
+    /// `timezone` drives by-month bucketing inside `build_summary`.
     pub async fn spending_summary(
         &self,
         include_event_ids: Option<Vec<String>>,
         include_all_events: Option<bool>,
+        base_currency: &str,
+        timezone: &str,
     ) -> Result<Vec<SpendingSummary>> {
         let s = self.settings.get().await?;
         let mut out = Vec::with_capacity(4);
@@ -424,29 +523,27 @@ impl AnalyticsService {
             .map(|v| v.iter().cloned().collect());
         let only_with_events = include_all_events.unwrap_or(false);
 
+        // Year boundaries are user-perceived calendar dates: a UTC+12 user
+        // just before midnight on New Year's Eve still considers themselves
+        // in the outgoing year. We derive `year_now` from the user's local
+        // date and compare each activity's user-local date against
+        // [year-01-01, year-12-31] ranges. Sub-day precision isn't needed
+        // (the bounds are whole calendar days), so we work in NaiveDate.
         let now = Utc::now();
-        let year_now = now.year();
-        let ytd_start = NaiveDate::from_ymd_opt(year_now, 1, 1)
-            .and_then(|d| d.and_hms_opt(0, 0, 0))
-            .unwrap();
-        let last_year_start = NaiveDate::from_ymd_opt(year_now - 1, 1, 1)
-            .and_then(|d| d.and_hms_opt(0, 0, 0))
-            .unwrap();
-        let last_year_end = NaiveDate::from_ymd_opt(year_now - 1, 12, 31)
-            .and_then(|d| d.and_hms_opt(23, 59, 59))
-            .unwrap();
-        let two_years_ago_start = NaiveDate::from_ymd_opt(year_now - 2, 1, 1)
-            .and_then(|d| d.and_hms_opt(0, 0, 0))
-            .unwrap();
-        let two_years_ago_end = NaiveDate::from_ymd_opt(year_now - 2, 12, 31)
-            .and_then(|d| d.and_hms_opt(23, 59, 59))
-            .unwrap();
+        let today_local =
+            wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(now, timezone);
+        let year_now = today_local.year();
+        let ytd_start = NaiveDate::from_ymd_opt(year_now, 1, 1).unwrap();
+        let last_year_start = NaiveDate::from_ymd_opt(year_now - 1, 1, 1).unwrap();
+        let last_year_end = NaiveDate::from_ymd_opt(year_now - 1, 12, 31).unwrap();
+        let two_years_ago_start = NaiveDate::from_ymd_opt(year_now - 2, 1, 1).unwrap();
+        let two_years_ago_end = NaiveDate::from_ymd_opt(year_now - 2, 12, 31).unwrap();
 
-        let currency = s
-            .account_ids
-            .first()
-            .and_then(|_| activities.first().map(|a| a.currency.clone()))
-            .unwrap_or_else(|| "USD".to_string());
+        // Report currency = caller's base. Per-activity native amounts are
+        // FX-converted to this inside build_summary. Previous behavior picked
+        // `activities.first().currency` which mislabeled multi-currency
+        // accounts and produced naive cross-currency sums.
+        let currency = base_currency.to_string();
 
         // Filter helper for an activity
         let activity_passes = |a: &Activity| -> bool {
@@ -473,18 +570,35 @@ impl AnalyticsService {
                     if classification.spending_amount(activity_abs_amount(a)) == 0.0 {
                         return false;
                     }
-                    let dt = a.activity_date.naive_utc();
+                    // Bucket by user-local date so an activity logged at 11pm
+                    // local on Dec 31 lands in the year the user perceives,
+                    // not the UTC year.
+                    let act_date =
+                        wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+                            a.activity_date,
+                            timezone,
+                        );
                     let in_period = match period {
                         "TOTAL" => true,
-                        "YTD" => dt >= ytd_start,
-                        "LAST_YEAR" => dt >= last_year_start && dt <= last_year_end,
-                        "TWO_YEARS_AGO" => dt >= two_years_ago_start && dt <= two_years_ago_end,
+                        "YTD" => act_date >= ytd_start,
+                        "LAST_YEAR" => act_date >= last_year_start && act_date <= last_year_end,
+                        "TWO_YEARS_AGO" => {
+                            act_date >= two_years_ago_start && act_date <= two_years_ago_end
+                        }
                         _ => false,
                     };
                     in_period && activity_passes(a)
                 })
                 .collect();
 
+            // FX as-of for each named period: end of that period for closed
+            // years (LAST_YEAR / TWO_YEARS_AGO), today (user-local) for
+            // TOTAL/YTD.
+            let fx_as_of: NaiveDate = match period {
+                "LAST_YEAR" => last_year_end,
+                "TWO_YEARS_AGO" => two_years_ago_end,
+                _ => today_local,
+            };
             out.push(build_summary(
                 period,
                 &in_window,
@@ -492,6 +606,9 @@ impl AnalyticsService {
                 &cat_meta,
                 &account_types,
                 &currency,
+                self.fx_service.as_ref(),
+                fx_as_of,
+                timezone,
             ));
         }
 
@@ -510,11 +627,79 @@ fn activity_date_in_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use chrono::TimeZone;
     use rust_decimal::Decimal;
     use serde_json::Value;
     use wealthfolio_core::accounts::account_types;
     use wealthfolio_core::activities::ActivityStatus;
+    use wealthfolio_core::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
+
+    /// Identity FX stub for tests — returns the input amount unchanged. Lets
+    /// build_summary / summarize be exercised without a real FxService + DB.
+    /// Same pattern as the insight service's PassthroughFx.
+    pub(super) struct PassthroughFx;
+
+    type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
+
+    #[async_trait]
+    impl FxServiceTrait for PassthroughFx {
+        fn initialize(&self) -> CoreResult<()> {
+            Ok(())
+        }
+        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn get_exchange_rate_for_date(
+            &self,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn convert_currency(&self, amount: Decimal, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn update_exchange_rate(
+            &self,
+            _: &str,
+            _: &str,
+            _: Decimal,
+        ) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
+            Ok(())
+        }
+    }
 
     fn spending_activity(
         id: &str,
@@ -592,6 +777,9 @@ mod tests {
             &cat_meta,
             &account_types,
             "USD",
+            &PassthroughFx,
+            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
+            "",
         )
     }
 
@@ -674,6 +862,9 @@ fn build_summary(
     cat_meta: &HashMap<String, (String, Option<String>, Option<String>)>,
     account_types: &HashMap<String, String>,
     currency: &str,
+    fx: &dyn wealthfolio_core::fx::FxServiceTrait,
+    fx_as_of: NaiveDate,
+    timezone: &str,
 ) -> SpendingSummary {
     let mut by_month: HashMap<String, f64> = HashMap::new();
     let mut by_account: HashMap<String, f64> = HashMap::new();
@@ -685,11 +876,19 @@ fn build_summary(
         let Some(classification) = classification_for(a, account_types) else {
             continue;
         };
-        let amt = classification.spending_amount(activity_abs_amount(a));
-        if amt == 0.0 {
+        let amt_native = classification.spending_amount(activity_abs_amount(a));
+        if amt_native == 0.0 {
             continue;
         }
-        let dt = a.activity_date.naive_utc();
+        // FX-convert each activity to the report currency at `fx_as_of`
+        // (snapshot-date convention, matches insight + monthly_report).
+        let amt = fx_to_target(fx, amt_native, &a.currency, currency, fx_as_of);
+        // Bucket by user-local calendar month so the by_month roll-up matches
+        // what the user perceives at boundaries (was `naive_utc()`).
+        let dt = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+            a.activity_date,
+            timezone,
+        );
         let month_key = format!("{:04}-{:02}", dt.year(), dt.month());
         *by_month.entry(month_key.clone()).or_insert(0.0) += amt;
         *by_account.entry(a.account_id.clone()).or_insert(0.0) += amt;
@@ -849,9 +1048,14 @@ impl AnalyticsService {
     /// Compute per-event spending summaries. Each event in the events table is intersected
     /// with the optional date window (events whose date range overlaps with [start, end]).
     /// Tagged activities count according to account-aware spending classification.
+    /// `timezone` (IANA name, may be empty) drives the per-day daily bucketing.
+    /// FX conversion target is `req.currency` (defaults to "USD") — every
+    /// activity is converted at the report's end window (or "now" when no
+    /// end was supplied).
     pub async fn event_spending_summaries(
         &self,
         req: EventSummariesRequest,
+        timezone: &str,
     ) -> Result<Vec<EventSpendingSummary>> {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
@@ -946,6 +1150,12 @@ impl AnalyticsService {
         }
 
         let currency = req.currency.unwrap_or_else(|| "USD".to_string());
+        // FX as-of: end of the requested window if provided; otherwise today.
+        // Matches the snapshot-date convention used by insight + monthly_report.
+        let fx_as_of: NaiveDate = window_end
+            .map(|d| d.date_naive())
+            .unwrap_or_else(|| Utc::now().date_naive());
+        let fx = self.fx_service.as_ref();
 
         let mut out = Vec::with_capacity(events.len());
         for ev in events {
@@ -962,12 +1172,21 @@ impl AnalyticsService {
                 let Some(classification) = classification_for(a, &account_types) else {
                     continue;
                 };
-                let amt = classification.spending_amount(activity_abs_amount(a));
-                if amt == 0.0 {
+                let amt_native = classification.spending_amount(activity_abs_amount(a));
+                if amt_native == 0.0 {
                     continue;
                 }
+                // FX-convert to the report currency at fx_as_of, matching
+                // insight + monthly_report so event totals reconcile with
+                // the broader period numbers.
+                let amt = fx_to_target(fx, amt_native, &a.currency, &currency, fx_as_of);
                 total += amt;
-                let dt = a.activity_date.naive_utc();
+                // Bucket by user-local day so daily counts match what the
+                // user perceives at boundaries (was `naive_utc()`).
+                let dt = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+                    a.activity_date,
+                    timezone,
+                );
                 let day = format!("{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day());
                 *daily.entry(day).or_insert(0.0) += amt;
 
