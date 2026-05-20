@@ -500,6 +500,7 @@ diesel::table! {
 diesel::table! {
     event_types (id) {
         id -> Text,
+        key -> Nullable<Text>,
         name -> Text,
         color -> Nullable<Text>,
         created_at -> Text,

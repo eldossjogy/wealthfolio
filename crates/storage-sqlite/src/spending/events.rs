@@ -26,6 +26,7 @@ use wealthfolio_spending::events::{
 #[serde(rename_all = "camelCase")]
 pub struct EventTypeDB {
     pub id: String,
+    pub key: Option<String>,
     pub name: String,
     pub color: Option<String>,
     pub created_at: String,
@@ -36,6 +37,7 @@ pub struct EventTypeDB {
 #[diesel(table_name = crate::schema::event_types)]
 pub struct NewEventTypeDB {
     pub id: String,
+    pub key: Option<String>,
     pub name: String,
     pub color: Option<String>,
     pub created_at: String,
@@ -94,6 +96,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
         let now = chrono::Utc::now().to_rfc3339();
         let row = NewEventTypeDB {
             id: new_type.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+            key: None,
             name: new_type.name,
             color: new_type.color,
             created_at: now.clone(),

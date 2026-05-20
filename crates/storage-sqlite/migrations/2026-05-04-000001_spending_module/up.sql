@@ -54,11 +54,16 @@ CREATE UNIQUE INDEX ix_activity_taxonomy_assignment_unique ON activity_taxonomy_
 
 CREATE TABLE event_types (
     id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    key TEXT,
+    name TEXT NOT NULL,
     color TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE UNIQUE INDEX idx_event_types_key_unique
+  ON event_types(key)
+  WHERE key IS NOT NULL;
 
 CREATE TABLE events (
     id TEXT NOT NULL PRIMARY KEY,
@@ -395,14 +400,14 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
 -- 8. SEED: DEFAULT EVENT TYPES
 -- ============================================================================
 
-INSERT INTO event_types (id, name, color) VALUES
-  ('event-type-travel',           'Travel',           '#7B96C9'),
-  ('event-type-holiday',          'Holiday',          '#6B8E54'),
-  ('event-type-business',         'Business',         '#B89A4C'),
-  ('event-type-education',        'Education',        '#5A7A3E'),
-  ('event-type-medical',          'Medical',          '#B0552E'),
-  ('event-type-special-occasion', 'Special Occasion', '#8E7CB3'),
-  ('event-type-other',            'Other',            '#9C998E');
+INSERT INTO event_types (id, key, name, color) VALUES
+  ('event-type-travel',           'travel',           'Travel',           '#7B96C9'),
+  ('event-type-holiday',          'holiday',          'Holiday',          '#6B8E54'),
+  ('event-type-business',         'business',         'Business',         '#B89A4C'),
+  ('event-type-education',        'education',        'Education',        '#5A7A3E'),
+  ('event-type-medical',          'medical',          'Medical',          '#B0552E'),
+  ('event-type-special-occasion', 'special_occasion', 'Special Occasion', '#8E7CB3'),
+  ('event-type-other',            'other',            'Other',            '#9C998E');
 
 -- ============================================================================
 -- 9. SEED: ENABLE SPENDING MODULE BY DEFAULT
