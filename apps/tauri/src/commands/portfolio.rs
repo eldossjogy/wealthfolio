@@ -1279,10 +1279,11 @@ pub async fn delete_snapshot(
         );
     }
 
-    // Delete the snapshot
+    // Delete the snapshot via the service so lots are kept in sync with
+    // whichever snapshot now occupies "latest" for this account.
     state
-        .snapshot_repository()
-        .delete_snapshots_for_account_and_dates(&account_id, &[target_date])
+        .snapshot_service()
+        .delete_snapshot_for_account(&account_id, &[target_date])
         .await
         .map_err(|e| format!("Failed to delete snapshot: {}", e))?;
 
@@ -1291,7 +1292,7 @@ pub async fn delete_snapshot(
         snapshot.source, account_id, date
     );
 
-    // If no user-created snapshots remain, clean up orphan SYNTHETIC snapshots
+    // If no user-created snapshots remain, clean up orphan SYNTHETIC snapshots.
     let remaining = state
         .snapshot_repository()
         .get_snapshots_by_account(&account_id, None, None)
@@ -1309,8 +1310,8 @@ pub async fn delete_snapshot(
             .collect();
         if !synthetic_dates.is_empty() {
             state
-                .snapshot_repository()
-                .delete_snapshots_for_account_and_dates(&account_id, &synthetic_dates)
+                .snapshot_service()
+                .delete_snapshot_for_account(&account_id, &synthetic_dates)
                 .await
                 .map_err(|e| format!("Failed to clean up synthetic snapshots: {}", e))?;
             info!(

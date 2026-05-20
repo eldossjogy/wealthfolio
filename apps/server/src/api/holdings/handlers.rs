@@ -338,10 +338,11 @@ pub async fn delete_snapshot_handler(
         .into());
     }
 
-    // Delete the snapshot
+    // Delete the snapshot via the service so lots are kept in sync with
+    // whichever snapshot now occupies "latest" for this account.
     state
-        .snapshot_repository
-        .delete_snapshots_for_account_and_dates(&q.account_id, &[target_date])
+        .snapshot_service
+        .delete_snapshot_for_account(&q.account_id, &[target_date])
         .await?;
 
     tracing::info!(

@@ -77,6 +77,10 @@ pub struct AppState {
     pub base_currency: Arc<RwLock<String>>,
     pub timezone: Arc<RwLock<String>>,
     pub snapshot_service: Arc<dyn SnapshotServiceTrait + Send + Sync>,
+    /// Direct repository handle. No handler reads it currently — snapshot
+    /// access goes through `snapshot_service`. Retained for tests and any
+    /// future maintenance path that needs raw repository access.
+    #[allow(dead_code)]
     pub snapshot_repository: Arc<SnapshotRepository>,
     pub lots_repository: Arc<dyn wealthfolio_core::lots::LotRepositoryTrait + Send + Sync>,
     pub performance_service:
