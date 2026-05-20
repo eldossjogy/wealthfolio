@@ -403,3 +403,9 @@ INSERT INTO event_types (id, name, color) VALUES
   ('event-type-medical',          'Medical',          '#B0552E'),
   ('event-type-special-occasion', 'Special Occasion', '#8E7CB3'),
   ('event-type-other',            'Other',            '#9C998E');
+
+-- ============================================================================
+-- 9. SEED: ENABLE SPENDING MODULE BY DEFAULT
+-- ============================================================================
+
+INSERT INTO app_settings (setting_key, setting_value) VALUES ('spending.enabled', 'true');

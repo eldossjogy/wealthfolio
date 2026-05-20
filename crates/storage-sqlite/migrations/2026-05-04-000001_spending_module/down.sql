@@ -1,6 +1,9 @@
 -- Reverse the spending_module migration.
 -- Order: drop FK-dependent objects first.
 
+-- Remove spending module default-enabled setting
+DELETE FROM app_settings WHERE setting_key = 'spending.enabled';
+
 -- Drop budget tables
 DROP INDEX IF EXISTS idx_budget_rollover_settings_group;
 DROP INDEX IF EXISTS idx_budget_rollover_settings_category;
