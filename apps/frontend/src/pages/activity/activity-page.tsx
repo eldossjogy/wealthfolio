@@ -40,6 +40,7 @@ const ActivityPage = () => {
   const [showBulkHoldingsForm, setShowBulkHoldingsForm] = useState(false);
   const [showAlternativeAssetModal, setShowAlternativeAssetModal] = useState(false);
   const [showActionPalette, setShowActionPalette] = useState(false);
+  const [showSpendingActionPalette, setShowSpendingActionPalette] = useState(false);
 
   // Filter and search state
   const [selectedAccounts, setSelectedAccounts] = usePersistentState<string[]>(
@@ -226,6 +227,28 @@ const ActivityPage = () => {
     setSelectedActivity(undefined);
   }, []);
 
+  const investmentsFiltersActive =
+    selectedAccounts.length > 0 ||
+    selectedActivityTypes.length > 0 ||
+    selectedInstrumentTypes.length > 0 ||
+    statusFilter !== "all" ||
+    searchInput.trim().length > 0;
+
+  const clearInvestmentsFilters = useCallback(() => {
+    setSelectedAccounts([]);
+    setSelectedActivityTypes([]);
+    setSelectedInstrumentTypes([]);
+    setStatusFilter("all");
+    setSearchInput("");
+    setSearchQuery("");
+  }, [
+    setSelectedAccounts,
+    setSelectedActivityTypes,
+    setSelectedInstrumentTypes,
+    setStatusFilter,
+    setSearchInput,
+  ]);
+
   const actionPaletteGroups: ActionPaletteGroup[] = useMemo(
     () => [
       {
@@ -288,15 +311,42 @@ const ActivityPage = () => {
     </div>
   );
 
+  const spendingActionPaletteGroups: ActionPaletteGroup[] = useMemo(
+    () => [
+      {
+        items: [
+          {
+            icon: Icons.Activity,
+            label: "Add Transaction",
+            onClick: () => spendingTabRef.current?.openAddForm(),
+          },
+          {
+            icon: Icons.UploadSimple,
+            label: "Import from CSV",
+            onClick: () => navigate("/import"),
+          },
+        ],
+      },
+    ],
+    [navigate],
+  );
+
   const spendingActions = (
     <div className="flex flex-wrap items-center gap-2">
       <SyncButton />
-      {/* Desktop add */}
+      {/* Desktop action palette */}
       <div className="hidden sm:flex">
-        <Button size="sm" onClick={() => spendingTabRef.current?.openAddForm()}>
-          <Icons.Plus className="mr-2 h-4 w-4" />
-          Add Activities
-        </Button>
+        <ActionPalette
+          open={showSpendingActionPalette}
+          onOpenChange={setShowSpendingActionPalette}
+          groups={spendingActionPaletteGroups}
+          trigger={
+            <Button size="sm">
+              <Icons.Plus className="mr-2 h-4 w-4" />
+              Add Activities
+            </Button>
+          }
+        />
       </div>
 
       {/* Mobile add button */}
@@ -355,6 +405,9 @@ const ActivityPage = () => {
           handleEdit={handleEdit}
           handleDelete={handleDelete}
           onDuplicate={handleDuplicate}
+          filtersActive={investmentsFiltersActive}
+          onAdd={() => handleEdit(undefined)}
+          onClearFilters={clearInvestmentsFilters}
         />
       ) : isDatagridView ? (
         <ActivityDataGrid
@@ -380,6 +433,9 @@ const ActivityPage = () => {
           onSortingChange={setSorting}
           handleEdit={handleEdit}
           handleDelete={handleDelete}
+          filtersActive={investmentsFiltersActive}
+          onAdd={() => handleEdit(undefined)}
+          onClearFilters={clearInvestmentsFilters}
         />
       )}
 
