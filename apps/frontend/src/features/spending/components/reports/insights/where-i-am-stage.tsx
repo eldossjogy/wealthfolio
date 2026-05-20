@@ -648,8 +648,20 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
               totals.net >= 0 ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive",
             )}
           >
-            {totals.net >= 0 ? "Saved" : "Overspent"}{" "}
-            {formatPercentValue(Math.abs(totals.savingsRate) * 100, { digits: 0 })}
+            {(() => {
+              // Saved → savings rate (net/income), capped at 100% since you
+              // can't save more than your income.
+              // Overspent → deficit as % of income ("by N%"). For deficits
+              // greater than 100% of income the literal number ("Overspent
+              // 250%") is misleading — cap the display at "by 100%+".
+              const ratePct = Math.abs(totals.savingsRate) * 100;
+              if (totals.net >= 0) {
+                return `Saved ${formatPercentValue(Math.min(100, ratePct), { digits: 0 })}`;
+              }
+              return ratePct >= 100
+                ? "Overspent by 100%+"
+                : `Overspent by ${formatPercentValue(ratePct, { digits: 0 })}`;
+            })()}
           </span>
         )}
       </div>

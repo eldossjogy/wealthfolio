@@ -85,16 +85,23 @@ function buildEventTaggedSeries(event: EventSpendingSummary): EventTaggedSeries 
   ].sort();
   const chartStartDate = new Date(`${allKeys[0]}T12:00:00`);
   const chartEndDate = new Date(`${allKeys[allKeys.length - 1]}T12:00:00`);
+  // Day count via Math.round + 1 is DST-safe at the endpoint level: spring
+  // forward (23h elapsed) rounds to 1, fall back (25h) also rounds to 1.
   const days = Math.round((chartEndDate.getTime() - chartStartDate.getTime()) / 86_400_000) + 1;
 
   const series = new Array(days).fill(0);
   const inWindow = new Array(days).fill(false);
-  const evStartMs = new Date(`${evStartKey}T12:00:00`).getTime();
-  const evEndMs = new Date(`${evEndKey}T12:00:00`).getTime();
-
+  // Use ISO date keys for the in-window membership check rather than
+  // ms-arithmetic from chartStartDate. A fixed 86_400_000 step drifts by one
+  // hour across DST so the day after spring-forward would otherwise drop
+  // out of the window. Walking dates via setDate handles DST correctly.
+  const cursor = new Date(chartStartDate);
   for (let i = 0; i < days; i++) {
-    const ms = chartStartDate.getTime() + i * 86_400_000;
-    inWindow[i] = ms >= evStartMs && ms <= evEndMs;
+    const dayKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(
+      cursor.getDate(),
+    ).padStart(2, "0")}`;
+    inWindow[i] = dayKey >= evStartKey && dayKey <= evEndKey;
+    cursor.setDate(cursor.getDate() + 1);
   }
   for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
     const d = new Date(`${dateKey.slice(0, 10)}T12:00:00`);

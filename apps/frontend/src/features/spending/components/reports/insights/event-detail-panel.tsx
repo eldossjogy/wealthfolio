@@ -594,7 +594,7 @@ function RhythmCard({
               hangoverPct > 0 ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success",
             )}
           >
-            {hangoverPct > 0 ? `HANGOVER +${hangoverPct}%` : `UNDER ${hangoverPct}%`}
+            {hangoverPct > 0 ? `HANGOVER +${hangoverPct}%` : `UNDER ${Math.abs(hangoverPct)}%`}
           </span>
         )}
       </div>

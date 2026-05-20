@@ -121,11 +121,27 @@ impl InsightService {
         let spending_meta = category_meta(&spending_categories);
         let top_categories = top_level_categories(&spending_categories);
 
-        let other_group_id = groups
-            .iter()
-            .find(|g| g.key == OTHER_GROUP_KEY)
-            .map(|g| g.id.clone())
-            .ok_or_else(|| anyhow!("Missing Other budget group"))?;
+        // "Other" is the catch-all bucket for categories that aren't assigned
+        // to any explicit group. It's seeded by the migration + ensured by
+        // BudgetService::ensure_system_groups, so it normally exists. If the
+        // user has deleted/renamed it, degrade gracefully: fall back to the
+        // last group (typically the lowest-priority one) and log a warning
+        // rather than blanking the whole dashboard. If no groups exist at all
+        // we return an empty insight — the user hasn't set anything up yet.
+        let other_group_id = match groups.iter().find(|g| g.key == OTHER_GROUP_KEY) {
+            Some(g) => g.id.clone(),
+            None => match groups.last() {
+                Some(fallback) => {
+                    log::warn!(
+                        "spending insight: 'Other' budget group missing; falling back to '{}' as catch-all. \
+                         Run BudgetService::reset_groups() or restore the seed to fix.",
+                        fallback.name,
+                    );
+                    fallback.id.clone()
+                }
+                None => return Ok(empty_insight(period, prior, currency)),
+            },
+        };
         let assignment_by_category: HashMap<String, String> = group_assignments
             .iter()
             .filter(|a| a.taxonomy_id == SPENDING_TAXONOMY)

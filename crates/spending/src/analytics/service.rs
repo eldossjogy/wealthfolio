@@ -22,6 +22,11 @@ use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
+/// Sentinel category id used in spending_breakdown rows for activities that
+/// have no spending_categories assignment. Mirrors the insight pipeline's
+/// `UncategorizedBucket` so the two reports agree on totals. Keep in sync
+/// with `insight-projection.ts::UNCATEGORIZED_CATEGORY_ID`.
+const UNCATEGORIZED_CATEGORY_ID: &str = "__uncategorized__";
 const INCOME_TAXONOMY: &str = "income_sources";
 
 pub struct AnalyticsService {
@@ -267,8 +272,10 @@ impl AnalyticsService {
             );
             let day_str = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
             let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
+            let mut had_spending_assignment = false;
             for asg in assignments {
                 let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY && spending_amount != 0.0 {
+                    had_spending_assignment = true;
                     Some((&mut spending_acc, spending_amount))
                 } else if asg.taxonomy_id == INCOME_TAXONOMY && income_amount != 0.0 {
                     Some((&mut income_acc, income_amount))
@@ -292,6 +299,30 @@ impl AnalyticsService {
                     dc.0 += bucket_amount;
                     dc.1 += 1;
                 }
+            }
+            // Surface uncategorized outflow as an explicit synthetic row so
+            // Σ spending_breakdown.amount == current.outflow (matches the
+            // insight pipeline's UncategorizedBucket and lets the frontend
+            // legacy projection drop its synthetic-row workaround). Sentinel
+            // id matches insight-projection.ts:UNCATEGORIZED_CATEGORY_ID.
+            if !had_spending_assignment && spending_amount != 0.0 {
+                let entry = spending_acc
+                    .entry((
+                        SPENDING_TAXONOMY.to_string(),
+                        UNCATEGORIZED_CATEGORY_ID.to_string(),
+                    ))
+                    .or_insert((0.0, 0));
+                entry.0 += spending_amount;
+                entry.1 += 1;
+                let dc = by_day_cat_acc
+                    .entry((
+                        day_str.clone(),
+                        SPENDING_TAXONOMY.to_string(),
+                        UNCATEGORIZED_CATEGORY_ID.to_string(),
+                    ))
+                    .or_insert((0.0, 0));
+                dc.0 += spending_amount;
+                dc.1 += 1;
             }
         }
 
