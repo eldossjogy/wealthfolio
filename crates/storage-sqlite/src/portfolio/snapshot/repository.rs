@@ -632,6 +632,18 @@ impl SnapshotRepository {
                 .collect()
         };
 
+        // Capture positions for the snapshot_positions dual-write before the
+        // AccountStateSnapshotDB::from conversion. Mirrors save_snapshots:
+        // without this, the FK ON DELETE CASCADE wipes snapshot_positions
+        // rows tied to the deleted CALCULATED snapshots, and the replacement
+        // INSERT below never repopulates them — breaking the dual-write
+        // invariant for every Full recalc.
+        let positions_to_write: Vec<(String, HashMap<String, Position>)> = filtered_snapshots
+            .iter()
+            .filter(|s| !s.positions.is_empty())
+            .map(|s| (s.id.clone(), s.positions.clone()))
+            .collect();
+
         let db_models: Vec<AccountStateSnapshotDB> = filtered_snapshots
             .iter()
             .cloned()
@@ -657,6 +669,12 @@ impl SnapshotRepository {
                         .execute(conn)
                         .map_err(StorageError::from)?;
                 }
+
+                // Dual-write positions to the relational table.
+                for (snap_id, pos_map) in &positions_to_write {
+                    Self::write_snapshot_positions(conn, snap_id, pos_map)?;
+                }
+
                 Ok(())
             })
             .await

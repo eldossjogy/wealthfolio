@@ -1768,15 +1768,16 @@ impl SnapshotServiceTrait for SnapshotService {
             if is_latest {
                 let open_lots = extract_lot_records(&snapshot);
                 let _ = check_lot_quantity_consistency(&snapshot, &open_lots);
-                if let Err(e) = lot_repo
+                lot_repo
                     .replace_lots_for_account(account_id, &open_lots)
                     .await
-                {
-                    error!(
-                        "Failed to write lots for HOLDINGS account {} from manual snapshot: {}",
-                        account_id, e
-                    );
-                }
+                    .map_err(|e| {
+                        error!(
+                            "Failed to write lots for HOLDINGS account {} from manual snapshot: {}",
+                            account_id, e
+                        );
+                        e
+                    })?;
             }
         }
 
@@ -2004,12 +2005,16 @@ impl SnapshotServiceTrait for SnapshotService {
         match latest {
             // No snapshot left — clear the account's lot rows.
             None => {
-                if let Err(e) = lot_repo.replace_lots_for_account(account_id, &[]).await {
-                    warn!(
-                        "Failed to clear lots for account {} after snapshot delete: {}",
-                        account_id, e
-                    );
-                }
+                lot_repo
+                    .replace_lots_for_account(account_id, &[])
+                    .await
+                    .map_err(|e| {
+                        error!(
+                            "Failed to clear lots for account {} after snapshot delete: {}",
+                            account_id, e
+                        );
+                        e
+                    })?;
             }
             // Non-calculated (HOLDINGS-mode) — re-derive lots from the new
             // latest snapshot's positions.
@@ -2053,20 +2058,20 @@ impl SnapshotServiceTrait for SnapshotService {
                     .collect();
 
                 let count = lot_records.len();
-                if let Err(e) = lot_repo
+                lot_repo
                     .replace_lots_for_account(account_id, &lot_records)
                     .await
-                {
-                    warn!(
-                        "Failed to refresh lots for account {} after snapshot delete: {}",
-                        account_id, e
-                    );
-                } else {
-                    info!(
-                        "Refreshed {} lot(s) for account {} from new latest snapshot on {}",
-                        count, account_id, snapshot.snapshot_date
-                    );
-                }
+                    .map_err(|e| {
+                        error!(
+                            "Failed to refresh lots for account {} after snapshot delete: {}",
+                            account_id, e
+                        );
+                        e
+                    })?;
+                info!(
+                    "Refreshed {} lot(s) for account {} from new latest snapshot on {}",
+                    count, account_id, snapshot.snapshot_date
+                );
             }
             // CALCULATED — lots are managed by the activity-replay pipeline.
             // The next recalc will rebuild them correctly.

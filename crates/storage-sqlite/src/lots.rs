@@ -320,7 +320,7 @@ impl LotRepositoryTrait for LotsRepository {
                         // separate disposal record (when lot_disposals lands).
                         remaining_cost_basis: "0".to_string(),
                         fee_allocated: closure.fee_allocated.clone(),
-                        split_ratio: "1".to_string(),
+                        split_ratio: closure.split_ratio.clone(),
                         is_closed: 1,
                         close_date: Some(closure.close_date.clone()),
                         close_activity_id: closure.close_activity_id.clone(),

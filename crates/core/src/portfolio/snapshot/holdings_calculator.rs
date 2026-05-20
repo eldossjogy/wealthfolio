@@ -164,6 +164,11 @@ impl HoldingsCalculator {
                     original_cost_basis: (lot.acquisition_price * orig_qty + lot.acquisition_fees)
                         .to_string(),
                     fee_allocated: lot.acquisition_fees.to_string(),
+                    // Carry the cumulative split ratio as of closure. A lot
+                    // that lived through a 2:1 split before being fully
+                    // consumed must persist with split_ratio = 2; otherwise
+                    // downstream tax-lot reporting sees a wrong split history.
+                    split_ratio: lot.effective_split_ratio().to_string(),
                 });
         }
     }

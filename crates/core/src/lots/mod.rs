@@ -65,6 +65,11 @@ pub struct LotClosure {
     pub original_cost_basis: String,
     /// Transaction fees allocated to this lot.
     pub fee_allocated: String,
+    /// Cumulative product of post-acquisition SPLIT ratios at the time of
+    /// closure. A lot opened before a 2:1 split and fully consumed after the
+    /// split should persist with split_ratio = "2", not "1" — otherwise
+    /// downstream tax-lot consumers see a misleading split history.
+    pub split_ratio: String,
 }
 
 /// Persistence interface for lot rows.
