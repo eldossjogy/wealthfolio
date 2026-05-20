@@ -89,7 +89,20 @@ pub struct Lot {
     /// Represents the price per share/unit in the Position's currency at the time of purchase.
     pub acquisition_price: Decimal,
     /// Represents fees paid in the Position's currency associated with the acquisition.
+    ///
+    /// **Mutated** on partial sells: reduced proportionally to track remaining-fee
+    /// allocation. For the immutable original fee allocation, use
+    /// [`Lot::original_fees`] / [`Lot::original_acquisition_fees`].
     pub acquisition_fees: Decimal,
+    /// Immutable original fee allocated to this lot at acquisition. Never
+    /// modified by sells or splits. Mirrors the relationship between
+    /// `quantity` (mutated) and `original_quantity` (immutable).
+    ///
+    /// `#[serde(default)]` keeps backward compatibility with snapshots
+    /// serialized before this field existed. Callers should fall back to
+    /// `acquisition_fees` when this field is absent — see [`Lot::original_fees`].
+    #[serde(default)]
+    pub original_acquisition_fees: Decimal,
     /// FX rate used to convert from activity currency to position currency.
     /// Stored for audit trail when cross-currency purchases occur.
     /// None when activity currency matches position currency.
@@ -142,6 +155,18 @@ impl Lot {
     /// Effective share count held now (in current/post-split units).
     pub fn effective_quantity(&self) -> Decimal {
         self.quantity * self.effective_split_ratio()
+    }
+
+    /// Returns the immutable original fee allocated to this lot at acquisition.
+    /// Falls back to `acquisition_fees` for snapshots serialized before
+    /// `original_acquisition_fees` existed (in which case the lot has not been
+    /// partially consumed yet — `acquisition_fees` still equals the original).
+    pub fn original_fees(&self) -> Decimal {
+        if self.original_acquisition_fees.is_zero() && !self.acquisition_fees.is_zero() {
+            self.acquisition_fees
+        } else {
+            self.original_acquisition_fees
+        }
     }
 }
 
@@ -332,9 +357,10 @@ impl Position {
             acquisition_date: activity.activity_date,
             quantity,
             original_quantity: quantity,
-            cost_basis,                // Store unrounded in position currency
-            acquisition_price,         // Store unrounded in position currency
-            acquisition_fees,          // Store unrounded in position currency
+            cost_basis,        // Store unrounded in position currency
+            acquisition_price, // Store unrounded in position currency
+            acquisition_fees,  // Store unrounded; mutated on partial sells
+            original_acquisition_fees: acquisition_fees, // Immutable original
             fx_rate_to_position: None, // No currency conversion in this method
             // BUY lot: source activity is the activity itself.
             source_activity_id: Some(activity.id.clone()),
@@ -409,6 +435,7 @@ impl Position {
             cost_basis,
             acquisition_price: unit_price,
             acquisition_fees: fee,
+            original_acquisition_fees: fee,
             fx_rate_to_position: fx_rate_used,
             source_activity_id,
             split_ratio: Decimal::ONE,
@@ -475,6 +502,7 @@ impl Position {
                 cost_basis,
                 acquisition_price: price,
                 acquisition_fees: fee,
+                original_acquisition_fees: fee,
                 fx_rate_to_position: rate_used,
                 // The TRANSFER_IN activity owns these sub-lots — deleting it
                 // should cascade-remove them. `lot_id_prefix` is the
@@ -611,7 +639,10 @@ impl Position {
 
             // Record the removed portion as a lot (preserving original acquisition data)
             // For transfer-out flows, the receiving account inherits the same split ratio
-            // so its effective shares match what was sent.
+            // so its effective shares match what was sent. The removed chunk's
+            // "original" fee allocation is the proportional fee that travels
+            // with the removed quantity — that becomes its own immutable
+            // origin once it lands in the receiving account.
             removed_lots.push(Lot {
                 id: lot.id.clone(),
                 position_id: lot.position_id.clone(),
@@ -621,6 +652,7 @@ impl Position {
                 cost_basis: cost_basis_removed,
                 acquisition_price: lot.acquisition_price,
                 acquisition_fees: fees_removed,
+                original_acquisition_fees: fees_removed,
                 fx_rate_to_position: lot.fx_rate_to_position,
                 source_activity_id: lot.source_activity_id.clone(),
                 split_ratio: lot_split_ratio,

@@ -210,11 +210,13 @@ pub fn extract_lot_records(snapshot: &AccountStateSnapshot) -> Vec<LotRecord> {
                 lot.original_quantity
             };
             // Original cost basis (immutable) is reconstructed from at-acquisition
-            // values that the in-memory model preserves: acquisition_price stays
-            // at the as-acquired price, acquisition_fees stays at the original
-            // fee allocation. lot.cost_basis is mutated on partial sells (it's
-            // effectively the remaining_cost_basis).
-            let original_cost_basis = lot.acquisition_price * orig_qty + lot.acquisition_fees;
+            // values: `acquisition_price` is immutable; `original_fees()` returns
+            // the immutable `original_acquisition_fees` (falling back to
+            // `acquisition_fees` for pre-this-field snapshots that haven't been
+            // partially consumed yet). `lot.cost_basis` is mutated on partial
+            // sells and represents the remaining open cost basis.
+            let orig_fees = lot.original_fees();
+            let original_cost_basis = lot.acquisition_price * orig_qty + orig_fees;
             records.push(LotRecord {
                 id: lot.id.clone(),
                 account_id: snapshot.account_id.clone(),
@@ -226,7 +228,7 @@ pub fn extract_lot_records(snapshot: &AccountStateSnapshot) -> Vec<LotRecord> {
                 cost_per_unit: lot.acquisition_price.to_string(),
                 original_cost_basis: original_cost_basis.to_string(),
                 remaining_cost_basis: lot.cost_basis.to_string(),
-                fee_allocated: lot.acquisition_fees.to_string(),
+                fee_allocated: orig_fees.to_string(),
                 split_ratio: lot.effective_split_ratio().to_string(),
                 is_closed: false,
                 close_date: None,
@@ -562,6 +564,29 @@ pub async fn backfill_split_ratios(
 ///
 /// Lots whose `remaining_quantity` reaches zero after replay are filtered out
 /// of the result.
+///
+/// # Known limitation — transferred split-adjusted lots
+///
+/// The `split_ratio` rewind logic is binary: it resets to 1 when the receiving
+/// account has any SPLIT activity for the asset in the relevant range, and
+/// otherwise preserves the stored ratio. For a lot that was transferred with
+/// an inherited ratio (e.g. account A held through a 2:1 split, then
+/// transferred to account B which then sees another 3:1) this gives the wrong
+/// answer:
+///   - At an as-of date between the transfer and account B's split: the
+///     inherited ratio of 2 is reset to 1.
+///   - At an as-of date after account B's split: the result is 3 (from
+///     forward-replaying B's split) rather than 6 (inherited 2 × new 3).
+///
+/// This function is not called by any read path in the additive groundwork
+/// PR — it is staged for the Phase B read-path switchover. Before that
+/// switchover lands, replace the binary `reset_split` with a proper
+/// "snapshot inherited ratio at transfer date, then forward-replay subsequent
+/// in-account splits" model, or refactor to replay ALL splits across every
+/// account that ever touched the asset.
+///
+/// See the `replay_lots_to_date_transferred_split_adjusted_lot_known_bug`
+/// regression test (`#[ignore]`'d) for an executable demonstration.
 pub fn replay_lots_to_date(
     lots: Vec<LotRecord>,
     activities: &[Activity],
@@ -797,6 +822,7 @@ mod tests {
             cost_basis: qty * price + fee,
             acquisition_price: price,
             acquisition_fees: fee,
+            original_acquisition_fees: fee,
             fx_rate_to_position: None,
             source_activity_id: None,
             split_ratio: Decimal::ONE,
@@ -928,6 +954,51 @@ mod tests {
             .map(|r| r.remaining_quantity.parse::<Decimal>().unwrap())
             .sum();
         assert_eq!(total_qty, dec!(150));
+    }
+
+    /// Regression: a lot that has been partially consumed must still persist
+    /// the immutable `original_cost_basis` and `fee_allocated` it had at
+    /// acquisition. Before adding `original_acquisition_fees`,
+    /// `extract_lot_records` reconstructed those values from the mutated
+    /// `acquisition_fees` field, silently corrupting the new lot table on
+    /// every partial sell.
+    #[test]
+    fn extract_lot_records_preserves_original_fees_after_partial_sell() {
+        // Lot bought 100 shares @ $15 with a $10 fee. Partially consumed:
+        // remaining = 50, cost_basis halved, acquisition_fees halved on the
+        // in-memory side. The persisted record must still report the original
+        // fee of $10 and an original_cost_basis of 100*$15 + $10 = $1510.
+        let mut lot = make_lot(
+            "buy-1",
+            "POS-XYZ-acc1",
+            (2024, 1, 1),
+            dec!(100),
+            dec!(15),
+            dec!(10),
+        );
+        lot.quantity = dec!(50);
+        lot.cost_basis = dec!(750);
+        lot.acquisition_fees = dec!(5); // mutated by reduce_lots_fifo
+
+        let pos = make_position("acc1", "XYZ", "USD", vec![lot]);
+        let mut positions = HashMap::new();
+        positions.insert("XYZ".to_string(), pos);
+        let snap = make_snapshot("acc1", positions);
+
+        let records = extract_lot_records(&snap);
+        assert_eq!(records.len(), 1);
+        let r = &records[0];
+        assert_eq!(r.remaining_quantity.parse::<Decimal>().unwrap(), dec!(50));
+        assert_eq!(r.original_quantity.parse::<Decimal>().unwrap(), dec!(100));
+        assert_eq!(r.fee_allocated.parse::<Decimal>().unwrap(), dec!(10));
+        assert_eq!(
+            r.original_cost_basis.parse::<Decimal>().unwrap(),
+            dec!(1510)
+        );
+        assert_eq!(
+            r.remaining_cost_basis.parse::<Decimal>().unwrap(),
+            dec!(750)
+        );
     }
 
     /// AAPL Jun 2026 $200 call option — verifies options symbols are handled
@@ -1440,6 +1511,80 @@ mod tests {
         );
         assert_eq!(result[0].split_ratio, "2");
         // Effective check: 7.5 × 2 = 15 shares held post-sell.
+    }
+
+    /// Known limitation — see the `# Known limitation` block on
+    /// `replay_lots_to_date`. A lot transferred in with an inherited
+    /// `split_ratio` should retain that ratio at as-of dates before any new
+    /// in-account split, and compound multiplicatively with subsequent
+    /// in-account splits. The current binary `reset_split` logic instead
+    /// resets the inherited ratio to 1 whenever the receiving account has
+    /// any SPLIT in scope.
+    ///
+    /// This test is `#[ignore]`'d because the function isn't called by any
+    /// read path in the additive groundwork PR. Phase B's read-path
+    /// switchover must address this before relying on `replay_lots_to_date`
+    /// for valuation history.
+    ///
+    /// Run with: `cargo test -p wealthfolio-core replay_lots_to_date_transferred_split_adjusted_lot_known_bug -- --ignored`
+    #[test]
+    #[ignore]
+    fn replay_lots_to_date_transferred_split_adjusted_lot_known_bug() {
+        // Setup mirrors what the storage would persist after:
+        //   - 2020-01-01: BUY 100 shares of AAPL in account A
+        //   - 2021-01-01: 2:1 SPLIT in account A → A's lot has split_ratio=2
+        //   - 2022-01-01: TRANSFER_OUT from A, TRANSFER_IN to B → B's lot
+        //                 inherits split_ratio=2, open_date carries forward
+        //   - 2023-01-01: 3:1 SPLIT in account B → B's lot has split_ratio=6
+        //
+        // The replay receives B's lot (final ratio=6) plus only B's
+        // activities (the 3:1 SPLIT — B has no BUY, no first SPLIT).
+        let mut lot = make_lot_record(
+            "transfer_in_1",
+            "acc_b",
+            "AAPL",
+            "2020-01-01",
+            "100",
+            "100",
+            "150",
+        );
+        lot.split_ratio = "6".to_string(); // inherited 2 × new 3
+        let lots = vec![lot];
+        let activities = vec![make_activity(
+            "split_b",
+            "acc_b",
+            "AAPL",
+            "SPLIT",
+            "2023-01-01",
+            dec!(3),
+        )];
+
+        // As-of 2022 (between transfer and B's split): should preserve the
+        // inherited ratio of 2. Current logic resets to 1 and produces 1.
+        let result_2022 = replay_lots_to_date(
+            lots.clone(),
+            &activities,
+            NaiveDate::from_ymd_opt(2022, 6, 1).unwrap(),
+        );
+        assert_eq!(result_2022.len(), 1);
+        assert_eq!(
+            result_2022[0].split_ratio, "2",
+            "transferred lot's inherited ratio (2) should survive an as-of date \
+             between transfer and the next in-account split"
+        );
+
+        // As-of 2024 (after B's split): should be 2 × 3 = 6. Current logic
+        // produces 1 × 3 = 3.
+        let result_2024 = replay_lots_to_date(
+            lots,
+            &activities,
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+        );
+        assert_eq!(result_2024.len(), 1);
+        assert_eq!(
+            result_2024[0].split_ratio, "6",
+            "inherited ratio (2) must compound with B's in-account split (3)"
+        );
     }
 
     #[test]

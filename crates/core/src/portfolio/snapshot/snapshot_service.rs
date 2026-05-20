@@ -298,6 +298,18 @@ impl SnapshotService {
                 self.snapshot_repository
                     .delete_snapshots_by_account_ids(&ids_to_delete)
                     .await?;
+                // Clear lots for the same accounts. Without this, deleting
+                // the last activity for an account leaves orphan lot rows
+                // pointing at no remaining snapshot/activity state — the
+                // exact stale-lots situation the dual-write contract aims
+                // to prevent. Propagate the error: if we just deleted the
+                // user's snapshots and can't keep lots in sync, the caller
+                // must know.
+                if let Some(lot_repo) = &self.lot_repository {
+                    for acc_id in &ids_to_delete {
+                        lot_repo.replace_lots_for_account(acc_id, &[]).await?;
+                    }
+                }
             }
             return Ok(0);
         } else if all_activities.is_empty() {

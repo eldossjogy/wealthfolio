@@ -1488,6 +1488,7 @@ mod tests {
                 cost_basis: dec!(3000),
                 acquisition_price: dec!(3000),
                 acquisition_fees: dec!(0),
+                original_acquisition_fees: dec!(0),
                 fx_rate_to_position: None,
                 source_activity_id: None,
                 split_ratio: Decimal::ONE,

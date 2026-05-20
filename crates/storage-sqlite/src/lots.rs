@@ -116,25 +116,10 @@ impl LotRepositoryTrait for LotsRepository {
                     .map_err(StorageError::from)?;
 
                 if !db_lots.is_empty() {
-                    let valid_assets =
-                        existing_asset_ids(conn, db_lots.iter().map(|l| l.asset_id.as_str()))?;
-                    let filtered: Vec<&LotRecordDB> = db_lots
-                        .iter()
-                        .filter(|l| {
-                            if valid_assets.contains(l.asset_id.as_str()) {
-                                true
-                            } else {
-                                warn!(
-                                    "Dropping lot for missing asset {} (account {})",
-                                    l.asset_id, account_id
-                                );
-                                false
-                            }
-                        })
-                        .collect();
-                    if !filtered.is_empty() {
+                    let normalized = filter_and_normalize_lots(conn, db_lots, &account_id)?;
+                    if !normalized.is_empty() {
                         diesel::insert_into(dsl::lots)
-                            .values(filtered)
+                            .values(&normalized)
                             .execute(conn)
                             .map_err(StorageError::from)?;
                     }
@@ -243,29 +228,16 @@ impl LotRepositoryTrait for LotsRepository {
 
         self.writer
             .exec(move |conn| {
-                // Drop records whose asset_id no longer exists. Legacy
-                // positions JSON has no FK enforcement, so HOLDINGS-mode
-                // derivation can produce LotRecords for since-deleted assets;
-                // the lots table's FK would reject them and abort the whole
-                // sync.
-                let valid_assets = existing_asset_ids(
-                    conn,
-                    db_lots
-                        .iter()
-                        .map(|l| l.asset_id.as_str())
-                        .chain(closures.iter().map(|c| c.asset_id.as_str())),
-                )?;
+                // Normalize open-lot batch: drop rows whose asset_id no longer
+                // exists (FK would reject them), and null out
+                // open_activity_id when it points to an activity row that
+                // doesn't exist (compiler-generated synthetic IDs like
+                // `drip-1:buy`, or activities since deleted).
+                let normalized_lots = filter_and_normalize_lots(conn, db_lots, &account_id)?;
 
                 // Upsert open lots one at a time (SQLite Diesel doesn't support
                 // batch ON CONFLICT)
-                for lot in &db_lots {
-                    if !valid_assets.contains(lot.asset_id.as_str()) {
-                        warn!(
-                            "Dropping lot {} for missing asset {} (account {})",
-                            lot.id, lot.asset_id, account_id
-                        );
-                        continue;
-                    }
+                for lot in &normalized_lots {
                     diesel::insert_into(dsl::lots)
                         .values(lot)
                         .on_conflict(dsl::id)
@@ -291,21 +263,15 @@ impl LotRepositoryTrait for LotsRepository {
                         .map_err(StorageError::from)?;
                 }
 
-                // Upsert closed lots — INSERT the full record if it doesn't exist
-                // yet (happens during full recalc when a lot is created and fully
-                // consumed in one pass), or UPDATE if it was previously open.
+                // Build closure records, then normalize them through the same
+                // filter so missing-asset closures are dropped and synthetic
+                // open/close_activity_ids are nulled out.
                 let now = chrono::Utc::now()
                     .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                     .to_string();
-                for closure in &closures {
-                    if !valid_assets.contains(closure.asset_id.as_str()) {
-                        warn!(
-                            "Dropping lot closure {} for missing asset {} (account {})",
-                            closure.lot_id, closure.asset_id, account_id
-                        );
-                        continue;
-                    }
-                    let closed_lot = LotRecordDB {
+                let closure_lots: Vec<LotRecordDB> = closures
+                    .iter()
+                    .map(|closure| LotRecordDB {
                         id: closure.lot_id.clone(),
                         account_id: closure.account_id.clone(),
                         asset_id: closure.asset_id.clone(),
@@ -326,9 +292,13 @@ impl LotRepositoryTrait for LotsRepository {
                         close_activity_id: closure.close_activity_id.clone(),
                         created_at: now.clone(),
                         updated_at: now.clone(),
-                    };
+                    })
+                    .collect();
+                let normalized_closures =
+                    filter_and_normalize_lots(conn, closure_lots, &account_id)?;
+                for closed_lot in &normalized_closures {
                     diesel::insert_into(dsl::lots)
-                        .values(&closed_lot)
+                        .values(closed_lot)
                         .on_conflict(dsl::id)
                         .do_update()
                         .set((
@@ -357,7 +327,7 @@ impl LotRepositoryTrait for LotsRepository {
                 // explicitly. In the former case, wiping would destroy correct
                 // data — leaving the existing rows stale until the next successful
                 // recalc is the safer outcome.
-                let known_ids: Vec<&str> = db_lots
+                let known_ids: Vec<&str> = normalized_lots
                     .iter()
                     .map(|l| l.id.as_str())
                     .chain(closures.iter().map(|c| c.lot_id.as_str()))
@@ -479,6 +449,92 @@ where
         .load(conn)
         .map_err(StorageError::from)?;
     Ok(found.into_iter().collect())
+}
+
+/// Mirror of `existing_asset_ids` for the `activities` table. Used to validate
+/// `lots.open_activity_id` / `lots.close_activity_id` before write — the
+/// activity-compiler can emit synthetic IDs (e.g. `drip-1:buy`) that look like
+/// real IDs but don't have rows in `activities`, and a user can delete an
+/// activity at any time. Storing such an ID would violate the FK constraint
+/// and abort the whole batch.
+fn existing_activity_ids<'a, I>(
+    conn: &mut SqliteConnection,
+    candidate_ids: I,
+) -> std::result::Result<HashSet<String>, StorageError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    use crate::schema::activities::dsl as ac;
+
+    let unique: HashSet<String> = candidate_ids.into_iter().map(|s| s.to_string()).collect();
+    if unique.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let needles: Vec<String> = unique.iter().cloned().collect();
+    let found: Vec<String> = ac::activities
+        .select(ac::id)
+        .filter(ac::id.eq_any(&needles))
+        .load(conn)
+        .map_err(StorageError::from)?;
+    Ok(found.into_iter().collect())
+}
+
+/// Pre-write normalization for a batch of `LotRecordDB`:
+///
+///   * Drop rows whose `asset_id` is missing from `assets` (with a warn log).
+///   * Null out `open_activity_id` / `close_activity_id` when they point at
+///     activities that don't exist (with a warn log). The compiler emits
+///     synthetic IDs like `<parent>:buy` for DRIP / staking / dividend-in-kind
+///     legs; the lot record is still real and useful, just can't claim
+///     provenance through the FK.
+///
+/// Returns the normalized batch ready for insert/upsert.
+fn filter_and_normalize_lots(
+    conn: &mut SqliteConnection,
+    lots: Vec<LotRecordDB>,
+    account_id: &str,
+) -> std::result::Result<Vec<LotRecordDB>, StorageError> {
+    if lots.is_empty() {
+        return Ok(lots);
+    }
+    let valid_assets = existing_asset_ids(conn, lots.iter().map(|l| l.asset_id.as_str()))?;
+    let valid_activities = existing_activity_ids(
+        conn,
+        lots.iter()
+            .filter_map(|l| l.open_activity_id.as_deref())
+            .chain(lots.iter().filter_map(|l| l.close_activity_id.as_deref())),
+    )?;
+
+    let mut out = Vec::with_capacity(lots.len());
+    for mut lot in lots {
+        if !valid_assets.contains(lot.asset_id.as_str()) {
+            warn!(
+                "Dropping lot {} for missing asset {} (account {})",
+                lot.id, lot.asset_id, account_id
+            );
+            continue;
+        }
+        if let Some(ref aid) = lot.open_activity_id {
+            if !valid_activities.contains(aid.as_str()) {
+                warn!(
+                    "Lot {} references unknown open_activity_id {} (account {}); persisting as NULL",
+                    lot.id, aid, account_id
+                );
+                lot.open_activity_id = None;
+            }
+        }
+        if let Some(ref aid) = lot.close_activity_id {
+            if !valid_activities.contains(aid.as_str()) {
+                warn!(
+                    "Lot {} references unknown close_activity_id {} (account {}); persisting as NULL",
+                    lot.id, aid, account_id
+                );
+                lot.close_activity_id = None;
+            }
+        }
+        out.push(lot);
+    }
+    Ok(out)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -648,6 +704,38 @@ mod tests {
 
         repo.replace_lots_for_account("acc1", &[]).await.unwrap();
         assert_eq!(repo.count_lots().unwrap(), 0);
+    }
+
+    /// Regression test for the FK-violation bug where compiler-generated
+    /// synthetic activity IDs (e.g. `drip-1:buy` for DRIP/staking/dividend-
+    /// in-kind BUY legs) would cause `replace_lots_for_account` /
+    /// `sync_lots_for_account` to abort with a FK violation on
+    /// `lots.open_activity_id`.
+    ///
+    /// The storage layer should detect that the referenced activity doesn't
+    /// exist, null out the FK column with a warning, and still persist the
+    /// rest of the lot data.
+    #[tokio::test]
+    async fn synthetic_open_activity_id_is_nulled_out() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_asset(&pool, "AAPL");
+
+        // `drip-1:buy` is not in the activities table.
+        let mut lot = make_lot_record("lot-drip", "acc1", "AAPL", "10");
+        lot.open_activity_id = Some("drip-1:buy".to_string());
+
+        // Should succeed (no FK violation), with the open_activity_id stored as NULL.
+        repo.replace_lots_for_account("acc1", &[lot]).await.unwrap();
+
+        let stored = repo.get_open_lots_for_account("acc1").await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, "lot-drip");
+        assert!(
+            stored[0].open_activity_id.is_none(),
+            "synthetic activity_id {:?} should be normalized to NULL",
+            stored[0].open_activity_id
+        );
     }
 
     /// Regression test for the data-corruption bug where a recalculation that

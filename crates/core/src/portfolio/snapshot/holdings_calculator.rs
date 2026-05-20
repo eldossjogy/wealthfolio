@@ -144,6 +144,11 @@ impl HoldingsCalculator {
         } else {
             lot.original_quantity
         };
+        // `acquisition_fees` is mutated on partial sells, so use the immutable
+        // `original_fees()` accessor here. Otherwise a lot bought with a $10
+        // fee, half-sold, then fully consumed would persist closure rows with
+        // a $5 original fee.
+        let orig_fees = lot.original_fees();
         if let Ok(mut log) = self.disposed_lots.lock() {
             log.entry(account_id.to_string())
                 .or_default()
@@ -157,13 +162,11 @@ impl HoldingsCalculator {
                     open_date: lot.acquisition_date.format("%Y-%m-%d").to_string(),
                     original_quantity: orig_qty.to_string(),
                     cost_per_unit: lot.acquisition_price.to_string(),
-                    // lot.cost_basis is the running remaining basis (mutated
-                    // on partial sells). For the closure record we want the
-                    // original/at-acquisition basis, reconstructed from the
-                    // immutable acquisition_price/original_quantity/fees.
-                    original_cost_basis: (lot.acquisition_price * orig_qty + lot.acquisition_fees)
-                        .to_string(),
-                    fee_allocated: lot.acquisition_fees.to_string(),
+                    // Original/at-acquisition cost basis, reconstructed from
+                    // the immutable acquisition_price / original_quantity /
+                    // original_acquisition_fees.
+                    original_cost_basis: (lot.acquisition_price * orig_qty + orig_fees).to_string(),
+                    fee_allocated: orig_fees.to_string(),
                     // Carry the cumulative split ratio as of closure. A lot
                     // that lived through a 2:1 split before being fully
                     // consumed must persist with split_ratio = 2; otherwise
