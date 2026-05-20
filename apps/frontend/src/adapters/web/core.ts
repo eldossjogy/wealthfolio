@@ -211,12 +211,10 @@ export const COMMANDS: CommandMap = {
   create_event: { method: "POST", path: "/spending/events" },
   update_event: { method: "PUT", path: "/spending/events" },
   delete_event: { method: "DELETE", path: "/spending/events" },
-  get_events_with_names: { method: "GET", path: "/spending/events-with-names" },
   get_event_spending_summaries: { method: "POST", path: "/spending/event-spending-summaries" },
   // Spending analytics
   get_spending_report: { method: "POST", path: "/spending/report" },
   get_spending_insight: { method: "POST", path: "/spending/insight" },
-  get_spending_summary: { method: "POST", path: "/spending/summary" },
   // Health Center
   get_health_status: { method: "GET", path: "/health/status" },
   run_health_checks: { method: "POST", path: "/health/check" },
@@ -1217,7 +1215,6 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     // Spending events + event types
     case "list_event_types":
     case "list_events":
-    case "get_events_with_names":
       break;
     case "create_event_type": {
       const { newType } = payload as { newType: Record<string, unknown> };
@@ -1264,14 +1261,6 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "get_spending_insight": {
       const { request } = payload as { request: Record<string, unknown> };
       body = JSON.stringify(request);
-      break;
-    }
-    case "get_spending_summary": {
-      const { includeEventIds, includeAllEvents } = (payload ?? {}) as {
-        includeEventIds?: string[];
-        includeAllEvents?: boolean;
-      };
-      body = JSON.stringify({ includeEventIds, includeAllEvents });
       break;
     }
     // Health Center commands

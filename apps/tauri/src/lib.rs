@@ -408,8 +408,6 @@ pub fn run() {
             commands::spending::copy_budget_targets,
             commands::spending::get_spending_report,
             commands::spending::get_spending_insight,
-            commands::spending::get_spending_summary,
-            commands::spending::get_events_with_names,
             commands::spending::get_event_spending_summaries,
             // Goal commands
             commands::goal::create_goal,

@@ -120,17 +120,21 @@ export default function SpendingTabContent() {
     priorReportReq,
     /* enabled */ priorRangeForReport !== undefined,
   );
-  const { data: activities = [] } = useCashActivities({
+  const { data: activities = [], isError: activitiesErrored } = useCashActivities({
     startDate: reportReq.startDate,
     endDate: reportReq.endDate,
   });
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
-  const { data: budget } = useBudget();
+  const { data: budget, isError: budgetErrored } = useBudget();
   const { accounts = [] } = useAccounts({ filterActive: false });
   const { data: uncategorizedCount = 0 } = useUncategorizedCount(
     reportReq.startDate,
     reportReq.endDate,
   );
+  // Aggregated error state for the headline banner. Activities / budget
+  // failures degrade more silently than report (their absence shows up as
+  // a flat treemap or hidden chips), but the user deserves a signal.
+  const dataErrored = reportErrored || activitiesErrored || budgetErrored;
 
   const monthReportReq = useMemo(() => {
     const now = new Date();
@@ -425,11 +429,10 @@ export default function SpendingTabContent() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {reportErrored && (
+      {dataErrored && (
         <div className="mx-4 mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 md:mx-6 lg:mx-8 dark:text-amber-300">
           <span>
-            <span className="font-semibold">Couldn't load spending report.</span> Showing zeros
-            below.
+            <span className="font-semibold">Couldn't load spending data.</span> Showing zeros below.
           </span>
           <button
             type="button"

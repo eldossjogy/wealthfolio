@@ -186,7 +186,12 @@ export function useEventChartData(
     [accountTypeById, heatmapActivities, event],
   );
 
-  const expected = baseline * days;
+  // Floor `expected` at zero before computing lift. `computeBaselinePace`
+  // clamps its result ≥ 0 today, but tying the lift formula to that invariant
+  // is fragile — a future refund-aware baseline could legitimately go
+  // slightly negative from FP. Mirror the display-side `Math.max(0, expected)`
+  // at event-detail-panel.tsx:251 so headline and lift stay consistent.
+  const expected = Math.max(0, baseline * days);
   const lift = event.totalSpending - expected;
   const dailyDeltaPct = baseline > 0 ? Math.round((dailyDuring / baseline - 1) * 100) : 0;
 

@@ -8,7 +8,7 @@ use wealthfolio_spending::activity_assignments::{
     ActivityTaxonomyAssignment, BulkCategoryAssignment,
 };
 use wealthfolio_spending::analytics::{
-    EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest, SpendingSummary,
+    EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest,
 };
 use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
@@ -20,9 +20,7 @@ use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, ImportPresetResult, NewCategorizationRule,
     RemovePresetResult, RulePresetSummary, UpdateCategorizationRule,
 };
-use wealthfolio_spending::events::{
-    Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
-};
+use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
@@ -640,37 +638,6 @@ pub async fn get_spending_insight(
         .compute(request, &currency, &timezone)
         .await
         .map_err(|e| format!("Failed to compute spending insight: {}", e))
-}
-
-#[tauri::command]
-pub async fn get_spending_summary(
-    include_event_ids: Option<Vec<String>>,
-    include_all_events: Option<bool>,
-    state: State<'_, Arc<ServiceContext>>,
-) -> Result<Vec<SpendingSummary>, String> {
-    let base_currency = state.get_base_currency();
-    let timezone = state.get_timezone();
-    state
-        .spending_analytics_service()
-        .spending_summary(
-            include_event_ids,
-            include_all_events,
-            &base_currency,
-            &timezone,
-        )
-        .await
-        .map_err(|e| format!("Failed to compute spending summary: {}", e))
-}
-
-#[tauri::command]
-pub async fn get_events_with_names(
-    state: State<'_, Arc<ServiceContext>>,
-) -> Result<Vec<EventWithTypeName>, String> {
-    state
-        .events_service()
-        .list_events_with_names()
-        .await
-        .map_err(|e| format!("Failed to list events with names: {}", e))
 }
 
 #[tauri::command]

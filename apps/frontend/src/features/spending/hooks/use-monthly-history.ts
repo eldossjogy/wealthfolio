@@ -33,6 +33,10 @@ export interface MonthBucket {
 export interface MonthlyHistory {
   months: MonthBucket[];
   isLoading: boolean;
+  /** True if any per-month query failed; surface with a retry banner upstream
+   *  rather than rendering silently empty charts. */
+  isError: boolean;
+  refetch: () => void;
 }
 
 /** YYYY-MM from local date components — NOT toISOString().slice(0,7).
@@ -72,5 +76,9 @@ export function useMonthlyHistory(range: ReportsRange, enabled = true): MonthlyH
   return {
     months: buckets,
     isLoading: queries.some((q) => q.isLoading),
+    isError: queries.some((q) => q.isError),
+    refetch: () => {
+      queries.forEach((q) => void q.refetch());
+    },
   };
 }

@@ -11,7 +11,7 @@ use crate::{error::ApiResult, main_lib::AppState};
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment;
 use wealthfolio_spending::analytics::{
-    EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest, SpendingSummary,
+    EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest,
 };
 use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
@@ -22,9 +22,7 @@ use wealthfolio_spending::cash_activities::{
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
 };
-use wealthfolio_spending::events::{
-    Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
-};
+use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
@@ -619,40 +617,6 @@ async fn get_event_spending_summaries(
     ))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SpendingSummaryBody {
-    #[serde(default)]
-    include_event_ids: Option<Vec<String>>,
-    #[serde(default)]
-    include_all_events: Option<bool>,
-}
-
-async fn get_spending_summary(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<SpendingSummaryBody>,
-) -> ApiResult<Json<Vec<SpendingSummary>>> {
-    let base_currency = state.base_currency.read().unwrap().clone();
-    let timezone = state.timezone.read().unwrap().clone();
-    Ok(Json(
-        state
-            .spending_analytics_service
-            .spending_summary(
-                body.include_event_ids,
-                body.include_all_events,
-                &base_currency,
-                &timezone,
-            )
-            .await?,
-    ))
-}
-
-async fn get_events_with_names(
-    State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<Vec<EventWithTypeName>>> {
-    Ok(Json(state.events_service.list_events_with_names().await?))
-}
-
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/spending/settings", get(get_spending_settings))
@@ -743,6 +707,4 @@ pub fn router() -> Router<Arc<AppState>> {
             "/v1/spending/event-spending-summaries",
             post(get_event_spending_summaries),
         )
-        .route("/v1/spending/summary", post(get_spending_summary))
-        .route("/v1/spending/events-with-names", get(get_events_with_names))
 }

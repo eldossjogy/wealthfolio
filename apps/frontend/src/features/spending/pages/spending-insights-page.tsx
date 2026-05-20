@@ -158,10 +158,12 @@ export default function SpendingInsightsPage() {
   // produce richer per-day / per-leaf-category shapes that the insight
   // payload doesn't carry yet). Disabled when their stage isn't visible.
   const currentRequest = useMemo(() => rangeToReportRequest(range), [range]);
-  const { data: currentReport, isLoading: isCurrentLoading } = useSpendingReport(
-    currentRequest,
-    stage === "changed",
-  );
+  const {
+    data: currentReport,
+    isLoading: isCurrentLoading,
+    isError: currentErrored,
+    refetch: refetchCurrent,
+  } = useSpendingReport(currentRequest, stage === "changed");
   const priorRange = useMemo(() => comparisonRange(range, "prior"), [range]);
   const priorRequest = useMemo(
     () => (priorRange ? rangeToReportRequest(priorRange) : currentRequest),
@@ -171,7 +173,12 @@ export default function SpendingInsightsPage() {
     priorRequest,
     stage === "changed",
   );
-  const { months, isLoading: isHistoryLoading } = useMonthlyHistory(range, stage === "changed");
+  const {
+    months,
+    isLoading: isHistoryLoading,
+    isError: historyErrored,
+    refetch: refetchHistory,
+  } = useMonthlyHistory(range, stage === "changed");
 
   // Project insight back into the legacy MonthlyReport + BudgetSnapshot
   // shapes that WhereIAmStage's child cards/table consume. Same numbers,
@@ -301,14 +308,18 @@ export default function SpendingInsightsPage() {
           />
         )}
 
-        {insightErrored && (
+        {(insightErrored || (stage === "changed" && (currentErrored || historyErrored))) && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             <span>
               <span className="font-semibold">Couldn't load insights.</span> Showing zeros below.
             </span>
             <button
               type="button"
-              onClick={() => void refetchInsight()}
+              onClick={() => {
+                if (insightErrored) void refetchInsight();
+                if (currentErrored) void refetchCurrent();
+                if (historyErrored) refetchHistory();
+              }}
               className="text-foreground hover:underline"
             >
               Retry
