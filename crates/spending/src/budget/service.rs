@@ -754,36 +754,50 @@ impl BudgetService {
     }
 }
 
-struct TargetIndex<'a> {
+pub(crate) struct TargetIndex<'a> {
     targets: &'a [BudgetTarget],
 }
 
 impl<'a> TargetIndex<'a> {
-    fn new(targets: &'a [BudgetTarget]) -> Self {
+    pub(crate) fn new(targets: &'a [BudgetTarget]) -> Self {
         Self { targets }
     }
 
-    fn effective_category(&self, period: &str, taxonomy_id: &str, category_id: &str) -> f64 {
+    pub(crate) fn effective_category(
+        &self,
+        period: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> f64 {
         self.month_category(period, taxonomy_id, category_id)
             .or_else(|| self.default_category(taxonomy_id, category_id))
             .map(parse_amount)
             .unwrap_or(0.0)
     }
 
-    fn effective_group_buffer(&self, period: &str, group_id: &str) -> f64 {
+    pub(crate) fn effective_group_buffer(&self, period: &str, group_id: &str) -> f64 {
         self.month_group_buffer(period, group_id)
             .or_else(|| self.default_group_buffer(group_id))
             .map(parse_amount)
             .unwrap_or(0.0)
     }
 
-    fn has_default_category(&self, taxonomy_id: &str, category_id: &str) -> bool {
+    pub(crate) fn has_default_category(&self, taxonomy_id: &str, category_id: &str) -> bool {
         self.default_category(taxonomy_id, category_id).is_some()
     }
 
-    fn has_month_category(&self, period: &str, taxonomy_id: &str, category_id: &str) -> bool {
+    pub(crate) fn has_month_category(
+        &self,
+        period: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> bool {
         self.month_category(period, taxonomy_id, category_id)
             .is_some()
+    }
+
+    pub(crate) fn has_month_group_buffer(&self, period: &str, group_id: &str) -> bool {
+        self.month_group_buffer(period, group_id).is_some()
     }
 
     fn month_category(&self, period: &str, taxonomy_id: &str, category_id: &str) -> Option<&str> {
@@ -907,14 +921,14 @@ fn default_assignment_inputs(
         .collect()
 }
 
-fn category_meta(categories: &[Category]) -> HashMap<String, Category> {
+pub(crate) fn category_meta(categories: &[Category]) -> HashMap<String, Category> {
     categories
         .iter()
         .map(|c| (c.id.clone(), c.clone()))
         .collect()
 }
 
-fn top_level_categories(categories: &[Category]) -> Vec<Category> {
+pub(crate) fn top_level_categories(categories: &[Category]) -> Vec<Category> {
     let mut categories = categories
         .iter()
         .filter(|c| c.parent_id.is_none())
@@ -924,7 +938,7 @@ fn top_level_categories(categories: &[Category]) -> Vec<Category> {
     categories
 }
 
-fn resolve_group_for_category(
+pub(crate) fn resolve_group_for_category(
     category_id: &str,
     assignment_by_category: &HashMap<String, String>,
     category_meta: &HashMap<String, Category>,
@@ -940,7 +954,7 @@ fn resolve_group_for_category(
     other_group_id.to_string()
 }
 
-fn top_category_id(category_id: &str, meta: &HashMap<String, Category>) -> String {
+pub(crate) fn top_category_id(category_id: &str, meta: &HashMap<String, Category>) -> String {
     let mut current = category_id.to_string();
     while let Some(parent_id) = meta.get(&current).and_then(|c| c.parent_id.clone()) {
         current = parent_id;

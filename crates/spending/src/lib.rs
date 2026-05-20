@@ -23,6 +23,7 @@
 //! - `events` — first-class event entity (trips, holidays) with event_types.
 //! - `budget` — monthly budget config and per-category allocations.
 //! - `analytics` — aggregations for the Spending overview / reports pages.
+//! - `insight` — reconciled period payload powering the Spending Insight dashboard.
 
 pub mod activity_assignments;
 mod activity_classification;
@@ -32,4 +33,5 @@ pub mod cash_activities;
 pub mod categories_seed;
 pub mod categorization_rules;
 pub mod events;
+pub mod insight;
 pub mod settings;
