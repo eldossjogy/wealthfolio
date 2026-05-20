@@ -4,14 +4,16 @@ import { Link } from "react-router-dom";
 import {
   Button,
   Icons,
+  PrivacyAmount,
   Sheet,
   SheetContent,
   SheetTitle,
   formatCompactAmount,
 } from "@wealthfolio/ui";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Account, Activity } from "@/lib/types";
-import { cn, formatAmount, formatDate, formatTime } from "@/lib/utils";
+import { cn, formatDate, formatTime } from "@/lib/utils";
 
 import { isCashActivityOutflow } from "../../lib/constants";
 
@@ -40,6 +42,7 @@ export function HeatmapCellSheet({
   hour,
   currency,
 }: HeatmapCellSheetProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { accounts = [] } = useAccounts({ filterActive: false });
   const accountById = useMemo(() => {
     const m = new Map<string, Account>();
@@ -139,16 +142,24 @@ export function HeatmapCellSheet({
           </div>
 
           <div className="mt-5 grid grid-cols-4 gap-3">
-            <Stat label="Total" value={formatCompactAmount(stats.total, currency)} hint={null} />
+            <Stat
+              label="Total"
+              value={isBalanceHidden ? "••••" : formatCompactAmount(stats.total, currency)}
+              hint={null}
+            />
             <Stat
               label="Tx"
               value={stats.count.toLocaleString()}
               hint={stats.count === 0 ? "none" : null}
             />
-            <Stat label="Avg / tx" value={formatCompactAmount(stats.avg, currency)} hint={null} />
+            <Stat
+              label="Avg / tx"
+              value={isBalanceHidden ? "••••" : formatCompactAmount(stats.avg, currency)}
+              hint={null}
+            />
             <Stat
               label="Largest"
-              value={formatCompactAmount(stats.largest, currency)}
+              value={isBalanceHidden ? "••••" : formatCompactAmount(stats.largest, currency)}
               hint={null}
             />
           </div>
@@ -170,7 +181,8 @@ export function HeatmapCellSheet({
                       {group.label}
                     </h3>
                     <span className="text-muted-foreground/80 text-[11px] tabular-nums">
-                      {group.items.length} · {formatCompactAmount(group.total, currency)}
+                      {group.items.length} ·{" "}
+                      {isBalanceHidden ? "••••" : formatCompactAmount(group.total, currency)}
                     </span>
                   </header>
                   <ul className="divide-border/40 divide-y">
@@ -219,7 +231,7 @@ export function HeatmapCellSheet({
                             )}
                           >
                             {isOutflow ? "−" : "+"}
-                            {formatAmount(safeAmt, it.currency)}
+                            <PrivacyAmount value={safeAmt} currency={it.currency} />
                             {it.currency !== currency && (
                               <span className="text-muted-foreground/70 ml-1 text-[9px] uppercase tracking-wide">
                                 {it.currency}

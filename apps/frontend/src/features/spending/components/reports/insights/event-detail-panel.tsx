@@ -13,11 +13,13 @@ import { useNavigate } from "react-router-dom";
 import {
   Button,
   Icons,
+  PrivacyAmount,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
   formatCompactAmount,
 } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
@@ -50,6 +52,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
   accountTypeById,
   onSelect,
 }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const isPhone = useIsMobileViewport();
   const chart = useEventChartData(event, heatmapActivities, accountTypeById, taxonomyCategories);
   const {
@@ -82,8 +85,8 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
   const nextEvent = canNav ? events[(currentIdx + 1) % events.length] : null;
 
   const caption = useMemo(
-    () => buildEventCaption({ days, lift, currency, top: categories }),
-    [days, lift, currency, categories],
+    () => buildEventCaption({ days, lift, currency, top: categories, isBalanceHidden }),
+    [days, lift, currency, categories, isBalanceHidden],
   );
 
   const { update } = useSpendingEventMutations();
@@ -228,7 +231,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
       <div className="mt-2 grid grid-cols-2 gap-y-3 md:grid-cols-4 md:gap-x-0 md:gap-y-4">
         <StatCell label="EVENT TOTAL">
           <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
-            {formatAmount(event.totalSpending, currency)}
+            <PrivacyAmount value={event.totalSpending} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
             across {event.transactionCount} transactions
@@ -242,25 +245,27 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
             )}
           >
             {lift >= 0 ? "+" : "−"}
-            {formatAmount(Math.abs(lift), currency)}
+            <PrivacyAmount value={Math.abs(lift)} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
-            vs {formatAmount(Math.max(0, expected), currency)} expected
+            vs <PrivacyAmount value={Math.max(0, expected)} currency={currency} /> expected
           </div>
         </StatCell>
         <StatCell label={isPhone ? "DAILY" : "DAILY DURING"} divided>
           <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
-            {formatAmount(dailyDuring, currency)}
+            <PrivacyAmount value={dailyDuring} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
             {baseline > 0
-              ? `${dailyDeltaPct >= 0 ? "+" : "−"}${Math.abs(dailyDeltaPct)}% vs ${formatAmount(baseline, currency)}`
+              ? `${dailyDeltaPct >= 0 ? "+" : "−"}${Math.abs(dailyDeltaPct)}% vs ${
+                  isBalanceHidden ? "••••" : formatAmount(baseline, currency)
+                }`
               : "no baseline available"}
           </div>
         </StatCell>
         <StatCell label="PEAK DAY" divided>
           <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight md:text-base">
-            {peak ? formatAmount(peak.amount, currency) : "—"}
+            {peak ? <PrivacyAmount value={peak.amount} currency={currency} /> : "—"}
           </div>
           <div className="text-muted-foreground/80 mt-1 text-[10px]">
             {peak ? formatPeakDay(peak.date) : ""}
@@ -283,11 +288,13 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
           <div className="flex items-center justify-between gap-3">
             <div className={LABEL_CLASS}>DAY BY DAY</div>
             <div className={cn(LABEL_CLASS, "text-right")}>
-              {isPhone
-                ? `BASELINE ${formatCompactAmount(baseline, currency)}`
-                : peak
-                  ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
-                  : `BASELINE ${formatAmount(baseline, currency)}`}
+              {isBalanceHidden
+                ? `BASELINE ••••${peak ? " · PEAK ••••" : ""}`
+                : isPhone
+                  ? `BASELINE ${formatCompactAmount(baseline, currency)}`
+                  : peak
+                    ? `PEAK ${formatAmount(peak.amount, currency)} · BASELINE ${formatAmount(baseline, currency)}`
+                    : `BASELINE ${formatAmount(baseline, currency)}`}
             </div>
           </div>
           <DailyBars
@@ -299,6 +306,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
             baseline={baseline}
             currency={currency}
             compact={isPhone}
+            isBalanceHidden={isBalanceHidden}
           />
         </div>
 
@@ -317,7 +325,9 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
                   <div
                     key={c.id}
                     className="rounded-full"
-                    title={`${c.name} · ${formatAmount(c.amount, currency)}`}
+                    title={`${c.name} · ${
+                      isBalanceHidden ? "••••" : formatAmount(c.amount, currency)
+                    }`}
                     style={{ flex: `${c.amount} 0 0`, background: c.color }}
                   />
                 ))}
@@ -342,7 +352,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
                         {pct.toFixed(1)}%
                       </span>
                       <span className="text-foreground/90 text-right text-[12px] font-medium tabular-nums">
-                        {formatAmount(c.amount, currency)}
+                        <PrivacyAmount value={c.amount} currency={currency} />
                       </span>
                     </div>
                   );
@@ -465,7 +475,9 @@ function DailyBars({
   baseline,
   currency,
   compact,
+  isBalanceHidden,
 }: {
+  isBalanceHidden: boolean;
   series: number[];
   inWindow: boolean[];
   chartStartDate: Date;
@@ -498,7 +510,10 @@ function DailyBars({
                 isOut ? "bg-warning/70" : "bg-success/80",
               )}
               style={{ height: `${(Math.max(v, 0) / max) * 100}%` }}
-              title={formatAmount(v, currency) + (isOut ? " · outside event window" : "")}
+              title={
+                (isBalanceHidden ? "••••" : formatAmount(v, currency)) +
+                (isOut ? " · outside event window" : "")
+              }
             />
           );
           if (!boundary) return bar;
@@ -589,7 +604,7 @@ function RhythmCard({
             "—"
           ) : (
             <>
-              {formatAmount(value, currency)}
+              <PrivacyAmount value={value} currency={currency} />
               <span className="text-muted-foreground/70 font-normal">/d</span>
             </>
           )}
@@ -645,15 +660,18 @@ function buildEventCaption({
   lift,
   currency,
   top,
+  isBalanceHidden,
 }: {
   days: number;
   lift: number;
   currency: string;
   top: readonly { readonly name: string }[];
+  isBalanceHidden: boolean;
 }): string {
+  const amt = (v: number) => (isBalanceHidden ? "••••" : formatAmount(v, currency));
   if (top.length === 0) {
     return lift > 0
-      ? `Lift vs your normal week: +${formatAmount(lift, currency)} over ${days} days.`
+      ? `Lift vs your normal week: +${amt(lift)} over ${days} days.`
       : `In line with your normal week.`;
   }
   if (lift > 0 && days <= 4) {
@@ -665,7 +683,7 @@ function buildEventCaption({
   if (Math.abs(lift) < 50) {
     return `Mostly ${top[0].name.toLowerCase()} — modest lift over a normal stretch.`;
   }
-  return `Lift vs your normal week: ${lift >= 0 ? "+" : "−"}${formatAmount(Math.abs(lift), currency)} over ${days} days.`;
+  return `Lift vs your normal week: ${lift >= 0 ? "+" : "−"}${amt(Math.abs(lift))} over ${days} days.`;
 }
 
 function formatRange(start: Date, end: Date): string {

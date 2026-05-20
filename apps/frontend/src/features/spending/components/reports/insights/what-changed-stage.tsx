@@ -1,7 +1,8 @@
 import { memo, useMemo, useState, type FC, type ReactNode } from "react";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 
-import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
@@ -140,6 +141,7 @@ interface HeadlineCardProps {
 }
 
 const HeadlineCard: FC<HeadlineCardProps> = ({ headline, currency, isLoading }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   if (isLoading) {
     return (
       <div className={CARD_CLASS}>
@@ -159,14 +161,24 @@ const HeadlineCard: FC<HeadlineCardProps> = ({ headline, currency, isLoading }) 
           headline.metaLabel && "mt-3",
         )}
       >
-        {renderHeadlineFragments(headline.fragments, currency)}
+        {renderHeadlineFragments(headline.fragments, currency, isBalanceHidden)}
       </p>
-      {headline.summary && <HeadlineSummaryLine summary={headline.summary} currency={currency} />}
+      {headline.summary && (
+        <HeadlineSummaryLine
+          summary={headline.summary}
+          currency={currency}
+          isBalanceHidden={isBalanceHidden}
+        />
+      )}
     </div>
   );
 };
 
-function renderHeadlineFragments(fragments: HeadlineFragment[], currency: string): ReactNode {
+function renderHeadlineFragments(
+  fragments: HeadlineFragment[],
+  currency: string,
+  isBalanceHidden: boolean,
+): ReactNode {
   return fragments.map((f, i) => {
     switch (f.type) {
       case "text":
@@ -177,12 +189,12 @@ function renderHeadlineFragments(fragments: HeadlineFragment[], currency: string
             key={i}
             className={cn("whitespace-nowrap font-serif font-medium", toneClass(f.tone))}
           >
-            {formatAmount(f.value, currency)}
+            <PrivacyAmount value={f.value} currency={currency} />
           </span>
         );
       case "mover": {
         const d = f.descriptor.descriptor;
-        const phrase = describeMoverPhrase(d, currency);
+        const phrase = describeMoverPhrase(d, currency, isBalanceHidden);
         return (
           <span
             key={i}
@@ -196,20 +208,25 @@ function renderHeadlineFragments(fragments: HeadlineFragment[], currency: string
   });
 }
 
-function describeMoverPhrase(d: ChangeDescriptor, currency: string): string {
+function describeMoverPhrase(
+  d: ChangeDescriptor,
+  currency: string,
+  isBalanceHidden: boolean,
+): string {
+  const amt = (v: number) => (isBalanceHidden ? "••••" : formatAmount(v, currency));
   switch (d.kind) {
     case "no_activity":
       return "";
     case "new":
-      return `appeared (+${formatAmount(d.absDelta, currency)})`;
+      return `appeared (+${amt(d.absDelta)})`;
     case "ended":
-      return `dropped to zero (was ${formatAmount(d.prior, currency)})`;
+      return `dropped to zero (was ${amt(d.prior)})`;
     case "valid": {
       const verb = d.delta >= 0 ? "up" : "down";
       if (d.showPct && d.pct != null) {
         return `${verb} ${formatPercentValue(Math.abs(d.pct), { digits: 0 })}`;
       }
-      return `${verb} ${formatAmount(d.absDelta, currency)}`;
+      return `${verb} ${amt(d.absDelta)}`;
     }
   }
 }
@@ -223,21 +240,25 @@ function toneClass(tone: "up" | "down" | "neutral"): string {
 function HeadlineSummaryLine({
   summary,
   currency,
+  isBalanceHidden,
 }: {
   summary: NonNullable<HeadlineModel["summary"]>;
   currency: string;
+  isBalanceHidden: boolean;
 }) {
+  const renderAmt = (value: number) =>
+    isBalanceHidden ? <>••••</> : <PrivacyAmount value={value} currency={currency} />;
   const parts: ReactNode[] = [
     <span key="cur" className="tabular-nums">
       <span className={LABEL_CLASS}>this </span>
-      {formatAmount(summary.current, currency)}
+      {renderAmt(summary.current)}
     </span>,
   ];
   if (summary.prior != null) {
     parts.push(
       <span key="prior" className="text-muted-foreground/80 tabular-nums">
         <span className={LABEL_CLASS}>prior </span>
-        {formatAmount(summary.prior, currency)}
+        {renderAmt(summary.prior)}
       </span>,
     );
   }
@@ -247,7 +268,7 @@ function HeadlineSummaryLine({
     parts.push(
       <span key="delta" className={cn("font-medium tabular-nums", toneClass(tone))}>
         {sign}
-        {formatAmount(Math.abs(summary.delta), currency)}
+        {renderAmt(Math.abs(summary.delta))}
       </span>,
     );
   }
@@ -571,6 +592,7 @@ const SparklineRow = memo(function SparklineRow({
   showPill: boolean;
   onCategoryClick?: (categoryId: string) => void;
 }) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const color = row.color ?? "var(--muted-foreground)";
   const tintBg = row.color ? `${row.color}14` : "var(--muted)";
   const gradId = `wc-spark-${row.id.replace(/[^a-z0-9]/gi, "_")}`;
@@ -641,7 +663,7 @@ const SparklineRow = memo(function SparklineRow({
         </ResponsiveContainer>
       </div>
       <div className="text-muted-foreground/80 text-xs tabular-nums">
-        {formatCompactAmount(row.total, currency)}
+        {isBalanceHidden ? "••••" : formatCompactAmount(row.total, currency)}
       </div>
     </div>
   );
@@ -733,14 +755,14 @@ const ComparisonRow = memo(function ComparisonRow({
         {row.current === 0 ? (
           <span className="text-muted-foreground/60">—</span>
         ) : (
-          formatAmount(row.current, currency)
+          <PrivacyAmount value={row.current} currency={currency} />
         )}
       </td>
       <td className="text-muted-foreground/80 px-3 py-2.5 text-right text-xs tabular-nums">
         {row.prior === 0 ? (
           <span className="text-muted-foreground/60">—</span>
         ) : (
-          formatAmount(row.prior, currency)
+          <PrivacyAmount value={row.prior} currency={currency} />
         )}
       </td>
       <td
@@ -749,9 +771,14 @@ const ComparisonRow = memo(function ComparisonRow({
           row.delta === 0 ? "text-muted-foreground/70" : isUp ? "text-destructive" : "text-success",
         )}
       >
-        {row.delta === 0
-          ? "—"
-          : `${isUp ? "+" : "−"}${formatAmount(Math.abs(row.delta), currency)}`}
+        {row.delta === 0 ? (
+          "—"
+        ) : (
+          <>
+            {isUp ? "+" : "−"}
+            <PrivacyAmount value={Math.abs(row.delta)} currency={currency} />
+          </>
+        )}
       </td>
       <td className="text-muted-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
         {impactPct == null || impactPct === 0 ? "—" : `${impactPct}%`}

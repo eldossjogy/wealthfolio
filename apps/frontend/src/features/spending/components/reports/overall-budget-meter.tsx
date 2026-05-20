@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
-import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
-import { cn, formatAmount } from "@/lib/utils";
+import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
+import { cn } from "@/lib/utils";
 
 import type { BudgetSnapshot } from "../../types/budget";
 
@@ -29,6 +30,7 @@ export function OverallBudgetMeter({
   currency,
   isLoading,
 }: OverallBudgetMeterProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const monthlyTarget = budget?.computed.totals.spendingPlanned ?? 0;
   const targetForRange = monthlyTarget * Math.max(1, monthsInRange);
   const pct = targetForRange > 0 ? spent / targetForRange : 0;
@@ -78,7 +80,8 @@ export function OverallBudgetMeter({
         <div>
           <h3 className="text-foreground text-sm font-semibold">Overall budget</h3>
           <p className="text-muted-foreground/70 text-xs tabular-nums">
-            {formatAmount(monthlyTarget, currency)}/mo × {monthsInRange} {monthsLabel}
+            <PrivacyAmount value={monthlyTarget} currency={currency} />
+            /mo × {monthsInRange} {monthsLabel}
           </p>
         </div>
         <div className="text-right">
@@ -91,9 +94,11 @@ export function OverallBudgetMeter({
               isOver ? "text-destructive" : "text-success",
             )}
           >
-            {isOver
-              ? `+${formatCompactAmount(overage, currency)} over`
-              : `${formatCompactAmount(remaining, currency)} left`}
+            {isBalanceHidden
+              ? "••••"
+              : isOver
+                ? `+${formatCompactAmount(overage, currency)} over`
+                : `${formatCompactAmount(remaining, currency)} left`}
           </div>
         </div>
       </div>
@@ -118,8 +123,12 @@ export function OverallBudgetMeter({
       </div>
 
       <div className="text-muted-foreground/70 mt-1.5 flex justify-between text-[11px] tabular-nums">
-        <span>{formatAmount(spent, currency)} spent</span>
-        <span>{formatAmount(targetForRange, currency)} target</span>
+        <span>
+          <PrivacyAmount value={spent} currency={currency} /> spent
+        </span>
+        <span>
+          <PrivacyAmount value={targetForRange} currency={currency} /> target
+        </span>
       </div>
     </div>
   );

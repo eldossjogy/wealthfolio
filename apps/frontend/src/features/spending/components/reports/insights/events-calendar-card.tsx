@@ -1,6 +1,7 @@
 import { useMemo, useState, type FC } from "react";
 
 import { Button, Icons } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { useEventDialog } from "../../event-dialog-provider";
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export const EventsCalendarCard: FC<Props> = ({ events, currency, selectedId, onSelect }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { openEventDialog } = useEventDialog();
   const today = useMemo(() => stripTime(new Date()), []);
   const [cursor, setCursor] = useState<Date>(() => startOfMonth(today));
@@ -125,10 +127,9 @@ export const EventsCalendarCard: FC<Props> = ({ events, currency, selectedId, on
                   type="button"
                   key={`bar-${bar.event.eventId}`}
                   onClick={() => onSelect(bar.event.eventId)}
-                  title={`${bar.event.eventName} · ${formatAmount(
-                    bar.event.totalSpending,
-                    currency,
-                  )}`}
+                  title={`${bar.event.eventName} · ${
+                    isBalanceHidden ? "••••" : formatAmount(bar.event.totalSpending, currency)
+                  }`}
                   className={cn(
                     "min-h-[16px] truncate rounded-sm px-1 text-left text-[10px] leading-[16px]",
                     isSel ? "font-semibold" : "hover:brightness-95",

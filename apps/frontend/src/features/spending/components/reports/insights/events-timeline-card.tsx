@@ -7,13 +7,15 @@ import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import {
   Button,
   Icons,
+  PrivacyAmount,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
   formatCompactAmount,
 } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Activity } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 import { useEventDialog } from "../../event-dialog-provider";
 import { useEventsAggregate } from "../../../hooks/use-events-aggregate";
@@ -52,6 +54,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   onPrevWindow,
   onNextWindow,
 }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { openEventDialog } = useEventDialog();
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -337,7 +340,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                 fontSize={9}
                 className="fill-muted-foreground"
               >
-                {formatCompactAmount(computed.normalPace, currency)}/d
+                {isBalanceHidden ? "••••" : formatCompactAmount(computed.normalPace, currency)}/d
               </text>
             </>
           )}
@@ -465,7 +468,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
                       className={lift >= 0 ? "fill-destructive" : "fill-success"}
                     >
                       {lift >= 0 ? "+" : "−"}
-                      {formatCompactAmount(Math.abs(lift), currency)}
+                      {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(lift), currency)}
                     </text>
                     <text x={x1 + 8} y={bandY + 46} fontSize={9} className="fill-muted-foreground">
                       {days}D · {kindLabel}
@@ -547,7 +550,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
       <div className="border-border/40 mt-3 grid grid-cols-2 gap-x-0 gap-y-3 border-t pt-3 md:grid-cols-4">
         <SummaryCell label={`ACROSS ${events.length} EVENT${events.length === 1 ? "" : "S"}`}>
           <div className="text-foreground text-sm font-semibold tabular-nums tracking-tight">
-            {formatAmount(computed.totalSpent, currency)}
+            <PrivacyAmount value={computed.totalSpent} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 mt-0.5 text-[10px]">
             {computed.totalEventDays} event-days ·{" "}
@@ -562,7 +565,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
             )}
           >
             {computed.lift >= 0 ? "+" : "−"}
-            {formatAmount(Math.abs(computed.lift), currency)}
+            <PrivacyAmount value={Math.abs(computed.lift)} currency={currency} />
           </div>
           <div className="text-muted-foreground/80 mt-0.5 text-[10px]">
             on event days, vs normal pace
@@ -574,7 +577,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               {biggest.eventName}
             </div>
             <div className="text-muted-foreground/80 mt-0.5 text-[10px] tabular-nums">
-              {formatAmount(biggest.totalSpending, currency)}
+              <PrivacyAmount value={biggest.totalSpending} currency={currency} />
             </div>
           </SummaryCell>
         )}

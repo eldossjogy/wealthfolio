@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { QueryKeys } from "@/lib/query-keys";
 import type { Activity } from "@/lib/types";
-import { cn, formatAmount, formatDateISO } from "@/lib/utils";
+import { cn, formatDateISO } from "@/lib/utils";
 import { Icons, PrivacyAmount } from "@wealthfolio/ui";
 
 import { getActivityAssignments } from "../adapters/cash-activities";
@@ -218,7 +218,7 @@ export function EventsCard({
           <div className="border-border/40 text-muted-foreground/80 mt-3 flex items-center gap-3 border-t pt-2 text-[11px]">
             <span className="tabular-nums">
               <span className="text-foreground/90 font-semibold">
-                {formatAmount(dailyAvg, currency)}
+                <PrivacyAmount value={dailyAvg} currency={currency} />
               </span>{" "}
               / day
             </span>
@@ -266,7 +266,9 @@ export function EventsCard({
               >
                 <CategoryIcon icon={c.icon} fallback={c.name} className="h-3.5 w-3.5" />
                 <span className="text-foreground/85">{c.name}</span>
-                <span className="opacity-70">{formatAmount(c.amount, currency)}</span>
+                <span className="opacity-70">
+                  <PrivacyAmount value={c.amount} currency={currency} />
+                </span>
               </span>
             );
           })}

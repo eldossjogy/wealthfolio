@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 
 import { formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Activity } from "@/lib/types";
 import { formatAmount } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export function DayOfWeekChart({
   currency,
   accent = "var(--success)",
 }: DayOfWeekChartProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const data: DayDatum[] = useMemo(
     () => buildSeries(activities, accountTypeById),
     [accountTypeById, activities],
@@ -59,10 +61,10 @@ export function DayOfWeekChart({
                 <div className="bg-background rounded-md border px-3 py-2 text-xs shadow-sm">
                   <div className="text-foreground font-semibold">{d.day}</div>
                   <div className="text-muted-foreground">
-                    Total: {formatAmount(d.total, currency)}
+                    Total: {isBalanceHidden ? "••••" : formatAmount(d.total, currency)}
                   </div>
                   <div className="text-muted-foreground">
-                    Avg: {formatAmount(d.avg, currency)} · {d.count}{" "}
+                    Avg: {isBalanceHidden ? "••••" : formatAmount(d.avg, currency)} · {d.count}{" "}
                     {d.count === 1 ? "transaction" : "transactions"}
                   </div>
                 </div>
@@ -81,8 +83,13 @@ export function DayOfWeekChart({
         </BarChart>
       </ResponsiveContainer>
       <div className="text-muted-foreground/70 mt-1 flex justify-between text-[10px] tabular-nums">
-        <span>Min {formatCompactAmount(Math.min(...data.map((d) => d.total)), currency)}</span>
-        <span>Max {formatCompactAmount(peak, currency)}</span>
+        <span>
+          Min{" "}
+          {isBalanceHidden
+            ? "••••"
+            : formatCompactAmount(Math.min(...data.map((d) => d.total)), currency)}
+        </span>
+        <span>Max {isBalanceHidden ? "••••" : formatCompactAmount(peak, currency)}</span>
       </div>
     </div>
   );

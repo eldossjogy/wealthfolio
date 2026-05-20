@@ -13,6 +13,7 @@ import {
 
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { DateRange, TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount, formatDateISO } from "@/lib/utils";
@@ -63,6 +64,7 @@ function priorRange(range: DateRange | undefined): DateRange | undefined {
 }
 
 export default function SpendingTabContent() {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
@@ -352,7 +354,9 @@ export default function SpendingTabContent() {
             the prior period.
           </>
         ),
-        sub: `${formatAmount(delta, currency)} more than ${formatAmount(priorSpending, currency)}`,
+        sub: `${isBalanceHidden ? "••••" : formatAmount(delta, currency)} more than ${
+          isBalanceHidden ? "••••" : formatAmount(priorSpending, currency)
+        }`,
       });
     }
     const uncategorized = categoryRows.find((c) => c.id === "uncategorized");
@@ -363,14 +367,14 @@ export default function SpendingTabContent() {
           <>
             <span className="font-semibold">{uncategorized.txCount} uncategorized</span>{" "}
             {uncategorized.txCount === 1 ? "transaction" : "transactions"} totaling{" "}
-            {formatAmount(uncategorized.amount, currency)}.
+            <PrivacyAmount value={uncategorized.amount} currency={currency} />.
           </>
         ),
         sub: "Categorize them to improve breakdowns",
       });
     }
     return items;
-  }, [deltaPct, delta, priorSpending, categoryRows, currency]);
+  }, [deltaPct, delta, priorSpending, categoryRows, currency, isBalanceHidden]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -465,7 +469,7 @@ export default function SpendingTabContent() {
                       <div className="bg-background rounded-md border px-3 py-2 text-xs shadow-sm">
                         <div className="text-muted-foreground">{p.key}</div>
                         <div className="text-foreground font-semibold tabular-nums">
-                          {p.future ? "—" : formatAmount(p.value, currency)}
+                          {p.future ? "—" : <PrivacyAmount value={p.value} currency={currency} />}
                         </div>
                       </div>
                     );
@@ -763,7 +767,7 @@ function CategoryTreemapMono({
                   <div className="bg-background rounded-md border px-3 py-2 text-xs shadow-sm">
                     <div className="text-foreground font-semibold">{p.name}</div>
                     <div className="text-muted-foreground tabular-nums">
-                      {formatAmount(p.amount, currency)} · {p.pct.toFixed(1)}%
+                      <PrivacyAmount value={p.amount} currency={currency} /> · {p.pct.toFixed(1)}%
                     </div>
                   </div>
                 );
@@ -789,6 +793,7 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
   currency = "USD",
   accent,
 }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   if (depth === 0) return null;
 
   const showName = width > 56 && height > 32;
@@ -802,7 +807,7 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
   const dotR = Math.max(2.5, Math.min(4, Math.min(width, height) * 0.04));
   const showDot = accent && width > 40 && height > 28;
 
-  const amountText = formatAmount(amount, currency);
+  const amountText = isBalanceHidden ? "••••" : formatAmount(amount, currency);
   const pctText = `${pct.toFixed(1)}%`;
   const amountTextW = amountText.length * amountFontSize * 0.58;
   const pctTextW = pctText.length * pctFontSize * 0.6;
@@ -887,6 +892,7 @@ function CategoryRankedBar({
    */
   groupRows?: import("../types/budget").BudgetGroupRow[];
 }) {
+  const { isBalanceHidden } = useBalancePrivacy();
   // Memoize derivations so we don't rebuild the Map + reduce + slices on every
   // parent re-render — this card lives inside a chart-heavy page.
   const derived = useMemo(() => {
@@ -944,7 +950,9 @@ function CategoryRankedBar({
               opacity: 0.85 - i * 0.05,
               borderRight: "1px solid var(--card)",
             }}
-            title={`${s.name} — ${formatAmount(s.amount, currency)} (${share.toFixed(1)}%)`}
+            title={`${s.name} — ${
+              isBalanceHidden ? "••••" : formatAmount(s.amount, currency)
+            } (${share.toFixed(1)}%)`}
           />
         );
       })}
@@ -1075,7 +1083,7 @@ function CategoryRankedBar({
         )}
         {restAmount > 0 && (
           <div className="text-muted-foreground/60 px-1 pt-1 text-[10px]">
-            + {rows.length - 7} more · {formatAmount(restAmount, currency)}
+            + {rows.length - 7} more · <PrivacyAmount value={restAmount} currency={currency} />
           </div>
         )}
       </div>
@@ -1218,7 +1226,7 @@ function SpendingDeltaLine({
   return (
     <span className="lg:text-md text-sm font-light">
       <span className={cn("font-medium", tone)}>
-        {direction} {formatAmount(Math.abs(delta), currency)}
+        {direction} <PrivacyAmount value={Math.abs(delta)} currency={currency} />
         {pctSuffix}
       </span>{" "}
       <span className="text-muted-foreground">from prior period</span>

@@ -6,6 +6,7 @@
 import { useMemo, type FC } from "react";
 
 import { formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import type { Activity } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
@@ -31,6 +32,7 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   currency,
   onCellClick,
 }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const isPhone = useIsMobileViewport();
   const cols = isPhone ? 8 : 24;
   const grid = useMemo(
@@ -92,6 +94,7 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
               median={median}
               currency={currency}
               isPhone={isPhone}
+              isBalanceHidden={isBalanceHidden}
               onCellClick={onCellClick}
             />
           );
@@ -119,6 +122,7 @@ function Row({
   median,
   currency,
   isPhone,
+  isBalanceHidden,
   onCellClick,
 }: {
   day: string;
@@ -128,6 +132,7 @@ function Row({
   median: number;
   currency: string;
   isPhone: boolean;
+  isBalanceHidden: boolean;
   onCellClick?: (weekday: number, hour: number) => void;
 }) {
   const cols = cells.length;
@@ -151,7 +156,9 @@ function Row({
             hoursPerCell === 1
               ? formatHour(startHour)
               : `${formatHour(startHour)}–${formatHour(endHour + 1)}`;
-          const label = `${day} ${range} · ${amount > 0 ? formatAmount(amount, currency) : "no spend"}`;
+          const label = `${day} ${range} · ${
+            amount > 0 ? (isBalanceHidden ? "••••" : formatAmount(amount, currency)) : "no spend"
+          }`;
           if (!onCellClick) {
             return (
               <div
@@ -182,7 +189,9 @@ function Row({
         )}
       >
         {!isPhone && <span className="bg-foreground/30 inline-block h-px w-6" />}
-        <span className="font-medium">{formatCompactAmount(median, currency)}</span>
+        <span className="font-medium">
+          {isBalanceHidden ? "••••" : formatCompactAmount(median, currency)}
+        </span>
       </div>
     </>
   );

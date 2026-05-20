@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Icons,
+  PrivacyAmount,
   TableCell,
   TableRow,
 } from "@wealthfolio/ui";
@@ -175,7 +176,7 @@ function TransactionRowImpl({
         )}
       >
         {sign}
-        {formatAmount(safeAmount, a.currency)}
+        <PrivacyAmount value={safeAmount} currency={a.currency} />
       </TableCell>
       <TableCell>
         <DropdownMenu>

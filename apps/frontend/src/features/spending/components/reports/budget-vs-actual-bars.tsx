@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
-import { Skeleton } from "@wealthfolio/ui";
+import { PrivacyAmount, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 import type { BudgetCategoryRow } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
@@ -126,8 +126,8 @@ export function BudgetVsActualBars({
           <SummaryStat count={summary.counts.underused} label="under-used" tone="muted" />
         )}
         <span className="text-muted-foreground/60 ml-auto text-[11px] tabular-nums">
-          {formatAmount(summary.totalSpent, currency)} of{" "}
-          {formatAmount(summary.totalBudget, currency)}
+          <PrivacyAmount value={summary.totalSpent} currency={currency} /> of{" "}
+          <PrivacyAmount value={summary.totalBudget} currency={currency} />
         </span>
       </div>
 
@@ -197,10 +197,12 @@ function BudgetRow({ row, currency }: { row: BudgetRow; currency: string }) {
           )}
         </div>
         <div className="text-foreground/90 shrink-0 tabular-nums" style={{ minWidth: "5.5rem" }}>
-          <span className="text-xs font-semibold">{formatAmount(row.spent, currency)}</span>
+          <span className="text-xs font-semibold">
+            <PrivacyAmount value={row.spent} currency={currency} />
+          </span>
           <span className="text-muted-foreground/70 text-[11px]">
             {" / "}
-            {formatAmount(row.budgeted, currency)}
+            <PrivacyAmount value={row.budgeted} currency={currency} />
           </span>
         </div>
       </div>
@@ -211,10 +213,12 @@ function BudgetRow({ row, currency }: { row: BudgetRow; currency: string }) {
         <span className="text-muted-foreground/40">·</span>
         {row.status === "over" ? (
           <span className="text-destructive font-medium">
-            {formatAmount(overage, currency)} over
+            <PrivacyAmount value={overage} currency={currency} /> over
           </span>
         ) : (
-          <span>{formatAmount(remaining, currency)} left</span>
+          <span>
+            <PrivacyAmount value={remaining} currency={currency} /> left
+          </span>
         )}
       </div>
     </Link>

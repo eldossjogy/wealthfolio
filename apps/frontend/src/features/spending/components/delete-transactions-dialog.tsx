@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { formatAmount } from "@/lib/utils";
 
 import { pluralizeTransaction } from "../lib/transactions-helpers";
@@ -35,12 +36,13 @@ export function DeleteTransactionsDialog({
   onCancel,
   isPending,
 }: DeleteTransactionsDialogProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
+  const previewAmount = isBalanceHidden
+    ? "••••"
+    : formatAmount(parseFloat(preview?.amount ?? "0") || 0, preview?.currency ?? "USD");
   const message =
     count === 1 && preview
-      ? `Are you sure you want to delete this ${preview.activityType.toLowerCase()} of ${formatAmount(
-          parseFloat(preview.amount ?? "0") || 0,
-          preview.currency,
-        )}?`
+      ? `Are you sure you want to delete this ${preview.activityType.toLowerCase()} of ${previewAmount}?`
       : `Are you sure you want to delete ${count} transactions?`;
 
   return (

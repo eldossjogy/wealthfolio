@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@wealthfolio/ui";
 
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
@@ -314,7 +314,7 @@ export function BudgetLineChartCard({
               Spent so far
             </div>
             <div className="text-foreground text-sm font-semibold tabular-nums">
-              {formatAmount(spent, currency)}
+              <PrivacyAmount value={spent} currency={currency} />
             </div>
           </div>
           <div className="text-right">
@@ -331,7 +331,7 @@ export function BudgetLineChartCard({
                   : "text-muted-foreground/60",
               )}
             >
-              {forecastReliable ? formatAmount(forecast, currency) : "—"}
+              {forecastReliable ? <PrivacyAmount value={forecast} currency={currency} /> : "—"}
             </div>
             <div className="text-muted-foreground/60 text-[10px]">
               {forecastReliable

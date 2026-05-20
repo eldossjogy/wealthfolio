@@ -11,8 +11,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
-import { formatAmount } from "@/lib/utils";
+import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 
 import type { MonthBucket } from "../../hooks/use-monthly-history";
 
@@ -34,6 +34,7 @@ interface CashflowDatum {
  *  see both magnitudes; the Net line tells the saved-vs-overspent story directly.
  */
 export function CashflowAreaChart({ months, currency, isLoading }: CashflowAreaChartProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const data: CashflowDatum[] = useMemo(
     () =>
       months.map((m) => {
@@ -77,7 +78,9 @@ export function CashflowAreaChart({ months, currency, isLoading }: CashflowAreaC
           <YAxis
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v: number) => formatCompactAmount(v, currency)}
+            tickFormatter={(v: number) =>
+              isBalanceHidden ? "••" : formatCompactAmount(v, currency)
+            }
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             width={56}
           />
@@ -168,7 +171,7 @@ function Row({
       <span className="text-muted-foreground">{label}</span>
       <span className={`tabular-nums ${toneClass} ${bold ? "font-semibold" : "font-medium"}`}>
         {value < 0 ? "−" : ""}
-        {formatAmount(Math.abs(value), currency)}
+        <PrivacyAmount value={Math.abs(value)} currency={currency} />
       </span>
     </div>
   );

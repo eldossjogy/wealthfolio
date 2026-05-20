@@ -1,8 +1,8 @@
 import { memo, useCallback, useMemo, useState } from "react";
 
-import { Icons, Skeleton } from "@wealthfolio/ui";
+import { Icons, PrivacyAmount, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
 import type { BudgetCategoryRow, BudgetGroupRow } from "../../types/budget";
@@ -215,11 +215,11 @@ export function CategoryHierarchyTable({
             <td className="px-3 py-2.5">Total</td>
             <td className="px-3 py-2.5 text-right text-xs tabular-nums">
               <span className="text-foreground font-medium">
-                −{formatAmount(totals.spent, currency)}
+                −<PrivacyAmount value={totals.spent} currency={currency} />
               </span>
               {totals.budgeted > 0 && (
                 <span className="text-muted-foreground/70 ml-1">
-                  / {formatAmount(totals.budgeted, currency)}
+                  / <PrivacyAmount value={totals.budgeted} currency={currency} />
                 </span>
               )}
             </td>
@@ -334,10 +334,10 @@ const GroupRow = memo(function GroupRow({
           </div>
         </td>
         <td className="text-foreground px-3 py-2.5 text-right text-xs font-semibold tabular-nums">
-          −{formatAmount(group.spent, currency)}
+          −<PrivacyAmount value={group.spent} currency={currency} />
           {group.budgeted > 0 && (
             <span className="text-muted-foreground/70 ml-1 font-normal">
-              / {formatAmount(group.budgeted, currency)}
+              / <PrivacyAmount value={group.budgeted} currency={currency} />
             </span>
           )}
         </td>
@@ -439,10 +439,12 @@ const ParentRow = memo(function ParentRow({
           </div>
         </td>
         <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
-          <span className="text-foreground font-medium">−{formatAmount(node.spent, currency)}</span>
+          <span className="text-foreground font-medium">
+            −<PrivacyAmount value={node.spent} currency={currency} />
+          </span>
           {node.budgeted > 0 && (
             <span className="text-muted-foreground/70 ml-1">
-              / {formatAmount(node.budgeted, currency)}
+              / <PrivacyAmount value={node.budgeted} currency={currency} />
             </span>
           )}
         </td>
@@ -514,7 +516,7 @@ const ChildRow = memo(function ChildRow({
         </div>
       </td>
       <td className="text-muted-foreground/90 px-3 py-1.5 text-right text-xs tabular-nums">
-        −{formatAmount(node.spent, currency)}
+        −<PrivacyAmount value={node.spent} currency={currency} />
       </td>
       <td className="px-3 py-1.5"></td>
       <td

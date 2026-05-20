@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   Button,
   Icons,
+  PrivacyAmount,
   Sheet,
   SheetContent,
   SheetTitle,
@@ -11,8 +12,9 @@ import {
   formatCompactAmount,
 } from "@wealthfolio/ui";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Account, TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount, formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
 import { useCashActivitySearch } from "../../hooks/use-cash-activity-search";
@@ -45,6 +47,7 @@ export function CategoryTransactionsSheet({
   rangeEnd,
   currency,
 }: CategoryTransactionsSheetProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const isTopLevel = !!category && !category.parentId;
 
   const ids = useMemo(() => {
@@ -222,6 +225,8 @@ export function CategoryTransactionsSheet({
               value={
                 isLoading ? (
                   <Skeleton className="h-5 w-16" />
+                ) : isBalanceHidden ? (
+                  "••••"
                 ) : (
                   formatCompactAmount(stats.outflow, currency)
                 )
@@ -242,6 +247,8 @@ export function CategoryTransactionsSheet({
               value={
                 isLoading ? (
                   <Skeleton className="h-5 w-14" />
+                ) : isBalanceHidden ? (
+                  "••••"
                 ) : (
                   formatCompactAmount(stats.avg, currency)
                 )
@@ -253,6 +260,8 @@ export function CategoryTransactionsSheet({
               value={
                 isLoading ? (
                   <Skeleton className="h-5 w-14" />
+                ) : isBalanceHidden ? (
+                  "••••"
                 ) : (
                   formatCompactAmount(stats.dailyPace, currency)
                 )
@@ -302,7 +311,7 @@ export function CategoryTransactionsSheet({
                         {row.share.toFixed(0)}%
                       </span>
                       <span className="text-foreground/90 w-16 shrink-0 text-right text-xs font-semibold tabular-nums">
-                        {formatCompactAmount(row.amount, currency)}
+                        {isBalanceHidden ? "••••" : formatCompactAmount(row.amount, currency)}
                       </span>
                     </div>
                   ))
@@ -364,7 +373,7 @@ export function CategoryTransactionsSheet({
                         )}
                       >
                         {isOutflow ? "−" : "+"}
-                        {formatAmount(safeAmt, it.currency)}
+                        <PrivacyAmount value={safeAmt} currency={it.currency} />
                         {it.currency !== currency && (
                           <span className="text-muted-foreground/70 ml-1 text-[9px] uppercase tracking-wide">
                             {it.currency}

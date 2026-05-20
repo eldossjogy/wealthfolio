@@ -7,9 +7,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   Icons,
+  PrivacyAmount,
   Skeleton,
   formatCompactAmount,
 } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
@@ -103,13 +105,14 @@ interface PaceCardProps {
 }
 
 const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   // `spendingPlanned` is the period-level target straight from the insight
   // payload (already buffered + prorated). No range.months multiplier.
   const target = budget?.computed.totals.spendingPlanned ?? 0;
 
   const pace = useMemo(
-    () => computePace(range, spent, target, currency),
-    [range, spent, target, currency],
+    () => computePace(range, spent, target, currency, isBalanceHidden),
+    [range, spent, target, currency, isBalanceHidden],
   );
 
   if (isLoading) {
@@ -213,6 +216,7 @@ function computePace(
   spent: number,
   target: number,
   currency: string,
+  isBalanceHidden: boolean,
 ): PaceComputed {
   // Determine elapsed fraction of the active range. For periods that include
   // "today" we treat (today - start)/(end - start) as elapsed; for fully-past
@@ -255,8 +259,15 @@ function computePace(
   const isComplete = !isLive || daysRemaining === 0;
   const closeLabel = range.months <= 1 ? "month end" : "period close";
   const narrative = isComplete
-    ? buildClosedNarrative({ spent, target, currency })
-    : buildLiveNarrative({ diffFromPace, projection, target, currency, closeLabel });
+    ? buildClosedNarrative({ spent, target, currency, isBalanceHidden })
+    : buildLiveNarrative({
+        diffFromPace,
+        projection,
+        target,
+        currency,
+        closeLabel,
+        isBalanceHidden,
+      });
 
   return {
     status,
@@ -277,12 +288,14 @@ function buildLiveNarrative({
   target,
   currency,
   closeLabel,
+  isBalanceHidden,
 }: {
   diffFromPace: number;
   projection: number;
   target: number;
   currency: string;
   closeLabel: string;
+  isBalanceHidden: boolean;
 }): ReactNode {
   const direction = diffFromPace > 0 ? "over" : "under";
   const colorClass = diffFromPace > 0 ? "text-destructive" : "text-success";
@@ -297,12 +310,13 @@ function buildLiveNarrative({
           colorClass,
         )}
       >
-        {formatCompactAmount(Math.abs(diffFromPace), currency)} {direction} pace
+        {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(diffFromPace), currency)}{" "}
+        {direction} pace
       </div>
       <div className="text-foreground/90 text-sm">
         Projected{" "}
         <span className={cn("font-serif font-medium", projColorClass)}>
-          {formatCompactAmount(projection, currency)}
+          {isBalanceHidden ? "••••" : formatCompactAmount(projection, currency)}
         </span>{" "}
         by {closeLabel}
       </div>
@@ -317,10 +331,12 @@ function buildClosedNarrative({
   spent,
   target,
   currency,
+  isBalanceHidden,
 }: {
   spent: number;
   target: number;
   currency: string;
+  isBalanceHidden: boolean;
 }): ReactNode {
   const diff = spent - target;
   const colorClass = diff > 0 ? "text-destructive" : "text-success";
@@ -333,12 +349,13 @@ function buildClosedNarrative({
           colorClass,
         )}
       >
-        {formatCompactAmount(spent, currency)} spent
+        {isBalanceHidden ? "••••" : formatCompactAmount(spent, currency)} spent
       </div>
       <div className="text-foreground/90 text-sm">
-        Against a {formatCompactAmount(target, currency)} target —{" "}
+        Against a {isBalanceHidden ? "••••" : formatCompactAmount(target, currency)} target —{" "}
         <span className={cn("font-medium", colorClass)}>
-          {diff > 0 ? "over" : "under"} by {formatCompactAmount(Math.abs(diff), currency)}
+          {diff > 0 ? "over" : "under"} by{" "}
+          {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(diff), currency)}
         </span>
       </div>
       <div className="text-muted-foreground/80 text-xs tabular-nums">
@@ -371,6 +388,7 @@ const SpentThisPeriodCard: FC<SpentThisPeriodCardProps> = ({
   currency,
   isLoading,
 }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const segments = useMemo(
     () => buildShareSegments(breakdown, taxonomyCategories, spent),
     [breakdown, taxonomyCategories, spent],
@@ -411,7 +429,7 @@ const SpentThisPeriodCard: FC<SpentThisPeriodCardProps> = ({
       <div className={LABEL_CLASS}>{periodLabel}</div>
       <div className="mt-2 flex items-baseline justify-between gap-2">
         <div className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
-          {formatAmount(spent, currency)}
+          <PrivacyAmount value={spent} currency={currency} />
         </div>
         {deltaPct != null && (
           <span
@@ -442,7 +460,9 @@ const SpentThisPeriodCard: FC<SpentThisPeriodCardProps> = ({
                   backgroundColor: s.color,
                   borderRight: i < segments.length - 1 ? "1px solid var(--card)" : undefined,
                 }}
-                title={`${s.name} · ${formatAmount(s.amount, currency)} (${s.share.toFixed(1)}%)`}
+                title={`${s.name} · ${
+                  isBalanceHidden ? "••••" : formatAmount(s.amount, currency)
+                } (${s.share.toFixed(1)}%)`}
               />
             ))}
           </div>
@@ -574,7 +594,7 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
       <div className="mt-2 flex items-baseline justify-between gap-2">
         <div className={cn("text-2xl font-semibold tabular-nums tracking-tight", netToneClass)}>
           {totals.net >= 0 ? "+" : "−"}
-          {formatAmount(Math.abs(totals.net), currency)}
+          <PrivacyAmount value={Math.abs(totals.net)} currency={currency} />
         </div>
         {totals.income > 0 && (
           <span
@@ -599,7 +619,7 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
             />
           </div>
           <span className="text-foreground/90 w-20 shrink-0 text-right font-semibold tabular-nums">
-            {formatAmount(totals.income, currency)}
+            <PrivacyAmount value={totals.income} currency={currency} />
           </span>
         </div>
         {totals.income === 0 && (
@@ -616,7 +636,7 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
             />
           </div>
           <span className="text-foreground/90 w-20 shrink-0 text-right font-semibold tabular-nums">
-            {formatAmount(totals.spent, currency)}
+            <PrivacyAmount value={totals.spent} currency={currency} />
           </span>
         </div>
       </div>

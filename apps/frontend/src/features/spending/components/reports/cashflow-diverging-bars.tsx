@@ -12,8 +12,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
-import { formatAmount } from "@/lib/utils";
+import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 
 /** Generic cashflow datum — caller supplies one per bucket (month, week, or day). */
 export interface CashflowPoint {
@@ -50,6 +50,7 @@ interface CashflowDatum {
  * chart would draw via splines).
  */
 export function CashflowDivergingBars({ points, currency, isLoading }: CashflowDivergingBarsProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const data: CashflowDatum[] = useMemo(
     () =>
       points.map((p) => ({
@@ -101,7 +102,9 @@ export function CashflowDivergingBars({ points, currency, isLoading }: CashflowD
           <YAxis
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v: number) => formatCompactAmount(Math.abs(v), currency)}
+            tickFormatter={(v: number) =>
+              isBalanceHidden ? "••" : formatCompactAmount(Math.abs(v), currency)
+            }
             tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
             width={56}
           />
@@ -211,7 +214,7 @@ function Row({
       <span className="text-muted-foreground">{label}</span>
       <span className={`tabular-nums ${toneClass} ${bold ? "font-semibold" : "font-medium"}`}>
         {showMinus ? "−" : ""}
-        {formatAmount(Math.abs(value), currency)}
+        <PrivacyAmount value={Math.abs(value)} currency={currency} />
       </span>
     </div>
   );

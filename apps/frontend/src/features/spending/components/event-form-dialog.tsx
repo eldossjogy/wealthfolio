@@ -30,10 +30,10 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  PrivacyAmount,
   Textarea,
 } from "@wealthfolio/ui";
 
-import { formatAmount } from "@/lib/utils";
 import type { Activity } from "@/lib/types";
 
 import { useCashActivities, useSetActivityEvent } from "../hooks/use-cash-activities";
@@ -646,7 +646,7 @@ function SuggestedTransactions({
                   <p className="text-muted-foreground text-[10px]">{dateLabel}</p>
                 </div>
                 <span className="text-foreground shrink-0 text-xs font-medium tabular-nums">
-                  {formatAmount(Math.abs(amt), c.currency || "USD")}
+                  <PrivacyAmount value={Math.abs(amt)} currency={c.currency || "USD"} />
                 </span>
               </label>
             </li>

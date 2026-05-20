@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 
+import { PrivacyAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Activity } from "@/lib/types";
-import { formatAmount, formatDateISO } from "@/lib/utils";
+import { formatDateISO } from "@/lib/utils";
 
 import { getActivitySpendingAmount } from "../../lib/constants";
 
@@ -34,6 +36,7 @@ export function SpendingRhythmHeatmap({
   accent = "var(--success)",
   currency,
 }: SpendingRhythmHeatmapProps) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { rows, max, heaviestDay, heaviestDayAvg } = useMemo(
     () => buildRhythm(activities, weeks, accountTypeById),
     [accountTypeById, activities, weeks],
@@ -52,7 +55,14 @@ export function SpendingRhythmHeatmap({
           </div>
         ))}
         {rows.map((row, wi) => (
-          <RhythmRow key={wi} weekIndex={wi} cells={row} max={max} accent={accent} />
+          <RhythmRow
+            key={wi}
+            weekIndex={wi}
+            cells={row}
+            max={max}
+            accent={accent}
+            isBalanceHidden={isBalanceHidden}
+          />
         ))}
       </div>
       <div className="border-border/60 text-muted-foreground/80 mt-3 flex items-center justify-between border-t pt-2 text-xs">
@@ -60,7 +70,9 @@ export function SpendingRhythmHeatmap({
           Heaviest: <span className="text-foreground font-medium">{heaviestDay}</span>
         </span>
         {heaviestDayAvg > 0 && (
-          <span className="tabular-nums">avg {formatAmount(heaviestDayAvg, currency)}</span>
+          <span className="tabular-nums">
+            avg <PrivacyAmount value={heaviestDayAvg} currency={currency} />
+          </span>
         )}
       </div>
     </div>
@@ -72,11 +84,13 @@ function RhythmRow({
   cells,
   max,
   accent,
+  isBalanceHidden,
 }: {
   weekIndex: number;
   cells: Cell[];
   max: number;
   accent: string;
+  isBalanceHidden: boolean;
 }) {
   return (
     <>
@@ -92,7 +106,7 @@ function RhythmRow({
             className="aspect-square rounded-md transition-opacity"
             style={{ backgroundColor: accent, opacity }}
             title={`${cell.date.toLocaleDateString()} · ${
-              cell.amount > 0 ? cell.amount.toFixed(2) : "no spend"
+              cell.amount > 0 ? (isBalanceHidden ? "••••" : cell.amount.toFixed(2)) : "no spend"
             }`}
           />
         );

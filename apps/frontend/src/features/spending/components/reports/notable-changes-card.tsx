@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
-import { Skeleton } from "@wealthfolio/ui";
+import { PrivacyAmount, Skeleton } from "@wealthfolio/ui";
 import type { TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 import type { CategoryBreakdownRow, MonthlyReport } from "../../types/report";
 
@@ -131,7 +131,7 @@ function ChangeColumn({
                 {r.name}
               </span>
               <span className={cn("shrink-0 text-xs font-semibold tabular-nums", toneClass)}>
-                {arrow} {formatAmount(Math.abs(r.delta), currency)}
+                {arrow} <PrivacyAmount value={Math.abs(r.delta)} currency={currency} />
                 {r.pct != null && (
                   <span className="text-muted-foreground/60 ml-1 text-[10px] font-normal">
                     ({Math.round(Math.abs(r.pct) * 100)}%)

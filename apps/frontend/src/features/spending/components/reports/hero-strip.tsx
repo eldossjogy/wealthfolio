@@ -1,6 +1,7 @@
 import { useMemo, type FC } from "react";
 
-import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
@@ -61,6 +62,7 @@ export const PeriodSummaryHero: FC<PeriodSummaryHeroProps> = ({
     [breakdown, taxonomyCategories, spent],
   );
 
+  const { isBalanceHidden } = useBalancePrivacy();
   const periodSubtitle = months >= 2 ? `${months} months · ${days} days` : `${days} days`;
   const dailyAvg = days > 0 ? spent / days : 0;
 
@@ -78,12 +80,12 @@ export const PeriodSummaryHero: FC<PeriodSummaryHeroProps> = ({
   return (
     <HeroSection label={`Period summary · ${periodSubtitle}`}>
       <div className="text-foreground text-3xl font-bold tabular-nums tracking-tight">
-        {formatAmount(spent, currency)}
+        <PrivacyAmount value={spent} currency={currency} />
       </div>
       <div className="text-muted-foreground/80 text-xs">
         Total spent ·{" "}
         <span className="text-foreground/90 font-semibold">
-          {formatCompactAmount(dailyAvg, currency)}
+          {isBalanceHidden ? "••••" : formatCompactAmount(dailyAvg, currency)}
         </span>{" "}
         / day avg
       </div>
@@ -102,7 +104,9 @@ export const PeriodSummaryHero: FC<PeriodSummaryHeroProps> = ({
                   opacity: 0.9,
                   borderRight: i < segments.length - 1 ? "1px solid var(--card)" : undefined,
                 }}
-                title={`${s.name} · ${formatAmount(s.amount, currency)} (${s.share.toFixed(1)}%)`}
+                title={`${s.name} · ${
+                  isBalanceHidden ? "••••" : formatAmount(s.amount, currency)
+                } (${s.share.toFixed(1)}%)`}
               />
             ))}
           </div>
@@ -221,6 +225,7 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
         ? (spent / Math.max(1, dayOfMonth)) * daysInRange
         : 0;
 
+  const { isBalanceHidden } = useBalancePrivacy();
   const overBy = spent - target;
   const remaining = target - spent;
 
@@ -272,7 +277,8 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
         </span>
       </div>
       <div className="text-muted-foreground/80 mt-1 text-xs tabular-nums">
-        {formatCompactAmount(spent, currency)} of {formatCompactAmount(target, currency)}
+        {isBalanceHidden ? "••••" : formatCompactAmount(spent, currency)} of{" "}
+        {isBalanceHidden ? "••••" : formatCompactAmount(target, currency)}
       </div>
 
       {/* Horizontal progress with pace marker */}
@@ -298,19 +304,26 @@ export const BudgetStatusHero: FC<BudgetStatusHeroProps> = ({
         <span className={cn("tabular-nums", isOver ? "text-destructive" : "text-success")}>
           {isOver ? "Over by " : "Remaining "}
           <span className="font-semibold">
-            {formatCompactAmount(Math.abs(isOver ? overBy : remaining), currency)}
+            {isBalanceHidden
+              ? "••••"
+              : formatCompactAmount(Math.abs(isOver ? overBy : remaining), currency)}
           </span>
         </span>
         <span
           className={cn("tabular-nums", forecast > target ? "text-destructive" : "text-success")}
         >
-          Forecast <span className="font-semibold">{formatCompactAmount(forecast, currency)}</span>
+          Forecast{" "}
+          <span className="font-semibold">
+            {isBalanceHidden ? "••••" : formatCompactAmount(forecast, currency)}
+          </span>
           {forecast > 0 && (
             <span className="ml-1">
               (
-              {forecast > target
-                ? `+${formatCompactAmount(forecast - target, currency)}`
-                : `−${formatCompactAmount(target - forecast, currency)}`}
+              {isBalanceHidden
+                ? "••••"
+                : forecast > target
+                  ? `+${formatCompactAmount(forecast - target, currency)}`
+                  : `−${formatCompactAmount(target - forecast, currency)}`}
               )
             </span>
           )}
@@ -331,6 +344,7 @@ interface CashflowHeroProps {
 }
 
 export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoading }) => {
+  const { isBalanceHidden } = useBalancePrivacy();
   const totals = useMemo(() => {
     let income = 0;
     let spent = 0;
@@ -369,7 +383,7 @@ export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoadin
       <div className="flex items-baseline justify-between gap-2">
         <div className={cn("text-3xl font-bold tabular-nums tracking-tight", netToneClass)}>
           {totals.net >= 0 ? "+" : "−"}
-          {formatCompactAmount(Math.abs(totals.net), currency)}
+          {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(totals.net), currency)}
         </div>
         {totals.income > 0 && (
           <span
@@ -388,7 +402,7 @@ export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoadin
       <div className="mt-4 space-y-1.5">
         <div className="flex items-center gap-2">
           <span className="text-success w-20 shrink-0 text-[11px] font-semibold tabular-nums">
-            +{formatCompactAmount(totals.income, currency)}
+            +{isBalanceHidden ? "••••" : formatCompactAmount(totals.income, currency)}
           </span>
           <div className="bg-foreground/10 h-1.5 flex-1 overflow-hidden rounded-full">
             <div
@@ -399,7 +413,7 @@ export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoadin
         </div>
         <div className="flex items-center gap-2">
           <span className="text-destructive w-20 shrink-0 text-[11px] font-semibold tabular-nums">
-            −{formatCompactAmount(totals.spent, currency)}
+            −{isBalanceHidden ? "••••" : formatCompactAmount(totals.spent, currency)}
           </span>
           <div className="bg-foreground/10 h-1.5 flex-1 overflow-hidden rounded-full">
             <div
@@ -419,7 +433,7 @@ export const CashflowHero: FC<CashflowHeroProps> = ({ months, currency, isLoadin
           )}
         >
           {monthlyAvgNet >= 0 ? "+" : "−"}
-          {formatCompactAmount(Math.abs(monthlyAvgNet), currency)}
+          {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(monthlyAvgNet), currency)}
         </span>{" "}
         / month
       </div>

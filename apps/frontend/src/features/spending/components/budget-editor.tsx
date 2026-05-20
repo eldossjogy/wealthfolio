@@ -37,11 +37,12 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  PrivacyAmount,
   useIsMobile,
 } from "@wealthfolio/ui";
 import { Switch } from "@wealthfolio/ui/components/ui/switch";
 
-import { cn, formatAmount } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 import { useBudget, useBudgetMutations } from "../hooks/use-budget";
 import { FOREST_THEME } from "../lib/theme";
@@ -305,11 +306,11 @@ function BudgetSummary({
           </div>
           <div className="mt-0.5 flex items-baseline gap-1.5">
             <span className="text-foreground truncate text-lg font-semibold tabular-nums tracking-tight sm:text-xl">
-              {formatAmount(planned, currency)}
+              <PrivacyAmount value={planned} currency={currency} />
             </span>
             {income > 0 && (
               <span className="text-muted-foreground truncate text-[11px]">
-                / {formatAmount(income, currency)}
+                / <PrivacyAmount value={income} currency={currency} />
               </span>
             )}
           </div>
@@ -407,7 +408,7 @@ function GroupSummaryCell({
         {formatPercent(pct)}
       </span>
       <span className="text-foreground shrink-0 text-xs font-medium tabular-nums">
-        {formatAmount(row.plannedTotal, currency)}
+        <PrivacyAmount value={row.plannedTotal} currency={currency} />
       </span>
     </div>
   );
@@ -525,14 +526,15 @@ function GroupBudgetSection({
               />
             </div>
             <span className="text-muted-foreground truncate text-[10px] tabular-nums">
-              {formatAmount(row.actual, currency)} / {formatAmount(row.plannedTotal, currency)}
+              <PrivacyAmount value={row.actual} currency={currency} /> /{" "}
+              <PrivacyAmount value={row.plannedTotal} currency={currency} />
             </span>
           </div>
         </button>
 
         <div className="text-right">
           <div className="text-sm font-semibold tabular-nums">
-            {formatAmount(row.plannedTotal, currency)}
+            <PrivacyAmount value={row.plannedTotal} currency={currency} />
           </div>
           <div className="text-muted-foreground text-[9px] uppercase tracking-wide">
             {totalSuffix}
@@ -1113,8 +1115,9 @@ function BudgetCategoryLine({
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4} className="text-xs">
-          {formatAmount(row.actual, currency)} spent of {formatAmount(row.target, currency)} (
-          {formatPercent(sharePct)} of group)
+          <PrivacyAmount value={row.actual} currency={currency} /> spent of{" "}
+          <PrivacyAmount value={row.target} currency={currency} /> ({formatPercent(sharePct)} of
+          group)
         </TooltipContent>
       </Tooltip>
 
@@ -1286,7 +1289,7 @@ function IncomeSourcesPanel({
         <PanelHeader title={title} icon={<Icons.Wallet className="h-3.5 w-3.5" />} />
         {isMonthly && (
           <span className="text-foreground text-xs font-semibold tabular-nums">
-            {formatAmount(total, currency)}
+            <PrivacyAmount value={total} currency={currency} />
           </span>
         )}
       </div>
@@ -1335,7 +1338,7 @@ function IncomeSourcesPanel({
         <div className="border-border/40 mt-2.5 flex items-center justify-between border-t pt-2.5">
           <span className="text-muted-foreground text-xs">Total default</span>
           <span className="text-sm font-semibold tabular-nums">
-            {formatAmount(total, currency)}
+            <PrivacyAmount value={total} currency={currency} />
           </span>
         </div>
       )}
@@ -1494,10 +1497,10 @@ function OverridesSummary({
               </div>
               <div className="mt-0.5 flex items-baseline gap-1.5 pl-3 text-[11px] tabular-nums">
                 <span className="text-foreground font-medium">
-                  {formatAmount(o.monthAmount, currency)}
+                  <PrivacyAmount value={o.monthAmount} currency={currency} />
                 </span>
                 <span className="text-muted-foreground/70">
-                  vs {formatAmount(o.defaultAmount, currency)}
+                  vs <PrivacyAmount value={o.defaultAmount} currency={currency} />
                 </span>
                 <span
                   className={cn(
@@ -1509,7 +1512,14 @@ function OverridesSummary({
                         : "text-success",
                   )}
                 >
-                  {delta === 0 ? "—" : `${positive ? "+" : ""}${formatAmount(delta, currency)}`}
+                  {delta === 0 ? (
+                    "—"
+                  ) : (
+                    <>
+                      {positive ? "+" : ""}
+                      <PrivacyAmount value={delta} currency={currency} />
+                    </>
+                  )}
                 </span>
               </div>
             </div>
@@ -1595,16 +1605,17 @@ function BudgetTotalsPanel({
     <section className={cn(CARD_CLASS, "p-3 sm:p-4")}>
       <PanelHeader title="Totals" icon={<Icons.PieChart className="h-3.5 w-3.5" />} />
       <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
-        <TotalLine label="Planned" value={formatAmount(totals.spendingPlanned, currency)} />
-        <TotalLine label="Actual" value={formatAmount(totals.spendingActual, currency)} />
+        <TotalLine label="Planned" value={totals.spendingPlanned} currency={currency} />
+        <TotalLine label="Actual" value={totals.spendingActual} currency={currency} />
         <TotalLine
           label="Remaining"
-          value={formatAmount(totals.spendingRemaining, currency)}
+          value={totals.spendingRemaining}
+          currency={currency}
           destructive={totals.spendingRemaining < 0}
         />
-        <TotalLine label="Income" value={formatAmount(totals.incomePlanned, currency)} />
-        <TotalLine label="Unassigned" value={formatAmount(totals.groupBuffer, currency)} />
-        <TotalLine label="Rollover in" value={formatAmount(totals.rolloverIn, currency)} />
+        <TotalLine label="Income" value={totals.incomePlanned} currency={currency} />
+        <TotalLine label="Unassigned" value={totals.groupBuffer} currency={currency} />
+        <TotalLine label="Rollover in" value={totals.rolloverIn} currency={currency} />
       </div>
     </section>
   );
@@ -1613,10 +1624,12 @@ function BudgetTotalsPanel({
 function TotalLine({
   label,
   value,
+  currency,
   destructive = false,
 }: {
   label: string;
-  value: string;
+  value: number;
+  currency: string;
   destructive?: boolean;
 }) {
   return (
@@ -1628,7 +1641,7 @@ function TotalLine({
           destructive ? "text-destructive" : "text-foreground",
         )}
       >
-        {value}
+        <PrivacyAmount value={value} currency={currency} />
       </span>
     </div>
   );
