@@ -315,7 +315,7 @@ impl InsightService {
         });
 
         // ── 8. Uncategorized ──────────────────────────────────────────────────
-        let uncategorized = UncategorizedBucket {
+        let mut uncategorized = UncategorizedBucket {
             spent: current_agg.uncategorized_spend,
             prior_spent: prior_agg.uncategorized_spend,
             delta_vs_prior_pct: pct_change(
@@ -357,14 +357,12 @@ impl InsightService {
         );
 
         // ── 10. Backfill pct_of_total_spent now that we know the total ────────
-        let mut group_insights = group_insights;
         for g in &mut group_insights {
             g.pct_of_total_spent = pct_share(g.spent, total_spent);
             for c in &mut g.categories {
                 c.pct_of_total_spent = pct_share(c.spent, total_spent);
             }
         }
-        let mut uncategorized = uncategorized;
         uncategorized.pct_of_total_spent = pct_share(uncategorized.spent, total_spent);
 
         // ── 11. Daily + monthly time series ───────────────────────────────────
@@ -881,6 +879,11 @@ fn is_leap(year: i32) -> bool {
 // Pace + status
 // ──────────────────────────────────────────────────────────────────────────────
 
+// 11 args is intentional — splitting into a struct here would just be
+// shuffling the same fields with no shared call site to benefit. The window
+// inputs (start/end/now), the FX trio (fx/target_currency/fx_as_of), and
+// the result-aggregation pair (spent/budget) all serve different concerns.
+#[allow(clippy::too_many_arguments)]
 fn compute_pace(
     acts: &[&Activity],
     account_types: &HashMap<String, String>,

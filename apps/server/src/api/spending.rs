@@ -627,15 +627,15 @@ pub fn router() -> Router<Arc<AppState>> {
             post(search_cash_activities),
         )
         .route(
-            "/v1/spending/cash-activities/:activity_id/event",
+            "/v1/spending/cash-activities/{activity_id}/event",
             put(set_activity_event),
         )
         .route(
-            "/v1/spending/activities/:activity_id/assignments",
+            "/v1/spending/activities/{activity_id}/assignments",
             get(get_activity_assignments).put(assign_activity_category),
         )
         .route(
-            "/v1/spending/activities/:activity_id/assignments/:taxonomy_id",
+            "/v1/spending/activities/{activity_id}/assignments/{taxonomy_id}",
             delete(unassign_activity_category),
         )
         .route(
@@ -647,17 +647,17 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_categorization_rules).post(create_categorization_rule),
         )
         .route(
-            "/v1/spending/rules/:id",
+            "/v1/spending/rules/{id}",
             put(update_categorization_rule).delete(delete_categorization_rule),
         )
         .route("/v1/spending/rules/rerun", post(rerun_categorization_rules))
         .route("/v1/spending/rule-presets", get(list_rule_presets))
         .route(
-            "/v1/spending/rule-presets/:preset_id/import",
+            "/v1/spending/rule-presets/{preset_id}/import",
             post(import_rule_preset),
         )
         .route(
-            "/v1/spending/rule-presets/:preset_id",
+            "/v1/spending/rule-presets/{preset_id}",
             delete(remove_rule_preset),
         )
         .route(
@@ -665,18 +665,18 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_event_types).post(create_event_type),
         )
         .route(
-            "/v1/spending/event-types/:id",
+            "/v1/spending/event-types/{id}",
             put(update_event_type).delete(delete_event_type),
         )
         .route("/v1/spending/events", get(list_events).post(create_event))
         .route(
-            "/v1/spending/events/:id",
+            "/v1/spending/events/{id}",
             put(update_event).delete(delete_event),
         )
         .route("/v1/spending/budget", get(get_budget))
         .route("/v1/spending/budget/targets", post(upsert_budget_target))
         .route(
-            "/v1/spending/budget/targets/:id",
+            "/v1/spending/budget/targets/{id}",
             delete(delete_budget_target),
         )
         .route(
@@ -684,7 +684,7 @@ pub fn router() -> Router<Arc<AppState>> {
             post(upsert_budget_rollover_setting),
         )
         .route(
-            "/v1/spending/budget/rollovers/:id",
+            "/v1/spending/budget/rollovers/{id}",
             delete(delete_budget_rollover_setting),
         )
         .route("/v1/spending/budget/groups", post(create_budget_group))
@@ -693,7 +693,7 @@ pub fn router() -> Router<Arc<AppState>> {
             post(reset_budget_groups),
         )
         .route(
-            "/v1/spending/budget/groups/:id",
+            "/v1/spending/budget/groups/{id}",
             put(update_budget_group).delete(delete_budget_group),
         )
         .route(

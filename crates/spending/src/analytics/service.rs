@@ -948,6 +948,11 @@ fn empty_summary(period: &str) -> SpendingSummary {
     }
 }
 
+// 9 args is intentional — every parameter serves a distinct concern (period
+// label, activities, assignment lookup, category metadata, account types,
+// target currency, FX, snapshot date, timezone). No call site repetition to
+// extract into a struct.
+#[allow(clippy::too_many_arguments)]
 fn build_summary(
     period: &str,
     activities: &[&Activity],

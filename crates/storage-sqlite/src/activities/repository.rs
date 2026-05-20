@@ -2170,6 +2170,7 @@ mod tests {
             import_run_id: None,
             is_user_modified: 0,
             needs_review: 0,
+            event_id: None,
             created_at: "2024-01-15T00:00:00+00:00".to_string(),
             updated_at: "2024-01-15T00:00:00+00:00".to_string(),
         };
@@ -2292,6 +2293,7 @@ mod tests {
                 notes: None,
                 fx_rate: None,
                 metadata: None,
+                event_id: None,
             })
             .await
             .expect("update activity");

@@ -1122,12 +1122,25 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       const { filter } = (payload ?? {}) as { filter?: Record<string, unknown> };
       if (filter) {
         const params = new URLSearchParams();
+        // Stringify only primitives so the query string never gets
+        // "[object Object]" from an accidental nested value. Filter shape is
+        // string/number/boolean/string[]; the guard keeps that contract
+        // visible (and silences @typescript-eslint/no-base-to-string).
+        const toQs = (val: unknown): string | null => {
+          if (typeof val === "string") return val;
+          if (typeof val === "number" || typeof val === "boolean") return String(val);
+          return null;
+        };
         for (const [k, v] of Object.entries(filter)) {
           if (v === undefined || v === null) continue;
           if (Array.isArray(v)) {
-            for (const item of v) params.append(`${k}[]`, String(item));
+            for (const item of v) {
+              const s = toQs(item);
+              if (s !== null) params.append(`${k}[]`, s);
+            }
           } else {
-            params.set(k, String(v));
+            const s = toQs(v);
+            if (s !== null) params.set(k, s);
           }
         }
         const qs = params.toString();

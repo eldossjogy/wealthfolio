@@ -230,7 +230,7 @@ interface WeekdayHourGrid {
 function buildWeekdayHourGrid(
   activities: Activity[],
   accountTypeById?: Map<string, string>,
-  cols: number = 24,
+  cols = 24,
 ): WeekdayHourGrid {
   const safeCols = cols > 0 && cols <= 24 ? cols : 24;
   const hoursPerCell = Math.max(1, Math.round(24 / safeCols));
