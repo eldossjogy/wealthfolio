@@ -40,6 +40,7 @@ export function useBudgetMutations(periodKey?: string) {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_BUDGET] });
     qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_REPORT] });
+    qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_INSIGHT] });
   };
 
   const upsertTarget = useMutation({

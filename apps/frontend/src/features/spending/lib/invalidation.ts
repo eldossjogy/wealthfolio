@@ -17,6 +17,7 @@ export function invalidateSpendingCaches(qc: QueryClient, opts: { skip?: readonl
     QueryKeys.SPENDING_TRANSACTIONS,
     QueryKeys.SPENDING_REPORT,
     QueryKeys.SPENDING_BUDGET,
+    QueryKeys.SPENDING_INSIGHT,
     QueryKeys.SPENDING_EVENTS,
   ];
   for (const key of keys) {

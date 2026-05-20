@@ -11,6 +11,7 @@ export const QueryKeys = {
   SPENDING_EVENT_TYPES: "spending_event_types",
   SPENDING_BUDGET: "spending_budget",
   SPENDING_REPORT: "spending_report",
+  SPENDING_INSIGHT: "spending_insight",
 
   // Activity related keys
   ACTIVITY_DATA: "activity-data",
