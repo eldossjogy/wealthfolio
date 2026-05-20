@@ -29,6 +29,10 @@ export interface WhenWhereStageProps {
   /** Period start/end for the events strip. */
   rangeStart: Date;
   rangeEnd: Date;
+  /** 0 = current window, 1+ = N windows back. */
+  windowOffset: number;
+  onPrevWindow: () => void;
+  onNextWindow: () => void;
   /** Fired when a heatmap cell is clicked. Weekday is Mon=0..Sun=6, hour is 0..23. */
   onHeatmapCellClick?: (weekday: number, hour: number) => void;
 }
@@ -41,6 +45,9 @@ export function WhenWhereStage({
   currency,
   rangeStart,
   rangeEnd,
+  windowOffset,
+  onPrevWindow,
+  onNextWindow,
   onHeatmapCellClick,
 }: WhenWhereStageProps) {
   // Derived: user's pick wins if it's still in the list; otherwise fall back to
@@ -69,7 +76,13 @@ export function WhenWhereStage({
         onCellClick={onHeatmapCellClick}
       />
       <div className="flex flex-col gap-4">
-        {events.length > 0 ? (
+        {/* Empty + offset=0 (current period, no events ever tagged here): show the
+            "tag your first event" CTA. Empty + offset>0 (paginated to a quiet
+            historical window): render the timeline card empty so the < > arrows
+            stay reachable. */}
+        {events.length === 0 && windowOffset === 0 ? (
+          <EmptyEventsCard rangeStart={rangeStart} rangeEnd={rangeEnd} />
+        ) : (
           <>
             {useCalendar ? (
               <EventsCalendarCard
@@ -88,6 +101,9 @@ export function WhenWhereStage({
                 accountTypeById={accountTypeById}
                 selectedId={selectedId}
                 onSelect={setOverride}
+                windowOffset={windowOffset}
+                onPrevWindow={onPrevWindow}
+                onNextWindow={onNextWindow}
               />
             )}
             {selected && (
@@ -102,8 +118,6 @@ export function WhenWhereStage({
               />
             )}
           </>
-        ) : (
-          <EmptyEventsCard rangeStart={rangeStart} rangeEnd={rangeEnd} />
         )}
       </div>
     </div>

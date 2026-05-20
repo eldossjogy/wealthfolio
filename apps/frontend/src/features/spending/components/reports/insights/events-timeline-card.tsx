@@ -33,6 +33,10 @@ export interface EventsTimelineCardProps {
   accountTypeById?: Map<string, string>;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** 0 = current window, 1+ = N windows back. */
+  windowOffset: number;
+  onPrevWindow: () => void;
+  onNextWindow: () => void;
 }
 
 export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
@@ -44,6 +48,9 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   accountTypeById,
   selectedId,
   onSelect,
+  windowOffset,
+  onPrevWindow,
+  onNextWindow,
 }) => {
   const { openEventDialog } = useEventDialog();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -225,13 +232,46 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               {t.name.toUpperCase()}
             </span>
           ))}
+          <div className="ml-1 inline-flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Previous period"
+                  className="h-7 w-7 rounded-full"
+                  onClick={onPrevWindow}
+                >
+                  <Icons.ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Previous period</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Next period"
+                  className="h-7 w-7 rounded-full"
+                  onClick={onNextWindow}
+                  disabled={windowOffset === 0}
+                >
+                  <Icons.ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {windowOffset === 0 ? "Already at current period" : "Next period"}
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="outline"
                 size="icon"
                 aria-label="Create event"
-                className="ml-1 h-7 w-7 rounded-full"
+                className="h-7 w-7 rounded-full"
                 onClick={() =>
                   openEventDialog({
                     prefill: { startDate: rangeStart, endDate: rangeEnd },

@@ -103,8 +103,9 @@ interface PaceCardProps {
 }
 
 const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading }) => {
-  const monthlyTarget = budget?.computed.totals.spendingPlanned ?? 0;
-  const target = monthlyTarget * Math.max(1, range.months);
+  // `spendingPlanned` is the period-level target straight from the insight
+  // payload (already buffered + prorated). No range.months multiplier.
+  const target = budget?.computed.totals.spendingPlanned ?? 0;
 
   const pace = useMemo(
     () => computePace(range, spent, target, currency),

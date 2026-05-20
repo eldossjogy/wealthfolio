@@ -35,7 +35,7 @@ export interface MonthlyHistory {
   isLoading: boolean;
 }
 
-export function useMonthlyHistory(range: ReportsRange): MonthlyHistory {
+export function useMonthlyHistory(range: ReportsRange, enabled = true): MonthlyHistory {
   const months = useMemo(() => monthsInRange(range), [range]);
 
   const queries = useQueries({
@@ -46,6 +46,7 @@ export function useMonthlyHistory(range: ReportsRange): MonthlyHistory {
           startDate: m.start.toISOString(),
           endDate: m.end.toISOString(),
         }),
+      enabled,
       staleTime: 5 * 60_000, // 5 minutes
     })),
   });
