@@ -1104,15 +1104,27 @@ fn apply_remote_event_lww_tx(
                         // (TODO: Phase B should re-derive from the new
                         // latest here to avoid emptiness between sync and
                         // the next save.)
-                        if let Some(account_value) = payload_obj.get("accountId") {
-                            if let Some(account_id) = account_value.as_str() {
-                                diesel::sql_query(format!(
-                                    "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
-                                    escape_sqlite_str(account_id)
-                                ))
-                                .execute(conn)
-                                .map_err(StorageError::from)?;
-                            }
+                        //
+                        // Query account_id back out of the just-written
+                        // snapshot row rather than parsing it from the
+                        // payload — sidesteps any camelCase / snake_case
+                        // ambiguity in the wire protocol.
+                        let account_id: Option<String> = {
+                            use crate::schema::holdings_snapshots::dsl as hs;
+                            hs::holdings_snapshots
+                                .find(entity_id_value.as_str())
+                                .select(hs::account_id)
+                                .first::<String>(conn)
+                                .optional()
+                                .map_err(StorageError::from)?
+                        };
+                        if let Some(account_id) = account_id {
+                            diesel::sql_query(format!(
+                                "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
+                                escape_sqlite_str(&account_id)
+                            ))
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
                         }
                     }
                 }
