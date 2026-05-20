@@ -366,6 +366,13 @@ impl SnapshotService {
             }
         }
 
+        // Accumulate per-account lot sync failures so the loop can complete
+        // (other accounts' work still proceeds) but the function can return
+        // an aggregate error at the end. Without this, a lot-sync failure
+        // would be logged and silently swallowed, leaving the JSON snapshot
+        // and the lots table to diverge with no signal to the caller.
+        let mut lot_sync_errors: Vec<String> = Vec::new();
+
         // Persist keyframe snapshots
         for acc_id in accounts_needing_calculation.keys() {
             let frames: Vec<_> = keyframes_to_save
@@ -455,6 +462,7 @@ impl SnapshotService {
                     };
                     if let Err(e) = result {
                         error!("Failed to sync lot rows for account {}: {}", acc_id, e);
+                        lot_sync_errors.push(format!("{}: {}", acc_id, e));
                     }
                 }
             }
@@ -492,6 +500,22 @@ impl SnapshotService {
                     }
                 }
             }
+        }
+
+        // Surface any per-account lot-sync failures collected during the
+        // loop. Snapshots for the affected accounts WERE saved (the
+        // snapshot write happens via `?` before the lot sync), but the
+        // lots table diverged. Returning Err signals the caller that the
+        // dual-write contract was partially broken and a retry / Full
+        // recalc is needed to bring things back in sync.
+        if !lot_sync_errors.is_empty() {
+            return Err(Error::Database(crate::errors::DatabaseError::QueryFailed(
+                format!(
+                    "lot sync failed for {} account(s): {}",
+                    lot_sync_errors.len(),
+                    lot_sync_errors.join("; ")
+                ),
+            )));
         }
 
         Ok(keyframes_to_save.len())
@@ -1799,10 +1823,21 @@ impl SnapshotServiceTrait for SnapshotService {
                     .all(|s| s.snapshot_date <= snapshot.snapshot_date);
 
             if is_latest {
-                let open_lots = extract_lot_records(&snapshot);
-                let _ = check_lot_quantity_consistency(&snapshot, &open_lots);
+                // HOLDINGS-mode positions don't carry per-acquisition lot
+                // detail — manual_snapshot_service constructs each Position
+                // with an empty `lots: VecDeque`. Calling
+                // `extract_lot_records` here returns [] and then
+                // `replace_lots_for_account(&[])` would wipe the synthetic
+                // HOLDINGS lots that the startup backfill (or a prior save)
+                // had populated. Use the synthetic derivation that mirrors
+                // the position aggregates — same as
+                // `backfill_lots_for_holdings_accounts` and
+                // `refresh_lots_from_latest_snapshot`.
+                let open_date = snapshot.snapshot_date.format("%Y-%m-%d").to_string();
+                let lot_records =
+                    synthetic_holdings_lot_records(account_id, &snapshot.positions, &open_date);
                 lot_repo
-                    .replace_lots_for_account(account_id, &open_lots)
+                    .replace_lots_for_account(account_id, &lot_records)
                     .await
                     .map_err(|e| {
                         error!(
@@ -1954,7 +1989,6 @@ impl SnapshotServiceTrait for SnapshotService {
         }
 
         let mut total = 0usize;
-        let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
         for acc in &holdings_accounts {
             // Lots reflect current state, so derive them from the LATEST
@@ -1975,29 +2009,7 @@ impl SnapshotServiceTrait for SnapshotService {
                 .get_snapshot_positions(&latest.id)?;
 
             let open_date = latest.snapshot_date.format("%Y-%m-%d").to_string();
-            let lot_records: Vec<crate::lots::LotRecord> = positions
-                .values()
-                .filter(|p| p.quantity > rust_decimal::Decimal::ZERO)
-                .map(|p| crate::lots::LotRecord {
-                    id: format!("HOLDINGS-{}-{}", acc.id, p.asset_id),
-                    account_id: acc.id.clone(),
-                    asset_id: p.asset_id.clone(),
-                    open_date: open_date.clone(),
-                    open_activity_id: None,
-                    original_quantity: p.quantity.to_string(),
-                    remaining_quantity: p.quantity.to_string(),
-                    cost_per_unit: p.average_cost.to_string(),
-                    original_cost_basis: p.total_cost_basis.to_string(),
-                    remaining_cost_basis: p.total_cost_basis.to_string(),
-                    fee_allocated: "0".to_string(),
-                    split_ratio: "1".to_string(),
-                    is_closed: false,
-                    close_date: None,
-                    close_activity_id: None,
-                    created_at: now.clone(),
-                    updated_at: now.clone(),
-                })
-                .collect();
+            let lot_records = synthetic_holdings_lot_records(&acc.id, &positions, &open_date);
 
             let count = lot_records.len();
             if let Err(e) = lot_repo
@@ -2064,31 +2076,9 @@ impl SnapshotServiceTrait for SnapshotService {
                     .snapshot_repository
                     .get_snapshot_positions(&snapshot.id)?;
 
-                let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
                 let open_date = snapshot.snapshot_date.format("%Y-%m-%d").to_string();
-                let lot_records: Vec<crate::lots::LotRecord> = positions
-                    .values()
-                    .filter(|p| p.quantity > rust_decimal::Decimal::ZERO)
-                    .map(|p| crate::lots::LotRecord {
-                        id: format!("HOLDINGS-{}-{}", account_id, p.asset_id),
-                        account_id: account_id.to_string(),
-                        asset_id: p.asset_id.clone(),
-                        open_date: open_date.clone(),
-                        open_activity_id: None,
-                        original_quantity: p.quantity.to_string(),
-                        remaining_quantity: p.quantity.to_string(),
-                        cost_per_unit: p.average_cost.to_string(),
-                        original_cost_basis: p.total_cost_basis.to_string(),
-                        remaining_cost_basis: p.total_cost_basis.to_string(),
-                        fee_allocated: "0".to_string(),
-                        split_ratio: "1".to_string(),
-                        is_closed: false,
-                        close_date: None,
-                        close_activity_id: None,
-                        created_at: now.clone(),
-                        updated_at: now.clone(),
-                    })
-                    .collect();
+                let lot_records =
+                    synthetic_holdings_lot_records(account_id, &positions, &open_date);
 
                 let count = lot_records.len();
                 lot_repo
@@ -2125,6 +2115,54 @@ impl SnapshotServiceTrait for SnapshotService {
         self.refresh_lots_from_latest_snapshot(account_id).await?;
         Ok(())
     }
+}
+
+/// Build the synthetic HOLDINGS lot rows that represent the latest non-
+/// calculated snapshot for an account.
+///
+/// HOLDINGS-mode positions don't carry per-acquisition lot detail (the user
+/// enters aggregate quantity + average cost), so the lots table holds one
+/// synthetic row per (account, asset) with the aggregate values copied
+/// across. `open_activity_id` is always None — these aren't tied to any
+/// activity row — and `split_ratio` is fixed at "1" because we don't know
+/// the split history of imported positions.
+///
+/// Shared by `backfill_lots_for_holdings_accounts`,
+/// `refresh_lots_from_latest_snapshot`, and the
+/// `save_manual_snapshot` lot hook. Without this helper, the
+/// `save_manual_snapshot` path was incorrectly building lots from the
+/// in-memory `Position::lots` VecDeque — which manual entry leaves empty —
+/// and `replace_lots_for_account(&[])` would wipe the account's lots on
+/// every save.
+fn synthetic_holdings_lot_records(
+    account_id: &str,
+    positions: &std::collections::HashMap<String, crate::portfolio::snapshot::Position>,
+    open_date: &str,
+) -> Vec<crate::lots::LotRecord> {
+    let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    positions
+        .values()
+        .filter(|p| p.quantity > rust_decimal::Decimal::ZERO)
+        .map(|p| crate::lots::LotRecord {
+            id: format!("HOLDINGS-{}-{}", account_id, p.asset_id),
+            account_id: account_id.to_string(),
+            asset_id: p.asset_id.clone(),
+            open_date: open_date.to_string(),
+            open_activity_id: None,
+            original_quantity: p.quantity.to_string(),
+            remaining_quantity: p.quantity.to_string(),
+            cost_per_unit: p.average_cost.to_string(),
+            original_cost_basis: p.total_cost_basis.to_string(),
+            remaining_cost_basis: p.total_cost_basis.to_string(),
+            fee_allocated: "0".to_string(),
+            split_ratio: "1".to_string(),
+            is_closed: false,
+            close_date: None,
+            close_activity_id: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        })
+        .collect()
 }
 
 /// Orders accounts for a given day so that TRANSFER_OUT sources are processed

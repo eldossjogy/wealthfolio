@@ -975,6 +975,28 @@ fn apply_remote_event_lww_tx(
         } else if let Some((table_name, pk_name)) = entity_storage_mapping(&entity) {
             match op {
                 SyncOperation::Delete => {
+                    // For SyncEntity::Snapshot: HOLDINGS-mode lots are
+                    // derived from the latest non-calculated snapshot for
+                    // an account, but they aren't linked to the snapshot
+                    // row via FK. Read the snapshot's account_id BEFORE
+                    // the row is deleted so we can clean up the synthetic
+                    // HOLDINGS lots that may have been derived from it.
+                    // (TODO: a heavier Phase B fix would re-derive from
+                    // the *new* latest snapshot to avoid emptiness between
+                    // sync-delete and the next local save.)
+                    let snapshot_account_id_for_lot_cleanup: Option<String> =
+                        if matches!(entity, SyncEntity::Snapshot) {
+                            use crate::schema::holdings_snapshots::dsl as hs;
+                            hs::holdings_snapshots
+                                .find(entity_id_value.as_str())
+                                .select(hs::account_id)
+                                .first::<String>(conn)
+                                .optional()
+                                .map_err(StorageError::from)?
+                        } else {
+                            None
+                        };
+
                     let sql = format!(
                         "DELETE FROM {} WHERE {} = '{}'",
                         quote_identifier(table_name),
@@ -984,6 +1006,15 @@ fn apply_remote_event_lww_tx(
                     diesel::sql_query(sql)
                         .execute(conn)
                         .map_err(StorageError::from)?;
+
+                    if let Some(account_id) = snapshot_account_id_for_lot_cleanup {
+                        diesel::sql_query(format!(
+                            "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
+                            escape_sqlite_str(&account_id)
+                        ))
+                        .execute(conn)
+                        .map_err(StorageError::from)?;
+                    }
                 }
                 SyncOperation::Create | SyncOperation::Update => {
                     let payload_obj = payload_json.as_object().ok_or_else(|| {
@@ -1063,6 +1094,26 @@ fn apply_remote_event_lww_tx(
                         ))
                         .execute(conn)
                         .map_err(StorageError::from)?;
+
+                        // Same concern for the lots table: synthetic
+                        // HOLDINGS-mode lots are derived from the latest
+                        // non-calculated snapshot but have no FK link to
+                        // the snapshot row, so an `ON CONFLICT DO UPDATE`
+                        // on `holdings_snapshots` doesn't propagate. Clear
+                        // them so the next save_manual_snapshot rebuilds.
+                        // (TODO: Phase B should re-derive from the new
+                        // latest here to avoid emptiness between sync and
+                        // the next save.)
+                        if let Some(account_value) = payload_obj.get("accountId") {
+                            if let Some(account_id) = account_value.as_str() {
+                                diesel::sql_query(format!(
+                                    "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
+                                    escape_sqlite_str(account_id)
+                                ))
+                                .execute(conn)
+                                .map_err(StorageError::from)?;
+                            }
+                        }
                     }
                 }
             }
@@ -5035,6 +5086,168 @@ mod tests {
         assert_eq!(
             after.c, 0,
             "stale relational rows must be cleared on sync upsert"
+        );
+    }
+
+    /// Regression: HOLDINGS-mode synthetic lots are derived from the
+    /// account's latest non-calculated snapshot but aren't linked via FK.
+    /// A sync that UPDATEs that snapshot row in place must also clear the
+    /// derived synthetic lots, so they don't carry the pre-sync positions
+    /// indefinitely.
+    #[tokio::test]
+    async fn replay_snapshot_update_clears_stale_holdings_lots() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account_for_test(&mut conn, "acc-holdings-sync").expect("insert account");
+        diesel::sql_query(
+            "INSERT INTO assets (id, kind, name, display_code, notes, metadata, is_active, quote_mode, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, created_at, updated_at)
+             VALUES ('asset-holdings-sync', 'INVESTMENT', 'Holdings Asset', 'HLD', NULL, NULL, 1, 'MANUAL', 'USD', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .execute(&mut conn)
+        .expect("insert asset");
+
+        let snap_id = "snap-holdings-sync";
+        diesel::sql_query(format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES ('{}', 'acc-holdings-sync', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            snap_id
+        ))
+        .execute(&mut conn)
+        .expect("insert snapshot");
+
+        // Pre-seed a synthetic HOLDINGS lot — what backfill or save_manual
+        // would have produced for the receiving device pre-sync.
+        diesel::sql_query(
+            "INSERT INTO lots (id, account_id, asset_id, open_date, open_activity_id, original_quantity, remaining_quantity, cost_per_unit, original_cost_basis, remaining_cost_basis, fee_allocated, is_closed, close_date, close_activity_id, created_at, updated_at, split_ratio) \
+             VALUES ('HOLDINGS-acc-holdings-sync-asset-holdings-sync', 'acc-holdings-sync', 'asset-holdings-sync', '2026-01-01', NULL, '10', '10', '100', '1000', '1000', '0', 0, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '1')",
+        )
+        .execute(&mut conn)
+        .expect("insert synthetic lot");
+
+        let before: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM lots WHERE account_id = 'acc-holdings-sync' AND open_activity_id IS NULL",
+        )
+        .get_result(&mut conn)
+        .expect("count before");
+        assert_eq!(before.c, 1);
+
+        drop(conn);
+
+        // Remote sync sends an updated snapshot for the same id. The
+        // payload's positions JSON now references the asset with a
+        // different quantity.
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                snap_id.to_string(),
+                SyncOperation::Update,
+                "evt-snap-update-lots".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": snap_id,
+                    "accountId": "acc-holdings-sync",
+                    "snapshotDate": "2026-01-01",
+                    "currency": "USD",
+                    "positions": "{}",
+                    "cashBalances": "{}",
+                    "costBasis": "0",
+                    "netContribution": "0",
+                    "calculatedAt": "2026-02-01T00:00:00Z",
+                    "netContributionBase": "0",
+                    "cashTotalAccountCurrency": "0",
+                    "cashTotalBaseCurrency": "0",
+                    "source": "MANUAL_ENTRY",
+                }),
+            )
+            .await
+            .expect("apply snapshot update");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let after: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM lots WHERE account_id = 'acc-holdings-sync' AND open_activity_id IS NULL",
+        )
+        .get_result(&mut conn)
+        .expect("count after");
+        assert_eq!(
+            after.c, 0,
+            "synthetic HOLDINGS lots must be cleared on sync update"
+        );
+    }
+
+    /// Same as above but for the DELETE op: the sync removes the snapshot
+    /// row entirely; the receiving device's HOLDINGS lots derived from it
+    /// must not survive the operation.
+    #[tokio::test]
+    async fn replay_snapshot_delete_clears_stale_holdings_lots() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account_for_test(&mut conn, "acc-holdings-del").expect("insert account");
+        diesel::sql_query(
+            "INSERT INTO assets (id, kind, name, display_code, notes, metadata, is_active, quote_mode, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, created_at, updated_at)
+             VALUES ('asset-holdings-del', 'INVESTMENT', 'Holdings Asset', 'HLD', NULL, NULL, 1, 'MANUAL', 'USD', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .execute(&mut conn)
+        .expect("insert asset");
+
+        let snap_id = "snap-holdings-del";
+        diesel::sql_query(format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES ('{}', 'acc-holdings-del', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            snap_id
+        ))
+        .execute(&mut conn)
+        .expect("insert snapshot");
+
+        diesel::sql_query(
+            "INSERT INTO lots (id, account_id, asset_id, open_date, open_activity_id, original_quantity, remaining_quantity, cost_per_unit, original_cost_basis, remaining_cost_basis, fee_allocated, is_closed, close_date, close_activity_id, created_at, updated_at, split_ratio) \
+             VALUES ('HOLDINGS-acc-holdings-del-asset-holdings-del', 'acc-holdings-del', 'asset-holdings-del', '2026-01-01', NULL, '10', '10', '100', '1000', '1000', '0', 0, NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '1')",
+        )
+        .execute(&mut conn)
+        .expect("insert synthetic lot");
+
+        drop(conn);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                snap_id.to_string(),
+                SyncOperation::Delete,
+                "evt-snap-delete-lots".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({}),
+            )
+            .await
+            .expect("apply snapshot delete");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let after: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM lots WHERE account_id = 'acc-holdings-del' AND open_activity_id IS NULL",
+        )
+        .get_result(&mut conn)
+        .expect("count after");
+        assert_eq!(
+            after.c, 0,
+            "synthetic HOLDINGS lots must be cleared on sync delete"
         );
     }
 }

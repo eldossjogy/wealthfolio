@@ -428,22 +428,33 @@ impl LotRepositoryTrait for LotsRepository {
 
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>> {
         // Quantities are stored as TEXT for Decimal precision, so SUM() in
-        // SQLite would force a lossy REAL cast. Fetch only the two columns
-        // we need (avoiding the full LotRecordDB row) and sum as Decimal in
-        // Rust to keep precision intact.
+        // SQLite would force a lossy REAL cast. Fetch only the columns we
+        // need (avoiding the full LotRecordDB row) and aggregate as
+        // Decimal in Rust to keep precision intact.
+        //
+        // `remaining_quantity` is in as-acquired (pre-split) units;
+        // effective shares held now = remaining_quantity * split_ratio.
+        // Callers (e.g. quote sync planning) want the effective open
+        // position per asset, so the multiplication happens here. A lot
+        // serialized before `split_ratio` existed may have it as "0" or
+        // "" — treat both as 1.0 to match `Lot::effective_split_ratio`.
         use crate::schema::lots::dsl;
 
         let mut conn = get_connection(&self.pool)?;
-        let rows: Vec<(String, String)> = dsl::lots
+        let rows: Vec<(String, String, String)> = dsl::lots
             .filter(dsl::is_closed.eq(0))
-            .select((dsl::asset_id, dsl::remaining_quantity))
+            .select((dsl::asset_id, dsl::remaining_quantity, dsl::split_ratio))
             .load(&mut conn)
             .map_err(StorageError::from)?;
 
         let mut quantities: HashMap<String, Decimal> = HashMap::new();
-        for (asset_id, remaining) in rows {
+        for (asset_id, remaining, split_ratio) in rows {
             let qty = remaining.parse::<Decimal>().unwrap_or(Decimal::ZERO);
-            *quantities.entry(asset_id).or_default() += qty;
+            let ratio = match split_ratio.parse::<Decimal>() {
+                Ok(r) if !r.is_zero() => r,
+                _ => Decimal::ONE,
+            };
+            *quantities.entry(asset_id).or_default() += qty * ratio;
         }
         Ok(quantities)
     }
@@ -987,5 +998,42 @@ mod tests {
         assert_eq!(l.cost_per_unit, "200");
         assert_eq!(l.original_cost_basis, "20025");
         assert_eq!(l.fee_allocated, "25");
+    }
+
+    /// Regression: `get_open_position_quantities` must apply `split_ratio`.
+    /// Quantities are stored in as-acquired (pre-split) units; the returned
+    /// per-asset total is the effective (current) quantity used by quote
+    /// sync planning and similar consumers. Pre-fix the sum was raw
+    /// remaining_quantity, undercounting post-split holdings.
+    #[tokio::test]
+    async fn get_open_position_quantities_applies_split_ratio() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_asset(&pool, "AAPL");
+        insert_asset(&pool, "MSFT");
+
+        // AAPL: 10 shares as-acquired, 2:1 split applied → effective 20.
+        let mut split_lot = make_lot_record("lot-aapl", "acc1", "AAPL", "10");
+        split_lot.original_quantity = "10".to_string();
+        split_lot.split_ratio = "2".to_string();
+
+        // MSFT: 50 shares, no split.
+        let plain_lot = make_lot_record("lot-msft", "acc1", "MSFT", "50");
+
+        repo.replace_lots_for_account("acc1", &[split_lot, plain_lot])
+            .await
+            .unwrap();
+
+        let qtys = repo.get_open_position_quantities().await.unwrap();
+        assert_eq!(
+            qtys.get("AAPL").copied(),
+            Some(rust_decimal::Decimal::from(20)),
+            "effective quantity must be remaining_quantity * split_ratio"
+        );
+        assert_eq!(
+            qtys.get("MSFT").copied(),
+            Some(rust_decimal::Decimal::from(50)),
+            "non-split lots return remaining_quantity unchanged"
+        );
     }
 }
