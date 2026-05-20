@@ -103,7 +103,6 @@ export function WhatChangedStage({
       <CategoryTrendsSection
         months={months}
         currentReport={currentReport}
-        priorReport={priorReport}
         taxonomyCategories={taxonomyCategories}
         movers={movers}
         periodState={periodState}
@@ -340,7 +339,6 @@ function computeMovers(
 interface CategoryTrendsSectionProps {
   months: MonthBucket[];
   currentReport: MonthlyReport | undefined;
-  priorReport: MonthlyReport | undefined;
   taxonomyCategories: TaxonomyCategory[];
   movers: MoverDescriptor[];
   periodState: PeriodState;
@@ -355,7 +353,6 @@ const COLLAPSED_ROWS = 6;
 const CategoryTrendsSection: FC<CategoryTrendsSectionProps> = ({
   months,
   currentReport,
-  priorReport,
   taxonomyCategories,
   movers,
   periodState,
@@ -372,19 +369,11 @@ const CategoryTrendsSection: FC<CategoryTrendsSectionProps> = ({
       buildSparklineRows({
         months,
         byDayByCategory: useDaily ? currentReport?.byDayByCategory : undefined,
-        priorBreakdown: priorReport?.spendingBreakdown ?? [],
         taxonomyCategories,
         useDaily,
         movers,
       }),
-    [
-      months,
-      currentReport?.byDayByCategory,
-      priorReport?.spendingBreakdown,
-      taxonomyCategories,
-      useDaily,
-      movers,
-    ],
+    [months, currentReport?.byDayByCategory, taxonomyCategories, useDaily, movers],
   );
 
   const visible = expanded ? sparkRows : sparkRows.slice(0, COLLAPSED_ROWS);
@@ -456,27 +445,18 @@ interface SparkRow {
 function buildSparklineRows({
   months,
   byDayByCategory,
-  priorBreakdown,
   taxonomyCategories,
   useDaily,
   movers,
 }: {
   months: MonthBucket[];
   byDayByCategory: DayCategoryBucket[] | undefined;
-  priorBreakdown: CategoryBreakdownRow[];
   taxonomyCategories: TaxonomyCategory[];
   useDaily: boolean;
   movers: MoverDescriptor[];
 }): SparkRow[] {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
   const descriptorById = new Map(movers.map((m) => [m.id, m]));
-
-  // Touch priorBreakdown so it's not flagged unused when buildSparklineRows
-  // is invoked with daily data. (Daily path computes spend directly from
-  // byDayByCategory; the descriptor — which already encodes prior — is the
-  // authoritative source of delta info, so we no longer need priorBreakdown
-  // here.)
-  void priorBreakdown;
 
   type Bucket = { name: string; color: string | null; icon: string | null; perBucket: number[] };
   const byCat = new Map<string, Bucket>();

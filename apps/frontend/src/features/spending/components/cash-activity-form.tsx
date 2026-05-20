@@ -115,7 +115,10 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
     return map;
   }, [spending.data?.categories, income.data?.categories]);
 
-  // Event lookup for the trigger label
+  // Event lookup for the trigger label. Errors surface only via the
+  // QuickEventPopover the user opens to pick an event (handled there);
+  // the label render gracefully falls back to "Tag event" when events
+  // can't load, so no inline error is needed in the form chrome.
   const { data: events = [] } = useSpendingEvents();
   const { data: eventTypes = [] } = useEventTypes();
   const eventsById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);

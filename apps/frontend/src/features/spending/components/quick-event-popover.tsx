@@ -45,8 +45,9 @@ export function QuickEventPopover({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const { openEventDialog } = useEventDialog();
-  const { data: events = [] } = useSpendingEvents();
-  const { data: eventTypes = [] } = useEventTypes();
+  const { data: events = [], isError: eventsErrored } = useSpendingEvents();
+  const { data: eventTypes = [], isError: typesErrored } = useEventTypes();
+  const loadErrored = eventsErrored || typesErrored;
 
   const handleCreate = () => {
     const seedName = search.trim();
@@ -87,11 +88,18 @@ export function QuickEventPopover({
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent className="w-[280px] p-0" align={align}>
         <Command>
+          {loadErrored && (
+            <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+              Couldn't load events. Try refreshing.
+            </div>
+          )}
           <CommandInput placeholder="Search events..." value={search} onValueChange={setSearch} />
           <CommandList>
             {events.length === 0 ? (
               <CommandEmpty>
-                <div className="text-muted-foreground p-3 text-center text-xs">No events yet.</div>
+                <div className="text-muted-foreground p-3 text-center text-xs">
+                  {loadErrored ? "No events available." : "No events yet."}
+                </div>
               </CommandEmpty>
             ) : (
               <CommandEmpty>No events found.</CommandEmpty>

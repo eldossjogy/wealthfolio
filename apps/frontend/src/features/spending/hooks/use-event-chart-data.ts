@@ -177,8 +177,9 @@ export function useEventChartData(
 ): EventChartData {
   const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
   const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
+  // `inclusiveDays` is ≥ 1, and we floor at 1 anyway, so days > 0 always.
   const days = Math.max(1, inclusiveDays(startDate, endDate));
-  const dailyDuring = days > 0 ? event.totalSpending / days : 0;
+  const dailyDuring = event.totalSpending / days;
 
   const baseline = useMemo(
     () => computeBaselinePace(heatmapActivities, [event], 12 * 7, accountTypeById),

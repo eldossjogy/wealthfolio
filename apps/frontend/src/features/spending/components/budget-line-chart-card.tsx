@@ -132,7 +132,7 @@ export function BudgetLineChartCard({
   const padB = 14;
   const innerW = chartW - padL - padR;
   const innerH = chartH - padT - padB;
-  const yMax = Math.max(target, spent, target) * 1.05;
+  const yMax = Math.max(target, spent) * 1.05;
 
   const actualPath = useMemo(() => {
     if (!cumulative.length) return "";

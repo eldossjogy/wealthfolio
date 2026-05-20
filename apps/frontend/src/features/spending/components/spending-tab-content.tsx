@@ -85,10 +85,23 @@ export default function SpendingTabContent() {
   );
 
   const reportReq = useMemo(() => rangeToReportRequest(dateRange), [dateRange]);
-  const priorReportReq = useMemo(() => rangeToReportRequest(priorRange(dateRange)), [dateRange]);
+  // `priorRange` returns undefined for invalid / zero-span ranges; in that
+  // case feeding it back through `rangeToReportRequest` produces the
+  // current-month default, which would make priorReport identical to
+  // currentReport (priorSpending == totalSpending) and surface a misleading
+  // "About the same as prior period" delta line. Track whether we actually
+  // have a prior window and gate the query on it.
+  const priorRangeForReport = useMemo(() => priorRange(dateRange), [dateRange]);
+  const priorReportReq = useMemo(
+    () => (priorRangeForReport ? rangeToReportRequest(priorRangeForReport) : reportReq),
+    [priorRangeForReport, reportReq],
+  );
 
   const { data: report, isLoading } = useSpendingReport(reportReq);
-  const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(priorReportReq);
+  const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(
+    priorReportReq,
+    /* enabled */ priorRangeForReport !== undefined,
+  );
   const { data: activities = [] } = useCashActivities({
     startDate: reportReq.startDate,
     endDate: reportReq.endDate,
