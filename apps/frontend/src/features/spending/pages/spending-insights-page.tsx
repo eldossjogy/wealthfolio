@@ -173,7 +173,11 @@ export default function SpendingInsightsPage() {
     }),
     [eventsRange],
   );
-  const { data: events = [] } = useEventSpendingSummaries(eventsRequest);
+  const {
+    data: events = [],
+    isError: eventsErrored,
+    refetch: refetchEvents,
+  } = useEventSpendingSummaries(eventsRequest);
 
   const onJumpToBreakdown = useCallback(() => {
     const el = document.getElementById("breakdown");
@@ -277,6 +281,8 @@ export default function SpendingInsightsPage() {
             heatmapActivities={heatmapActivities}
             accountTypeById={accountTypeById}
             events={events}
+            eventsErrored={eventsErrored}
+            onRetryEvents={() => refetchEvents()}
             taxonomyCategories={taxonomyCategories}
             currency={baseCurrency}
             rangeStart={eventsRange.start}

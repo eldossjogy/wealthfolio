@@ -24,6 +24,10 @@ export interface WhenWhereStageProps {
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
   events: EventSpendingSummary[];
+  /** True when the events query failed. Used to render an error state instead of
+   * the "Create event" empty CTA, which would otherwise mask the failure. */
+  eventsErrored?: boolean;
+  onRetryEvents?: () => void;
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
   /** Period start/end for the events strip. */
@@ -41,6 +45,8 @@ export function WhenWhereStage({
   heatmapActivities,
   accountTypeById,
   events,
+  eventsErrored = false,
+  onRetryEvents,
   taxonomyCategories,
   currency,
   rangeStart,
@@ -76,11 +82,15 @@ export function WhenWhereStage({
         onCellClick={onHeatmapCellClick}
       />
       <div className="flex flex-col gap-4">
-        {/* Empty + offset=0 (current period, no events ever tagged here): show the
-            "tag your first event" CTA. Empty + offset>0 (paginated to a quiet
-            historical window): render the timeline card empty so the < > arrows
-            stay reachable. */}
-        {events.length === 0 && windowOffset === 0 ? (
+        {/* Error: backend query failed — surface explicitly. Without this branch,
+            the empty CTA below would mask the failure. */}
+        {eventsErrored ? (
+          <EventsErrorCard onRetry={onRetryEvents} />
+        ) : events.length === 0 && windowOffset === 0 ? (
+          /* Empty + offset=0 (current period, no events ever tagged here): show the
+              "tag your first event" CTA. Empty + offset>0 (paginated to a quiet
+              historical window): render the timeline card empty so the < > arrows
+              stay reachable. */
           <EmptyEventsCard rangeStart={rangeStart} rangeEnd={rangeEnd} />
         ) : (
           <>
@@ -120,6 +130,23 @@ export function WhenWhereStage({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function EventsErrorCard({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className={CARD_CLASS}>
+      <p className="text-foreground text-base font-semibold leading-snug">Couldn't load events</p>
+      <p className="text-muted-foreground/80 mt-2 text-sm">
+        Something went wrong fetching this period's events. Try again — if it keeps failing, check
+        the server logs.
+      </p>
+      {onRetry ? (
+        <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
+          Retry
+        </Button>
+      ) : null}
     </div>
   );
 }
