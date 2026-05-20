@@ -98,17 +98,18 @@ async fn calculate_performance_summary(
 #[derive(serde::Deserialize)]
 struct IncomeSummaryAccountQuery {
     #[serde(rename = "accountId")]
-    account_id: String,
+    account_id: Option<String>,
 }
 
-/// GET /income/summary?accountId=... — simple single-account scope
+/// GET /income/summary?accountId=... — single-account or all-accounts scope
 async fn get_income_summary_for_account(
     State(state): State<Arc<AppState>>,
     Query(q): Query<IncomeSummaryAccountQuery>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
+    let account_ids: Option<Vec<String>> = q.account_id.map(|id| vec![id]);
     let items = state
         .income_service
-        .get_income_summary(Some(&[q.account_id]))?;
+        .get_income_summary(account_ids.as_deref())?;
     Ok(Json(items))
 }
 

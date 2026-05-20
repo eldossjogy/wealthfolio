@@ -128,9 +128,12 @@ pub enum AccountScope {
     /// All active, non-archived accounts.
     All,
     /// A single specific account.
+    #[serde(rename_all = "camelCase")]
     Account { account_id: String },
     /// A saved portfolio — resolved to its member account IDs.
+    #[serde(rename_all = "camelCase")]
     Portfolio { portfolio_id: String },
     /// Ad-hoc list of account IDs (e.g. activity page multi-select).
+    #[serde(rename_all = "camelCase")]
     Accounts { account_ids: Vec<String> },
 }

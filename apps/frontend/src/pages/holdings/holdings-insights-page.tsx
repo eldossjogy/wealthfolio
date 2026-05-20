@@ -43,7 +43,7 @@ export const HoldingsInsightsPage = ({
     if (accountFilter.type === "account") return [accountFilter.accountId];
     if (accountFilter.type === "accounts") return accountFilter.accountIds;
     if (accountFilter.type === "portfolio") {
-      return portfolios.find((p) => p.id === accountFilter.portfolioId)?.accountIds;
+      return portfolios.find((p) => p.id === accountFilter.portfolioId)?.accountIds ?? [];
     }
     return undefined; // "all" → DrillableAccountChart shows every account
   }, [accountFilter, portfolios]);

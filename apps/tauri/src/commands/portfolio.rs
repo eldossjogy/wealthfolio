@@ -66,7 +66,8 @@ impl AccountScopeInput {
             }
             "adHoc" | "accounts" => {
                 let ids = self.account_ids.filter(|v| !v.is_empty()).ok_or_else(|| {
-                    "accountIds required and must be non-empty for filter type 'adHoc'".to_string()
+                    "accountIds required and must be non-empty for filter type 'accounts'"
+                        .to_string()
                 })?;
                 Ok(AccountScope::Accounts { account_ids: ids })
             }
@@ -150,7 +151,6 @@ pub async fn get_holdings(
 ) -> Result<Vec<Holding>, String> {
     debug!("Get holdings...");
     let base_currency = state.get_base_currency();
-    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
     match resolve_scope(&filter, &state).await? {
         ResolvedAccountScope::TotalSnapshot => state
@@ -165,7 +165,7 @@ pub async fn get_holdings(
             .map_err(|e| e.to_string()),
         ResolvedAccountScope::Accounts(ids) => state
             .holdings_service()
-            .get_holdings_for_accounts(&ids, &base_currency, &aggregated_id)
+            .get_holdings_for_accounts(&ids, &base_currency, "")
             .await
             .map_err(|e| e.to_string()),
     }
@@ -220,7 +220,6 @@ pub async fn get_portfolio_allocations(
     filter: AccountScopeInput,
 ) -> Result<PortfolioAllocations, String> {
     let base_currency = state.get_base_currency();
-    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
     match resolve_scope(&filter, &state).await? {
         ResolvedAccountScope::TotalSnapshot => state
@@ -235,7 +234,7 @@ pub async fn get_portfolio_allocations(
             .map_err(|e| e.to_string()),
         ResolvedAccountScope::Accounts(ids) => state
             .allocation_service()
-            .get_portfolio_allocations_for_accounts(&ids, &base_currency, &aggregated_id)
+            .get_portfolio_allocations_for_accounts(&ids, &base_currency, "")
             .await
             .map_err(|e| e.to_string()),
     }
@@ -249,7 +248,6 @@ pub async fn get_holdings_by_allocation(
     category_id: String,
 ) -> Result<AllocationHoldings, String> {
     let base_currency = state.get_base_currency();
-    let aggregated_id = filter.portfolio_id.clone().unwrap_or_default();
     let filter = filter.into_account_filter()?;
     match resolve_scope(&filter, &state).await? {
         ResolvedAccountScope::TotalSnapshot => state
@@ -269,7 +267,7 @@ pub async fn get_holdings_by_allocation(
                 &base_currency,
                 &taxonomy_id,
                 &category_id,
-                &aggregated_id,
+                "",
             )
             .await
             .map_err(|e| e.to_string()),

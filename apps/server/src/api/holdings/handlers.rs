@@ -50,12 +50,8 @@ fn resolve_scope(
     }
 }
 
-fn aggregated_id(filter: &AccountScope) -> String {
-    if let AccountScope::Portfolio { portfolio_id } = filter {
-        portfolio_id.clone()
-    } else {
-        String::new()
-    }
+fn aggregated_id(_filter: &AccountScope) -> String {
+    String::new()
 }
 
 pub async fn get_holdings(

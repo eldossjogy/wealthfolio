@@ -67,18 +67,22 @@ export const IncomeMobileFilterSheet = ({
               </div>
 
               {portfolios.map((p) => {
+                const isSelected =
+                  accountFilter.type === "portfolio" && accountFilter.portfolioId === p.id;
                 return (
                   <div
                     key={p.id}
                     className={cn(
-                      "text-muted-foreground flex cursor-not-allowed items-center justify-between border-t p-3 text-sm opacity-75",
+                      "flex cursor-pointer items-center justify-between border-t p-3 text-sm transition-colors",
+                      isSelected ? "bg-accent/50 font-medium" : "hover:bg-muted/50",
                     )}
+                    onClick={() => select({ type: "portfolio", portfolioId: p.id })}
                   >
                     <span className="flex items-center gap-2">
                       <Icons.Folder className="text-muted-foreground h-4 w-4" />
                       {p.name}
                     </span>
-                    <span className="text-xs">Coming soon</span>
+                    {isSelected && <Icons.Check className="text-primary h-4 w-4" />}
                   </div>
                 );
               })}
