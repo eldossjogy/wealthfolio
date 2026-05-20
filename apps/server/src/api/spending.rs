@@ -18,7 +18,7 @@ use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, NewCategorizationRule, UpdateCategorizationRule,
+    CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -35,8 +35,69 @@ async fn update_spending_settings(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SpendingSettingsUpdate>,
 ) -> ApiResult<Json<SpendingSettings>> {
-    let s = state.spending_settings_service.update(payload).await?;
-    Ok(Json(s))
+    let before = state.spending_settings_service.get().await?;
+    let after = state.spending_settings_service.update(payload).await?;
+
+    // Newly-added accounts need a first-time categorize. Toggling `enabled`
+    // false → true unfreezes the existing opted-in list, so we re-scan all
+    // of it (rerun_all with only_uncategorized=true is idempotent).
+    let just_enabled = !before.enabled && after.enabled;
+    let to_categorize: Vec<String> = if just_enabled {
+        after.account_ids.clone()
+    } else if after.enabled {
+        let before_set: std::collections::HashSet<&String> = before.account_ids.iter().collect();
+        after
+            .account_ids
+            .iter()
+            .filter(|id| !before_set.contains(id))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    spawn_auto_categorize(state.categorization_rules_service.clone(), to_categorize);
+    Ok(Json(after))
+}
+
+/// Fire-and-forget auto-categorize for direct (user-initiated) triggers.
+/// See the Tauri counterpart in `apps/tauri/src/commands/spending.rs` for the
+/// design rationale.
+fn spawn_auto_categorize(rules_service: Arc<CategorizationRulesService>, account_ids: Vec<String>) {
+    if account_ids.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        match rules_service
+            .rerun_all(&account_ids, /* only_uncategorized */ true)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                tracing::info!("Auto-categorization wrote {} assignment(s)", count);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Auto-categorization failed: {}", e),
+        }
+    });
+}
+
+async fn spawn_auto_categorize_for_opted_in_accounts(state: &Arc<AppState>) {
+    let settings = match state.spending_settings_service.get().await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(
+                "Skipping auto-categorization after rule change: failed to load spending settings: {}",
+                e
+            );
+            return;
+        }
+    };
+    if !settings.enabled {
+        return;
+    }
+    spawn_auto_categorize(
+        state.categorization_rules_service.clone(),
+        settings.account_ids,
+    );
 }
 
 async fn list_cash_activities(
@@ -135,9 +196,9 @@ async fn create_categorization_rule(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<NewCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
-    Ok(Json(
-        state.categorization_rules_service.create(payload).await?,
-    ))
+    let created = state.categorization_rules_service.create(payload).await?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(Json(created))
 }
 
 async fn update_categorization_rule(
@@ -145,12 +206,12 @@ async fn update_categorization_rule(
     Path(id): Path<String>,
     Json(payload): Json<UpdateCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
-    Ok(Json(
-        state
-            .categorization_rules_service
-            .update(&id, payload)
-            .await?,
-    ))
+    let updated = state
+        .categorization_rules_service
+        .update(&id, payload)
+        .await?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(Json(updated))
 }
 
 async fn delete_categorization_rule(
@@ -213,12 +274,12 @@ async fn import_rule_preset(
             resolver.insert(cat.key.clone(), (entry.taxonomy.id.clone(), cat.id.clone()));
         }
     }
-    Ok(Json(
-        state
-            .categorization_rules_service
-            .import_preset(&preset_id, &resolver)
-            .await?,
-    ))
+    let result = state
+        .categorization_rules_service
+        .import_preset(&preset_id, &resolver)
+        .await?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(Json(result))
 }
 
 async fn list_event_types(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<EventType>>> {

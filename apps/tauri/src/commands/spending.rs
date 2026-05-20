@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::context::ServiceContext;
-use log::debug;
+use log::{debug, info, warn};
 use tauri::State;
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::{
@@ -17,14 +17,60 @@ use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, ImportPresetResult, NewCategorizationRule, RemovePresetResult,
-    RulePresetSummary, UpdateCategorizationRule,
+    CategorizationRule, CategorizationRulesService, ImportPresetResult, NewCategorizationRule,
+    RemovePresetResult, RulePresetSummary, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{
     Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
 };
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
+
+/// Fire-and-forget auto-categorize for direct (user-initiated) triggers:
+/// settings changes that broaden the spending scope, and rule mutations that
+/// could re-classify existing uncategorized activities. `only_uncategorized=true`
+/// preserves any manual / rule / ai / history assignments already in place.
+///
+/// Errors are logged, never propagated — the originating command (e.g. saving
+/// settings) succeeds independently of the background categorize.
+fn spawn_auto_categorize(rules_service: Arc<CategorizationRulesService>, account_ids: Vec<String>) {
+    if account_ids.is_empty() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        match rules_service
+            .rerun_all(&account_ids, /* only_uncategorized */ true)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                info!("Auto-categorization wrote {} assignment(s)", count);
+            }
+            Ok(_) => {}
+            Err(e) => warn!("Auto-categorization failed: {}", e),
+        }
+    });
+}
+
+/// Convenience wrapper: load the opted-in spending account list and fan out
+/// an auto-categorize pass. Used by rule mutations / preset imports where the
+/// scope is "every spending account, not just one diff". No-op if spending is
+/// disabled or no accounts are opted in.
+async fn spawn_auto_categorize_for_opted_in_accounts(state: &State<'_, Arc<ServiceContext>>) {
+    let settings = match state.spending_settings_service().get().await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                "Skipping auto-categorization after rule change: failed to load spending settings: {}",
+                e
+            );
+            return;
+        }
+    };
+    if !settings.enabled {
+        return;
+    }
+    spawn_auto_categorize(state.categorization_rules_service(), settings.account_ids);
+}
 
 #[tauri::command]
 pub async fn get_spending_settings(
@@ -44,11 +90,35 @@ pub async fn update_spending_settings(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<SpendingSettings, String> {
     debug!("Updating spending settings...");
-    state
-        .spending_settings_service()
+    let settings_service = state.spending_settings_service();
+    let before = settings_service
+        .get()
+        .await
+        .map_err(|e| format!("Failed to load spending settings: {}", e))?;
+    let after = settings_service
         .update(update)
         .await
-        .map_err(|e| format!("Failed to update spending settings: {}", e))
+        .map_err(|e| format!("Failed to update spending settings: {}", e))?;
+
+    // Newly-added accounts need a first-time categorize. Toggling `enabled`
+    // from false → true unfreezes the existing opted-in list, so we re-scan
+    // all of it (cheap: rerun_all + only_uncategorized=true is idempotent).
+    let just_enabled = !before.enabled && after.enabled;
+    let to_categorize: Vec<String> = if just_enabled {
+        after.account_ids.clone()
+    } else if after.enabled {
+        let before_set: std::collections::HashSet<&String> = before.account_ids.iter().collect();
+        after
+            .account_ids
+            .iter()
+            .filter(|id| !before_set.contains(id))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    spawn_auto_categorize(state.categorization_rules_service(), to_categorize);
+    Ok(after)
 }
 
 #[tauri::command]
@@ -160,11 +230,13 @@ pub async fn create_categorization_rule(
     rule: NewCategorizationRule,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<CategorizationRule, String> {
-    state
+    let created = state
         .categorization_rules_service()
         .create(rule)
         .await
-        .map_err(|e| format!("Failed to create rule: {}", e))
+        .map_err(|e| format!("Failed to create rule: {}", e))?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(created)
 }
 
 #[tauri::command]
@@ -173,11 +245,13 @@ pub async fn update_categorization_rule(
     patch: UpdateCategorizationRule,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<CategorizationRule, String> {
-    state
+    let updated = state
         .categorization_rules_service()
         .update(&id, patch)
         .await
-        .map_err(|e| format!("Failed to update rule: {}", e))
+        .map_err(|e| format!("Failed to update rule: {}", e))?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -240,11 +314,13 @@ pub async fn import_rule_preset(
         }
     }
 
-    state
+    let result = state
         .categorization_rules_service()
         .import_preset(&preset_id, &resolver)
         .await
-        .map_err(|e| format!("Failed to import rule preset: {}", e))
+        .map_err(|e| format!("Failed to import rule preset: {}", e))?;
+    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    Ok(result)
 }
 
 #[tauri::command]

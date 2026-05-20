@@ -16,7 +16,9 @@ use wealthfolio_core::{
     assets::AssetServiceTrait, events::DomainEvent, goals::GoalServiceTrait, secrets::SecretStore,
 };
 
-use super::planner::{plan_asset_enrichment, plan_broker_sync, plan_portfolio_job};
+use super::planner::{
+    plan_asset_enrichment, plan_broker_sync, plan_categorization_job, plan_portfolio_job,
+};
 use crate::events::EventBus;
 
 /// Debounce window for collecting events before processing.
@@ -45,6 +47,11 @@ pub struct QueueWorkerDeps {
     pub secret_store: Arc<dyn SecretStore>,
     /// Shared token lifecycle state; must be the same instance used by API handlers.
     pub token_lifecycle: Arc<TokenLifecycleState>,
+    /// Spending settings — used to filter ActivitiesChanged events to opted-in accounts.
+    pub spending_settings_service: Arc<wealthfolio_spending::settings::SpendingSettingsService>,
+    /// Categorization rules service — auto-runs rules against newly-changed activities.
+    pub categorization_rules_service:
+        Arc<wealthfolio_spending::categorization_rules::CategorizationRulesService>,
 }
 
 /// Runs the event queue worker.
@@ -213,6 +220,9 @@ async fn process_event_batch(events: &[DomainEvent], deps: Arc<QueueWorkerDeps>)
         // Keep goal cards current after valuation changes, matching the Tauri worker.
         refresh_all_goal_summaries(deps.clone()).await;
     }
+
+    // 2b. Auto-categorize newly-changed activities on opted-in spending accounts.
+    spawn_auto_categorize_for_batch(events, deps.clone()).await;
 
     // 3. Plan and trigger broker sync
     let sync_accounts = plan_broker_sync(events);
@@ -444,6 +454,51 @@ async fn run_portfolio_job(
     }
 
     event_bus.publish(ServerEvent::new(PORTFOLIO_UPDATE_COMPLETE));
+}
+
+/// Plans and spawns auto-categorization for this batch's spending-account
+/// activity changes. Loads `SpendingSettings` once per batch; no-op when
+/// spending tracking is disabled or no opted-in account was touched.
+///
+/// Fire-and-forget by design — categorization writes are idempotent and
+/// the originating mutation has already returned to the API caller.
+async fn spawn_auto_categorize_for_batch(events: &[DomainEvent], deps: Arc<QueueWorkerDeps>) {
+    let settings = match deps.spending_settings_service.get().await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(
+                "Skipping auto-categorization: failed to load spending settings: {}",
+                e
+            );
+            return;
+        }
+    };
+    if !settings.enabled || settings.account_ids.is_empty() {
+        return;
+    }
+    let opted_in: std::collections::HashSet<String> =
+        settings.account_ids.iter().cloned().collect();
+    let account_ids = plan_categorization_job(events, &opted_in);
+    if account_ids.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "Triggering auto-categorization for {} account(s)",
+        account_ids.len()
+    );
+    let rules_service = deps.categorization_rules_service.clone();
+    tokio::spawn(async move {
+        match rules_service
+            .rerun_all(&account_ids, /* only_uncategorized */ true)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                tracing::info!("Auto-categorization wrote {} assignment(s)", count);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Auto-categorization failed: {}", e),
+        }
+    });
 }
 
 /// Refreshes cached summary fields for all active goals after valuation changes.

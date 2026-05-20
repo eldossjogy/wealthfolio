@@ -619,6 +619,8 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         timezone.clone(),
         secret_store.clone(),
         token_lifecycle.clone(),
+        spending_settings_service.clone(),
+        categorization_rules_service.clone(),
     );
 
     let addon_service: Arc<dyn AddonServiceTrait + Send + Sync> = Arc::new(AddonService::new(
