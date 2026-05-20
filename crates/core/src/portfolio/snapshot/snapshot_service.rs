@@ -423,10 +423,37 @@ impl SnapshotService {
                     let open_lots = extract_lot_records(snapshot);
                     let _ = check_lot_quantity_consistency(snapshot, &open_lots);
                     let closures = self.holdings_calculator.take_disposed_lots(acc_id);
-                    if let Err(e) = lot_repo
-                        .sync_lots_for_account(acc_id, &open_lots, &closures)
-                        .await
-                    {
+
+                    // Special case: a Full recalc that produced zero open
+                    // lots, zero closures, AND zero positions is the
+                    // calculator authoritatively telling us this account
+                    // holds nothing. The account may still have activities
+                    // (DEPOSIT / DIVIDEND / INTEREST only) but no
+                    // lot-producing ones. Stale lots from a previous,
+                    // since-deleted BUY would otherwise survive because
+                    // `sync_lots_for_account` deliberately preserves
+                    // existing rows on empty input (its safety against a
+                    // failed mid-replay). Caller explicitly opts into the
+                    // wipe with `replace_lots_for_account(&[])`.
+                    //
+                    // Limited to Full mode: incremental modes seed from a
+                    // prior snapshot's positions and might legitimately
+                    // produce no NEW lots while carrying historical ones —
+                    // we can't tell stale from genuine in that case, so the
+                    // safety stays.
+                    let is_full = matches!(mode, SnapshotRecalcMode::Full);
+                    let calculator_says_empty = open_lots.is_empty()
+                        && closures.is_empty()
+                        && snapshot.positions.is_empty();
+
+                    let result = if is_full && calculator_says_empty {
+                        lot_repo.replace_lots_for_account(acc_id, &[]).await
+                    } else {
+                        lot_repo
+                            .sync_lots_for_account(acc_id, &open_lots, &closures)
+                            .await
+                    };
+                    if let Err(e) = result {
                         error!("Failed to sync lot rows for account {}: {}", acc_id, e);
                     }
                 }
