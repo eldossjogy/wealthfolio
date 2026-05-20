@@ -237,12 +237,26 @@ impl LotRepositoryTrait for LotsRepository {
 
                 // Upsert open lots one at a time (SQLite Diesel doesn't support
                 // batch ON CONFLICT)
+                // Refresh ALL replay-derived columns on conflict. The lot's
+                // fee/price/date/asset/account can change when a user edits
+                // the opening activity (including reassigning it to a
+                // different account), so it's not enough to update only
+                // quantities and cost basis — the full set of fields
+                // produced by the calculator must overwrite the stale row.
+                //
+                // Preserved across conflicts: id (PK) and created_at (audit
+                // anchor for when the row first appeared).
                 for lot in &normalized_lots {
                     diesel::insert_into(dsl::lots)
                         .values(lot)
                         .on_conflict(dsl::id)
                         .do_update()
                         .set((
+                            dsl::account_id.eq(diesel::upsert::excluded(dsl::account_id)),
+                            dsl::asset_id.eq(diesel::upsert::excluded(dsl::asset_id)),
+                            dsl::open_date.eq(diesel::upsert::excluded(dsl::open_date)),
+                            dsl::open_activity_id
+                                .eq(diesel::upsert::excluded(dsl::open_activity_id)),
                             dsl::original_quantity
                                 .eq(diesel::upsert::excluded(dsl::original_quantity)),
                             dsl::remaining_quantity
@@ -252,6 +266,7 @@ impl LotRepositoryTrait for LotsRepository {
                                 .eq(diesel::upsert::excluded(dsl::original_cost_basis)),
                             dsl::remaining_cost_basis
                                 .eq(diesel::upsert::excluded(dsl::remaining_cost_basis)),
+                            dsl::fee_allocated.eq(diesel::upsert::excluded(dsl::fee_allocated)),
                             dsl::split_ratio.eq(diesel::upsert::excluded(dsl::split_ratio)),
                             dsl::is_closed.eq(diesel::upsert::excluded(dsl::is_closed)),
                             dsl::close_date.eq(diesel::upsert::excluded(dsl::close_date)),
@@ -296,17 +311,38 @@ impl LotRepositoryTrait for LotsRepository {
                     .collect();
                 let normalized_closures =
                     filter_and_normalize_lots(conn, closure_lots, &account_id)?;
+                // Same broad refresh for closure UPSERTs. Editing the
+                // opening BUY of an already-fully-consumed lot must
+                // re-propagate the new fee/price/date through the
+                // persisted closure row; otherwise the lots table keeps
+                // stale provenance for downstream tax-lot reporting.
                 for closed_lot in &normalized_closures {
                     diesel::insert_into(dsl::lots)
                         .values(closed_lot)
                         .on_conflict(dsl::id)
                         .do_update()
                         .set((
+                            dsl::account_id.eq(diesel::upsert::excluded(dsl::account_id)),
+                            dsl::asset_id.eq(diesel::upsert::excluded(dsl::asset_id)),
+                            dsl::open_date.eq(diesel::upsert::excluded(dsl::open_date)),
+                            dsl::open_activity_id
+                                .eq(diesel::upsert::excluded(dsl::open_activity_id)),
+                            dsl::original_quantity
+                                .eq(diesel::upsert::excluded(dsl::original_quantity)),
+                            dsl::remaining_quantity.eq("0"),
+                            dsl::cost_per_unit.eq(diesel::upsert::excluded(dsl::cost_per_unit)),
+                            dsl::original_cost_basis
+                                .eq(diesel::upsert::excluded(dsl::original_cost_basis)),
+                            // Closure means remaining basis is zero; the
+                            // disposed amount lives in the (forthcoming)
+                            // lot_disposals overlay rather than on the lot.
+                            dsl::remaining_cost_basis.eq("0"),
+                            dsl::fee_allocated.eq(diesel::upsert::excluded(dsl::fee_allocated)),
+                            dsl::split_ratio.eq(diesel::upsert::excluded(dsl::split_ratio)),
                             dsl::is_closed.eq(1),
                             dsl::close_date.eq(diesel::upsert::excluded(dsl::close_date)),
                             dsl::close_activity_id
                                 .eq(diesel::upsert::excluded(dsl::close_activity_id)),
-                            dsl::remaining_quantity.eq("0"),
                             dsl::updated_at.eq(diesel::upsert::excluded(dsl::updated_at)),
                         ))
                         .execute(conn)
@@ -583,6 +619,22 @@ mod tests {
         .unwrap();
     }
 
+    /// Seed an activity row so a lot's `open_activity_id` / `close_activity_id`
+    /// FK can target it without violating the constraint. Uses minimal columns;
+    /// tests only care that the id exists.
+    fn insert_activity(pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>, id: &str) {
+        let mut conn = get_connection(pool).unwrap();
+        diesel::sql_query(format!(
+            "INSERT INTO activities (id, account_id, activity_type, status, activity_date, currency, \
+             is_user_modified, needs_review, created_at, updated_at) \
+             VALUES ('{}', 'acc1', 'BUY', 'POSTED', '2024-01-15T00:00:00Z', 'USD', 0, 0, \
+             datetime('now'), datetime('now'))",
+            id
+        ))
+        .execute(&mut conn)
+        .unwrap();
+    }
+
     fn make_lot_record(id: &str, account_id: &str, asset_id: &str, qty: &str) -> LotRecord {
         LotRecord {
             id: id.to_string(),
@@ -816,5 +868,124 @@ mod tests {
         let lots = repo.get_all_lots_for_account("acc1").await.unwrap();
         assert_eq!(lots.len(), 1);
         assert_eq!(lots[0].id, "l1");
+    }
+
+    /// Regression: editing the opening BUY's fee / price / date must
+    /// propagate to the persisted lot row on the next recalc. Before
+    /// broadening the UPSERT SET clause, the conflict handler refreshed
+    /// quantities and cost basis but left `fee_allocated`, `open_date`,
+    /// `open_activity_id`, and `asset_id` from the original row.
+    #[tokio::test]
+    async fn sync_upsert_refreshes_origin_fields_on_open_lot_edit() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_asset(&pool, "AAPL");
+        insert_asset(&pool, "MSFT");
+        insert_activity(&pool, "buy-1");
+        insert_activity(&pool, "buy-1-edited");
+
+        // Initial: AAPL @ 150 with $10 fee, opened 2024-01-15.
+        let mut lot = make_lot_record("lot-1", "acc1", "AAPL", "100");
+        lot.open_date = "2024-01-15".to_string();
+        lot.open_activity_id = Some("buy-1".to_string());
+        lot.fee_allocated = "10".to_string();
+        lot.cost_per_unit = "150".to_string();
+        lot.original_cost_basis = "15010".to_string();
+        repo.sync_lots_for_account("acc1", &[lot], &[])
+            .await
+            .unwrap();
+
+        // User edits the BUY: changes asset to MSFT, date to 2024-02-01,
+        // fee to $25, price to 200. Activity id rolls over too.
+        let mut edited = make_lot_record("lot-1", "acc1", "MSFT", "100");
+        edited.open_date = "2024-02-01".to_string();
+        edited.open_activity_id = Some("buy-1-edited".to_string());
+        edited.fee_allocated = "25".to_string();
+        edited.cost_per_unit = "200".to_string();
+        edited.original_cost_basis = "20025".to_string();
+        repo.sync_lots_for_account("acc1", &[edited], &[])
+            .await
+            .unwrap();
+
+        let stored = repo.get_all_lots_for_account("acc1").await.unwrap();
+        assert_eq!(stored.len(), 1);
+        let l = &stored[0];
+        assert_eq!(l.asset_id, "MSFT", "asset_id must follow the edit");
+        assert_eq!(l.open_date, "2024-02-01", "open_date must follow the edit");
+        assert_eq!(
+            l.open_activity_id.as_deref(),
+            Some("buy-1-edited"),
+            "open_activity_id must follow the edit"
+        );
+        assert_eq!(l.fee_allocated, "25", "fee_allocated must follow the edit");
+        assert_eq!(l.cost_per_unit, "200");
+        assert_eq!(l.original_cost_basis, "20025");
+    }
+
+    /// Regression: editing the opening BUY of an already-fully-consumed lot
+    /// must refresh the closure row's basis/fee/date too. The previous
+    /// closure UPSERT only set close metadata + is_closed, leaving every
+    /// other column at the pre-edit value.
+    #[tokio::test]
+    async fn sync_upsert_refreshes_origin_fields_on_closure() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_asset(&pool, "AAPL");
+        insert_activity(&pool, "buy-1");
+        insert_activity(&pool, "buy-1-edited");
+        insert_activity(&pool, "sell-1");
+
+        // First pass: lot bought 100 @ $150 with $10 fee, then fully sold.
+        let closure_v1 = LotClosure {
+            lot_id: "lot-1".to_string(),
+            close_date: "2024-06-01".to_string(),
+            close_activity_id: Some("sell-1".to_string()),
+            open_activity_id: Some("buy-1".to_string()),
+            account_id: "acc1".to_string(),
+            asset_id: "AAPL".to_string(),
+            open_date: "2024-01-15".to_string(),
+            original_quantity: "100".to_string(),
+            cost_per_unit: "150".to_string(),
+            original_cost_basis: "15010".to_string(),
+            fee_allocated: "10".to_string(),
+            split_ratio: "1".to_string(),
+        };
+        repo.sync_lots_for_account("acc1", &[], &[closure_v1])
+            .await
+            .unwrap();
+
+        let stored = repo.get_all_lots_for_account("acc1").await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].is_closed);
+
+        // User edits the now-historical BUY: fee changes to $25, price to
+        // $200. Replay produces a closure with the corrected basis.
+        let closure_v2 = LotClosure {
+            lot_id: "lot-1".to_string(),
+            close_date: "2024-06-01".to_string(),
+            close_activity_id: Some("sell-1".to_string()),
+            open_activity_id: Some("buy-1-edited".to_string()),
+            account_id: "acc1".to_string(),
+            asset_id: "AAPL".to_string(),
+            open_date: "2024-02-01".to_string(),
+            original_quantity: "100".to_string(),
+            cost_per_unit: "200".to_string(),
+            original_cost_basis: "20025".to_string(),
+            fee_allocated: "25".to_string(),
+            split_ratio: "1".to_string(),
+        };
+        repo.sync_lots_for_account("acc1", &[], &[closure_v2])
+            .await
+            .unwrap();
+
+        let stored = repo.get_all_lots_for_account("acc1").await.unwrap();
+        assert_eq!(stored.len(), 1);
+        let l = &stored[0];
+        assert!(l.is_closed);
+        assert_eq!(l.open_date, "2024-02-01");
+        assert_eq!(l.open_activity_id.as_deref(), Some("buy-1-edited"));
+        assert_eq!(l.cost_per_unit, "200");
+        assert_eq!(l.original_cost_basis, "20025");
+        assert_eq!(l.fee_allocated, "25");
     }
 }
