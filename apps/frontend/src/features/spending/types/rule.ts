@@ -48,3 +48,29 @@ export interface UpdateCategorizationRule {
   isGlobal?: boolean;
   accountId?: string | null;
 }
+
+export interface RulePresetSummary {
+  presetId: string;
+  presetVersion: string;
+  name: string;
+  description?: string | null;
+  language?: string | null;
+  ruleCount: number;
+  installed: boolean;
+  installedVersion?: string | null;
+}
+
+export interface ImportPresetResult {
+  presetId: string;
+  presetVersion: string;
+  added: number;
+  skippedExisting: number;
+  skippedUnknownCategory: number;
+  total: number;
+}
+
+export interface RemovePresetResult {
+  presetId: string;
+  removed: number;
+  keptModified: number;
+}

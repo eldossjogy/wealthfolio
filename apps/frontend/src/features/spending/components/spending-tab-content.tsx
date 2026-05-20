@@ -33,6 +33,7 @@ import {
 import { useBudget } from "../hooks/use-budget";
 import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-activities";
 import { useSpendingReport } from "../hooks/use-spending-report";
+import { topCategoryId } from "../lib/category-rollup";
 import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
 import { BudgetLineChartCard } from "./budget-line-chart-card";
 import { CashFlowStrip } from "./cash-flow-strip";
@@ -330,7 +331,7 @@ export default function SpendingTabContent() {
     const topAmounts = new Map<string, { amount: number; subCount: number; txCount: number }>();
     for (const row of report.spendingBreakdown) {
       const meta = categoriesMeta.get(row.categoryId);
-      const topId = meta?.parentId ?? row.categoryId;
+      const topId = topCategoryId(row.categoryId, categoriesMeta);
       const e = topAmounts.get(topId) ?? { amount: 0, subCount: 0, txCount: 0 };
       e.amount += row.amount;
       e.txCount += row.count;
@@ -339,8 +340,7 @@ export default function SpendingTabContent() {
     }
     const priorAmounts = new Map<string, number>();
     for (const row of priorReport?.spendingBreakdown ?? []) {
-      const meta = categoriesMeta.get(row.categoryId);
-      const topId = meta?.parentId ?? row.categoryId;
+      const topId = topCategoryId(row.categoryId, categoriesMeta);
       priorAmounts.set(topId, (priorAmounts.get(topId) ?? 0) + row.amount);
     }
     return Array.from(topAmounts.entries())

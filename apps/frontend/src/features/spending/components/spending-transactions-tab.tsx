@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
@@ -64,12 +64,18 @@ export interface SpendingTransactionsTabHandle {
 
 export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>(
   function SpendingTransactionsTab(_, ref) {
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const urlCategoryId = searchParams.get("category");
     const urlSubcategoryId = searchParams.get("subcategory");
     const urlStartDate = searchParams.get("from");
     const urlEndDate = searchParams.get("to");
     const urlStatus = searchParams.get("status") as CashActivityStatusFilter | null;
+    const urlTypes = searchParams.get("types");
+    const urlAccounts = searchParams.get("accounts");
+    const urlEvents = searchParams.get("events");
+    const urlSearchQuery = searchParams.get("q");
+    const urlAmountMin = searchParams.get("amountMin");
+    const urlAmountMax = searchParams.get("amountMax");
 
     const qc = useQueryClient();
 
@@ -78,7 +84,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
     const [deletePreview, setDeletePreview] = useState<DeletePreview | undefined>();
 
-    const [searchInput, setSearchInput] = useState("");
+    const [searchInput, setSearchInput] = useState(urlSearchQuery ?? "");
     const debouncedSearch = useDebouncedValue(searchInput.trim(), SEARCH_DEBOUNCE_MS);
 
     const [statusFilter, setStatusFilter] = useState<CashActivityStatusFilter>(
@@ -90,16 +96,29 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
         ? urlStatus
         : "all",
     );
-    const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-    const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(new Set());
+    const [selectedTypes, setSelectedTypes] = useState<Set<string>>(
+      () => new Set(urlTypes ? urlTypes.split(",").filter(Boolean) : []),
+    );
+    const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(
+      () => new Set(urlAccounts ? urlAccounts.split(",").filter(Boolean) : []),
+    );
     const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
-      () => new Set(urlCategoryId ? [urlCategoryId] : []),
+      () => new Set(urlCategoryId ? urlCategoryId.split(",").filter(Boolean) : []),
     );
     const [selectedSubcategories, setSelectedSubcategories] = useState<Set<string>>(
-      () => new Set(urlSubcategoryId ? [urlSubcategoryId] : []),
+      () => new Set(urlSubcategoryId ? urlSubcategoryId.split(",").filter(Boolean) : []),
     );
-    const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set());
-    const [amountRange, setAmountRange] = useState<AmountRange>({ min: null, max: null });
+    const [selectedEvents, setSelectedEvents] = useState<Set<string>>(
+      () => new Set(urlEvents ? urlEvents.split(",").filter(Boolean) : []),
+    );
+    const [amountRange, setAmountRange] = useState<AmountRange>(() => {
+      const min = urlAmountMin != null ? Number(urlAmountMin) : null;
+      const max = urlAmountMax != null ? Number(urlAmountMax) : null;
+      return {
+        min: min != null && Number.isFinite(min) ? min : null,
+        max: max != null && Number.isFinite(max) ? max : null,
+      };
+    });
     const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
       if (urlStartDate || urlEndDate) {
         return {
@@ -109,6 +128,48 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       }
       return undefined;
     });
+
+    // Sync filter state → URL params (one-way, debounced search included via
+    // debouncedSearch). `replace: true` so each keystroke doesn't pollute
+    // history. Empty/default values are removed from the URL so a "clean"
+    // state reflects in the address bar.
+    useEffect(() => {
+      const next = new URLSearchParams(searchParams);
+      const setOrDelete = (key: string, value: string | null | undefined) => {
+        if (value && value.length > 0) next.set(key, value);
+        else next.delete(key);
+      };
+      const setSet = (key: string, set: Set<string>) =>
+        setOrDelete(key, set.size > 0 ? Array.from(set).join(",") : null);
+      setOrDelete("status", statusFilter === "all" ? null : statusFilter);
+      setSet("types", selectedTypes);
+      setSet("accounts", selectedAccounts);
+      setSet("category", selectedCategories);
+      setSet("subcategory", selectedSubcategories);
+      setSet("events", selectedEvents);
+      setOrDelete("q", debouncedSearch || null);
+      setOrDelete("amountMin", amountRange.min != null ? String(amountRange.min) : null);
+      setOrDelete("amountMax", amountRange.max != null ? String(amountRange.max) : null);
+      setOrDelete("from", dateRange?.from ? dateRange.from.toISOString().slice(0, 10) : null);
+      setOrDelete("to", dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : null);
+      // Only call setSearchParams when the serialized form actually changed,
+      // otherwise React Router still bumps history.
+      if (next.toString() !== searchParams.toString()) {
+        setSearchParams(next, { replace: true });
+      }
+    }, [
+      statusFilter,
+      selectedTypes,
+      selectedAccounts,
+      selectedCategories,
+      selectedSubcategories,
+      selectedEvents,
+      debouncedSearch,
+      amountRange,
+      dateRange,
+      searchParams,
+      setSearchParams,
+    ]);
 
     const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 

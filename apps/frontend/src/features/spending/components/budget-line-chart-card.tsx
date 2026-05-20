@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@wealthfolio/ui";
 
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
+import { topCategoryId } from "../lib/category-rollup";
 import type { BudgetCategoryRow } from "../types/budget";
 
 type Status = "ok" | "warn" | "over";
@@ -97,8 +98,7 @@ export function BudgetLineChartCard({
   const rings = useMemo(() => {
     const spentByTop = new Map<string, number>();
     for (const row of spendingBreakdown) {
-      const meta = categoriesMeta.get(row.categoryId);
-      const topId = meta?.parentId ?? row.categoryId;
+      const topId = topCategoryId(row.categoryId, categoriesMeta);
       spentByTop.set(topId, (spentByTop.get(topId) ?? 0) + row.amount);
     }
     return allocations

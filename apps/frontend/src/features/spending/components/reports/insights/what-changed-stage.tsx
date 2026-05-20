@@ -8,6 +8,7 @@ import { cn, formatAmount } from "@/lib/utils";
 
 import { CategoryIcon } from "../../category-chips";
 import type { MonthBucket } from "../../../hooks/use-monthly-history";
+import { topCategoryId } from "../../../lib/category-rollup";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { CategoryBreakdownRow, DayCategoryBucket, MonthlyReport } from "../../../types/report";
 import {
@@ -306,8 +307,7 @@ function computeMovers(
   const roll = (rows: CategoryBreakdownRow[]) => {
     const m = new Map<string, number>();
     for (const r of rows) {
-      const c = meta.get(r.categoryId);
-      const top = c?.parentId ?? r.categoryId;
+      const top = topCategoryId(r.categoryId, meta);
       m.set(top, (m.get(top) ?? 0) + r.amount);
     }
     return m;
@@ -466,9 +466,8 @@ function buildSparklineRows({
     const dayIndex = new Map(days.map((d, i) => [d, i] as const));
     for (const b of byDayByCategory) {
       if (b.taxonomyId !== "spending_categories") continue;
-      const c = meta.get(b.categoryId);
-      const top = c?.parentId ?? b.categoryId;
-      const tcat = meta.get(top) ?? c;
+      const top = topCategoryId(b.categoryId, meta);
+      const tcat = meta.get(top);
       if (!tcat) continue;
       const idx = dayIndex.get(b.date);
       if (idx == null) continue;
@@ -484,9 +483,8 @@ function buildSparklineRows({
   } else {
     months.forEach((m, idx) => {
       for (const r of m.report?.spendingBreakdown ?? []) {
-        const c = meta.get(r.categoryId);
-        const top = c?.parentId ?? r.categoryId;
-        const tcat = meta.get(top) ?? c;
+        const top = topCategoryId(r.categoryId, meta);
+        const tcat = meta.get(top);
         if (!tcat) continue;
         const e = byCat.get(top) ?? {
           name: tcat.name,

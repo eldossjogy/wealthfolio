@@ -370,6 +370,15 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
   ('cat_fees_interest', 'spending_categories', 'cat_fees', 'Interest Charges', 'fees_interest', '#9C998E', 'Percent',     3),
   ('cat_fees_late',     'spending_categories', 'cat_fees', 'Late Fees',        'fees_late',     '#9C998E', 'AlertCircle', 4);
 
+-- Savings
+INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
+  ('cat_savings_emergency',    'spending_categories', 'cat_savings', 'Emergency Fund',           'savings_emergency',    '#6B8E54', 'Shield',     1),
+  ('cat_savings_retirement',   'spending_categories', 'cat_savings', 'Retirement',               'savings_retirement',   '#6B8E54', 'PiggyBank',  2),
+  ('cat_savings_investments',  'spending_categories', 'cat_savings', 'Investment Contributions', 'savings_investments',  '#6B8E54', 'TrendingUp', 3),
+  ('cat_savings_short_term',   'spending_categories', 'cat_savings', 'Short-Term Savings',       'savings_short_term',   '#6B8E54', 'Wallet',     4),
+  ('cat_savings_education',    'spending_categories', 'cat_savings', 'Education / 529',          'savings_education',    '#6B8E54', 'GraduationCap', 5),
+  ('cat_savings_charitable',   'spending_categories', 'cat_savings', 'Charitable Reserve',       'savings_charitable',   '#6B8E54', 'Heart',      6);
+
 -- ----------------------------------------------------------------------------
 -- 9c. Income Sources: TOP LEVEL (parents)
 -- ----------------------------------------------------------------------------

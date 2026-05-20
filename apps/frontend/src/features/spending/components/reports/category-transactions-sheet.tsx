@@ -37,6 +37,21 @@ interface CategoryTransactionsSheetProps {
  * Drill-down drawer listing cash activities for a category in the active
  * insight range. Header shows aggregate stats; top-level categories also get a
  * subcategory composition strip.
+ *
+ * When to use this vs. navigating to `/activities?tab=spending&category=…`:
+ *
+ *   • In-context analysis surfaces (Insights stages, category breakdown
+ *     tables, sparkline grids on the insights page) → **use this sheet**.
+ *     The user is mid-narrative; staying in context preserves the period,
+ *     comparison, and other settings they're examining.
+ *
+ *   • Cross-page summary widgets (the dashboard Spending tab's treemap,
+ *     ranked bar, group blocks; the budget chart's category rings) →
+ *     **navigate to /activities**. The user clicked a summary number to
+ *     drill *out* for bulk edits, deletions, or full-transaction filters.
+ *
+ * If you find a third pattern emerging, decide which bucket above it falls
+ * into rather than introducing a third primitive.
  */
 export function CategoryTransactionsSheet({
   open,

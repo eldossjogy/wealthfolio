@@ -237,7 +237,24 @@ impl AnalyticsService {
             .collect();
         by_day.sort_by(|a, b| a.date.cmp(&b.date));
 
-        // Category breakdown — fetch assignments for the activities in scope
+        // Category breakdown — fetch assignments for the activities in scope.
+        // Use a single batched `list_for_activities` call rather than a
+        // per-activity round-trip (was an N+1 against the assignments table).
+        let current_ids: Vec<String> = current_acts.iter().map(|a| a.id.clone()).collect();
+        let all_assignments = self
+            .assignment_repo
+            .list_for_activities(&current_ids)
+            .await?;
+        let mut assignments_by_activity: HashMap<
+            String,
+            Vec<crate::activity_assignments::ActivityTaxonomyAssignment>,
+        > = HashMap::new();
+        for asg in all_assignments {
+            assignments_by_activity
+                .entry(asg.activity_id.clone())
+                .or_default()
+                .push(asg);
+        }
         let mut spending_acc: HashMap<(String, String), (f64, usize)> = HashMap::new();
         let mut income_acc: HashMap<(String, String), (f64, usize)> = HashMap::new();
         // (date, taxonomy_id, category_id) → (amount, count)
@@ -271,7 +288,10 @@ impl AnalyticsService {
                 timezone,
             );
             let day_str = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
-            let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
+            let assignments = assignments_by_activity
+                .get(&a.id)
+                .cloned()
+                .unwrap_or_default();
             let mut had_spending_assignment = false;
             for asg in assignments {
                 let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY && spending_amount != 0.0 {
@@ -530,21 +550,35 @@ impl AnalyticsService {
             .get_activities_by_account_ids(&target_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-        // Pre-load assignments per activity in scope (only for outflow + spending taxonomy)
-        let mut assign_by_act: HashMap<String, Option<String>> = HashMap::new();
-        for a in &activities {
-            let Some(classification) = classification_for(a, &account_types) else {
-                continue;
-            };
-            if classification.spending_amount(activity_abs_amount(a)) == 0.0 {
-                continue;
+        // Pre-load assignments per activity in scope (only for outflow + spending taxonomy).
+        // Single batched lookup, then group by activity_id — avoids the N+1
+        // round-trip that the previous per-activity loop performed.
+        let spending_ids: Vec<String> = activities
+            .iter()
+            .filter(|a| {
+                classification_for(a, &account_types)
+                    .map(|c| c.spending_amount(activity_abs_amount(a)) != 0.0)
+                    .unwrap_or(false)
+            })
+            .map(|a| a.id.clone())
+            .collect();
+        let all_assignments = self
+            .assignment_repo
+            .list_for_activities(&spending_ids)
+            .await?;
+        let mut spending_cat_by_act: HashMap<String, String> = HashMap::new();
+        for asg in all_assignments {
+            if asg.taxonomy_id == SPENDING_TAXONOMY {
+                // First-write wins per activity (matches the original
+                // `into_iter().find(...)` semantics).
+                spending_cat_by_act
+                    .entry(asg.activity_id.clone())
+                    .or_insert(asg.category_id);
             }
-            let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
-            let cat = assignments
-                .into_iter()
-                .find(|x| x.taxonomy_id == SPENDING_TAXONOMY)
-                .map(|x| x.category_id);
-            assign_by_act.insert(a.id.clone(), cat);
+        }
+        let mut assign_by_act: HashMap<String, Option<String>> = HashMap::new();
+        for id in &spending_ids {
+            assign_by_act.insert(id.clone(), spending_cat_by_act.get(id).cloned());
         }
 
         // Event filter set
@@ -1188,6 +1222,26 @@ impl AnalyticsService {
             .unwrap_or_else(|| Utc::now().date_naive());
         let fx = self.fx_service.as_ref();
 
+        // Batch assignment lookup for every in-scope activity at once,
+        // grouped by activity_id. Replaces a per-activity `list_for_activity`
+        // call inside the inner loop (N+1 against the assignments table).
+        let all_activity_ids: Vec<String> =
+            by_event.values().flatten().map(|a| a.id.clone()).collect();
+        let all_assignments = self
+            .assignment_repo
+            .list_for_activities(&all_activity_ids)
+            .await?;
+        let mut assignments_by_activity: HashMap<
+            String,
+            Vec<crate::activity_assignments::ActivityTaxonomyAssignment>,
+        > = HashMap::new();
+        for asg in all_assignments {
+            assignments_by_activity
+                .entry(asg.activity_id.clone())
+                .or_default()
+                .push(asg);
+        }
+
         let mut out = Vec::with_capacity(events.len());
         for ev in events {
             if !in_window(&ev.event.start_date, &ev.event.end_date) {
@@ -1221,11 +1275,12 @@ impl AnalyticsService {
                 let day = format!("{:04}-{:02}-{:02}", dt.year(), dt.month(), dt.day());
                 *daily.entry(day).or_insert(0.0) += amt;
 
-                // Resolve category for spending taxonomy via the assignments table
-                let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
-                let asg = assignments
-                    .into_iter()
-                    .find(|x| x.taxonomy_id == SPENDING_TAXONOMY);
+                // Resolve category for spending taxonomy via the pre-batched
+                // assignments map (single `list_for_activities` upfront).
+                let asg = assignments_by_activity
+                    .get(&a.id)
+                    .and_then(|v| v.iter().find(|x| x.taxonomy_id == SPENDING_TAXONOMY))
+                    .cloned();
                 let (cat_id_opt, cat_name, cat_color) = match asg {
                     Some(asg) => match cat_meta.get(&asg.category_id) {
                         Some((name, color, _parent)) => {

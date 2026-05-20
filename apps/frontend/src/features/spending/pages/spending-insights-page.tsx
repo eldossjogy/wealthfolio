@@ -5,16 +5,11 @@ import { useAccounts } from "@/hooks/use-accounts";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useSettingsContext } from "@/lib/settings-provider";
 
-import {
-  AnimatedToggleGroup,
-  Page,
-  PageContent,
-  PageHeader,
-  usePersistentState,
-} from "@wealthfolio/ui";
+import { Page, PageContent, PageHeader, usePersistentState } from "@wealthfolio/ui";
 
 import { CategoryTransactionsSheet } from "../components/reports/category-transactions-sheet";
 import { HeatmapCellSheet } from "../components/reports/heatmap-cell-sheet";
+import { SpendingPeriodToggle } from "../components/spending-period-toggle";
 import { StageNav, type InsightsStage } from "../components/reports/insights/stage-nav";
 import { WhatChangedStage } from "../components/reports/insights/what-changed-stage";
 import { WhenWhereStage } from "../components/reports/insights/when-where-stage";
@@ -55,14 +50,6 @@ const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as c
  * Owns period + comparison + stage state at the top; each stage receives the
  * data it needs. Data hooks run unconditionally so switching stages is instant.
  */
-const PERIOD_LABELS: Record<ReportsPeriod, string> = {
-  "1M": "1M",
-  "3M": "3M",
-  "6M": "6M",
-  YTD: "YTD",
-  "1Y": "1Y",
-};
-
 const VALID_STAGES: InsightsStage[] = ["where", "changed", "when"];
 
 export default function SpendingInsightsPage() {
@@ -285,15 +272,7 @@ export default function SpendingInsightsPage() {
     return <Navigate to="/dashboard?tab=spending" replace />;
   }
 
-  const periodToggle = (
-    <AnimatedToggleGroup
-      variant="secondary"
-      size="xs"
-      items={REPORTS_PERIODS.map((p) => ({ value: p, label: PERIOD_LABELS[p] }))}
-      value={period}
-      onValueChange={setPeriodAndUrl}
-    />
-  );
+  const periodToggle = <SpendingPeriodToggle value={period} onValueChange={setPeriodAndUrl} />;
 
   return (
     <Page>
@@ -454,9 +433,7 @@ function ForeignCurrencyBanner({
         source: <span className="font-medium">{fmtNative(foreign[0])}</span>
       </>
     ) : (
-      <>
-        sources: {foreign.map((c) => fmtNative(c)).join(" + ")}
-      </>
+      <>sources: {foreign.map((c) => fmtNative(c)).join(" + ")}</>
     );
   return (
     <div className="text-muted-foreground border-border/60 bg-muted/30 rounded-md border px-3 py-2 text-[11px]">

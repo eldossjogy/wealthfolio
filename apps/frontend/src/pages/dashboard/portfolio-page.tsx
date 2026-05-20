@@ -7,6 +7,7 @@ import { AlternativeAssetKind } from "@/lib/types";
 import SpendingTabContent from "@/features/spending/components/spending-tab-content";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
 import { Button, Icons } from "@wealthfolio/ui";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Suspense, useCallback, useMemo, useState } from "react";
@@ -124,6 +125,21 @@ export default function PortfolioPage() {
       },
     ];
     if (spendingEnabled) {
+      // Surface the activity-import flow from the Spending tab so first-run
+      // users with a CSV ready can find it without hunting through Settings.
+      // The /import page handles credit-card / cash exports the same way as
+      // brokerage imports.
+      const spendingActions = (
+        <>
+          {commonActions}
+          <Button asChild variant="ghost" size="sm" className="text-muted-foreground gap-1.5">
+            <Link to="/import">
+              <Icons.Upload className="h-3.5 w-3.5" />
+              Import
+            </Link>
+          </Button>
+        </>
+      );
       items.push({
         value: "spending",
         label: "Spending",
@@ -133,7 +149,7 @@ export default function PortfolioPage() {
             <SpendingTabContent />
           </Suspense>
         ),
-        actions: commonActions,
+        actions: spendingActions,
       });
     }
     return items;

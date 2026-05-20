@@ -1,9 +1,14 @@
 import { invoke, logger } from "#platform";
 import type {
   CategorizationRule,
+  ImportPresetResult,
   NewCategorizationRule,
+  RemovePresetResult,
+  RulePresetSummary,
   UpdateCategorizationRule,
 } from "../types/rule";
+
+export type { ImportPresetResult, RemovePresetResult, RulePresetSummary } from "../types/rule";
 
 export const listCategorizationRules = async (): Promise<CategorizationRule[]> => {
   try {
@@ -55,26 +60,6 @@ export const rerunCategorizationRules = async (onlyUncategorized: boolean): Prom
   }
 };
 
-export interface RulePresetSummary {
-  presetId: string;
-  presetVersion: string;
-  name: string;
-  description?: string | null;
-  language?: string | null;
-  ruleCount: number;
-  installed: boolean;
-  installedVersion?: string | null;
-}
-
-export interface ImportPresetResult {
-  presetId: string;
-  presetVersion: string;
-  added: number;
-  skippedExisting: number;
-  skippedUnknownCategory: number;
-  total: number;
-}
-
 export const listRulePresets = async (): Promise<RulePresetSummary[]> => {
   try {
     return await invoke<RulePresetSummary[]>("list_rule_presets");
@@ -92,12 +77,6 @@ export const importRulePreset = async (presetId: string): Promise<ImportPresetRe
     throw e;
   }
 };
-
-export interface RemovePresetResult {
-  presetId: string;
-  removed: number;
-  keptModified: number;
-}
 
 export const removeRulePreset = async (presetId: string): Promise<RemovePresetResult> => {
   try {

@@ -12,14 +12,14 @@ import {
   removeRulePreset,
   rerunCategorizationRules,
   updateCategorizationRule,
-  type ImportPresetResult,
-  type RemovePresetResult,
-  type RulePresetSummary,
 } from "../adapters/rules";
 import { invalidateSpendingCaches } from "../lib/invalidation";
 import type {
   CategorizationRule,
+  ImportPresetResult,
   NewCategorizationRule,
+  RemovePresetResult,
+  RulePresetSummary,
   UpdateCategorizationRule,
 } from "../types/rule";
 

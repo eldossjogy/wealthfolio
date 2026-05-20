@@ -16,6 +16,7 @@ import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
 import type { MonthBucket } from "../../../hooks/use-monthly-history";
+import { rollUpToTopLevel, topCategoryId } from "../../../lib/category-rollup";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { BudgetCategoryRow, BudgetSnapshot } from "../../../types/budget";
 import type { PaceState } from "../../../types/insight";
@@ -557,9 +558,8 @@ function buildShareSegments(
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
   const byTop = new Map<string, { name: string; color: string | null; amount: number }>();
   for (const r of breakdown) {
-    const m = meta.get(r.categoryId);
-    const topId = m?.parentId ?? r.categoryId;
-    const top = meta.get(topId) ?? m;
+    const topId = topCategoryId(r.categoryId, meta);
+    const top = meta.get(topId);
     if (!top) continue;
     const e = byTop.get(topId) ?? { name: top.name, color: top.color ?? null, amount: 0 };
     e.amount += r.amount;
@@ -921,24 +921,6 @@ function computeFilterCounts({
   return { all, over, movers, noBudget };
 }
 
-function rollUpToTopLevel(
-  breakdown: CategoryBreakdownRow[],
-  meta: Map<string, TaxonomyCategory>,
-): Map<string, number> {
-  const out = new Map<string, number>();
-  for (const r of breakdown) {
-    const c = meta.get(r.categoryId);
-    const topId = c?.parentId ?? r.categoryId;
-    out.set(topId, (out.get(topId) ?? 0) + r.amount);
-  }
-  for (const [id, amount] of out) {
-    if (amount <= 0) {
-      out.delete(id);
-    }
-  }
-  return out;
-}
-
 function sumAllocationsForTop(
   topId: string,
   meta: Map<string, TaxonomyCategory>,
@@ -979,11 +961,7 @@ function filterBreakdown({
       if (prior > 0 && Math.abs((amt - prior) / prior) * 100 >= 20) allowed.add(topId);
     }
   }
-  return breakdown.filter((r) => {
-    const c = meta.get(r.categoryId);
-    const topId = c?.parentId ?? r.categoryId;
-    return allowed.has(topId);
-  });
+  return breakdown.filter((r) => allowed.has(topCategoryId(r.categoryId, meta)));
 }
 
 /** Subtitle copy that reflects the active range, not just the start month. */
@@ -1003,9 +981,6 @@ function countTopLevel(
 ): number {
   const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
   const tops = new Set<string>();
-  for (const r of rows) {
-    const c = meta.get(r.categoryId);
-    tops.add(c?.parentId ?? r.categoryId);
-  }
+  for (const r of rows) tops.add(topCategoryId(r.categoryId, meta));
   return tops.size;
 }

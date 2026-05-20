@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
+use tokio::sync::Mutex;
 use wealthfolio_core::activities::ActivityRepositoryTrait;
 
 use super::matcher::{compile_rules, match_compiled};
@@ -19,6 +20,15 @@ pub struct CategorizationRulesService {
     repo: Arc<dyn CategorizationRulesRepositoryTrait>,
     activity_repo: Arc<dyn ActivityRepositoryTrait>,
     assignment_service: Arc<ActivityTaxonomyAssignmentService>,
+    /// Serializes `rerun_all` against itself and against in-progress user
+    /// assignments. Without this, a background rerun's pre-built skip-set
+    /// can become stale relative to a concurrent manual assign, causing the
+    /// rerun's bulk_apply to clobber the manual write (race tracked in #28).
+    /// User-initiated `assign_*` calls are atomic at the DB layer for a
+    /// single (activity, taxonomy) pair and do NOT take this lock — the lock
+    /// only forces reruns to complete-or-wait, so a manual write that lands
+    /// during a rerun is sequenced after the rerun's transaction.
+    rerun_lock: Arc<Mutex<()>>,
 }
 
 impl CategorizationRulesService {
@@ -31,6 +41,7 @@ impl CategorizationRulesService {
             repo,
             activity_repo,
             assignment_service,
+            rerun_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -91,6 +102,9 @@ impl CategorizationRulesService {
         if account_ids.is_empty() {
             return Ok(0);
         }
+        // Hold for the entire read-skip-set + write phase so two reruns can't
+        // interleave (each computes its own skip-set, then both writes fire).
+        let _guard = self.rerun_lock.lock().await;
         let activities = self
             .activity_repo
             .get_activities_by_account_ids(account_ids)
@@ -352,10 +366,14 @@ mod tests {
             items: Vec<NewActivityTaxonomyAssignment>,
         ) -> Result<Vec<ActivityTaxonomyAssignment>> {
             self.writes.lock().unwrap().extend(items.iter().cloned());
-            Ok(items
+            // Mirror real DB: a successful write becomes visible to subsequent
+            // `list_for_activities` calls. Replaces any prior row with the
+            // same (activity_id, taxonomy_id) pair to match the storage layer's
+            // single-select delete-then-insert semantics.
+            let rows: Vec<ActivityTaxonomyAssignment> = items
                 .into_iter()
                 .map(|n| ActivityTaxonomyAssignment {
-                    id: "row".to_string(),
+                    id: format!("row-{}-{}", n.activity_id, n.taxonomy_id),
                     activity_id: n.activity_id,
                     taxonomy_id: n.taxonomy_id,
                     category_id: n.category_id,
@@ -364,7 +382,17 @@ mod tests {
                     created_at: Utc::now().naive_utc(),
                     updated_at: Utc::now().naive_utc(),
                 })
-                .collect())
+                .collect();
+            {
+                let mut existing = self.existing.lock().unwrap();
+                for row in &rows {
+                    existing.retain(|a| {
+                        !(a.activity_id == row.activity_id && a.taxonomy_id == row.taxonomy_id)
+                    });
+                    existing.push(row.clone());
+                }
+            }
+            Ok(rows)
         }
         async fn delete(&self, _id: &str) -> Result<()> {
             unimplemented!()
@@ -742,6 +770,61 @@ mod tests {
         assert!(
             writes.is_empty(),
             "manual same-taxonomy must block the rule"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_rerun_all_do_not_interleave() {
+        // Two reruns are spawned concurrently against the same single matching
+        // activity with `only_uncategorized=true`. With the rerun_lock in place,
+        // the first rerun's write becomes visible to the second's skip-set
+        // (the mock now mirrors writes into `existing`), so the second rerun
+        // writes nothing. Without the lock, both skip-sets are built before
+        // either write fires and the activity is written twice.
+        let rule = mk_rule("r1", "AMAZON", "spending_categories", "cat_food", 10);
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(vec![rule]),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo::default());
+        let activity_repo = Arc::new(MockActivityRepo {
+            activities: vec![mk_activity("act1", "acct1", "AMAZON ORDER #123")],
+        });
+        let assignment_service = Arc::new(ActivityTaxonomyAssignmentService::new(
+            assignment_repo.clone() as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+        ));
+        let svc = Arc::new(CategorizationRulesService::new(
+            rules_repo as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn ActivityRepositoryTrait>,
+            assignment_service,
+        ));
+
+        let svc_a = svc.clone();
+        let svc_b = svc.clone();
+        let (a, b) = tokio::join!(
+            tokio::spawn(async move {
+                svc_a
+                    .rerun_all(&["acct1".to_string()], /* only_uncategorized */ true)
+                    .await
+            }),
+            tokio::spawn(async move {
+                svc_b
+                    .rerun_all(&["acct1".to_string()], /* only_uncategorized */ true)
+                    .await
+            }),
+        );
+        a.unwrap().unwrap();
+        b.unwrap().unwrap();
+
+        let writes = assignment_repo.writes.lock().unwrap();
+        assert_eq!(
+            writes.len(),
+            1,
+            "with serialized reruns, the second rerun's skip-set must see the first's write and skip — got {} writes ({:?})",
+            writes.len(),
+            writes
+                .iter()
+                .map(|w| (w.activity_id.clone(), w.taxonomy_id.clone()))
+                .collect::<Vec<_>>()
         );
     }
 
