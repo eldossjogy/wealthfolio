@@ -6,6 +6,7 @@ use axum::{
 };
 use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
+use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     portfolio::{
@@ -22,16 +23,63 @@ use wealthfolio_core::{
 use crate::{error::ApiResult, main_lib::AppState};
 
 use super::dto::{
-    AllocationHoldingsQuery, AssetHoldingsQuery, CheckHoldingsImportRequest,
-    CheckHoldingsImportResult, DeleteSnapshotQuery, HistoryQuery, HoldingItemQuery, HoldingsQuery,
-    HoldingsSnapshotInput, ImportHoldingsCsvRequest, ImportHoldingsCsvResult,
-    SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo, SnapshotsQuery, SymbolCheckResult,
+    AccountIdQuery, AllocationFilterBody, AllocationHoldingsQuery, AssetHoldingsQuery,
+    CheckHoldingsImportRequest, CheckHoldingsImportResult, DeleteSnapshotQuery, FilterBody,
+    HistoryQuery, HoldingItemQuery, HoldingsSnapshotInput, ImportHoldingsCsvRequest,
+    ImportHoldingsCsvResult, SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo,
+    SnapshotsQuery, SymbolCheckResult,
 };
 use super::mappers::{parse_date, parse_date_optional, snapshot_source_to_string};
 
+fn resolve_scope(
+    filter: &AccountScope,
+    state: &AppState,
+) -> Result<ResolvedAccountScope, crate::error::ApiError> {
+    match filter {
+        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
+        AccountScope::Account { account_id } => {
+            Ok(ResolvedAccountScope::Account(account_id.clone()))
+        }
+        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
+            let ids = state
+                .portfolio_service
+                .resolve_account_filter(filter)
+                .map_err(crate::error::ApiError::from)?;
+            Ok(ResolvedAccountScope::Accounts(ids))
+        }
+    }
+}
+
+fn aggregated_id(_filter: &AccountScope) -> String {
+    String::new()
+}
+
 pub async fn get_holdings(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<HoldingsQuery>,
+    Json(body): Json<FilterBody>,
+) -> ApiResult<Json<Vec<Holding>>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let holdings = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state.holdings_service.get_holdings("TOTAL", &base).await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state.holdings_service.get_holdings(&id, &base).await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .holdings_service
+                .get_holdings_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+                .await?
+        }
+    };
+    Ok(Json(holdings))
+}
+
+/// GET /holdings?accountId=... — simple single-account scope
+pub async fn get_holdings_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AccountIdQuery>,
 ) -> ApiResult<Json<Vec<Holding>>> {
     let base = state.base_currency.read().unwrap().clone();
     let holdings = state
@@ -39,6 +87,32 @@ pub async fn get_holdings(
         .get_holdings(&q.account_id, &base)
         .await?;
     Ok(Json(holdings))
+}
+
+/// GET /allocations?accountId=... — simple single-account scope
+pub async fn get_allocations_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AccountIdQuery>,
+) -> ApiResult<Json<PortfolioAllocations>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let allocations = state
+        .allocation_service
+        .get_portfolio_allocations(&q.account_id, &base)
+        .await?;
+    Ok(Json(allocations))
+}
+
+/// GET /allocations/holdings?accountId=...&taxonomyId=...&categoryId=... — simple single-account scope
+pub async fn get_holdings_by_allocation_for_account(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AllocationHoldingsQuery>,
+) -> ApiResult<Json<AllocationHoldings>> {
+    let base = state.base_currency.read().unwrap().clone();
+    let result = state
+        .allocation_service
+        .get_holdings_by_allocation(&q.account_id, &base, &q.taxonomy_id, &q.category_id)
+        .await?;
+    Ok(Json(result))
 }
 
 pub async fn get_holding(
@@ -132,25 +206,63 @@ pub async fn get_latest_valuations(
 
 pub async fn get_portfolio_allocations(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<HoldingsQuery>,
+    Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<PortfolioAllocations>> {
     let base = state.base_currency.read().unwrap().clone();
-    let allocations = state
-        .allocation_service
-        .get_portfolio_allocations(&q.account_id, &base)
-        .await?;
+    let allocations = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state
+                .allocation_service
+                .get_portfolio_allocations("TOTAL", &base)
+                .await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state
+                .allocation_service
+                .get_portfolio_allocations(&id, &base)
+                .await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .allocation_service
+                .get_portfolio_allocations_for_accounts(&ids, &base, &aggregated_id(&body.filter))
+                .await?
+        }
+    };
     Ok(Json(allocations))
 }
 
 pub async fn get_holdings_by_allocation(
     State(state): State<Arc<AppState>>,
-    Query(q): Query<AllocationHoldingsQuery>,
+    Json(body): Json<AllocationFilterBody>,
 ) -> ApiResult<Json<AllocationHoldings>> {
     let base = state.base_currency.read().unwrap().clone();
-    let result = state
-        .allocation_service
-        .get_holdings_by_allocation(&q.account_id, &base, &q.taxonomy_id, &q.category_id)
-        .await?;
+    let result = match resolve_scope(&body.filter, &state)? {
+        ResolvedAccountScope::TotalSnapshot => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation("TOTAL", &base, &body.taxonomy_id, &body.category_id)
+                .await?
+        }
+        ResolvedAccountScope::Account(id) => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation(&id, &base, &body.taxonomy_id, &body.category_id)
+                .await?
+        }
+        ResolvedAccountScope::Accounts(ids) => {
+            state
+                .allocation_service
+                .get_holdings_by_allocation_for_accounts(
+                    &ids,
+                    &base,
+                    &body.taxonomy_id,
+                    &body.category_id,
+                    &aggregated_id(&body.filter),
+                )
+                .await?
+        }
+    };
     Ok(Json(result))
 }
 

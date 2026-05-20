@@ -60,10 +60,11 @@ export interface NewPortfolio {
   accountIds: string[];
 }
 
-export type AccountFilter =
+export type AccountScope =
   | { type: "all" }
   | { type: "account"; accountId: string }
-  | { type: "portfolio"; portfolioId: string };
+  | { type: "portfolio"; portfolioId: string }
+  | { type: "accounts"; accountIds: string[] };
 
 export interface Account {
   id: string;
@@ -621,6 +622,8 @@ export interface Holding {
   prevCloseValue?: MonetaryValue | null;
   weight: number;
   asOfDate: string;
+  /** Source account IDs for aggregated holdings (portfolio/multi-account scope). Empty for single-account. */
+  sourceAccountIds?: string[];
 }
 
 /**
