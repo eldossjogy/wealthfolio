@@ -899,6 +899,14 @@ impl SnapshotRepository {
     /// Deletes existing rows first, then inserts new ones. Called inside the
     /// same transaction as the holdings_snapshots write so both representations
     /// move together.
+    ///
+    /// Positions whose `asset_id` no longer exists in `assets` are silently
+    /// dropped with a warning. The legacy positions JSON has no FK constraint,
+    /// so a snapshot can carry references to assets that have since been
+    /// deleted; the relational table does enforce the FK, so attempting to
+    /// insert an orphan row would abort the whole save. Drop them here so the
+    /// JSON write (which still happens in AccountStateSnapshotDB) keeps the
+    /// historical reference while the relational view stays clean.
     fn write_snapshot_positions(
         conn: &mut SqliteConnection,
         snap_id: &str,
@@ -914,10 +922,24 @@ impl SnapshotRepository {
             return Ok(());
         }
 
-        let records: Vec<NewSnapshotPositionRecord> = positions
-            .values()
-            .map(|pos| NewSnapshotPositionRecord::from_position(snap_id, pos))
-            .collect();
+        let existing_asset_ids =
+            Self::existing_asset_ids(conn, positions.values().map(|p| p.asset_id.as_str()))?;
+
+        let mut records: Vec<NewSnapshotPositionRecord> = Vec::with_capacity(positions.len());
+        for pos in positions.values() {
+            if !existing_asset_ids.contains(pos.asset_id.as_str()) {
+                warn!(
+                    "Dropping snapshot position for missing asset {} (snapshot {})",
+                    pos.asset_id, snap_id
+                );
+                continue;
+            }
+            records.push(NewSnapshotPositionRecord::from_position(snap_id, pos));
+        }
+
+        if records.is_empty() {
+            return Ok(());
+        }
 
         diesel::insert_into(snapshot_positions)
             .values(&records)
@@ -925,6 +947,31 @@ impl SnapshotRepository {
             .map_err(StorageError::from)?;
 
         Ok(())
+    }
+
+    /// Returns the subset of `candidate_ids` that exist in `assets`.
+    /// Used by write paths that mirror data from the legacy positions JSON
+    /// (which has no FK constraint) into FK-enforced relational tables.
+    fn existing_asset_ids<'a, I>(
+        conn: &mut SqliteConnection,
+        candidate_ids: I,
+    ) -> std::result::Result<HashSet<String>, StorageError>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        use crate::schema::assets::dsl as a;
+
+        let unique: HashSet<String> = candidate_ids.into_iter().map(|s| s.to_string()).collect();
+        if unique.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let needles: Vec<String> = unique.iter().cloned().collect();
+        let found: Vec<String> = a::assets
+            .select(a::id)
+            .filter(a::id.eq_any(&needles))
+            .load(conn)
+            .map_err(StorageError::from)?;
+        Ok(found.into_iter().collect())
     }
 }
 

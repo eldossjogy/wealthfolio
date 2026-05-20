@@ -130,9 +130,18 @@ CREATE INDEX idx_snapshot_positions_asset_id    ON snapshot_positions(asset_id);
 -- Backfill snapshot_positions from existing positions JSON for HOLDINGS-mode
 -- snapshots. One-shot atomic INSERT - no resume logic needed.
 --
--- json_extract on numeric fields can produce scientific notation
--- (e.g. 1e-08). Wrap in printf('%.20f') + rtrim to produce the decimal
--- text format that Decimal::from_str expects.
+-- Notes:
+--   * json_extract on numeric fields can produce scientific notation
+--     (e.g. 1e-08). Wrap in printf('%.20f') + rtrim to produce the decimal
+--     text format that Decimal::from_str expects.
+--   * Filter to assetIds that still exist in `assets`. The legacy JSON
+--     column has no FK constraint, so a snapshot can reference an asset
+--     that has since been deleted. PRAGMA foreign_keys is OFF during
+--     migrations (see db::run_migrations), so an orphan would silently
+--     INSERT here — but later runtime writes (FK=ON) would fail when the
+--     same (snapshot_id, asset_id) is re-inserted by write_snapshot_positions,
+--     regressing the user's ability to save the snapshot. Drop the orphan
+--     rows at backfill time so the relational table starts clean.
 INSERT INTO snapshot_positions (
     snapshot_id, asset_id, quantity, average_cost, total_cost_basis,
     currency, inception_date, is_alternative, contract_multiplier,
@@ -155,7 +164,10 @@ FROM holdings_snapshots hs,
 WHERE hs.positions IS NOT NULL
   AND hs.positions != '{}'
   AND hs.positions != ''
-  AND json_extract(pos.value, '$.assetId') IS NOT NULL;
+  AND json_extract(pos.value, '$.assetId') IS NOT NULL
+  AND EXISTS (
+      SELECT 1 FROM assets WHERE id = json_extract(pos.value, '$.assetId')
+  );
 
 -- NOTE: positions JSON is intentionally NOT cleared. Read paths still resolve
 -- through it; the relational table is a parallel write surface for now. A

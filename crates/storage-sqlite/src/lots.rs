@@ -9,8 +9,9 @@ use std::sync::Arc;
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
 use chrono::NaiveDate;
+use log::warn;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::lots::{LotClosure, LotRecord, LotRepositoryTrait};
 
@@ -115,10 +116,28 @@ impl LotRepositoryTrait for LotsRepository {
                     .map_err(StorageError::from)?;
 
                 if !db_lots.is_empty() {
-                    diesel::insert_into(dsl::lots)
-                        .values(&db_lots)
-                        .execute(conn)
-                        .map_err(StorageError::from)?;
+                    let valid_assets =
+                        existing_asset_ids(conn, db_lots.iter().map(|l| l.asset_id.as_str()))?;
+                    let filtered: Vec<&LotRecordDB> = db_lots
+                        .iter()
+                        .filter(|l| {
+                            if valid_assets.contains(l.asset_id.as_str()) {
+                                true
+                            } else {
+                                warn!(
+                                    "Dropping lot for missing asset {} (account {})",
+                                    l.asset_id, account_id
+                                );
+                                false
+                            }
+                        })
+                        .collect();
+                    if !filtered.is_empty() {
+                        diesel::insert_into(dsl::lots)
+                            .values(filtered)
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
+                    }
                 }
 
                 Ok(())
@@ -224,9 +243,29 @@ impl LotRepositoryTrait for LotsRepository {
 
         self.writer
             .exec(move |conn| {
+                // Drop records whose asset_id no longer exists. Legacy
+                // positions JSON has no FK enforcement, so HOLDINGS-mode
+                // derivation can produce LotRecords for since-deleted assets;
+                // the lots table's FK would reject them and abort the whole
+                // sync.
+                let valid_assets = existing_asset_ids(
+                    conn,
+                    db_lots
+                        .iter()
+                        .map(|l| l.asset_id.as_str())
+                        .chain(closures.iter().map(|c| c.asset_id.as_str())),
+                )?;
+
                 // Upsert open lots one at a time (SQLite Diesel doesn't support
                 // batch ON CONFLICT)
                 for lot in &db_lots {
+                    if !valid_assets.contains(lot.asset_id.as_str()) {
+                        warn!(
+                            "Dropping lot {} for missing asset {} (account {})",
+                            lot.id, lot.asset_id, account_id
+                        );
+                        continue;
+                    }
                     diesel::insert_into(dsl::lots)
                         .values(lot)
                         .on_conflict(dsl::id)
@@ -259,6 +298,13 @@ impl LotRepositoryTrait for LotsRepository {
                     .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                     .to_string();
                 for closure in &closures {
+                    if !valid_assets.contains(closure.asset_id.as_str()) {
+                        warn!(
+                            "Dropping lot closure {} for missing asset {} (account {})",
+                            closure.lot_id, closure.asset_id, account_id
+                        );
+                        continue;
+                    }
                     let closed_lot = LotRecordDB {
                         id: closure.lot_id.clone(),
                         account_id: closure.account_id.clone(),
@@ -407,6 +453,32 @@ impl LotRepositoryTrait for LotsRepository {
             .map_err(StorageError::from)?;
         Ok(n)
     }
+}
+
+/// Returns the subset of `candidate_ids` that exist in `assets`. Used by lot
+/// write paths to drop records whose asset has been deleted while the legacy
+/// positions JSON still referenced it — without this filter, the lots table's
+/// `asset_id` FK would reject the whole batch.
+fn existing_asset_ids<'a, I>(
+    conn: &mut SqliteConnection,
+    candidate_ids: I,
+) -> std::result::Result<HashSet<String>, StorageError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    use crate::schema::assets::dsl as a;
+
+    let unique: HashSet<String> = candidate_ids.into_iter().map(|s| s.to_string()).collect();
+    if unique.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let needles: Vec<String> = unique.iter().cloned().collect();
+    let found: Vec<String> = a::assets
+        .select(a::id)
+        .filter(a::id.eq_any(&needles))
+        .load(conn)
+        .map_err(StorageError::from)?;
+    Ok(found.into_iter().collect())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
