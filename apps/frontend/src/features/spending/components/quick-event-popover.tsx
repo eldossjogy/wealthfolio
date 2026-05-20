@@ -45,9 +45,13 @@ export function QuickEventPopover({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const { openEventDialog } = useEventDialog();
-  const { data: events = [], isError: eventsErrored } = useSpendingEvents();
-  const { data: eventTypes = [], isError: typesErrored } = useEventTypes();
+  const { data: events = [], isError: eventsErrored, refetch: refetchEvents } = useSpendingEvents();
+  const { data: eventTypes = [], isError: typesErrored, refetch: refetchTypes } = useEventTypes();
   const loadErrored = eventsErrored || typesErrored;
+  const retryLoad = () => {
+    if (eventsErrored) void refetchEvents();
+    if (typesErrored) void refetchTypes();
+  };
 
   const handleCreate = () => {
     const seedName = search.trim();
@@ -89,8 +93,11 @@ export function QuickEventPopover({
       <PopoverContent className="w-[280px] p-0" align={align}>
         <Command>
           {loadErrored && (
-            <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-              Couldn't load events. Try refreshing.
+            <div className="flex items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+              <span>Couldn't load events.</span>
+              <button type="button" onClick={retryLoad} className="text-foreground hover:underline">
+                Retry
+              </button>
             </div>
           )}
           <CommandInput placeholder="Search events..." value={search} onValueChange={setSearch} />

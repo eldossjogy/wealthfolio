@@ -361,7 +361,9 @@ pub async fn create_event_type(
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateEventType {
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
     pub color: Option<Option<String>>,
 }
 

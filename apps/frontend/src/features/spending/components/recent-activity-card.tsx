@@ -146,7 +146,23 @@ export function RecentActivityCard({
                 const needsReview = a.needsReview || (isOutflow && !badge);
 
                 return (
-                  <div key={a.id} className="flex items-center gap-2.5 py-1.5">
+                  // Single transaction row → activities page filtered to this
+                  // payee (or status=uncategorized when there's no payee +
+                  // it's flagged for review). Matches the clickable behavior
+                  // of every neighboring spending widget (ranked bar rows,
+                  // treemap cells, budget rings) so this row no longer feels
+                  // like a dead row sandwiched between live ones.
+                  <Link
+                    key={a.id}
+                    to={
+                      needsReview && !payee
+                        ? "/activities?tab=spending&status=uncategorized"
+                        : payee
+                          ? `/activities?tab=spending&q=${encodeURIComponent(payee)}`
+                          : "/activities?tab=spending"
+                    }
+                    className="hover:bg-muted/40 flex items-center gap-2.5 rounded-md py-1.5 transition-colors"
+                  >
                     <div className="min-w-0 flex-1">
                       <div className="text-foreground/90 truncate text-xs font-medium">
                         {payee || <span className="text-muted-foreground italic">No payee</span>}
@@ -166,7 +182,7 @@ export function RecentActivityCard({
                       {isOutflow ? "−" : "+"}
                       <PrivacyAmount value={amount} currency={currency} />
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>

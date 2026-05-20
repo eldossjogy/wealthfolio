@@ -13,6 +13,7 @@ import {
 } from "@/features/spending/hooks/use-categorization-rules";
 import { isSpendingAccountType } from "@/features/spending/lib/constants";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +21,9 @@ import { formatAmountWhole } from "./format";
 
 export function ModuleCard() {
   const { settings, isLoading } = useSpendingSettings();
+  const { isBalanceHidden } = useBalancePrivacy();
+  const fmt = (amount: number, currency: string) =>
+    isBalanceHidden ? "••••" : formatAmountWhole(amount, currency);
   const mutation = useSpendingSettingsMutation();
   const { accounts } = useAccounts({ filterActive: true });
   const { data: budget } = useBudget();
@@ -172,7 +176,7 @@ export function ModuleCard() {
               valueClassName={overPlan ? "text-warning" : undefined}
               sub={
                 spendingPlanned > 0 || incomePlanned > 0
-                  ? `${formatAmountWhole(spendingPlanned, currency)} / ${formatAmountWhole(incomePlanned, currency)}`
+                  ? `${fmt(spendingPlanned, currency)} / ${fmt(incomePlanned, currency)}`
                   : "Set up budget"
               }
             />

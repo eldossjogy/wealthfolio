@@ -308,7 +308,7 @@ export function EventsCard({
         </button>
       ) : (
         <Link
-          to="/spending/insights"
+          to="/spending/insights?stage=when"
           className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
         >
           {pick.mode === "recent" ? "See breakdown" : "Open event"}

@@ -147,7 +147,12 @@ export default function SpendingInsightsPage() {
     }),
     [range],
   );
-  const { data: insight, isLoading: isInsightLoading } = useSpendingInsight(insightRequest);
+  const {
+    data: insight,
+    isLoading: isInsightLoading,
+    isError: insightErrored,
+    refetch: refetchInsight,
+  } = useSpendingInsight(insightRequest);
 
   // Legacy hooks remain for the "What changed" + sparkline stages (they
   // produce richer per-day / per-leaf-category shapes that the insight
@@ -294,6 +299,21 @@ export default function SpendingInsightsPage() {
             nativeTotals={insight.nativeOutflowByCurrency ?? {}}
             asOf={insight.period.end}
           />
+        )}
+
+        {insightErrored && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+            <span>
+              <span className="font-semibold">Couldn't load insights.</span> Showing zeros below.
+            </span>
+            <button
+              type="button"
+              onClick={() => void refetchInsight()}
+              className="text-foreground hover:underline"
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         {stage === "where" && (

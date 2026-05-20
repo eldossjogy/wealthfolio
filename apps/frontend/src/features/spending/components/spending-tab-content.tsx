@@ -1,5 +1,5 @@
 import { useMemo, useState, type FC } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -69,7 +69,19 @@ export default function SpendingTabContent() {
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
-  const [intervalCode] = usePersistentState<TimePeriod>(INTERVAL_STORAGE_KEY, DEFAULT_INTERVAL);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // URL-driven so `/dashboard?tab=spending&spendingInterval=3M` is shareable
+  // and survives reload. Falls back to the persisted preference, then to
+  // DEFAULT_INTERVAL. The "spendingInterval" prefix avoids colliding with
+  // other dashboard tabs that may want their own `?interval`.
+  const [persistedInterval] = usePersistentState<TimePeriod>(
+    INTERVAL_STORAGE_KEY,
+    DEFAULT_INTERVAL,
+  );
+  const VALID_INTERVALS: TimePeriod[] = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "5Y", "ALL"];
+  const urlInterval = searchParams.get("spendingInterval") as TimePeriod | null;
+  const intervalCode: TimePeriod =
+    urlInterval && VALID_INTERVALS.includes(urlInterval) ? urlInterval : persistedInterval;
   const [activeCode, setActiveCode] = useState<TimePeriod>(intervalCode);
   const theme: Palette = FOREST_THEME;
 
@@ -98,7 +110,12 @@ export default function SpendingTabContent() {
     [priorRangeForReport, reportReq],
   );
 
-  const { data: report, isLoading } = useSpendingReport(reportReq);
+  const {
+    data: report,
+    isLoading,
+    isError: reportErrored,
+    refetch: refetchReport,
+  } = useSpendingReport(reportReq);
   const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(
     priorReportReq,
     /* enabled */ priorRangeForReport !== undefined,
@@ -185,6 +202,14 @@ export default function SpendingTabContent() {
     setActiveCode(code);
     setSelectedIntervalDescription(description);
     setDateRange(range);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("spendingInterval", code);
+        return p;
+      },
+      { replace: true },
+    );
   };
 
   const granularity: "day" | "week" | "month" = useMemo(() => {
@@ -400,6 +425,21 @@ export default function SpendingTabContent() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {reportErrored && (
+        <div className="mx-4 mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 md:mx-6 lg:mx-8 dark:text-amber-300">
+          <span>
+            <span className="font-semibold">Couldn't load spending report.</span> Showing zeros
+            below.
+          </span>
+          <button
+            type="button"
+            onClick={() => void refetchReport()}
+            className="text-foreground hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
           <div>
@@ -545,6 +585,7 @@ export default function SpendingTabContent() {
                   <h2 className="text-md font-semibold tracking-tight">Where it went</h2>
                   <div className="flex items-center gap-3">
                     <SegmentedToggle
+                      ariaLabel="Where it went view"
                       items={[
                         { value: "list", label: "List" },
                         { value: "map", label: "Map" },
@@ -658,13 +699,21 @@ function SegmentedToggle({
   items,
   value,
   onChange,
+  ariaLabel,
 }: {
   items: { value: string; label: string }[];
   value: string;
   onChange: (v: string) => void;
+  /** A11y label for the group — without this, screen readers announce two
+   *  unrelated buttons instead of a single logical control. */
+  ariaLabel?: string;
 }) {
   return (
-    <div className="bg-card/40 border-border/60 inline-flex max-w-full items-center gap-0.5 rounded-full border p-0.5">
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className="bg-card/40 border-border/60 inline-flex max-w-full items-center gap-0.5 rounded-full border p-0.5"
+    >
       {items.map((it) => {
         const active = it.value === value;
         return (
@@ -888,6 +937,10 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
       {showDot && (
         <circle cx={x + padX + dotR} cy={y + padY + dotR} r={dotR} fill={accent ?? "transparent"} />
       )}
+      {/* Visual labels — the parent <g> already carries an aria-label with
+          the full "<name>: <amount>, <pct>" string, so the SVG <text> nodes
+          are decorative and would otherwise double-announce on screen
+          readers. */}
       {showName && (
         <text
           x={x + padX + (showDot ? dotR * 2 + 6 : 0)}
@@ -895,6 +948,7 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
           fill="var(--foreground)"
           className="font-semibold uppercase"
           style={{ fontSize: labelFontSize, letterSpacing: "0.06em", opacity: 0.7 }}
+          aria-hidden
         >
           {truncateForBox(
             name ?? "",
@@ -910,6 +964,7 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
           fill="var(--foreground)"
           className="font-semibold tabular-nums"
           style={{ fontSize: amountFontSize, opacity: 0.92 }}
+          aria-hidden
         >
           {truncateForBox(amountText, innerW - (showPct ? pctTextW + 8 : 0), amountFontSize)}
         </text>
@@ -922,6 +977,7 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
           fill="var(--foreground)"
           className="tabular-nums"
           style={{ fontSize: pctFontSize, opacity: 0.5 }}
+          aria-hidden
         >
           {pctText}
         </text>

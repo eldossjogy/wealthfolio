@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { Button, Icons } from "@wealthfolio/ui";
 
@@ -55,6 +55,22 @@ export default function SpendingSettingsPage() {
         <>
           <Section title="Sources" meta="Which accounts feed the tracker">
             <AccountsCard />
+            {/* CSV import is a common first-run task — surface it next to the
+                sources selector so a user landing in Settings to set up the
+                tracker can seed historical activities without hunting for the
+                separate /import route. Matches the dashboard tab's Import
+                action (portfolio-page.tsx). */}
+            <div className="border-border/60 bg-card/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Icons.Upload className="text-muted-foreground h-3.5 w-3.5" aria-hidden />
+                <span className="text-foreground/90">
+                  Have a credit-card or bank CSV? Import historical activities to seed the tracker.
+                </span>
+              </div>
+              <Button asChild variant="outline" size="sm" className="h-7 shrink-0 text-xs">
+                <Link to="/import">Import CSV</Link>
+              </Button>
+            </div>
           </Section>
 
           <Section title="Budgets" meta="Default monthly plan and rollover behavior">

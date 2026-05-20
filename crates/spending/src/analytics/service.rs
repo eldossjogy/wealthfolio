@@ -226,12 +226,15 @@ impl AnalyticsService {
             .filter(|(_, (_, outflow))| *outflow > 0.0)
             .map(|(d, _)| format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()))
             .collect();
+        // Signed per-day outflow so `Σ by_day.outflow == current.net` minus
+        // income, matching the headline. Refund days emit a negative outflow;
+        // chart consumers that want non-negative bars should clamp at render.
         let mut by_day: Vec<DayBucket> = by_day_map
             .into_iter()
             .map(|(d, (income, outflow))| DayBucket {
                 date: format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()),
                 income,
-                outflow: outflow.max(0.0),
+                outflow,
             })
             .filter(|bucket| bucket.income != 0.0 || bucket.outflow != 0.0)
             .collect();
@@ -293,7 +296,25 @@ impl AnalyticsService {
                 .cloned()
                 .unwrap_or_default();
             let mut had_spending_assignment = false;
-            for asg in assignments {
+            // Single-select per (activity, taxonomy): dedupe defensively here
+            // so a corrupted DB row with two spending_categories assignments
+            // for one activity doesn't double-count into spending_breakdown
+            // while `summarize` (which sees the activity once, no assignments)
+            // doesn't — that would break the
+            // `monthly_report.current.outflow == Σ spending_breakdown.amount`
+            // invariant. Matches the dedupe in budget/service.rs:785-799 and
+            // the debug_assert in insight/service.rs:558.
+            let mut seen_taxonomies: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
+            for asg in &assignments {
+                if !seen_taxonomies.insert(asg.taxonomy_id.as_str()) {
+                    debug_assert!(
+                        false,
+                        "single-select invariant violated for activity {} in {}",
+                        a.id, asg.taxonomy_id
+                    );
+                    continue;
+                }
                 let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY && spending_amount != 0.0 {
                     had_spending_assignment = true;
                     Some((&mut spending_acc, spending_amount))
@@ -434,16 +455,23 @@ fn summarize(
         // matching insight::aggregate_spend so the two services agree.
         income += fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
         outflow += fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        // `count` is "activities that contributed income OR outflow" — it
+        // counts each activity once, regardless of how many spending/income
+        // category assignments it carries. Consumers that need spending-only
+        // counts should read `Σ spending_breakdown.count` (per-assignment),
+        // which will be `<= count` when income-only activities exist. The
+        // two fields measure different things; they're not expected to match.
         count += 1;
     }
-    // Display `outflow` as a non-negative magnitude (a refund-only period shows
-    // "$0 spent" rather than "-$50"), but compute `net` from the signed outflow
-    // so refunds correctly flow into net cashflow as positive contributions.
-    // This keeps net = income - signed_outflow in agreement with the insight
-    // pipeline's `Headline.net_cashflow` (insight/service.rs:337).
+    // All three monetary fields are signed so `Σ by_day.outflow == current.outflow`
+    // and `current.net == income - outflow` hold by construction. Matches the
+    // insight pipeline's `Headline.spent` / `Headline.net_cashflow`
+    // (insight/service.rs:337) which has always been signed. UI consumers
+    // that want a non-negative "Spent" badge for refund-heavy periods can
+    // clamp at render time.
     PeriodSummary {
         income,
-        outflow: outflow.max(0.0),
+        outflow,
         net: income - outflow,
         count,
     }

@@ -603,15 +603,18 @@ fn compute_by_day(
         entry.0 += spending;
         entry.1 += income;
     }
-    // Chart series surface non-negative magnitudes: a day with refunds > charges
-    // shows zero outflow rather than a negative bar. Headline totals stay signed
-    // (insight/service.rs:337) so net cashflow reconciles correctly.
+    // Emit signed per-day spent + income so that
+    // `Σ by_day.spent == headline.spent` (signed) — required by the
+    // reconciliation invariant. A previous version of this function clamped
+    // each day at zero, which broke the invariant on refund-heavy days. Chart
+    // consumers that want non-negative bars should clamp at render time
+    // rather than at emit time.
     let mut out: Vec<DayBucket> = map
         .into_iter()
         .map(|(d, (spent, income))| DayBucket {
             date: format_date(d),
-            spent: spent.max(0.0),
-            income: income.max(0.0),
+            spent,
+            income,
         })
         .collect();
     out.sort_by(|a, b| a.date.cmp(&b.date));
@@ -649,12 +652,14 @@ fn compute_by_month(
         entry.0 += spending;
         entry.1 += income;
     }
+    // Signed values (see compute_by_day comment): reconciliation invariant
+    // `Σ by_month.spent == headline.spent` requires no per-bucket clamping.
     let mut out: Vec<MonthBucket> = map
         .into_iter()
         .map(|(month, (spent, income))| MonthBucket {
             month,
-            spent: spent.max(0.0),
-            income: income.max(0.0),
+            spent,
+            income,
         })
         .collect();
     out.sort_by(|a, b| a.month.cmp(&b.month));
@@ -889,9 +894,15 @@ fn compute_pace(
     fx_as_of: NaiveDate,
     timezone: &str,
 ) -> PaceState {
-    let start_d = start.date_naive();
-    let end_d = end.date_naive();
-    let now_d = now.date_naive();
+    // All day anchors in the user's local timezone so the trailing-7 boundary
+    // and the activity-day comparison below are in the same domain. Otherwise
+    // a UTC±12 user near midnight would see a day shift between
+    // `trail_start..=elapsed_d` (UTC) and `d` (user-local), dropping or
+    // adding a day's worth of activities.
+    let start_d =
+        wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(start, timezone);
+    let end_d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(end, timezone);
+    let now_d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(now, timezone);
     let total_days = (end_d - start_d).num_days() + 1;
 
     // Day relative to the window:

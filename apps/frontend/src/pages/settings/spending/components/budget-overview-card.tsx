@@ -4,12 +4,16 @@ import { Link } from "react-router-dom";
 import { Button, Icons } from "@wealthfolio/ui";
 
 import { useBudget } from "@/features/spending/hooks/use-budget";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { cn } from "@/lib/utils";
 
 import { formatAmountWhole } from "./format";
 
 export function BudgetOverviewCard() {
   const { data: budget, isLoading } = useBudget();
+  const { isBalanceHidden } = useBalancePrivacy();
+  const fmt = (amount: number, currency: string) =>
+    isBalanceHidden ? "••••" : formatAmountWhole(amount, currency);
 
   const spendingPlanned = budget?.computed.totals.spendingPlanned ?? 0;
   const incomePlanned = budget?.computed.totals.incomePlanned ?? 0;
@@ -77,11 +81,11 @@ export function BudgetOverviewCard() {
           <div>
             <div className="tabular-nums leading-none">
               <span className="text-foreground text-xl font-semibold tracking-tight sm:text-2xl">
-                {formatAmountWhole(spendingPlanned, currency)}
+                {fmt(spendingPlanned, currency)}
               </span>
               {incomePlanned > 0 && (
                 <span className="text-muted-foreground ml-1 text-sm font-normal sm:text-base">
-                  / {formatAmountWhole(incomePlanned, currency)}
+                  / {fmt(incomePlanned, currency)}
                 </span>
               )}
             </div>
@@ -125,9 +129,7 @@ export function BudgetOverviewCard() {
                 style={{ background: g.color ?? "var(--muted-foreground)" }}
               />
               <span className="text-foreground font-medium">{g.name}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {formatAmountWhole(g.planned, currency)}
-              </span>
+              <span className="text-muted-foreground tabular-nums">{fmt(g.planned, currency)}</span>
             </span>
           ))}
           {unfundedGroups.map((g) => (

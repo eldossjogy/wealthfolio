@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useCallback } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button, Icons, Page, PageContent, PageHeader } from "@wealthfolio/ui";
 
@@ -11,10 +11,33 @@ function currentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Strict YYYY-MM check so `?month=garbage` doesn't poison the editor. */
+function isValidMonthKey(s: string | null): s is string {
+  return !!s && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+}
+
 export default function SpendingBudgetPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
-  const [monthKey, setMonthKey] = useState(currentMonthKey);
+  // URL-driven so `/spending/budget?month=2026-03` is shareable + reload-stable.
+  // Matches the Insights / Transactions pattern; falls back to the current
+  // local month when absent or malformed.
+  const urlMonth = searchParams.get("month");
+  const monthKey = isValidMonthKey(urlMonth) ? urlMonth : currentMonthKey();
+  const setMonthKey = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.set("month", next);
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   if (!settingsLoading && !isEnabled) {
     return <Navigate to="/dashboard?tab=spending" replace />;

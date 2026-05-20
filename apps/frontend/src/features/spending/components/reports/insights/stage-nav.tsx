@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import { cn } from "@/lib/utils";
 
 export type InsightsStage = "where" | "changed" | "when";
@@ -14,14 +16,30 @@ const STAGES: { id: InsightsStage; label: string }[] = [
 ];
 
 export function StageNav({ stage, onStageChange }: StageNavProps) {
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  // When the URL deep-links to a stage on mount or `stage` changes
+  // (e.g. via the dashboard "Where I am" link), scroll the active chip
+  // into view so it isn't off-screen on a 375px column.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [stage]);
+
   return (
-    <div className="border-border/60 bg-card/40 flex items-center gap-1 overflow-x-auto rounded-2xl border px-3 py-2 backdrop-blur-xl">
+    <nav
+      aria-label="Insights stages"
+      className="border-border/60 bg-card/40 flex items-center gap-1 overflow-x-auto rounded-2xl border px-3 py-2 backdrop-blur-xl"
+    >
       {STAGES.map((s) => {
         const active = stage === s.id;
         return (
           <button
             key={s.id}
             type="button"
+            ref={active ? activeRef : undefined}
             onClick={() => onStageChange(s.id)}
             className={cn(
               "group inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3 py-1.5 text-xs transition-colors",
@@ -35,6 +53,6 @@ export function StageNav({ stage, onStageChange }: StageNavProps) {
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }
