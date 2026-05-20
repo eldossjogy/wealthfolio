@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  EmptyPlaceholder,
   Icons,
   Skeleton,
 } from "@wealthfolio/ui";
@@ -146,9 +147,18 @@ export default function SpendingEventsPage() {
           })}
         </div>
       ) : (
-        <div className="text-muted-foreground py-8 text-center text-sm">
-          No event types yet. Click &quot;Add event type&quot; to create one.
-        </div>
+        <EmptyPlaceholder>
+          <EmptyPlaceholder.Icon name="Calendar" />
+          <EmptyPlaceholder.Title>No event types</EmptyPlaceholder.Title>
+          <EmptyPlaceholder.Description>
+            You don&apos;t have any event types yet. Create an event type to start tagging
+            transactions by trip, project, or any other grouping.
+          </EmptyPlaceholder.Description>
+          <Button onClick={handleAddEventType}>
+            <Icons.Plus className="mr-2 h-4 w-4" />
+            Add event type
+          </Button>
+        </EmptyPlaceholder>
       )}
     </div>
   );

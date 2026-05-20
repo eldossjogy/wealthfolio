@@ -10,7 +10,9 @@ use serde::Deserialize;
 use crate::{error::ApiResult, main_lib::AppState};
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment;
-use wealthfolio_spending::analytics::{MonthlyReport, ReportRequest};
+use wealthfolio_spending::analytics::{
+    EventSpendingSummary, EventSummariesRequest, MonthlyReport, ReportRequest, SpendingSummary,
+};
 use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
@@ -20,7 +22,9 @@ use wealthfolio_spending::cash_activities::{
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
 };
-use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
+use wealthfolio_spending::events::{
+    Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent,
+};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
@@ -293,6 +297,37 @@ async fn create_event_type(
     Ok(Json(state.events_service.create_type(payload).await?))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateEventTypeBody {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_color")]
+    color: Option<Option<String>>,
+}
+
+/// Distinguish missing field (None) from explicit `null` (Some(None)) so callers
+/// can clear the color. Mirrors the Tauri `UpdateEventType.color` semantics.
+fn deserialize_optional_color<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+async fn update_event_type(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateEventTypeBody>,
+) -> ApiResult<Json<EventType>> {
+    Ok(Json(
+        state
+            .events_service
+            .update_type(&id, body.name, body.color)
+            .await?,
+    ))
+}
+
 async fn delete_event_type(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -490,10 +525,11 @@ async fn get_spending_report(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ReportRequest>,
 ) -> ApiResult<Json<MonthlyReport>> {
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .spending_analytics_service
-            .monthly_report(payload)
+            .monthly_report(payload, &timezone)
             .await?,
     ))
 }
@@ -503,10 +539,11 @@ async fn get_spending_insight(
     Json(payload): Json<SpendingInsightRequest>,
 ) -> ApiResult<Json<SpendingInsight>> {
     let currency = state.base_currency.read().unwrap().clone();
+    let timezone = state.timezone.read().unwrap().clone();
     Ok(Json(
         state
             .spending_insight_service
-            .compute(payload, &currency)
+            .compute(payload, &currency, &timezone)
             .await?,
     ))
 }
@@ -536,6 +573,53 @@ async fn copy_budget_targets(
             )
             .await?,
     ))
+}
+
+async fn get_event_spending_summaries(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<Option<EventSummariesRequest>>,
+) -> ApiResult<Json<Vec<EventSpendingSummary>>> {
+    let mut req = request.unwrap_or(EventSummariesRequest {
+        start_date: None,
+        end_date: None,
+        currency: None,
+    });
+    if req.currency.is_none() {
+        req.currency = Some(state.base_currency.read().unwrap().clone());
+    }
+    Ok(Json(
+        state
+            .spending_analytics_service
+            .event_spending_summaries(req)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpendingSummaryBody {
+    #[serde(default)]
+    include_event_ids: Option<Vec<String>>,
+    #[serde(default)]
+    include_all_events: Option<bool>,
+}
+
+async fn get_spending_summary(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SpendingSummaryBody>,
+) -> ApiResult<Json<Vec<SpendingSummary>>> {
+    Ok(Json(
+        state
+            .spending_analytics_service
+            .spending_summary(body.include_event_ids, body.include_all_events)
+            .await?,
+    ))
+}
+
+async fn get_events_with_names(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<EventWithTypeName>>> {
+    Ok(Json(state.events_service.list_events_with_names().await?))
 }
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -585,7 +669,10 @@ pub fn router() -> Router<Arc<AppState>> {
             "/v1/spending/event-types",
             get(list_event_types).post(create_event_type),
         )
-        .route("/v1/spending/event-types/:id", delete(delete_event_type))
+        .route(
+            "/v1/spending/event-types/:id",
+            put(update_event_type).delete(delete_event_type),
+        )
         .route("/v1/spending/events", get(list_events).post(create_event))
         .route(
             "/v1/spending/events/:id",
@@ -621,4 +708,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/v1/spending/budget/copy", post(copy_budget_targets))
         .route("/v1/spending/report", post(get_spending_report))
         .route("/v1/spending/insight", post(get_spending_insight))
+        .route(
+            "/v1/spending/event-spending-summaries",
+            post(get_event_spending_summaries),
+        )
+        .route("/v1/spending/summary", post(get_spending_summary))
+        .route("/v1/spending/events-with-names", get(get_events_with_names))
 }

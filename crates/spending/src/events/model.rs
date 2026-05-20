@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct EventType {
     pub id: String,
+    /// Stable slug for the 7 seeded types (Travel, Wedding, …). Present only
+    /// on rows seeded by the migration; user-created types have `None`. Used
+    /// by the UI as an i18n lookup key so seeded names can be localized.
+    pub key: Option<String>,
     pub name: String,
     pub color: Option<String>,
     pub created_at: NaiveDateTime,

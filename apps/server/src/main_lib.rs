@@ -446,6 +446,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     let events_service = Arc::new(wealthfolio_spending::events::EventsService::new(
         event_types_repo,
         events_repo,
+        activity_repository.clone(),
     ));
 
     // Spending: budget
@@ -498,6 +499,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         analytics_assignment_repo,
         spending_settings_service.clone(),
         taxonomy_service.clone(),
+        fx_service.clone(),
     ));
 
     // Alternative asset repository for alternative assets operations

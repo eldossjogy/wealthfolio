@@ -35,12 +35,23 @@ export interface MonthlyHistory {
   isLoading: boolean;
 }
 
+/** YYYY-MM from local date components — NOT toISOString().slice(0,7).
+ *  toISOString shifts to UTC, so for users east of UTC a local Jan-1 lands on
+ *  Dec-31 in ISO, polluting the query cache key and the bucket anchor. */
+function localMonthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+/** YYYY-MM-DD from local date components. */
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function useMonthlyHistory(range: ReportsRange, enabled = true): MonthlyHistory {
   const months = useMemo(() => monthsInRange(range), [range]);
 
   const queries = useQueries({
     queries: months.map((m) => ({
-      queryKey: [QueryKeys.SPENDING_REPORT, "monthly", m.start.toISOString().slice(0, 7)],
+      queryKey: [QueryKeys.SPENDING_REPORT, "monthly", localMonthKey(m.start)],
       queryFn: () =>
         getSpendingReport({
           startDate: m.start.toISOString(),
@@ -52,7 +63,7 @@ export function useMonthlyHistory(range: ReportsRange, enabled = true): MonthlyH
   });
 
   const buckets: MonthBucket[] = months.map((m, i) => ({
-    iso: m.start.toISOString().slice(0, 10),
+    iso: localDayKey(m.start),
     label: m.label,
     report: queries[i]?.data,
     isLoading: queries[i]?.isLoading ?? false,

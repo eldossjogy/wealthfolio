@@ -182,6 +182,41 @@ export const COMMANDS: CommandMap = {
   assign_category_to_group: { method: "POST", path: "/spending/budget/group-assignments" },
   reset_budget_groups: { method: "POST", path: "/spending/budget/groups/reset" },
   copy_budget_targets: { method: "POST", path: "/spending/budget/copy" },
+  // Spending settings
+  get_spending_settings: { method: "GET", path: "/spending/settings" },
+  update_spending_settings: { method: "PUT", path: "/spending/settings" },
+  // Spending cash activities + assignments
+  list_cash_activities: { method: "GET", path: "/spending/cash-activities" },
+  search_cash_activities: { method: "POST", path: "/spending/cash-activities/search" },
+  set_activity_event: { method: "PUT", path: "/spending/cash-activities" },
+  get_activity_assignments: { method: "GET", path: "/spending/activities" },
+  assign_activity_category: { method: "PUT", path: "/spending/activities" },
+  unassign_activity_category: { method: "DELETE", path: "/spending/activities" },
+  bulk_assign_categories: { method: "POST", path: "/spending/assignments/bulk" },
+  // Spending categorization rules
+  list_categorization_rules: { method: "GET", path: "/spending/rules" },
+  create_categorization_rule: { method: "POST", path: "/spending/rules" },
+  update_categorization_rule: { method: "PUT", path: "/spending/rules" },
+  delete_categorization_rule: { method: "DELETE", path: "/spending/rules" },
+  rerun_categorization_rules: { method: "POST", path: "/spending/rules/rerun" },
+  list_rule_presets: { method: "GET", path: "/spending/rule-presets" },
+  import_rule_preset: { method: "POST", path: "/spending/rule-presets" },
+  remove_rule_preset: { method: "DELETE", path: "/spending/rule-presets" },
+  // Spending events + event types
+  list_event_types: { method: "GET", path: "/spending/event-types" },
+  create_event_type: { method: "POST", path: "/spending/event-types" },
+  update_event_type: { method: "PUT", path: "/spending/event-types" },
+  delete_event_type: { method: "DELETE", path: "/spending/event-types" },
+  list_events: { method: "GET", path: "/spending/events" },
+  create_event: { method: "POST", path: "/spending/events" },
+  update_event: { method: "PUT", path: "/spending/events" },
+  delete_event: { method: "DELETE", path: "/spending/events" },
+  get_events_with_names: { method: "GET", path: "/spending/events-with-names" },
+  get_event_spending_summaries: { method: "POST", path: "/spending/event-spending-summaries" },
+  // Spending analytics
+  get_spending_report: { method: "POST", path: "/spending/report" },
+  get_spending_insight: { method: "POST", path: "/spending/insight" },
+  get_spending_summary: { method: "POST", path: "/spending/summary" },
   // Health Center
   get_health_status: { method: "GET", path: "/health/status" },
   run_health_checks: { method: "POST", path: "/health/check" },
@@ -1074,6 +1109,169 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
         overwrite?: boolean;
       };
       body = JSON.stringify({ sourcePeriodKey, targetPeriodKey, overwrite: !!overwrite });
+      break;
+    }
+    // Spending settings
+    case "get_spending_settings":
+      break;
+    case "update_spending_settings": {
+      const { update } = payload as { update: Record<string, unknown> };
+      body = JSON.stringify(update);
+      break;
+    }
+    // Spending cash activities + assignments
+    case "list_cash_activities": {
+      const { filter } = (payload ?? {}) as { filter?: Record<string, unknown> };
+      if (filter) {
+        const params = new URLSearchParams();
+        for (const [k, v] of Object.entries(filter)) {
+          if (v === undefined || v === null) continue;
+          if (Array.isArray(v)) {
+            for (const item of v) params.append(`${k}[]`, String(item));
+          } else {
+            params.set(k, String(v));
+          }
+        }
+        const qs = params.toString();
+        if (qs) url += `?${qs}`;
+      }
+      break;
+    }
+    case "search_cash_activities": {
+      const { request } = (payload ?? {}) as { request?: Record<string, unknown> };
+      body = JSON.stringify(request ?? {});
+      break;
+    }
+    case "set_activity_event": {
+      const { activityId, eventId } = payload as {
+        activityId: string;
+        eventId: string | null;
+      };
+      url += `/${encodeURIComponent(activityId)}/event`;
+      body = JSON.stringify({ eventId });
+      break;
+    }
+    case "get_activity_assignments": {
+      const { activityId } = payload as { activityId: string };
+      url += `/${encodeURIComponent(activityId)}/assignments`;
+      break;
+    }
+    case "assign_activity_category": {
+      const { activityId, taxonomyId, categoryId } = payload as {
+        activityId: string;
+        taxonomyId: string;
+        categoryId: string;
+      };
+      url += `/${encodeURIComponent(activityId)}/assignments`;
+      body = JSON.stringify({ taxonomyId, categoryId });
+      break;
+    }
+    case "unassign_activity_category": {
+      const { activityId, taxonomyId } = payload as {
+        activityId: string;
+        taxonomyId: string;
+      };
+      url += `/${encodeURIComponent(activityId)}/assignments/${encodeURIComponent(taxonomyId)}`;
+      break;
+    }
+    case "bulk_assign_categories": {
+      const { items } = payload as { items: unknown[] };
+      body = JSON.stringify(items);
+      break;
+    }
+    // Spending categorization rules
+    case "list_categorization_rules":
+    case "list_rule_presets":
+      break;
+    case "create_categorization_rule": {
+      const { rule } = payload as { rule: Record<string, unknown> };
+      body = JSON.stringify(rule);
+      break;
+    }
+    case "update_categorization_rule": {
+      const { id, patch } = payload as { id: string; patch: Record<string, unknown> };
+      url += `/${encodeURIComponent(id)}`;
+      body = JSON.stringify(patch);
+      break;
+    }
+    case "delete_categorization_rule": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "rerun_categorization_rules": {
+      const { onlyUncategorized } = payload as { onlyUncategorized: boolean };
+      body = JSON.stringify({ onlyUncategorized });
+      break;
+    }
+    case "import_rule_preset": {
+      const { presetId } = payload as { presetId: string };
+      url += `/${encodeURIComponent(presetId)}/import`;
+      break;
+    }
+    case "remove_rule_preset": {
+      const { presetId } = payload as { presetId: string };
+      url += `/${encodeURIComponent(presetId)}`;
+      break;
+    }
+    // Spending events + event types
+    case "list_event_types":
+    case "list_events":
+    case "get_events_with_names":
+      break;
+    case "create_event_type": {
+      const { newType } = payload as { newType: Record<string, unknown> };
+      body = JSON.stringify(newType);
+      break;
+    }
+    case "update_event_type": {
+      const { id, patch } = payload as {
+        id: string;
+        patch: { name?: string; color?: string | null };
+      };
+      url += `/${encodeURIComponent(id)}`;
+      body = JSON.stringify(patch);
+      break;
+    }
+    case "delete_event_type": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "create_event": {
+      const { event } = payload as { event: Record<string, unknown> };
+      body = JSON.stringify(event);
+      break;
+    }
+    case "update_event": {
+      const { id, patch } = payload as { id: string; patch: Record<string, unknown> };
+      url += `/${encodeURIComponent(id)}`;
+      body = JSON.stringify(patch);
+      break;
+    }
+    case "delete_event": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "get_event_spending_summaries": {
+      const { request } = (payload ?? {}) as { request?: Record<string, unknown> };
+      body = JSON.stringify(request ?? null);
+      break;
+    }
+    // Spending analytics
+    case "get_spending_report":
+    case "get_spending_insight": {
+      const { request } = payload as { request: Record<string, unknown> };
+      body = JSON.stringify(request);
+      break;
+    }
+    case "get_spending_summary": {
+      const { includeEventIds, includeAllEvents } = (payload ?? {}) as {
+        includeEventIds?: string[];
+        includeAllEvents?: boolean;
+      };
+      body = JSON.stringify({ includeEventIds, includeAllEvents });
       break;
     }
     // Health Center commands

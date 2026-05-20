@@ -149,10 +149,15 @@ export default function SpendingTabContent() {
   const totalSpending = report?.current.outflow ?? 0;
   const priorSpending = priorReport?.current.outflow ?? 0;
   const delta = totalSpending - priorSpending;
-  // A near-zero prior makes the percent change explode (e.g. −2,062%).
-  // Hide it whenever prior is small relative to current spending.
+  // `deltaPct` is a RATIO (0.2 == 20%) used for thresholds; convert to
+  // percentage on render. `displayDeltaPct` is the same ratio but null'd out
+  // when prior is too small to make the percentage meaningful — that gating
+  // is only for *display*, not for fact-detection (e.g. "spending doubled"
+  // is interesting even when prior was $50 — the insight should still fire,
+  // even if we choose not to render the eye-popping % delta).
+  const deltaPct = priorSpending > 0 ? delta / priorSpending : 0;
   const priorIsMeaningful = priorSpending >= Math.max(100, totalSpending * 0.02);
-  const deltaPct = priorIsMeaningful ? delta / priorSpending : 0;
+  const displayDeltaPct = priorIsMeaningful ? deltaPct : null;
 
   const handleIntervalSelect = (
     code: TimePeriod,
@@ -397,7 +402,11 @@ export default function SpendingTabContent() {
                 <SpendingDeltaLine
                   delta={delta}
                   currency={currency}
-                  deltaPct={priorSpending >= 100 && Math.abs(deltaPct) <= 5 ? deltaPct : null}
+                  deltaPct={
+                    displayDeltaPct !== null && Math.abs(displayDeltaPct) <= 5
+                      ? displayDeltaPct
+                      : null
+                  }
                 />
               ) : null}
             </div>
@@ -527,7 +536,7 @@ export default function SpendingTabContent() {
                       onChange={(v) => setWhereItWentView(v as "list" | "map")}
                     />
                     <Link
-                      to="/spending/insights?tab=categories"
+                      to="/spending/insights?stage=where"
                       className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
                     >
                       View all →
@@ -603,7 +612,7 @@ export default function SpendingTabContent() {
                     ))}
                   </div>
                   <Link
-                    to="/spending/insights?tab=overview"
+                    to="/spending/insights?stage=changed"
                     className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
                   >
                     See trends
@@ -683,10 +692,12 @@ interface CategoryTreemapNodeProps {
   pct?: number;
   fill?: string;
   currency?: string;
+  id?: string;
 }
 
 interface CategoryTreemapNodeMonoProps extends CategoryTreemapNodeProps {
   accent?: string | null;
+  onActivate?: (id: string) => void;
 }
 
 function CategoryTreemapMono({
@@ -748,7 +759,16 @@ function CategoryTreemapMono({
             aspectRatio={4 / 3}
             stroke="transparent"
             content={
-              (<CategoryTreemapNodeMono currency={currency} />) as unknown as React.ReactElement
+              (
+                <CategoryTreemapNodeMono
+                  currency={currency}
+                  onActivate={(id) => {
+                    if (id && id !== "__other__") {
+                      navigate(`/activities?tab=spending&category=${id}`);
+                    }
+                  }}
+                />
+              ) as unknown as React.ReactElement
             }
             isAnimationActive={false}
             onClick={(node: unknown) => {
@@ -792,6 +812,8 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
   fill = "#7DB3D9",
   currency = "USD",
   accent,
+  id,
+  onActivate,
 }) => {
   const { isBalanceHidden } = useBalancePrivacy();
   if (depth === 0) return null;
@@ -815,8 +837,24 @@ const CategoryTreemapNodeMono: FC<CategoryTreemapNodeMonoProps> = ({
   const showAmount = width > 60 && height > 48;
   const showPct = showAmount && height > 70 && amountTextW + pctTextW + 8 <= innerW;
 
+  const isOther = id === "__other__";
+  const isClickable = !!id && !isOther;
+  const a11yProps = isClickable
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        "aria-label": `${name ?? "Category"}: ${amountText}, ${pctText}`,
+        onKeyDown: (e: React.KeyboardEvent<SVGGElement>) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onActivate?.(id!);
+          }
+        },
+      }
+    : {};
+
   return (
-    <g style={{ cursor: "pointer" }}>
+    <g style={{ cursor: isClickable ? "pointer" : "default" }} {...a11yProps}>
       <rect
         x={x + 1}
         y={y + 1}

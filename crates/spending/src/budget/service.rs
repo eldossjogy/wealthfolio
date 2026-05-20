@@ -732,11 +732,28 @@ impl BudgetService {
             }
             let month = period_key_for_date(activity.activity_date);
             let month_actuals = actuals.entry(month).or_default();
+            // Spending + income taxonomies are single-select per (activity_id,
+            // taxonomy_id) — enforced by the DB unique index and the
+            // ActivityTaxonomyAssignmentsService::assign_many_single_select
+            // delete-then-insert pattern. Dedupe per taxonomy here as a
+            // defensive measure so a corrupted DB row can't double-count the
+            // same activity into two top categories. Matches the single-select
+            // contract honored by insight/service.rs:aggregate_spend.
+            let mut seen_taxonomies: std::collections::HashSet<&str> =
+                std::collections::HashSet::new();
             for assignment in assignments_by_activity
                 .get(&activity.id)
                 .into_iter()
                 .flatten()
             {
+                if !seen_taxonomies.insert(assignment.taxonomy_id.as_str()) {
+                    debug_assert!(
+                        false,
+                        "single-select invariant violated for activity {} in {}",
+                        activity.id, assignment.taxonomy_id
+                    );
+                    continue;
+                }
                 if assignment.taxonomy_id == SPENDING_TAXONOMY && spending != 0.0 {
                     let top_id = top_category_id(&assignment.category_id, spending_meta);
                     *month_actuals
@@ -956,14 +973,39 @@ pub(crate) fn resolve_group_for_category(
 
 pub(crate) fn top_category_id(category_id: &str, meta: &HashMap<String, Category>) -> String {
     let mut current = category_id.to_string();
-    while let Some(parent_id) = meta.get(&current).and_then(|c| c.parent_id.clone()) {
-        current = parent_id;
+    // Guard against a corrupted taxonomy with a cyclic parent_id chain: bound
+    // the walk to a depth far above any realistic hierarchy depth (the seeded
+    // taxonomies are 2 levels deep). Without the bound, a `parent_id` loop
+    // would hang the entire request thread.
+    const MAX_DEPTH: usize = 32;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(current.clone());
+    for _ in 0..MAX_DEPTH {
+        match meta.get(&current).and_then(|c| c.parent_id.clone()) {
+            Some(parent_id) if !seen.contains(&parent_id) => {
+                seen.insert(parent_id.clone());
+                current = parent_id;
+            }
+            _ => break,
+        }
     }
     current
 }
 
+/// Parse a string-encoded decimal amount into f64. Garbage input degrades to
+/// 0.0 (callers treat that as "no budget set"), but log a warning so a
+/// corrupted row is at least visible in operator logs.
 fn parse_amount(value: &str) -> f64 {
-    value.parse::<f64>().unwrap_or(0.0)
+    match value.parse::<f64>() {
+        Ok(n) => n,
+        Err(_) => {
+            log::warn!(
+                "budget parse_amount: ignoring non-numeric amount {:?} (treating as 0.0)",
+                value
+            );
+            0.0
+        }
+    }
 }
 
 fn normalize_period_key(period_key: Option<String>) -> Result<String> {

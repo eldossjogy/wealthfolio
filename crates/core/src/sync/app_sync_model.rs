@@ -302,6 +302,14 @@ mod tests {
             SyncEntity::CustomProvider,
             SyncEntity::CustomTaxonomy,
             SyncEntity::ImportRun,
+            SyncEntity::ActivityTaxonomyAssignment,
+            SyncEntity::CategorizationRule,
+            SyncEntity::Event,
+            SyncEntity::EventType,
+            SyncEntity::BudgetGroup,
+            SyncEntity::BudgetGroupAssignment,
+            SyncEntity::BudgetTarget,
+            SyncEntity::BudgetRolloverSetting,
         ]
         .iter()
         .map(|entity| serde_json::to_string(entity).expect("serialize sync entity"))
@@ -326,6 +334,14 @@ mod tests {
             "\"custom_provider\"",
             "\"custom_taxonomy\"",
             "\"import_run\"",
+            "\"activity_taxonomy_assignment\"",
+            "\"categorization_rule\"",
+            "\"event\"",
+            "\"event_type\"",
+            "\"budget_group\"",
+            "\"budget_group_assignment\"",
+            "\"budget_target\"",
+            "\"budget_rollover_setting\"",
         ];
 
         assert_eq!(actual, expected);

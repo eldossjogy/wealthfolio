@@ -76,7 +76,14 @@ impl AnalyticsService {
 
     /// Compute a monthly report covering [start_date, end_date].
     /// "Prior" period uses an equally-sized window immediately preceding the current one.
-    pub async fn monthly_report(&self, req: ReportRequest) -> Result<MonthlyReport> {
+    /// `timezone` (IANA name, may be empty) drives per-day bucketing so a
+    /// midnight-local activity lands on the date the user perceives. Empty/
+    /// invalid values fall back to UTC.
+    pub async fn monthly_report(
+        &self,
+        req: ReportRequest,
+        timezone: &str,
+    ) -> Result<MonthlyReport> {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
             return Ok(MonthlyReport {
@@ -120,9 +127,14 @@ impl AnalyticsService {
 
         let start = DateTime::parse_from_rfc3339(&req.start_date)?.with_timezone(&Utc);
         let end = DateTime::parse_from_rfc3339(&req.end_date)?.with_timezone(&Utc);
+        // Prior window: same length, immediately preceding `start`. The `−1s`
+        // exclusive boundary already shifts prior_end one tick below current's
+        // start; we therefore subtract `period_secs − 1` (not `period_secs`)
+        // so prior_start..=prior_end covers the same number of seconds as
+        // current. Without the −1, prior was always one second shorter.
         let period_secs = (end - start).num_seconds().max(1);
         let prior_end = start - Duration::seconds(1);
-        let prior_start = prior_end - Duration::seconds(period_secs);
+        let prior_start = prior_end - Duration::seconds((period_secs - 1).max(0));
 
         let activities = self
             .activity_repo
@@ -157,7 +169,10 @@ impl AnalyticsService {
             if income_amount == 0.0 && spending_amount == 0.0 {
                 continue;
             }
-            let d = a.activity_date.naive_utc().date();
+            let d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+                a.activity_date,
+                timezone,
+            );
             let entry = by_day_map.entry(d).or_insert((0.0, 0.0));
             entry.0 += income_amount;
             entry.1 += spending_amount;
@@ -193,7 +208,10 @@ impl AnalyticsService {
             if income_amount == 0.0 && spending_amount == 0.0 {
                 continue;
             }
-            let day = a.activity_date.naive_utc().date();
+            let day = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+                a.activity_date,
+                timezone,
+            );
             let day_str = format!("{:04}-{:02}-{:02}", day.year(), day.month(), day.day());
             let assignments = self.assignment_repo.list_for_activity(&a.id).await?;
             for asg in assignments {
@@ -306,10 +324,15 @@ fn summarize(acts: &[&Activity], account_types: &HashMap<String, String>) -> Per
         outflow += spending_amount;
         count += 1;
     }
+    // Display `outflow` as a non-negative magnitude (a refund-only period shows
+    // "$0 spent" rather than "-$50"), but compute `net` from the signed outflow
+    // so refunds correctly flow into net cashflow as positive contributions.
+    // This keeps net = income - signed_outflow in agreement with the insight
+    // pipeline's `Headline.net_cashflow` (insight/service.rs:337).
     PeriodSummary {
         income,
         outflow: outflow.max(0.0),
-        net: income - outflow.max(0.0),
+        net: income - outflow,
         count,
     }
 }

@@ -29,7 +29,16 @@ export function computeEventsAggregate(
     if (!topEvent || ev.totalSpending > topEvent.totalSpending) topEvent = ev;
   }
 
-  const normalPace = computeBaselinePace(heatmapActivities, events, accountTypeById);
+  // Heatmap is a fixed 12-week window (see spending-insights-page.tsx
+  // HEATMAP_WEEKS) — use 84 calendar days as the divisor so the baseline
+  // reflects pace across the whole window, not just days that saw spending.
+  const HEATMAP_PERIOD_DAYS = 12 * 7;
+  const normalPace = computeBaselinePace(
+    heatmapActivities,
+    events,
+    HEATMAP_PERIOD_DAYS,
+    accountTypeById,
+  );
   const expected = normalPace * totalEventDays;
   const lift = totalSpent - expected;
 

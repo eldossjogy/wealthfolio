@@ -551,12 +551,12 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
                       }
                     />
                   </TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Account</TableHead>
+                  <TableHead className="hidden sm:table-cell">Date</TableHead>
+                  <TableHead className="hidden md:table-cell">Type</TableHead>
+                  <TableHead className="hidden lg:table-cell">Account</TableHead>
                   <TableHead>Name / Notes</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Event</TableHead>
+                  <TableHead className="hidden md:table-cell">Category</TableHead>
+                  <TableHead className="hidden lg:table-cell">Event</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>

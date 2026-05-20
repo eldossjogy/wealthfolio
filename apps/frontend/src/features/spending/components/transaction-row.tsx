@@ -76,13 +76,15 @@ function TransactionRowImpl({
           aria-label={rowAriaLabel}
         />
       </TableCell>
-      <TableCell className="whitespace-nowrap text-sm">{formatDate(a.activityDate)}</TableCell>
-      <TableCell>
+      <TableCell className="hidden whitespace-nowrap text-sm sm:table-cell">
+        {formatDate(a.activityDate)}
+      </TableCell>
+      <TableCell className="hidden md:table-cell">
         <Badge variant="outline" className="text-xs">
           {getCashActivityLabel(a.activityType, account?.accountType)}
         </Badge>
       </TableCell>
-      <TableCell className="text-sm">
+      <TableCell className="hidden text-sm lg:table-cell">
         <div className="truncate">{accountName}</div>
         <div className="text-muted-foreground text-[10px]">{a.currency}</div>
       </TableCell>
@@ -97,8 +99,11 @@ function TransactionRowImpl({
             </Badge>
           )}
         </div>
+        <div className="text-muted-foreground mt-0.5 truncate text-[11px] sm:hidden">
+          {formatDate(a.activityDate)} · {accountName}
+        </div>
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden md:table-cell">
         <QuickCategorizePopover
           scope={
             isCashActivityIncome(a.activityType, account?.accountType, a.subtype)
@@ -137,7 +142,7 @@ function TransactionRowImpl({
           }
         />
       </TableCell>
-      <TableCell className="text-sm">
+      <TableCell className="hidden text-sm lg:table-cell">
         <QuickEventPopover
           selectedEventId={event?.id ?? null}
           onSelect={(eventId) => onSetEvent(a.id, eventId)}

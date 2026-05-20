@@ -23,4 +23,8 @@ pub trait EventsRepositoryTrait: Send + Sync {
     async fn create(&self, new_event: NewEvent) -> Result<Event>;
     async fn update(&self, id: &str, patch: UpdateEvent) -> Result<Event>;
     async fn delete(&self, id: &str) -> Result<()>;
+    /// Count events that reference the given event_type_id. Used by the service
+    /// layer to pre-check `delete_type` so we return a typed error instead of a
+    /// raw Diesel FK violation.
+    async fn count_by_type(&self, event_type_id: &str) -> Result<usize>;
 }

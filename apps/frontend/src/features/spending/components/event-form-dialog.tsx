@@ -205,6 +205,14 @@ export function EventFormDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [candidates, activeOverrides],
   );
+  // Selected candidates that are currently tagged to another event. Tagging
+  // them to the new event will silently replace the prior eventId on the
+  // activity row — surface the count so the user is aware before submit.
+  const replacedTagCount = useMemo(
+    () => candidates.filter((c) => isCandidateSelected(c) && !!c.eventId).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [candidates, activeOverrides],
+  );
 
   const handleCreateType = async () => {
     const name = newTypeName.trim();
@@ -525,6 +533,14 @@ export function EventFormDialog({
               />
             )}
 
+            {replacedTagCount > 0 && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <span className="font-semibold">{replacedTagCount}</span>{" "}
+                {replacedTagCount === 1 ? "transaction is" : "transactions are"} already tagged to
+                another event. Creating this event will replace those tags.
+              </div>
+            )}
+
             <DialogFooter>
               <Button
                 type="button"
@@ -637,7 +653,12 @@ function SuggestedTransactions({
                     <span className="text-foreground truncate text-xs">
                       {c.notes || c.activityType}
                     </span>
-                    {c.eventId && (
+                    {c.eventId && checked && (
+                      <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1 py-px text-[9px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                        will replace tag
+                      </span>
+                    )}
+                    {c.eventId && !checked && (
                       <span className="text-muted-foreground/80 border-muted-foreground/30 shrink-0 rounded border px-1 py-px text-[9px] uppercase tracking-wide">
                         already tagged
                       </span>

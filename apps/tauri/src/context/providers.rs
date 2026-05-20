@@ -249,6 +249,7 @@ pub async fn initialize_context(
     let events_service = Arc::new(wealthfolio_spending::events::EventsService::new(
         event_types_repo,
         events_repo,
+        activity_repository.clone(),
     ));
 
     // Spending: budget
@@ -302,6 +303,7 @@ pub async fn initialize_context(
         analytics_assignment_repo,
         spending_settings_service.clone(),
         taxonomy_service.clone(),
+        fx_service.clone(),
     ));
 
     // Import run repository for tracking CSV imports

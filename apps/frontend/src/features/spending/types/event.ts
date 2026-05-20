@@ -1,5 +1,8 @@
 export interface EventType {
   id: string;
+  /** Stable slug for seeded types (Travel, Wedding, ...). User-created types
+   *  have this `null`. UIs can use it as an i18n lookup key. */
+  key?: string | null;
   name: string;
   color?: string | null;
   createdAt: string;

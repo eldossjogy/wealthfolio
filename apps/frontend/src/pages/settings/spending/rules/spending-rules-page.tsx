@@ -2,6 +2,14 @@ import { useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -56,6 +64,7 @@ export default function SpendingRulesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   // `presetFilter`: null = all, presetId = installed preset, "custom" = user-created rules.
   const [presetFilter, setPresetFilter] = useState<string | null>(null);
+  const [confirmRerunAllOpen, setConfirmRerunAllOpen] = useState(false);
 
   const isLoading = rulesLoading || spending.isLoading || income.isLoading;
 
@@ -218,7 +227,10 @@ export default function SpendingRulesPage() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => rerun.mutate(false)}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setConfirmRerunAllOpen(true);
+                  }}
                   className="flex-col items-start gap-0.5"
                 >
                   <span className="text-sm font-medium">Re-categorize all</span>
@@ -353,6 +365,27 @@ export default function SpendingRulesPage() {
         onSave={handleSave}
         isLoading={create.isPending || update.isPending}
       />
+
+      <AlertDialog open={confirmRerunAllOpen} onOpenChange={setConfirmRerunAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Re-categorize all activities?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will re-run all rules against every activity in your spending accounts and may
+              overwrite existing auto-categorized assignments. Manual categorizations are preserved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => rerun.mutate(false)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Re-categorize all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

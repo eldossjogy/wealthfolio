@@ -599,9 +599,10 @@ pub async fn get_spending_report(
     request: ReportRequest,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<MonthlyReport, String> {
+    let timezone = state.get_timezone();
     state
         .spending_analytics_service()
-        .monthly_report(request)
+        .monthly_report(request, &timezone)
         .await
         .map_err(|e| format!("Failed to compute spending report: {}", e))
 }
@@ -612,9 +613,10 @@ pub async fn get_spending_insight(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<SpendingInsight, String> {
     let currency = state.get_base_currency();
+    let timezone = state.get_timezone();
     state
         .spending_insight_service()
-        .compute(request, &currency)
+        .compute(request, &currency, &timezone)
         .await
         .map_err(|e| format!("Failed to compute spending insight: {}", e))
 }

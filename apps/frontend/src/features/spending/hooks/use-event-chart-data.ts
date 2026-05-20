@@ -174,7 +174,7 @@ export function useEventChartData(
   const dailyDuring = days > 0 ? event.totalSpending / days : 0;
 
   const baseline = useMemo(
-    () => computeBaselinePace(heatmapActivities, [event], accountTypeById),
+    () => computeBaselinePace(heatmapActivities, [event], 12 * 7, accountTypeById),
     [accountTypeById, heatmapActivities, event],
   );
 

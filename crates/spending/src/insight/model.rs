@@ -185,7 +185,21 @@ pub struct MonthBucket {
 pub struct SpendingInsight {
     pub period: PeriodMeta,
     pub prior: PeriodMeta,
+    /// Target/report currency. All monetary fields below are denominated in
+    /// this currency (FX-converted from native at `period.end`, matching
+    /// net_worth's snapshot-date convention).
     pub currency: String,
+    /// Currencies (other than `currency`) observed on contributing activities
+    /// in the current window. Sorted alphabetically. Empty when every counted
+    /// activity was already in `currency`.
+    #[serde(default)]
+    pub foreign_currencies: Vec<String>,
+    /// Per-currency outflow totals in activities' *native* units, before FX.
+    /// Lets the UI surface a "source: €1,200 EUR" hint for single-foreign-
+    /// currency reports and a breakdown for multi-currency ones. Excludes
+    /// `currency` itself.
+    #[serde(default)]
+    pub native_outflow_by_currency: std::collections::HashMap<String, f64>,
     pub headline: Headline,
     pub groups: Vec<GroupInsight>,
     pub uncategorized: UncategorizedBucket,

@@ -18,6 +18,7 @@ import { cn, formatAmount } from "@/lib/utils";
 import type { MonthBucket } from "../../../hooks/use-monthly-history";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { BudgetCategoryRow, BudgetSnapshot } from "../../../types/budget";
+import type { PaceState } from "../../../types/insight";
 import type { CategoryBreakdownRow, MonthlyReport } from "../../../types/report";
 import { CategoryHierarchyTable, type CategorySort } from "../category-hierarchy-table";
 import { formatMonthName, formatPercentValue } from "./format";
@@ -41,6 +42,13 @@ export interface WhereIAmStageProps {
   budget: BudgetSnapshot | undefined;
   currency: string;
   isLoading: boolean;
+  /**
+   * Reconciled pace shipped by the backend. When provided, the pace card uses
+   * it verbatim instead of re-deriving daysElapsed/dailyAvg/projection locally
+   * — this is the same payload that drives headline.spent so the surfaces
+   * agree by construction. Falls back to the local derivation when absent.
+   */
+  reconciledPace?: PaceState;
   /** Reserved for callers that want to scroll to the breakdown — currently unused. */
   onJumpToBreakdown?: () => void;
   onCategoryClick?: (categoryId: string) => void;
@@ -55,6 +63,7 @@ export function WhereIAmStage({
   budget,
   currency,
   isLoading,
+  reconciledPace,
   onCategoryClick,
 }: WhereIAmStageProps) {
   return (
@@ -66,6 +75,7 @@ export function WhereIAmStage({
           budget={budget}
           currency={currency}
           isLoading={isLoading}
+          reconciledPace={reconciledPace}
         />
         <SpentThisPeriodCard
           range={range}
@@ -102,17 +112,30 @@ interface PaceCardProps {
   budget: BudgetSnapshot | undefined;
   currency: string;
   isLoading: boolean;
+  /**
+   * Reconciled pace from the backend insight payload. When provided, drives
+   * daysElapsed/dailyAvg/projectedSpend directly so this card agrees with
+   * headline.spent. Falls back to the local derivation when absent.
+   */
+  reconciledPace?: PaceState;
 }
 
-const PaceCard: FC<PaceCardProps> = ({ range, spent, budget, currency, isLoading }) => {
+const PaceCard: FC<PaceCardProps> = ({
+  range,
+  spent,
+  budget,
+  currency,
+  isLoading,
+  reconciledPace,
+}) => {
   const { isBalanceHidden } = useBalancePrivacy();
   // `spendingPlanned` is the period-level target straight from the insight
   // payload (already buffered + prorated). No range.months multiplier.
   const target = budget?.computed.totals.spendingPlanned ?? 0;
 
   const pace = useMemo(
-    () => computePace(range, spent, target, currency, isBalanceHidden),
-    [range, spent, target, currency, isBalanceHidden],
+    () => computePace(range, spent, target, currency, isBalanceHidden, reconciledPace),
+    [range, spent, target, currency, isBalanceHidden, reconciledPace],
   );
 
   if (isLoading) {
@@ -217,6 +240,7 @@ function computePace(
   target: number,
   currency: string,
   isBalanceHidden: boolean,
+  reconciledPace?: PaceState,
 ): PaceComputed {
   // Determine elapsed fraction of the active range. For periods that include
   // "today" we treat (today - start)/(end - start) as elapsed; for fully-past
@@ -228,17 +252,38 @@ function computePace(
   const elapsed = isLive ? Math.max(0.001, (now - startMs) / (endMs - startMs)) : 1;
 
   const totalDays = range.days;
-  const daysElapsed = isLive ? Math.max(1, Math.round(totalDays * elapsed)) : totalDays;
-  const daysRemaining = Math.max(0, totalDays - daysElapsed);
+  // Prefer reconciled values from the backend insight payload so this card
+  // agrees with headline.spent / status / pace by construction. Fall back to
+  // a local derivation only when the caller didn't pass a reconciled pace
+  // (e.g. legacy paths still being wired up).
+  const daysElapsed = reconciledPace
+    ? Math.max(0, reconciledPace.daysElapsed)
+    : isLive
+      ? Math.max(1, Math.round(totalDays * elapsed))
+      : totalDays;
+  const daysRemaining = reconciledPace
+    ? Math.max(0, reconciledPace.daysRemaining)
+    : Math.max(0, totalDays - daysElapsed);
 
-  const dailyAvg = daysElapsed > 0 ? spent / daysElapsed : 0;
+  // Day-1 / very-early-period guard: a single charge on day 1 would project
+  // to spent × totalDays, producing absurd "projected $20k" headlines.
+  // Suppress projection until we have at least 7 days of data, matching the
+  // forecast-reliability rule already used by budget-line-chart-card.tsx.
+  const PROJECTION_MIN_DAYS = 7;
+  const projectionReliable = !isLive || daysElapsed >= PROJECTION_MIN_DAYS;
+
+  const dailyAvg = reconciledPace?.dailyAvg ?? (daysElapsed > 0 ? spent / daysElapsed : 0);
   const expectedDailyPace = target > 0 && totalDays > 0 ? target / totalDays : 0;
 
   const percentSpent = target > 0 ? spent / target : 0;
   const percentPace = isLive ? elapsed : 1;
 
-  const projection = isLive ? dailyAvg * totalDays : spent;
-  const expectedSoFar = expectedDailyPace * daysElapsed;
+  const projection = !isLive
+    ? spent
+    : !projectionReliable
+      ? spent
+      : (reconciledPace?.projectedSpend ?? dailyAvg * totalDays);
+  const expectedSoFar = reconciledPace?.expectedSpendToDate ?? expectedDailyPace * daysElapsed;
   const diffFromPace = spent - expectedSoFar;
 
   const status: PaceComputed["status"] =

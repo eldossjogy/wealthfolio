@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAccounts } from "@/hooks/use-accounts";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
@@ -24,6 +24,7 @@ import { useMonthlyHistory } from "../hooks/use-monthly-history";
 import { useEventSpendingSummaries } from "../hooks/use-spending-events";
 import { useSpendingInsight } from "../hooks/use-spending-insight";
 import { useSpendingReport } from "../hooks/use-spending-report";
+import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { insightToLegacy, UNCATEGORIZED_CATEGORY_ID } from "../lib/insight-projection";
 import {
   DEFAULT_REPORTS_PERIOD,
@@ -62,16 +63,70 @@ const PERIOD_LABELS: Record<ReportsPeriod, string> = {
   "1Y": "1Y",
 };
 
+const VALID_STAGES: InsightsStage[] = ["where", "changed", "when"];
+
 export default function SpendingInsightsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
+  const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
 
   const [period, setPeriod] = usePersistentState<ReportsPeriod>(
     PERIOD_STORAGE_KEY,
     DEFAULT_REPORTS_PERIOD,
   );
   const [stage, setStage] = usePersistentState<InsightsStage>(STAGE_STORAGE_KEY, "where");
+
+  // ─── URL ↔ state sync ─────────────────────────────────────────────────────
+  // ?stage=where|changed|when and ?period=1M|3M|6M|YTD|1Y drive the page when
+  // present, otherwise fall back to the persisted localStorage values.
+  // Linking from the dashboard (`/spending/insights?stage=where`) and reload-
+  // ability of the current view both rely on this.
+  useEffect(() => {
+    const urlStage = searchParams.get("stage");
+    if (urlStage && VALID_STAGES.includes(urlStage as InsightsStage) && urlStage !== stage) {
+      setStage(urlStage as InsightsStage);
+    }
+    const urlPeriod = searchParams.get("period") as ReportsPeriod | null;
+    if (urlPeriod && REPORTS_PERIODS.includes(urlPeriod) && urlPeriod !== period) {
+      setPeriod(urlPeriod);
+    }
+    // Eslint disable: we intentionally run only on URL change, not on every
+    // state change — the inverse direction (state → URL) is handled by the
+    // wrapped setters below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const setStageAndUrl = useCallback(
+    (next: InsightsStage) => {
+      setStage(next);
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.set("stage", next);
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setStage, setSearchParams],
+  );
+
+  const setPeriodAndUrl = useCallback(
+    (next: ReportsPeriod) => {
+      setPeriod(next);
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.set("period", next);
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setPeriod, setSearchParams],
+  );
 
   // Events-timeline pagination — independent from `period`. Stored alongside
   // the period it was set against so changing periods resets the offset to 0
@@ -223,13 +278,20 @@ export default function SpendingInsightsPage() {
     [accounts],
   );
 
+  // Gate the entire page when tracking is disabled — mirrors spending-budget-page.
+  // Without this, disabling tracking from ModuleCard leaves Insights live and
+  // continues rendering numbers the user explicitly opted out of seeing.
+  if (!settingsLoading && !isEnabled) {
+    return <Navigate to="/dashboard?tab=spending" replace />;
+  }
+
   const periodToggle = (
     <AnimatedToggleGroup
       variant="secondary"
       size="xs"
       items={REPORTS_PERIODS.map((p) => ({ value: p, label: PERIOD_LABELS[p] }))}
       value={period}
-      onValueChange={setPeriod}
+      onValueChange={setPeriodAndUrl}
     />
   );
 
@@ -244,7 +306,15 @@ export default function SpendingInsightsPage() {
         actions={periodToggle}
       />
       <PageContent className="space-y-5">
-        <StageNav stage={stage} onStageChange={setStage} />
+        <StageNav stage={stage} onStageChange={setStageAndUrl} />
+
+        {insight?.foreignCurrencies && insight.foreignCurrencies.length > 0 && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            <span className="font-semibold">Mixed currencies:</span> activities in{" "}
+            {insight.foreignCurrencies.join(", ")} were summed alongside {insight.currency} without
+            conversion. Totals are approximate.
+          </div>
+        )}
 
         {stage === "where" && (
           <WhereIAmStage
@@ -256,6 +326,7 @@ export default function SpendingInsightsPage() {
             budget={legacyForWhereIAm?.budget}
             currency={insight?.currency ?? baseCurrency}
             isLoading={isInsightLoading}
+            reconciledPace={insight?.headline.pace}
             onJumpToBreakdown={onJumpToBreakdown}
             onCategoryClick={handleCategoryClick}
           />

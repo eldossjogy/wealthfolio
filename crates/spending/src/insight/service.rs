@@ -3,10 +3,13 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use wealthfolio_core::accounts::{
     account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
 };
 use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
+use wealthfolio_core::fx::FxServiceTrait;
 use wealthfolio_core::taxonomies::TaxonomyServiceTrait;
 
 use super::model::{
@@ -36,6 +39,7 @@ pub struct InsightService {
     assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
     settings: Arc<SpendingSettingsService>,
     taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+    fx_service: Arc<dyn FxServiceTrait>,
 }
 
 impl InsightService {
@@ -46,6 +50,7 @@ impl InsightService {
         assignment_repo: Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
         settings: Arc<SpendingSettingsService>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+        fx_service: Arc<dyn FxServiceTrait>,
     ) -> Self {
         Self {
             budget_repo,
@@ -54,6 +59,7 @@ impl InsightService {
             assignment_repo,
             settings,
             taxonomy_service,
+            fx_service,
         }
     }
 
@@ -61,6 +67,7 @@ impl InsightService {
         &self,
         req: SpendingInsightRequest,
         currency: &str,
+        timezone: &str,
     ) -> Result<SpendingInsight> {
         let start = parse_rfc3339(&req.start_date)?;
         let end = parse_rfc3339(&req.end_date)?;
@@ -160,17 +167,30 @@ impl InsightService {
         }
 
         // ── 5. Aggregate spend (current + prior) ──────────────────────────────
+        // FX is applied inline: each activity's spending/income amount is
+        // converted from its native currency to `currency` (the report target,
+        // typically base) using FxService at `period.end`. Matches the
+        // net_worth snapshot-date convention — one rate per report.
+        let fx_as_of = end.date_naive();
         let current_agg = aggregate_spend(
             &current_acts,
             &account_types,
             &assignments_by_activity,
             &spending_meta,
+            self.fx_service.as_ref(),
+            currency,
+            fx_as_of,
         );
         let prior_agg = aggregate_spend(
             &prior_acts,
             &account_types,
             &assignments_by_activity,
             &spending_meta,
+            self.fx_service.as_ref(),
+            currency,
+            // Prior window converts at its own end date so the prior period's
+            // numbers reflect what the user would have seen at the time.
+            prior_window.1.date_naive(),
         );
 
         // ── 6. Fan out budgets per month with proration ───────────────────────
@@ -308,6 +328,9 @@ impl InsightService {
             now,
             total_spent,
             total_budget,
+            self.fx_service.as_ref(),
+            currency,
+            fx_as_of,
         );
         let status = compute_health_status(
             total_spent,
@@ -328,8 +351,27 @@ impl InsightService {
         uncategorized.pct_of_total_spent = pct_share(uncategorized.spent, total_spent);
 
         // ── 11. Daily + monthly time series ───────────────────────────────────
-        let by_day = compute_by_day(&current_acts, &account_types);
-        let by_month = compute_by_month(&current_acts, &account_types, &period.months);
+        // Bucket by user-local calendar day so a midnight-local activity lands
+        // on the date the user perceives. Falls back to UTC for empty/invalid tz.
+        // Amounts FX-converted to `currency` at period.end (same rate the
+        // aggregate headline used) so totals reconcile across surfaces.
+        let by_day = compute_by_day(
+            &current_acts,
+            &account_types,
+            timezone,
+            self.fx_service.as_ref(),
+            currency,
+            fx_as_of,
+        );
+        let by_month = compute_by_month(
+            &current_acts,
+            &account_types,
+            &period.months,
+            timezone,
+            self.fx_service.as_ref(),
+            currency,
+            fx_as_of,
+        );
 
         let headline = Headline {
             spent: total_spent,
@@ -343,10 +385,33 @@ impl InsightService {
             status,
         };
 
+        // Build the foreign-currency summary from the aggregator's native
+        // totals: which non-target currencies contributed and how much in
+        // their native units. UI can surface a "source: €1,200 EUR" hint
+        // (single-foreign-currency reports) or a generic FX-converted notice.
+        let foreign_currencies: Vec<String> = {
+            let mut keys: Vec<String> = current_agg
+                .native_outflow_by_currency
+                .keys()
+                .filter(|c| c.as_str() != currency && !c.is_empty())
+                .cloned()
+                .collect();
+            keys.sort();
+            keys
+        };
+        let native_outflow_by_currency: HashMap<String, f64> = current_agg
+            .native_outflow_by_currency
+            .iter()
+            .filter(|(c, _)| c.as_str() != currency && !c.is_empty())
+            .map(|(c, v)| (c.clone(), *v))
+            .collect();
+
         let insight = SpendingInsight {
             period,
             prior,
             currency: currency.to_string(),
+            foreign_currencies,
+            native_outflow_by_currency,
             headline,
             groups: group_insights,
             uncategorized,
@@ -363,10 +428,13 @@ impl InsightService {
 // Aggregation helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Aggregated outputs for a single window.
+/// Aggregated outputs for a single window. All monetary fields are in the
+/// report's target currency; per-activity values are FX-converted inline
+/// during aggregation.
 #[derive(Default)]
 struct SpendAggregate {
-    /// total absolute outflow (sum of spending_amount over all activities).
+    /// total absolute outflow (sum of spending_amount over all activities,
+    /// converted to target currency).
     total_outflow: f64,
     total_income: f64,
     /// Top-level spending category id → (spend, txn_count).
@@ -374,6 +442,43 @@ struct SpendAggregate {
     /// Spend on activities that have no `spending_categories` assignment.
     uncategorized_spend: f64,
     uncategorized_count: u32,
+    /// Native-currency outflow totals before FX, indexed by source currency.
+    /// Empty (or single-entry equal to target) when no conversion happened.
+    /// Lets the UI surface "source: €1,200" hints for single-foreign-currency
+    /// reports and the list of contributing currencies for mixed reports.
+    native_outflow_by_currency: HashMap<String, f64>,
+}
+
+/// Convert a native amount to the report's target currency at `as_of` date.
+/// Matches the net_worth convention: one rate per report (snapshot date),
+/// not per-activity-date. On error (no rate available even after the
+/// inverse-pair and latest-rate fallbacks), the amount passes through
+/// unconverted with a warn-log so an outage is visible but doesn't blank the
+/// dashboard.
+fn fx_to_target(
+    fx: &dyn FxServiceTrait,
+    amount: f64,
+    from: &str,
+    to: &str,
+    as_of: NaiveDate,
+) -> f64 {
+    if amount == 0.0 || from == to || from.is_empty() {
+        return amount;
+    }
+    let dec = Decimal::from_f64_retain(amount).unwrap_or(Decimal::ZERO);
+    match fx.convert_currency_for_date(dec, from, to, as_of) {
+        Ok(converted) => converted.to_f64().unwrap_or(amount),
+        Err(e) => {
+            log::warn!(
+                "spending insight FX conversion {}→{} on {} failed ({}); passing through native amount",
+                from,
+                to,
+                as_of,
+                e,
+            );
+            amount
+        }
+    }
 }
 
 fn aggregate_spend(
@@ -384,6 +489,9 @@ fn aggregate_spend(
         Vec<crate::activity_assignments::ActivityTaxonomyAssignment>,
     >,
     spending_meta: &HashMap<String, wealthfolio_core::taxonomies::Category>,
+    fx: &dyn FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
 ) -> SpendAggregate {
     let mut agg = SpendAggregate::default();
     for a in acts {
@@ -392,13 +500,20 @@ fn aggregate_spend(
         };
         let classification = classify_activity(a, account_type);
         let amount = activity_abs_amount(a);
-        let spending = classification.spending_amount(amount);
-        let income = classification.income_amount(amount);
-        if spending == 0.0 && income == 0.0 {
+        let spending_native = classification.spending_amount(amount);
+        let income_native = classification.income_amount(amount);
+        if spending_native == 0.0 && income_native == 0.0 {
             continue;
         }
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
         agg.total_income += income;
         agg.total_outflow += spending;
+        if spending_native != 0.0 {
+            *agg.native_outflow_by_currency
+                .entry(a.currency.clone())
+                .or_insert(0.0) += spending_native;
+        }
 
         if spending == 0.0 {
             continue;
@@ -417,29 +532,36 @@ fn aggregate_spend(
             continue;
         }
 
-        // Distribute spend by weight (out of 10_000); fall back to even split.
-        let total_weight: i32 = assignments.iter().map(|asg| asg.weight).sum();
-        for asg in &assignments {
-            let share = if total_weight > 0 {
-                spending * (asg.weight as f64 / total_weight as f64)
-            } else {
-                spending / assignments.len() as f64
-            };
-            let top_id = top_category_id(&asg.category_id, spending_meta);
-            let entry = agg.spending_by_top.entry(top_id).or_insert((0.0, 0));
-            entry.0 += share;
-        }
-        // Count each activity once at the first matching top category.
-        if let Some(first) = assignments.first() {
-            let top_id = top_category_id(&first.category_id, spending_meta);
-            agg.spending_by_top.entry(top_id).or_insert((0.0, 0)).1 += 1;
-        }
+        // Spending taxonomies are single-select: the activity_taxonomy_assignments
+        // service deletes any prior (activity_id, taxonomy_id) row before insert,
+        // and the unique index on (activity_id, taxonomy_id, category_id) enforces
+        // it at the DB layer. Treat extra rows as a data-integrity issue —
+        // attribute the full amount to the first assignment so we stay reconciled
+        // with budget actuals (which use the same convention).
+        debug_assert!(
+            assignments.len() == 1,
+            "single-select invariant violated for activity {} in spending_categories: {} assignments",
+            a.id,
+            assignments.len(),
+        );
+        let primary = assignments[0];
+        let top_id = top_category_id(&primary.category_id, spending_meta);
+        let entry = agg.spending_by_top.entry(top_id).or_insert((0.0, 0));
+        entry.0 += spending;
+        entry.1 += 1;
     }
     // outflow may go slightly negative due to refunds — keep it as-is so totals stay reconciled.
     agg
 }
 
-fn compute_by_day(acts: &[&Activity], account_types: &HashMap<String, String>) -> Vec<DayBucket> {
+fn compute_by_day(
+    acts: &[&Activity],
+    account_types: &HashMap<String, String>,
+    timezone: &str,
+    fx: &dyn FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
+) -> Vec<DayBucket> {
     let mut map: HashMap<NaiveDate, (f64, f64)> = HashMap::new();
     for a in acts {
         let Some(account_type) = account_types.get(&a.account_id) else {
@@ -447,22 +569,32 @@ fn compute_by_day(acts: &[&Activity], account_types: &HashMap<String, String>) -
         };
         let classification = classify_activity(a, account_type);
         let amount = activity_abs_amount(a);
-        let spending = classification.spending_amount(amount);
-        let income = classification.income_amount(amount);
-        if spending == 0.0 && income == 0.0 {
+        let spending_native = classification.spending_amount(amount);
+        let income_native = classification.income_amount(amount);
+        if spending_native == 0.0 && income_native == 0.0 {
             continue;
         }
-        let date = a.activity_date.naive_utc().date();
+        // FX-convert per activity using the same as-of date as the headline
+        // aggregate so day-buckets sum to total_outflow within rounding.
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let date = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+            a.activity_date,
+            timezone,
+        );
         let entry = map.entry(date).or_insert((0.0, 0.0));
         entry.0 += spending;
         entry.1 += income;
     }
+    // Chart series surface non-negative magnitudes: a day with refunds > charges
+    // shows zero outflow rather than a negative bar. Headline totals stay signed
+    // (insight/service.rs:337) so net cashflow reconciles correctly.
     let mut out: Vec<DayBucket> = map
         .into_iter()
         .map(|(d, (spent, income))| DayBucket {
             date: format_date(d),
-            spent,
-            income,
+            spent: spent.max(0.0),
+            income: income.max(0.0),
         })
         .collect();
     out.sort_by(|a, b| a.date.cmp(&b.date));
@@ -473,6 +605,10 @@ fn compute_by_month(
     acts: &[&Activity],
     account_types: &HashMap<String, String>,
     months: &[String],
+    timezone: &str,
+    fx: &dyn FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
 ) -> Vec<MonthBucket> {
     let mut map: HashMap<String, (f64, f64)> = HashMap::new();
     for m in months {
@@ -484,12 +620,14 @@ fn compute_by_month(
         };
         let classification = classify_activity(a, account_type);
         let amount = activity_abs_amount(a);
-        let spending = classification.spending_amount(amount);
-        let income = classification.income_amount(amount);
-        if spending == 0.0 && income == 0.0 {
+        let spending_native = classification.spending_amount(amount);
+        let income_native = classification.income_amount(amount);
+        if spending_native == 0.0 && income_native == 0.0 {
             continue;
         }
-        let key = period_key_for_date(a.activity_date);
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let key = period_key_for_date_in_tz(a.activity_date, timezone);
         let entry = map.entry(key).or_insert((0.0, 0.0));
         entry.0 += spending;
         entry.1 += income;
@@ -498,8 +636,8 @@ fn compute_by_month(
         .into_iter()
         .map(|(month, (spent, income))| MonthBucket {
             month,
-            spent,
-            income,
+            spent: spent.max(0.0),
+            income: income.max(0.0),
         })
         .collect();
     out.sort_by(|a, b| a.month.cmp(&b.month));
@@ -667,8 +805,9 @@ fn month_bounds(month_key: &str) -> (NaiveDate, NaiveDate) {
     (start, end)
 }
 
-fn period_key_for_date(date: DateTime<Utc>) -> String {
-    format!("{:04}-{:02}", date.year(), date.month())
+fn period_key_for_date_in_tz(date: DateTime<Utc>, timezone: &str) -> String {
+    let d = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(date, timezone);
+    format!("{:04}-{:02}", d.year(), d.month())
 }
 
 fn format_date(date: NaiveDate) -> String {
@@ -728,6 +867,9 @@ fn compute_pace(
     now: DateTime<Utc>,
     spent: f64,
     budget: f64,
+    fx: &dyn FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
 ) -> PaceState {
     let start_d = start.date_naive();
     let end_d = end.date_naive();
@@ -763,9 +905,14 @@ fn compute_pace(
                 continue;
             }
             let classification = classify_activity(a, account_type);
-            sum += classification.spending_amount(activity_abs_amount(a));
+            let native = classification.spending_amount(activity_abs_amount(a));
+            sum += fx_to_target(fx, native, &a.currency, target_currency, fx_as_of);
         }
-        sum / trail_days as f64
+        // Clamp at zero: a refund-heavy trailing window would otherwise produce
+        // a negative daily_avg and a projection lower than current spent, which
+        // is misleading. The actual run-rate of charges (net of refunds) is
+        // bounded below by zero — refunds don't predict future "negative spend".
+        (sum / trail_days as f64).max(0.0)
     } else {
         0.0
     };
@@ -914,6 +1061,8 @@ fn empty_insight(period: PeriodMeta, prior: PeriodMeta, currency: &str) -> Spend
         period,
         prior,
         currency: currency.to_string(),
+        foreign_currencies: vec![],
+        native_outflow_by_currency: HashMap::new(),
         headline: Headline {
             spent: 0.0,
             income: 0.0,
@@ -935,10 +1084,83 @@ fn empty_insight(period: PeriodMeta, prior: PeriodMeta, currency: &str) -> Spend
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use chrono::TimeZone;
+    use wealthfolio_core::fx::{ExchangeRate, NewExchangeRate};
 
     fn dt(y: i32, m: u32, d: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
+    }
+
+    /// No-op FX stub: pass-through (rate = 1, regardless of pair). Lets unit
+    /// tests cover the same-currency happy path without standing up the real
+    /// FxService + DB. Cross-currency conversion is exercised by integration
+    /// tests at the repository layer.
+    struct PassthroughFx;
+
+    type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
+
+    #[async_trait]
+    impl FxServiceTrait for PassthroughFx {
+        fn initialize(&self) -> CoreResult<()> {
+            Ok(())
+        }
+        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn get_exchange_rate_for_date(
+            &self,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn convert_currency(&self, amount: Decimal, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn update_exchange_rate(
+            &self,
+            _: &str,
+            _: &str,
+            _: Decimal,
+        ) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
+    fn fx() -> PassthroughFx {
+        PassthroughFx
     }
 
     // ── PeriodMeta + months_in_window ─────────────────────────────────────────
@@ -1153,6 +1375,9 @@ mod tests {
             dt(2026, 5, 19),
             1000.0,
             500.0,
+            &fx(),
+            "USD",
+            NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
         );
         assert_eq!(pace.days_remaining, 0);
         assert_eq!(pace.projected_spend, 1000.0);
@@ -1187,6 +1412,9 @@ mod tests {
             dt(2026, 5, 19),
             spent_to_date,
             2000.0,
+            &fx(),
+            "USD",
+            NaiveDate::from_ymd_opt(2026, 5, 19).unwrap(),
         );
         assert_eq!(pace.days_elapsed, 19);
         assert_eq!(pace.days_remaining, 12);
@@ -1233,10 +1461,10 @@ mod tests {
         }
     }
 
-    // ── aggregate_spend with weighted splits + uncategorized ──────────────────
+    // ── aggregate_spend: single-select attribution + uncategorized ────────────
 
     #[test]
-    fn aggregate_splits_by_weight_and_buckets_unassigned_separately() {
+    fn aggregate_attributes_full_amount_to_single_assignment_and_buckets_unassigned_separately() {
         use rust_decimal::Decimal;
         use serde_json::Value;
         use wealthfolio_core::accounts::account_types;
@@ -1316,7 +1544,15 @@ mod tests {
             },
         );
 
-        let agg = aggregate_spend(&acts, &account_types, &assignments, &meta);
+        let agg = aggregate_spend(
+            &acts,
+            &account_types,
+            &assignments,
+            &meta,
+            &fx(),
+            "USD",
+            NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
+        );
         assert!((agg.total_outflow - 150.0).abs() < 1e-9);
         assert!((agg.uncategorized_spend - 50.0).abs() < 1e-9);
         assert_eq!(agg.uncategorized_count, 1);

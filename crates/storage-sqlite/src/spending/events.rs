@@ -61,6 +61,7 @@ impl From<EventTypeDB> for EventType {
     fn from(db: EventTypeDB) -> Self {
         Self {
             id: db.id,
+            key: db.key,
             name: db.name,
             color: db.color,
             created_at: parse_dt(&db.created_at),
@@ -341,5 +342,16 @@ impl EventsRepositoryTrait for EventsRepository {
             })
             .await
             .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn count_by_type(&self, event_type_id: &str) -> Result<usize> {
+        let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
+        let count: i64 = events::table
+            .filter(events::event_type_id.eq(event_type_id))
+            .count()
+            .get_result(&mut conn)
+            .map_err(StorageError::from)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        Ok(count.max(0) as usize)
     }
 }

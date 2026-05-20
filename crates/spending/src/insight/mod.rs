@@ -15,8 +15,8 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    AmountBlock, AmountSource, CategoryInsight, CompareMode, DayBucket, GroupInsight,
-    HealthStatus, Headline, MonthBucket, MonthlyAmount, PaceState, PeriodMeta, SpendingInsight,
+    AmountBlock, AmountSource, CategoryInsight, CompareMode, DayBucket, GroupInsight, Headline,
+    HealthStatus, MonthBucket, MonthlyAmount, PaceState, PeriodMeta, SpendingInsight,
     SpendingInsightRequest, UncategorizedBucket,
 };
 pub use service::InsightService;

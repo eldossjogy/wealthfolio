@@ -114,6 +114,12 @@ export interface SpendingInsight {
   period: PeriodMeta;
   prior: PeriodMeta;
   currency: string;
+  /**
+   * Currencies (other than `currency`) observed on activities counted in this
+   * report. The backend does not FX-convert; if non-empty, the totals are a
+   * naive sum across currencies and the UI should warn the user.
+   */
+  foreignCurrencies?: string[];
   headline: Headline;
   groups: GroupInsight[];
   uncategorized: UncategorizedBucket;

@@ -27,7 +27,7 @@ export function EventsCard({
   categoriesMeta: CategoryMetaMap;
   theme: Palette;
 }) {
-  const { data: events = [] } = useSpendingEvents();
+  const { data: events = [], isError: eventsErrored, refetch: refetchEvents } = useSpendingEvents();
   const { openEventDialog } = useEventDialog();
 
   const pick = useMemo(() => {
@@ -55,6 +55,24 @@ export function EventsCard({
     }
     return null;
   }, [events]);
+
+  // Surface query errors instead of silently rendering nothing — mirrors the
+  // pattern in spending-insights-page after commit de0d4d89. Without this,
+  // a server outage looks identical to "user has no events".
+  if (eventsErrored) {
+    return (
+      <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center text-xs backdrop-blur-xl md:p-5">
+        <div className="text-muted-foreground">Couldn't load events.</div>
+        <button
+          type="button"
+          onClick={() => void refetchEvents()}
+          className="text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   const ev = pick?.event;
   const start = ev ? new Date(ev.startDate.slice(0, 10) + "T00:00:00") : new Date();
