@@ -33,7 +33,10 @@ import {
   Textarea,
 } from "@wealthfolio/ui";
 
-import { useSetActivityEvent } from "../hooks/use-cash-activities";
+import { formatAmount } from "@/lib/utils";
+import type { Activity } from "@/lib/types";
+
+import { useCashActivities, useSetActivityEvent } from "../hooks/use-cash-activities";
 import {
   useEventTypeMutations,
   useEventTypes,
@@ -148,6 +151,61 @@ export function EventFormDialog({
     [eventTypes, selectedTypeId],
   );
 
+  // Suggested-transactions step: only shown when creating a brand-new event
+  // (no `activityId` single-tag context, not editing). Activities in the
+  // chosen date range are fetched and listed with checkboxes — selected ones
+  // get tagged with the new event on submit.
+  const watchedStart = form.watch("startDate");
+  const watchedEnd = form.watch("endDate");
+  const showSuggestions = !isEditing && !activityId;
+
+  const candidateFilter = useMemo(() => {
+    if (!showSuggestions || !watchedStart || !watchedEnd) return undefined;
+    if (watchedStart > watchedEnd) return undefined;
+    const start = new Date(watchedStart);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(watchedEnd);
+    end.setHours(23, 59, 59, 999);
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }, [showSuggestions, watchedStart, watchedEnd]);
+
+  const { data: candidates = [], isFetching: isFetchingCandidates } =
+    useCashActivities(candidateFilter);
+
+  // Selection state keyed by the active date range — on range change the key
+  // shifts and overrides reset naturally without a useEffect.
+  const rangeKey = candidateFilter ? `${candidateFilter.startDate}|${candidateFilter.endDate}` : "";
+  const [overrides, setOverrides] = useState<{ key: string; map: Record<string, boolean> }>({
+    key: "",
+    map: {},
+  });
+  const activeOverrides = overrides.key === rangeKey ? overrides.map : {};
+
+  const isCandidateSelected = (c: Activity): boolean =>
+    Object.prototype.hasOwnProperty.call(activeOverrides, c.id)
+      ? activeOverrides[c.id]
+      : !c.eventId; // default ON for untagged, OFF for already-tagged
+
+  const setCandidateSelected = (id: string, value: boolean) => {
+    setOverrides((prev) => {
+      const base = prev.key === rangeKey ? prev.map : {};
+      return { key: rangeKey, map: { ...base, [id]: value } };
+    });
+  };
+
+  const setAllCandidates = (value: boolean) => {
+    setOverrides({
+      key: rangeKey,
+      map: Object.fromEntries(candidates.map((c) => [c.id, value])),
+    });
+  };
+
+  const selectedCandidateIds = useMemo(
+    () => candidates.filter(isCandidateSelected).map((c) => c.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [candidates, activeOverrides],
+  );
+
   const handleCreateType = async () => {
     const name = newTypeName.trim();
     if (!name) {
@@ -198,6 +256,15 @@ export function EventFormDialog({
         const created = await create.mutateAsync(newEvent);
         if (activityId) {
           await setEventOnActivity.mutateAsync({ activityId, eventId: created.id });
+        } else if (selectedCandidateIds.length > 0) {
+          // Bulk-tag the suggested transactions in parallel. No bulk endpoint
+          // exists today; the N round-trips are acceptable since the user has
+          // already opted into the set explicitly.
+          await Promise.all(
+            selectedCandidateIds.map((id) =>
+              setEventOnActivity.mutateAsync({ activityId: id, eventId: created.id }),
+            ),
+          );
         }
         onCreated?.(created);
       }
@@ -445,6 +512,19 @@ export function EventFormDialog({
                 )}
               />
             </div>
+
+            {showSuggestions && candidateFilter && (
+              <SuggestedTransactions
+                candidates={candidates}
+                isFetching={isFetchingCandidates}
+                isSelected={isCandidateSelected}
+                onToggle={setCandidateSelected}
+                onSelectAll={() => setAllCandidates(true)}
+                onClearAll={() => setAllCandidates(false)}
+                selectedCount={selectedCandidateIds.length}
+              />
+            )}
+
             <DialogFooter>
               <Button
                 type="button"
@@ -468,5 +548,111 @@ export function EventFormDialog({
         </Form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface SuggestedTransactionsProps {
+  candidates: Activity[];
+  isFetching: boolean;
+  isSelected: (c: Activity) => boolean;
+  onToggle: (id: string, value: boolean) => void;
+  onSelectAll: () => void;
+  onClearAll: () => void;
+  selectedCount: number;
+}
+
+function SuggestedTransactions({
+  candidates,
+  isFetching,
+  isSelected,
+  onToggle,
+  onSelectAll,
+  onClearAll,
+  selectedCount,
+}: SuggestedTransactionsProps) {
+  if (isFetching && candidates.length === 0) {
+    return (
+      <div className="border-input bg-muted/10 rounded-md border p-3">
+        <p className="text-muted-foreground text-xs">Looking for transactions in range…</p>
+      </div>
+    );
+  }
+
+  if (candidates.length === 0) {
+    return (
+      <div className="border-input bg-muted/10 rounded-md border p-3">
+        <p className="text-foreground text-xs font-semibold">Tag transactions</p>
+        <p className="text-muted-foreground mt-1 text-xs">
+          No transactions found in this date range. You can tag them later from the activity list.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-input rounded-md border">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-foreground text-xs font-semibold">Tag transactions in this range</p>
+          <p className="text-muted-foreground text-[11px]">
+            {selectedCount} of {candidates.length} selected
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={onSelectAll}
+            className="text-muted-foreground hover:text-foreground text-[11px] underline-offset-2 hover:underline"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="text-muted-foreground hover:text-foreground text-[11px] underline-offset-2 hover:underline"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+      <ul className="max-h-52 divide-y overflow-y-auto">
+        {candidates.map((c) => {
+          const checked = isSelected(c);
+          const amt = c.amount ? Number(c.amount) : 0;
+          const date = new Date(c.activityDate);
+          const dateLabel = isNaN(date.getTime())
+            ? c.activityDate.slice(0, 10)
+            : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          return (
+            <li key={c.id}>
+              <label className="hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="border-input h-3.5 w-3.5 shrink-0 rounded"
+                  checked={checked}
+                  onChange={(e) => onToggle(c.id, e.target.checked)}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-foreground truncate text-xs">
+                      {c.notes || c.activityType}
+                    </span>
+                    {c.eventId && (
+                      <span className="text-muted-foreground/80 border-muted-foreground/30 shrink-0 rounded border px-1 py-px text-[9px] uppercase tracking-wide">
+                        already tagged
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-muted-foreground text-[10px]">{dateLabel}</p>
+                </div>
+                <span className="text-foreground shrink-0 text-xs font-medium tabular-nums">
+                  {formatAmount(Math.abs(amt), c.currency || "USD")}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

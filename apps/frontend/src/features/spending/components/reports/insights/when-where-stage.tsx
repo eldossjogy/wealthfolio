@@ -144,7 +144,7 @@ function EmptyEventsCard({ rangeStart, rangeEnd }: { rangeStart: Date; rangeEnd:
           })
         }
       >
-        Tag event
+        Create event
         <Icons.ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden />
       </Button>
     </div>
