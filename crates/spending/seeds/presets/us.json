@@ -1,8 +1,8 @@
 {
   "presetId": "us",
-  "presetVersion": "2026-05.1",
+  "presetVersion": "2026-05.2",
   "name": "United States",
-  "description": "~30 rules covering ~90% of typical US household transactions. Groceries, restaurants, fast food, coffee, gas, telecom & utilities, streaming/subscriptions, online shopping, pharmacy, transit, travel, fitness.",
+  "description": "~40 expense rules covering common US household transactions. Groceries, restaurants, transport, housing, telecom & utilities, subscriptions, shopping, health, personal care, pets, education, giving, travel, and fees.",
   "language": "en-US",
   "rules": [
     {
@@ -16,7 +16,7 @@
     {
       "key": "us.groceries.warehouse_clubs",
       "name": "Warehouse clubs",
-      "pattern": "(?i)\\bcostco\\b|sam'?s club|\\bbj'?s\\b|\\btarget\\b",
+      "pattern": "(?i)\\bcostco\\b|sam'?s club|\\bbj'?s\\b",
       "matchType": "regex",
       "categoryKey": "groceries",
       "priority": 75
@@ -64,7 +64,7 @@
     {
       "key": "us.rideshare",
       "name": "Rideshare & taxi",
-      "pattern": "(?i)\\buber\\b(?!.?eats)|\\blyft\\b|\\btaxi\\b|\\bcab\\b|\\bvia\\b ride|curb taxi",
+      "pattern": "(?i)\\buber\\b|\\blyft\\b|\\btaxi\\b|\\bcab\\b|\\bvia\\b ride|curb taxi",
       "matchType": "regex",
       "categoryKey": "transport_rideshare",
       "priority": 80
@@ -84,6 +84,14 @@
       "matchType": "regex",
       "categoryKey": "transport_parking",
       "priority": 80
+    },
+    {
+      "key": "us.car_maintenance",
+      "name": "Car maintenance",
+      "pattern": "(?i)jiffy lube|valvoline|midas|firestone|goodyear|discount tire|tire discounters|les schwab|autozone|o'?reilly|advance auto|pep boys|take 5 oil|car wash|auto repair|mechanic",
+      "matchType": "regex",
+      "categoryKey": "transport_maintenance",
+      "priority": 85
     },
     {
       "key": "us.airlines",
@@ -158,6 +166,14 @@
       "priority": 80
     },
     {
+      "key": "us.housing_rent_mortgage",
+      "name": "Rent & mortgage",
+      "pattern": "(?i)\\brent\\b|mortgage|apartments?\\.com|appfolio|yardi|rentcafe|resident portal|zillow rentals|\\bhoa\\b|homeowners association|rocket mortgage|mr\\.? cooper|pennymac|loan depot|newrez|freedom mortgage",
+      "matchType": "regex",
+      "categoryKey": "housing_rent",
+      "priority": 88
+    },
+    {
       "key": "us.online_marketplaces",
       "name": "Online marketplaces",
       "pattern": "(?i)amazon\\.com|amzn mktp|amzn\\.com|\\bamzn\\b|\\bebay\\b|\\betsy\\b|\\bshein\\b|\\btemu\\b|wayfair|overstock|wish\\.com|aliexpress|alibaba",
@@ -198,6 +214,38 @@
       "priority": 85
     },
     {
+      "key": "us.medical",
+      "name": "Medical & clinics",
+      "pattern": "(?i)kaiser permanente|urgent care|hospital|clinic|medical center|medical centre|quest diagnostics|labcorp|mychart|physician|dermatology|orthopedic|physical therapy|\\bpt clinic\\b",
+      "matchType": "regex",
+      "categoryKey": "health_medical",
+      "priority": 86
+    },
+    {
+      "key": "us.dental",
+      "name": "Dental",
+      "pattern": "(?i)dental|dentist|orthodont|delta dental|aspen dental|smile direct",
+      "matchType": "regex",
+      "categoryKey": "health_dental",
+      "priority": 86
+    },
+    {
+      "key": "us.vision",
+      "name": "Vision",
+      "pattern": "(?i)vision|optical|optomet|lenscrafters|warby parker|america'?s best|vsp\\b|eyeglass",
+      "matchType": "regex",
+      "categoryKey": "health_vision",
+      "priority": 86
+    },
+    {
+      "key": "us.health_insurance",
+      "name": "Health insurance",
+      "pattern": "(?i)aetna|cigna|blue cross|blue shield|\\bbcbs\\b|united ?health|\\buhc\\b|humana|anthem|health insurance",
+      "matchType": "regex",
+      "categoryKey": "health_insurance",
+      "priority": 86
+    },
+    {
       "key": "us.fitness",
       "name": "Gyms & fitness",
       "pattern": "(?i)planet fitness|\\bla fitness\\b|24 ?hour fitness|\\bequinox\\b|\\bcrunch\\b fitness|anytime fitness|soul ?cycle|orangetheory|\\bf45\\b|crossfit|classpass|peloton|barry'?s|\\bymca\\b",
@@ -224,17 +272,57 @@
     {
       "key": "us.dollar_stores",
       "name": "Dollar stores & discount",
-      "pattern": "(?i)dollar general|dollar tree|family dollar|five below|99 cents only|\\bbig lots\\b",
+      "pattern": "(?i)\\btarget\\b|dollar general|dollar tree|family dollar|five below|99 cents only|\\bbig lots\\b",
       "matchType": "regex",
       "categoryKey": "shopping",
-      "priority": 75
+      "priority": 78
+    },
+    {
+      "key": "us.personal_care",
+      "name": "Personal care",
+      "pattern": "(?i)salon|barber|spa\\b|nail salon|\\bnails\\b|sephora|ulta\\b|great clips|supercuts|massage envy|haircut",
+      "matchType": "regex",
+      "categoryKey": "personal",
+      "priority": 82
+    },
+    {
+      "key": "us.pets",
+      "name": "Pets",
+      "pattern": "(?i)petco|petsmart|chewy|banfield|vca animal|veterinary|vet clinic|animal hospital|pet supplies",
+      "matchType": "regex",
+      "categoryKey": "personal",
+      "priority": 82
+    },
+    {
+      "key": "us.education_childcare",
+      "name": "Education & childcare",
+      "pattern": "(?i)tuition|university|college|school payment|daycare|day care|child ?care|bright horizons|kumon|coursera|udemy",
+      "matchType": "regex",
+      "categoryKey": "education",
+      "priority": 82
+    },
+    {
+      "key": "us.donations",
+      "name": "Donations & charities",
+      "pattern": "(?i)gofundme|red cross|unicef|st\\.? jude|salvation army|\\bchurch\\b|\\btithe\\b|donation|charity|patreon",
+      "matchType": "regex",
+      "categoryKey": "gifts",
+      "priority": 82
+    },
+    {
+      "key": "us.gov_taxes",
+      "name": "Government & taxes",
+      "pattern": "(?i)\\birs\\b|us treasury|treasury direct|\\bdmv\\b|passport|\\buscis\\b|payusatax|pay1040|official payments|property tax",
+      "matchType": "regex",
+      "categoryKey": "fees",
+      "priority": 90
     },
     {
       "key": "us.bank_fees",
       "name": "Bank & ATM fees",
       "pattern": "(?i)\\batm fee\\b|overdraft fee|wire fee|service fee|monthly maintenance|nsf fee|foreign transaction fee|annual fee",
       "matchType": "regex",
-      "categoryKey": "fees",
+      "categoryKey": "fees_bank",
       "priority": 90
     },
     {

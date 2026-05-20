@@ -138,3 +138,41 @@ pub fn installed_rule_keys<'a>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex::Regex;
+
+    #[test]
+    fn bundled_presets_have_unique_keys_and_valid_regexes() {
+        for preset_id in ["us", "ca", "gb"] {
+            let preset = load_preset(preset_id).expect("preset should load");
+            assert_eq!(preset.preset_id, preset_id);
+            assert!(!preset.rules.is_empty(), "preset {preset_id} has no rules");
+
+            let mut keys = HashSet::new();
+            for rule in &preset.rules {
+                assert!(
+                    keys.insert(rule.key.as_str()),
+                    "duplicate preset rule key {} in {}",
+                    rule.key,
+                    preset.preset_id
+                );
+                assert!(
+                    !rule.category_key.trim().is_empty(),
+                    "rule {} has an empty categoryKey",
+                    rule.key
+                );
+                if rule.match_type == "regex" {
+                    Regex::new(&rule.pattern).unwrap_or_else(|err| {
+                        panic!(
+                            "invalid regex in preset {} rule {}: {}",
+                            preset.preset_id, rule.key, err
+                        )
+                    });
+                }
+            }
+        }
+    }
+}

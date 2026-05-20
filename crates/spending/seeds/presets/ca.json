@@ -1,8 +1,8 @@
 {
   "presetId": "ca",
-  "presetVersion": "2026-05.1",
+  "presetVersion": "2026-05.2",
   "name": "Canada",
-  "description": "~30 rules covering ~90% of typical Canadian household transactions. Includes major regional chains in ON, QC, BC, and Atlantic Canada.",
+  "description": "~40 expense rules covering common Canadian household transactions. Includes major regional chains in ON, QC, BC, and Atlantic Canada, plus housing, car maintenance, health, personal care, pets, education, giving, and fees.",
   "language": "en-CA",
   "rules": [
     {
@@ -72,7 +72,7 @@
     {
       "key": "ca.rideshare",
       "name": "Rideshare & taxi",
-      "pattern": "(?i)\\buber\\b(?!.?eats)|\\blyft\\b|\\beva\\b ride|beck taxi|\\btaxi\\b|\\bcab\\b",
+      "pattern": "(?i)\\buber\\b|\\blyft\\b|\\beva\\b ride|beck taxi|\\btaxi\\b|\\bcab\\b",
       "matchType": "regex",
       "categoryKey": "transport_rideshare",
       "priority": 80
@@ -83,6 +83,14 @@
       "pattern": "(?i)\\bimpark\\b|\\bindigo\\b parking|honk\\b mobile|paybyphone|green ?p|park'?n fly|diamond parking|\\bprecise park\\b|tour ?parking",
       "matchType": "regex",
       "categoryKey": "transport_parking",
+      "priority": 85
+    },
+    {
+      "key": "ca.car_maintenance",
+      "name": "Car maintenance",
+      "pattern": "(?i)mr\\.? lube|jiffy lube|kal tire|canadian tire auto|midas|fountain tire|partsource|napa auto|oil changers|speedy auto|car wash|auto repair|mechanic",
+      "matchType": "regex",
+      "categoryKey": "transport_maintenance",
       "priority": 85
     },
     {
@@ -142,6 +150,14 @@
       "priority": 80
     },
     {
+      "key": "ca.housing_rent_mortgage",
+      "name": "Rent, mortgage & condo fees",
+      "pattern": "(?i)\\brent\\b|mortgage|condo fee|strata fee|appfolio|yardi|rentcafe|resident portal|padmapper|rbc mortgage|td mortgage|scotia mortgage|bmo mortgage|cibc mortgage|first national|\\bmcap\\b|equitable bank",
+      "matchType": "regex",
+      "categoryKey": "housing_rent",
+      "priority": 88
+    },
+    {
       "key": "ca.online_marketplaces",
       "name": "Online marketplaces",
       "pattern": "(?i)amazon\\.ca|amzn mktp ca|\\bamzn\\b|\\bebay\\b|\\betsy\\b|\\btemu\\b|\\bshein\\b|aliexpress|wayfair|\\bposhmark\\b",
@@ -182,6 +198,38 @@
       "priority": 85
     },
     {
+      "key": "ca.medical",
+      "name": "Medical & clinics",
+      "pattern": "(?i)life ?labs|dynacare|maple|telus health|clinic|medical centre|medical center|hospital|walk-?in clinic|physio|chiropractic|massage therapy",
+      "matchType": "regex",
+      "categoryKey": "health_medical",
+      "priority": 86
+    },
+    {
+      "key": "ca.dental",
+      "name": "Dental",
+      "pattern": "(?i)dental|dentist|orthodont|dentalcorp|altima dental",
+      "matchType": "regex",
+      "categoryKey": "health_dental",
+      "priority": 86
+    },
+    {
+      "key": "ca.vision",
+      "name": "Vision",
+      "pattern": "(?i)specsavers|lenscrafters|hakim optical|fyidoctors|clearly|bailey nelson|optical|optomet|vision care",
+      "matchType": "regex",
+      "categoryKey": "health_vision",
+      "priority": 86
+    },
+    {
+      "key": "ca.health_insurance",
+      "name": "Health insurance",
+      "pattern": "(?i)sun life|manulife|canada life|green shield|blue cross|group benefits|health insurance",
+      "matchType": "regex",
+      "categoryKey": "health_insurance",
+      "priority": 86
+    },
+    {
       "key": "ca.fitness",
       "name": "Gyms & fitness",
       "pattern": "(?i)goodlife fitness|fit4less|anytime fitness|\\bla fitness\\b canada|\\borange theory\\b|\\bf45\\b|crossfit|\\bymca\\b|\\bywca\\b|\\bsteve nash\\b fitness|club energie|\\bspartacus gym\\b|yyoga|equinox\\b|\\bnautilus plus\\b",
@@ -206,11 +254,43 @@
       "priority": 75
     },
     {
+      "key": "ca.personal_care",
+      "name": "Personal care",
+      "pattern": "(?i)salon|barber|spa\\b|nail salon|\\bnails\\b|sephora|chatters|first choice haircutters|great clips|tommy guns|massage addict|hand & stone|haircut",
+      "matchType": "regex",
+      "categoryKey": "personal",
+      "priority": 82
+    },
+    {
+      "key": "ca.pets",
+      "name": "Pets",
+      "pattern": "(?i)pet valu|petsmart|global pet foods|ren'?s pets|veterinary|vet clinic|animal hospital|pet supplies",
+      "matchType": "regex",
+      "categoryKey": "personal",
+      "priority": 82
+    },
+    {
+      "key": "ca.education_childcare",
+      "name": "Education & childcare",
+      "pattern": "(?i)tuition|university|college|school payment|daycare|day care|child ?care|brightpath|kids & company|kumon|coursera|udemy",
+      "matchType": "regex",
+      "categoryKey": "education",
+      "priority": 82
+    },
+    {
+      "key": "ca.donations",
+      "name": "Donations & charities",
+      "pattern": "(?i)canadahelps|united way|red cross|unicef|\\bchurch\\b|\\btithe\\b|donation|charity|gofundme",
+      "matchType": "regex",
+      "categoryKey": "gifts",
+      "priority": 82
+    },
+    {
       "key": "ca.bank_fees",
       "name": "Bank & ATM fees",
       "pattern": "(?i)\\batm fee\\b|nsf fee|monthly fee|service charge|wire fee|overdraft|annual fee|interac e-?transfer fee",
       "matchType": "regex",
-      "categoryKey": "fees",
+      "categoryKey": "fees_bank",
       "priority": 90
     },
     {
@@ -224,7 +304,7 @@
     {
       "key": "ca.gov_taxes",
       "name": "Government & taxes",
-      "pattern": "(?i)\\bcra\\b|canada revenue|service canada|service ontario|saaq|saao|servicebc|service alberta|passport canada",
+      "pattern": "(?i)\\bcra\\b|canada revenue|service canada|service ontario|saaq|saao|servicebc|service alberta|passport canada|property tax|municipal tax",
       "matchType": "regex",
       "categoryKey": "fees",
       "priority": 90
