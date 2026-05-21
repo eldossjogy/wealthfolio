@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical list of local tables that participate in app-side device sync.
 /// Order matters: parent tables before children (FK dependencies).
-pub const APP_SYNC_TABLES: [&str; 24] = [
+pub const APP_SYNC_TABLES: [&str; 26] = [
     // Base tables (no FK deps)
     "platforms",
     "assets",
@@ -46,6 +46,10 @@ pub const APP_SYNC_TABLES: [&str; 24] = [
     "ai_thread_tags",
     // No FK deps (account_id has no FK constraint)
     "holdings_snapshots",
+    // No FK deps
+    "portfolios",
+    // Depends on: portfolios, accounts
+    "portfolio_accounts",
 ];
 
 /// Entity names used by incremental sync events.
@@ -71,6 +75,8 @@ pub enum SyncEntity {
     CustomProvider,
     CustomTaxonomy,
     ImportRun,
+    Portfolio,
+    PortfolioAccount,
     // Spending module (wealthfolio-spending crate)
     ActivityTaxonomyAssignment,
     ActivityEvent,
@@ -303,6 +309,8 @@ mod tests {
             SyncEntity::CustomProvider,
             SyncEntity::CustomTaxonomy,
             SyncEntity::ImportRun,
+            SyncEntity::Portfolio,
+            SyncEntity::PortfolioAccount,
             SyncEntity::ActivityTaxonomyAssignment,
             SyncEntity::ActivityEvent,
             SyncEntity::CategorizationRule,
@@ -336,6 +344,8 @@ mod tests {
             "\"custom_provider\"",
             "\"custom_taxonomy\"",
             "\"import_run\"",
+            "\"portfolio\"",
+            "\"portfolio_account\"",
             "\"activity_taxonomy_assignment\"",
             "\"activity_event\"",
             "\"categorization_rule\"",

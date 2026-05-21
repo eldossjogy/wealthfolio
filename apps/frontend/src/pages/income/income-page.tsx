@@ -11,10 +11,8 @@ import { EmptyPlaceholder } from "@wealthfolio/ui/components/ui/empty-placeholde
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
-import { AccountSelector } from "@/components/account-selector";
-import { AccountPurpose, createPortfolioAccount, PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
-import type { Account } from "@/lib/types";
-import { useSettingsContext } from "@/lib/settings-provider";
+import { AccountScopeSelector } from "@/components/account-filter-selector";
+import type { AccountScope } from "@/lib/types";
 
 import { QueryKeys } from "@/lib/query-keys";
 import type { IncomeSummary } from "@/lib/types";
@@ -66,23 +64,19 @@ const IncomePeriodSelector: React.FC<{
 export default function IncomePage() {
   const [selectedPeriod, setSelectedPeriod] = useState<"TOTAL" | "YTD" | "LAST_YEAR">("TOTAL");
   const { isBalanceHidden } = useBalancePrivacy();
-  const { settings } = useSettingsContext();
-  const baseCurrency = settings?.baseCurrency ?? "USD";
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
 
-  const [selectedAccount, setSelectedAccount] = useState<Account | null>(
-    () => createPortfolioAccount(baseCurrency) as Account,
-  );
+  const [accountFilter, setAccountScope] = useState<AccountScope>({ type: "all" });
 
-  const accountId = selectedAccount?.id === PORTFOLIO_ACCOUNT_ID ? undefined : selectedAccount?.id;
+  const incomeFilter = accountFilter.type === "all" ? undefined : accountFilter;
 
   const {
     data: incomeData,
     isLoading,
     error,
   } = useQuery<IncomeSummary[], Error>({
-    queryKey: [QueryKeys.INCOME_SUMMARY, accountId ?? "ALL"],
-    queryFn: () => getIncomeSummary(accountId),
+    queryKey: [QueryKeys.INCOME_SUMMARY, incomeFilter ?? "ALL"],
+    queryFn: () => getIncomeSummary(incomeFilter),
   });
 
   if (isLoading) {
@@ -100,14 +94,7 @@ export default function IncomePage() {
     return (
       <>
         <div className="pointer-events-auto fixed right-2 top-4 z-20 hidden items-center gap-2 md:flex lg:right-4">
-          <AccountSelector
-            selectedAccount={selectedAccount}
-            setSelectedAccount={setSelectedAccount}
-            variant="dropdown"
-            includePortfolio
-            accountPurpose={AccountPurpose.INCOME}
-            className="h-9"
-          />
+          <AccountScopeSelector value={accountFilter} onChange={setAccountScope} />
           <IncomePeriodSelector
             selectedPeriod={selectedPeriod}
             onPeriodSelect={setSelectedPeriod}
@@ -125,7 +112,7 @@ export default function IncomePage() {
             onClick={() => setIsFilterSheetOpen(true)}
           >
             <Icons.ListFilter className="h-4 w-4" />
-            {selectedAccount?.id !== PORTFOLIO_ACCOUNT_ID && (
+            {accountFilter.type !== "all" && (
               <span className="bg-destructive absolute -right-1 -top-1 h-2 w-2 rounded-full" />
             )}
           </Button>
@@ -139,8 +126,8 @@ export default function IncomePage() {
         <IncomeMobileFilterSheet
           open={isFilterSheetOpen}
           onOpenChange={setIsFilterSheetOpen}
-          selectedAccount={selectedAccount}
-          onAccountChange={setSelectedAccount}
+          accountFilter={accountFilter}
+          onAccountScopeChange={setAccountScope}
         />
       </>
     );
@@ -211,14 +198,7 @@ export default function IncomePage() {
     <>
       {/* Desktop: fixed header with account selector + period toggle */}
       <div className="pointer-events-auto fixed right-2 top-4 z-20 hidden items-center gap-2 md:flex lg:right-4">
-        <AccountSelector
-          selectedAccount={selectedAccount}
-          setSelectedAccount={setSelectedAccount}
-          variant="dropdown"
-          includePortfolio
-          accountPurpose={AccountPurpose.INCOME}
-          className="h-9"
-        />
+        <AccountScopeSelector value={accountFilter} onChange={setAccountScope} />
         <IncomePeriodSelector selectedPeriod={selectedPeriod} onPeriodSelect={setSelectedPeriod} />
       </div>
 
@@ -236,7 +216,7 @@ export default function IncomePage() {
             onClick={() => setIsFilterSheetOpen(true)}
           >
             <Icons.ListFilter className="h-4 w-4" />
-            {selectedAccount?.id !== PORTFOLIO_ACCOUNT_ID && (
+            {accountFilter.type !== "all" && (
               <span className="bg-destructive absolute -right-1 -top-1 h-2 w-2 rounded-full" />
             )}
           </Button>
@@ -508,8 +488,8 @@ export default function IncomePage() {
       <IncomeMobileFilterSheet
         open={isFilterSheetOpen}
         onOpenChange={setIsFilterSheetOpen}
-        selectedAccount={selectedAccount}
-        onAccountChange={setSelectedAccount}
+        accountFilter={accountFilter}
+        onAccountScopeChange={setAccountScope}
       />
     </>
   );

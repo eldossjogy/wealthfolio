@@ -28,6 +28,7 @@ use wealthfolio_core::{
         snapshot::SnapshotService,
         valuation::ValuationService,
     },
+    portfolios::PortfolioService,
     quotes::{QuoteService, QuoteServiceTrait},
     settings::{SettingsRepositoryTrait, SettingsService, SettingsServiceTrait},
     taxonomies::TaxonomyService,
@@ -45,6 +46,7 @@ use wealthfolio_storage_sqlite::{
     limits::ContributionLimitRepository,
     market_data::{MarketDataRepository, QuoteSyncStateRepository},
     portfolio::{snapshot::SnapshotRepository, valuation::ValuationRepository},
+    portfolios::PortfolioRepository,
     settings::SettingsRepository,
     sync::{AppSyncRepository, BrokerSyncStateRepository, ImportRunRepository, PlatformRepository},
     taxonomies::TaxonomyRepository,
@@ -182,6 +184,13 @@ pub async fn initialize_context(
         )
         .await?,
     );
+
+    // Portfolio service
+    let portfolio_repository = Arc::new(PortfolioRepository::new(pool.clone(), writer.clone()));
+    let portfolio_service = Arc::new(PortfolioService::new(
+        portfolio_repository,
+        account_repository.clone(),
+    ));
 
     // Custom provider service
     let custom_provider_service = Arc::new(
@@ -538,6 +547,7 @@ pub async fn initialize_context(
             device_sync_runtime,
             health_service,
             custom_provider_service,
+            portfolio_service,
             spending_settings_service,
             cash_activity_service,
             activity_taxonomy_assignment_service,

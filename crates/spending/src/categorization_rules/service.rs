@@ -597,7 +597,7 @@ mod tests {
         }
         fn get_income_activities_data(
             &self,
-            _: Option<&str>,
+            _: Option<&[String]>,
         ) -> wealthfolio_core::Result<Vec<IncomeData>> {
             unimplemented!()
         }

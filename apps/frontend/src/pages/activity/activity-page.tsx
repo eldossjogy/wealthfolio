@@ -1,10 +1,11 @@
 import { getAccounts } from "@/adapters";
 import { usePersistentState } from "@/hooks/use-persistent-state";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { debounce } from "@/lib/debounce";
 import { ActivityType } from "@/lib/constants";
 import { QueryKeys } from "@/lib/query-keys";
-import { Account, ActivityDetails } from "@/lib/types";
+import { Account, AccountScope, ActivityDetails } from "@/lib/types";
 import { useQuery } from "@tanstack/react-query";
 import type { SortingState } from "@tanstack/react-table";
 import { Button, Icons, Page, PageContent, PageHeader } from "@wealthfolio/ui";
@@ -43,10 +44,11 @@ const ActivityPage = () => {
   const [showSpendingActionPalette, setShowSpendingActionPalette] = useState(false);
 
   // Filter and search state
-  const [selectedAccounts, setSelectedAccounts] = usePersistentState<string[]>(
-    "activity-filter-accounts",
-    [],
+  const [accountScope, setAccountScope] = usePersistentState<AccountScope>(
+    "activity-filter-scope",
+    { type: "all" },
   );
+  const { data: portfolios = [] } = usePortfolios();
   const [selectedActivityTypes, setSelectedActivityTypes] = usePersistentState<ActivityType[]>(
     "activity-filter-types",
     [],
@@ -127,6 +129,16 @@ const ActivityPage = () => {
 
   const isDatagridView = viewMode === "datagrid";
 
+  // Resolve the typed scope to a flat account ID list for the activity search.
+  const effectiveAccountIds = useMemo(() => {
+    if (accountScope.type === "account") return [accountScope.accountId];
+    if (accountScope.type === "accounts") return accountScope.accountIds;
+    if (accountScope.type === "portfolio") {
+      return portfolios.find((p) => p.id === accountScope.portfolioId)?.accountIds ?? [];
+    }
+    return []; // "all" → no filter
+  }, [accountScope, portfolios]);
+
   // Accounts opted into the Spending module are shown on the Spending tab; the
   // Investments tab must exclude them so cash/credit-card activity doesn't double-up.
   const investmentAccounts = useMemo(() => {
@@ -140,12 +152,17 @@ const ActivityPage = () => {
     [investmentAccounts],
   );
 
+  // Intersect main's scope-resolved IDs with the spending-excluded set so the
+  // Investments tab respects both the typed AccountScope (main's
+  // portfolio-filters work) AND the spending opt-in partitioning (this
+  // branch's work). Empty effectiveAccountIds means "all" — collapses to
+  // the investment-only set.
   const effectiveInvestmentAccountIds = useMemo(() => {
-    if (!isSpendingEnabled || spendingAccountIds.length === 0) return selectedAccounts;
-    if (selectedAccounts.length === 0) return investmentAccountIds;
+    if (!isSpendingEnabled || spendingAccountIds.length === 0) return effectiveAccountIds;
+    if (effectiveAccountIds.length === 0) return investmentAccountIds;
     const allowed = new Set(investmentAccountIds);
-    return selectedAccounts.filter((id) => allowed.has(id));
-  }, [selectedAccounts, investmentAccountIds, isSpendingEnabled, spendingAccountIds.length]);
+    return effectiveAccountIds.filter((id) => allowed.has(id));
+  }, [effectiveAccountIds, investmentAccountIds, isSpendingEnabled, spendingAccountIds.length]);
 
   // Infinite scroll search for table view
   const infiniteSearch = useActivitySearch({
@@ -182,7 +199,7 @@ const ActivityPage = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    selectedAccounts,
+    effectiveAccountIds,
     selectedActivityTypes,
     selectedInstrumentTypes,
     statusFilter,
@@ -228,21 +245,21 @@ const ActivityPage = () => {
   }, []);
 
   const investmentsFiltersActive =
-    selectedAccounts.length > 0 ||
+    accountScope.type !== "all" ||
     selectedActivityTypes.length > 0 ||
     selectedInstrumentTypes.length > 0 ||
     statusFilter !== "all" ||
     searchInput.trim().length > 0;
 
   const clearInvestmentsFilters = useCallback(() => {
-    setSelectedAccounts([]);
+    setAccountScope({ type: "all" });
     setSelectedActivityTypes([]);
     setSelectedInstrumentTypes([]);
     setStatusFilter("all");
     setSearchInput("");
     setSearchQuery("");
   }, [
-    setSelectedAccounts,
+    setAccountScope,
     setSelectedActivityTypes,
     setSelectedInstrumentTypes,
     setStatusFilter,
@@ -370,8 +387,12 @@ const ActivityPage = () => {
           accounts={investmentAccounts}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
-          selectedAccountIds={selectedAccounts}
-          onAccountIdsChange={setSelectedAccounts}
+          selectedAccountIds={effectiveAccountIds}
+          onAccountIdsChange={(ids) => {
+            if (ids.length === 0) setAccountScope({ type: "all" });
+            else if (ids.length === 1) setAccountScope({ type: "account", accountId: ids[0] });
+            else setAccountScope({ type: "accounts", accountIds: ids });
+          }}
           selectedActivityTypes={selectedActivityTypes}
           onActivityTypesChange={setSelectedActivityTypes}
           isCompactView={isCompactView}
@@ -379,11 +400,10 @@ const ActivityPage = () => {
         />
       ) : (
         <ActivityViewControls
-          accounts={investmentAccounts}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
-          selectedAccountIds={selectedAccounts}
-          onAccountIdsChange={setSelectedAccounts}
+          accountScope={accountScope}
+          onAccountScopeChange={setAccountScope}
           selectedActivityTypes={selectedActivityTypes}
           onActivityTypesChange={setSelectedActivityTypes}
           selectedInstrumentTypes={selectedInstrumentTypes}

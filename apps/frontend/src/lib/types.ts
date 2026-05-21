@@ -50,6 +50,29 @@ export type { HoldingCategoryFilterId } from "./constants";
 
 export type { ActivitySubtype, ImportRequiredField } from "./constants";
 
+export interface PortfolioWithAccounts {
+  id: string;
+  name: string;
+  description?: string;
+  sortOrder: number;
+  accountIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewPortfolio {
+  name: string;
+  description?: string;
+  sortOrder?: number;
+  accountIds: string[];
+}
+
+export type AccountScope =
+  | { type: "all" }
+  | { type: "account"; accountId: string }
+  | { type: "portfolio"; portfolioId: string }
+  | { type: "accounts"; accountIds: string[] };
+
 export interface Account {
   id: string;
   name: string;
@@ -615,6 +638,8 @@ export interface Holding {
   prevCloseValue?: MonetaryValue | null;
   weight: number;
   asOfDate: string;
+  /** Source account IDs for aggregated holdings (portfolio/multi-account scope). Empty for single-account. */
+  sourceAccountIds?: string[];
 }
 
 /**
