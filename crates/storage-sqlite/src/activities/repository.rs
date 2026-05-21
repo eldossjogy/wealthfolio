@@ -444,13 +444,13 @@ impl ActivityRepositoryTrait for ActivityRepository {
     /// longer lives as a column on `activities`, so this writes to the
     /// sidecar table instead. We still bump `activities.updated_at` so device
     /// sync sees the surrounding edit, and we push a per-join-row outbox
-    /// entry (`SyncEntity::ActivityEvent`) so the tag itself replicates.
+    /// entry (`SyncEntity::SpendingActivityEvent`) so the tag itself replicates.
     async fn set_activity_event_id(
         &self,
         activity_id: &str,
         event_id: Option<String>,
     ) -> Result<Activity> {
-        use crate::schema::activity_events;
+        use crate::schema::spending_activity_events;
         use crate::spending::activity_events::ActivityEventDB;
         let activity_id = activity_id.to_string();
         self.writer
@@ -459,18 +459,18 @@ impl ActivityRepositoryTrait for ActivityRepository {
                 // 1) Upsert / delete in activity_events.
                 match &event_id {
                     Some(eid) => {
-                        diesel::insert_into(activity_events::table)
+                        diesel::insert_into(spending_activity_events::table)
                             .values((
-                                activity_events::activity_id.eq(&activity_id),
-                                activity_events::event_id.eq(eid),
-                                activity_events::created_at.eq(&now),
-                                activity_events::updated_at.eq(&now),
+                                spending_activity_events::activity_id.eq(&activity_id),
+                                spending_activity_events::event_id.eq(eid),
+                                spending_activity_events::created_at.eq(&now),
+                                spending_activity_events::updated_at.eq(&now),
                             ))
-                            .on_conflict(activity_events::activity_id)
+                            .on_conflict(spending_activity_events::activity_id)
                             .do_update()
                             .set((
-                                activity_events::event_id.eq(eid),
-                                activity_events::updated_at.eq(&now),
+                                spending_activity_events::event_id.eq(eid),
+                                spending_activity_events::updated_at.eq(&now),
                             ))
                             .execute(tx.conn())
                             .map_err(StorageError::from)?;
@@ -489,8 +489,8 @@ impl ActivityRepositoryTrait for ActivityRepository {
                         // — and a subsequent Create from another device
                         // would then get rejected by LWW as resurrection.
                         let removed = diesel::delete(
-                            activity_events::table
-                                .filter(activity_events::activity_id.eq(&activity_id)),
+                            spending_activity_events::table
+                                .filter(spending_activity_events::activity_id.eq(&activity_id)),
                         )
                         .execute(tx.conn())
                         .map_err(StorageError::from)?;

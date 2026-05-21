@@ -22,24 +22,25 @@ DROP TABLE IF EXISTS budget_group_assignments;
 DROP INDEX IF EXISTS idx_budget_groups_sort;
 DROP TABLE IF EXISTS budget_groups;
 
--- Drop categorization_rules
-DROP INDEX IF EXISTS idx_categorization_rules_preset_unique;
-DROP INDEX IF EXISTS idx_categorization_rules_activity_type;
-DROP INDEX IF EXISTS idx_categorization_rules_is_global;
-DROP INDEX IF EXISTS idx_categorization_rules_account;
-DROP INDEX IF EXISTS idx_categorization_rules_category;
-DROP INDEX IF EXISTS idx_categorization_rules_priority;
-DROP TABLE IF EXISTS categorization_rules;
+-- Drop spending_categorization_rules
+DROP INDEX IF EXISTS idx_spending_categorization_rules_preset_unique;
+DROP INDEX IF EXISTS idx_spending_categorization_rules_activity_type;
+DROP INDEX IF EXISTS idx_spending_categorization_rules_is_global;
+DROP INDEX IF EXISTS idx_spending_categorization_rules_account;
+DROP INDEX IF EXISTS idx_spending_categorization_rules_category;
+DROP INDEX IF EXISTS idx_spending_categorization_rules_priority;
+DROP TABLE IF EXISTS spending_categorization_rules;
 
--- Drop activity_events join table
-DROP INDEX IF EXISTS idx_activity_events_event;
-DROP TABLE IF EXISTS activity_events;
+-- Drop spending_activity_events join table
+DROP INDEX IF EXISTS idx_spending_activity_events_event;
+DROP TABLE IF EXISTS spending_activity_events;
 
--- Drop events + event_types
-DROP INDEX IF EXISTS idx_events_dates;
-DROP INDEX IF EXISTS idx_events_event_type;
-DROP TABLE IF EXISTS events;
-DROP TABLE IF EXISTS event_types;
+-- Drop spending_events + spending_event_types
+DROP INDEX IF EXISTS idx_spending_events_dates;
+DROP INDEX IF EXISTS idx_spending_events_event_type;
+DROP TABLE IF EXISTS spending_events;
+DROP INDEX IF EXISTS idx_spending_event_types_key_unique;
+DROP TABLE IF EXISTS spending_event_types;
 
 -- Drop activity_taxonomy_assignments
 DROP INDEX IF EXISTS ix_activity_taxonomy_assignment_unique;

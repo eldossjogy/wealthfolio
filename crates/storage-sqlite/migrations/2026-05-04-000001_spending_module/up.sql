@@ -4,8 +4,8 @@
 --
 -- Adds:
 --   - Columns: taxonomies.scope, taxonomy_categories.icon
---   - Tables: activity_taxonomy_assignments, activity_events, event_types,
---             events, categorization_rules, budget_groups,
+--   - Tables: activity_taxonomy_assignments, spending_activity_events, spending_event_types,
+--             spending_events, spending_categorization_rules, budget_groups,
 --             budget_group_assignments, budget_targets,
 --             budget_rollover_settings
 --   - Seeds: 'Spending Categories' + 'Income Sources' system taxonomies (scope='activity')
@@ -53,7 +53,7 @@ CREATE UNIQUE INDEX ix_activity_taxonomy_assignment_unique ON activity_taxonomy_
 -- 3. EVENT_TYPES (lookup) + EVENTS
 -- ============================================================================
 
-CREATE TABLE event_types (
+CREATE TABLE spending_event_types (
     id TEXT NOT NULL PRIMARY KEY,
     key TEXT,
     name TEXT NOT NULL,
@@ -62,23 +62,23 @@ CREATE TABLE event_types (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE UNIQUE INDEX idx_event_types_key_unique
-  ON event_types(key)
+CREATE UNIQUE INDEX idx_spending_event_types_key_unique
+  ON spending_event_types(key)
   WHERE key IS NOT NULL;
 
-CREATE TABLE events (
+CREATE TABLE spending_events (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
-    event_type_id TEXT NOT NULL REFERENCES event_types(id) ON DELETE RESTRICT,
+    event_type_id TEXT NOT NULL REFERENCES spending_event_types(id) ON DELETE RESTRICT,
     start_date TEXT NOT NULL,
     end_date TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE INDEX idx_events_event_type ON events(event_type_id);
-CREATE INDEX idx_events_dates ON events(start_date, end_date);
+CREATE INDEX idx_spending_events_event_type ON spending_events(event_type_id);
+CREATE INDEX idx_spending_events_dates ON spending_events(start_date, end_date);
 
 -- ============================================================================
 -- 4. ACTIVITY_EVENTS (join table — activity ⇄ event tag)
@@ -91,23 +91,23 @@ CREATE INDEX idx_events_dates ON events(start_date, end_date);
 --    tag per activity. CASCADE in both directions cleans up dangling rows.
 -- ============================================================================
 
-CREATE TABLE activity_events (
+CREATE TABLE spending_activity_events (
     activity_id TEXT NOT NULL PRIMARY KEY,
     event_id    TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
-    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+    FOREIGN KEY (event_id) REFERENCES spending_events(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_activity_events_event ON activity_events(event_id);
+CREATE INDEX idx_spending_activity_events_event ON spending_activity_events(event_id);
 
 -- ============================================================================
 -- 5. CATEGORIZATION_RULES (auto-categorization on create / import)
 --    References taxonomy_categories via composite FK.
 -- ============================================================================
 
-CREATE TABLE categorization_rules (
+CREATE TABLE spending_categorization_rules (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
     pattern TEXT NOT NULL,
@@ -134,15 +134,15 @@ CREATE TABLE categorization_rules (
     FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_categorization_rules_priority ON categorization_rules(priority DESC);
-CREATE INDEX idx_categorization_rules_category ON categorization_rules(taxonomy_id, category_id);
-CREATE INDEX idx_categorization_rules_account ON categorization_rules(account_id);
-CREATE INDEX idx_categorization_rules_is_global ON categorization_rules(is_global);
-CREATE INDEX idx_categorization_rules_activity_type ON categorization_rules(activity_type);
+CREATE INDEX idx_spending_categorization_rules_priority ON spending_categorization_rules(priority DESC);
+CREATE INDEX idx_spending_categorization_rules_category ON spending_categorization_rules(taxonomy_id, category_id);
+CREATE INDEX idx_spending_categorization_rules_account ON spending_categorization_rules(account_id);
+CREATE INDEX idx_spending_categorization_rules_is_global ON spending_categorization_rules(is_global);
+CREATE INDEX idx_spending_categorization_rules_activity_type ON spending_categorization_rules(activity_type);
 -- Used by the preset update flow to look up "the user's installed copy of preset rule X".
 -- NULL preset_id rows (user-created) are excluded from the unique index.
-CREATE UNIQUE INDEX idx_categorization_rules_preset_unique
-  ON categorization_rules(preset_id, preset_rule_key)
+CREATE UNIQUE INDEX idx_spending_categorization_rules_preset_unique
+  ON spending_categorization_rules(preset_id, preset_rule_key)
   WHERE preset_id IS NOT NULL;
 
 -- ============================================================================
@@ -425,7 +425,7 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
 -- 8. SEED: DEFAULT EVENT TYPES
 -- ============================================================================
 
-INSERT INTO event_types (id, key, name, color) VALUES
+INSERT INTO spending_event_types (id, key, name, color) VALUES
   ('event-type-travel',           'travel',           'Travel',           '#7B96C9'),
   ('event-type-holiday',          'holiday',          'Holiday',          '#6B8E54'),
   ('event-type-business',         'business',         'Business',         '#B89A4C'),

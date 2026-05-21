@@ -497,7 +497,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    activity_events (activity_id) {
+    spending_activity_events (activity_id) {
         activity_id -> Text,
         event_id -> Text,
         created_at -> Text,
@@ -506,7 +506,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    event_types (id) {
+    spending_event_types (id) {
         id -> Text,
         key -> Nullable<Text>,
         name -> Text,
@@ -517,7 +517,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    events (id) {
+    spending_events (id) {
         id -> Text,
         name -> Text,
         description -> Nullable<Text>,
@@ -530,7 +530,7 @@ diesel::table! {
 }
 
 diesel::table! {
-    categorization_rules (id) {
+    spending_categorization_rules (id) {
         id -> Text,
         name -> Text,
         pattern -> Text,
@@ -645,11 +645,11 @@ diesel::joinable!(quotes -> assets (asset_id));
 diesel::joinable!(taxonomy_categories -> taxonomies (taxonomy_id));
 diesel::joinable!(activity_taxonomy_assignments -> activities (activity_id));
 diesel::joinable!(activity_taxonomy_assignments -> taxonomies (taxonomy_id));
-diesel::joinable!(activity_events -> activities (activity_id));
-diesel::joinable!(activity_events -> events (event_id));
-diesel::joinable!(events -> event_types (event_type_id));
-diesel::joinable!(categorization_rules -> accounts (account_id));
-diesel::joinable!(categorization_rules -> taxonomies (taxonomy_id));
+diesel::joinable!(spending_activity_events -> activities (activity_id));
+diesel::joinable!(spending_activity_events -> spending_events (event_id));
+diesel::joinable!(spending_events -> spending_event_types (event_type_id));
+diesel::joinable!(spending_categorization_rules -> accounts (account_id));
+diesel::joinable!(spending_categorization_rules -> taxonomies (taxonomy_id));
 diesel::joinable!(budget_group_assignments -> budget_groups (group_id));
 diesel::joinable!(budget_group_assignments -> taxonomies (taxonomy_id));
 diesel::joinable!(budget_targets -> budget_groups (group_id));
@@ -696,10 +696,10 @@ diesel::allow_tables_to_appear_in_same_query!(
     taxonomies,
     taxonomy_categories,
     activity_taxonomy_assignments,
-    activity_events,
-    event_types,
-    events,
-    categorization_rules,
+    spending_activity_events,
+    spending_event_types,
+    spending_events,
+    spending_categorization_rules,
     budget_groups,
     budget_group_assignments,
     budget_targets,

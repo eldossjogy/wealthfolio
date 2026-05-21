@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::activity_events;
+use crate::schema::spending_activity_events;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::activity_events::{ActivityEvent, ActivityEventsRepositoryTrait};
 
 #[derive(Queryable, Selectable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::activity_events)]
+#[diesel(table_name = crate::schema::spending_activity_events)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEventDB {
@@ -32,7 +32,7 @@ pub struct ActivityEventDB {
 }
 
 impl crate::sync::SyncOutboxModel for ActivityEventDB {
-    const ENTITY: SyncEntity = SyncEntity::ActivityEvent;
+    const ENTITY: SyncEntity = SyncEntity::SpendingActivityEvent;
     fn sync_entity_id(&self) -> &str {
         // PK is `activity_id` — one tag per activity.
         &self.activity_id
@@ -74,8 +74,8 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
             return Ok(HashMap::new());
         }
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows: Vec<ActivityEventDB> = activity_events::table
-            .filter(activity_events::activity_id.eq_any(ids))
+        let rows: Vec<ActivityEventDB> = spending_activity_events::table
+            .filter(spending_activity_events::activity_id.eq_any(ids))
             .select(ActivityEventDB::as_select())
             .load(&mut conn)
             .map_err(StorageError::from)
@@ -88,9 +88,9 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
 
     async fn list_for_event(&self, event_id: &str) -> Result<Vec<String>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows: Vec<String> = activity_events::table
-            .filter(activity_events::event_id.eq(event_id))
-            .select(activity_events::activity_id)
+        let rows: Vec<String> = spending_activity_events::table
+            .filter(spending_activity_events::event_id.eq(event_id))
+            .select(spending_activity_events::activity_id)
             .load(&mut conn)
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -104,13 +104,14 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
                 // Capture affected rows so we can mark them deleted in the
                 // sync outbox (each row was previously sent with its
                 // activity_id as the entity id).
-                let affected_ids: Vec<String> = activity_events::table
-                    .filter(activity_events::event_id.eq(&event_id))
-                    .select(activity_events::activity_id)
+                let affected_ids: Vec<String> = spending_activity_events::table
+                    .filter(spending_activity_events::event_id.eq(&event_id))
+                    .select(spending_activity_events::activity_id)
                     .load::<String>(tx.conn())
                     .map_err(StorageError::from)?;
                 let removed = diesel::delete(
-                    activity_events::table.filter(activity_events::event_id.eq(&event_id)),
+                    spending_activity_events::table
+                        .filter(spending_activity_events::event_id.eq(&event_id)),
                 )
                 .execute(tx.conn())
                 .map_err(StorageError::from)?;
@@ -125,7 +126,7 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
 
     async fn list_all(&self) -> Result<Vec<ActivityEvent>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows: Vec<ActivityEventDB> = activity_events::table
+        let rows: Vec<ActivityEventDB> = spending_activity_events::table
             .select(ActivityEventDB::as_select())
             .load(&mut conn)
             .map_err(StorageError::from)

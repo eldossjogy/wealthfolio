@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::{event_types, events};
+use crate::schema::{spending_event_types, spending_events};
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::events::{
     Event, EventType, EventTypesRepositoryTrait, EventsRepositoryTrait, NewEvent, NewEventType,
@@ -21,7 +21,7 @@ use wealthfolio_spending::events::{
 // ----------------------------- event_types -----------------------------
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::event_types)]
+#[diesel(table_name = crate::schema::spending_event_types)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[serde(rename_all = "camelCase")]
 pub struct EventTypeDB {
@@ -34,7 +34,7 @@ pub struct EventTypeDB {
 }
 
 #[derive(Insertable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::event_types)]
+#[diesel(table_name = crate::schema::spending_event_types)]
 pub struct NewEventTypeDB {
     pub id: String,
     pub key: Option<String>,
@@ -45,7 +45,7 @@ pub struct NewEventTypeDB {
 }
 
 impl crate::sync::SyncOutboxModel for EventTypeDB {
-    const ENTITY: SyncEntity = SyncEntity::EventType;
+    const ENTITY: SyncEntity = SyncEntity::SpendingEventType;
     fn sync_entity_id(&self) -> &str {
         &self.id
     }
@@ -85,8 +85,8 @@ impl EventTypesRepository {
 impl EventTypesRepositoryTrait for EventTypesRepository {
     async fn list(&self) -> Result<Vec<EventType>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows = event_types::table
-            .order(event_types::name.asc())
+        let rows = spending_event_types::table
+            .order(spending_event_types::name.asc())
             .load::<EventTypeDB>(&mut conn)
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -105,7 +105,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
         };
         self.writer
             .exec_tx(move |tx| {
-                let inserted = diesel::insert_into(event_types::table)
+                let inserted = diesel::insert_into(spending_event_types::table)
                     .values(&row)
                     .returning(EventTypeDB::as_returning())
                     .get_result(tx.conn())
@@ -127,7 +127,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let mut existing: EventTypeDB = event_types::table
+                let mut existing: EventTypeDB = spending_event_types::table
                     .find(&id)
                     .first::<EventTypeDB>(tx.conn())
                     .map_err(StorageError::from)?;
@@ -138,11 +138,11 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
                     existing.color = c;
                 }
                 existing.updated_at = chrono::Utc::now().to_rfc3339();
-                diesel::update(event_types::table.find(&id))
+                diesel::update(spending_event_types::table.find(&id))
                     .set((
-                        event_types::name.eq(&existing.name),
-                        event_types::color.eq(&existing.color),
-                        event_types::updated_at.eq(&existing.updated_at),
+                        spending_event_types::name.eq(&existing.name),
+                        spending_event_types::color.eq(&existing.color),
+                        spending_event_types::updated_at.eq(&existing.updated_at),
                     ))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
@@ -158,7 +158,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let affected = diesel::delete(event_types::table.find(&id))
+                let affected = diesel::delete(spending_event_types::table.find(&id))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
                 if affected > 0 {
@@ -174,7 +174,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
 // ----------------------------- events -----------------------------
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::events)]
+#[diesel(table_name = crate::schema::spending_events)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[serde(rename_all = "camelCase")]
 pub struct EventDB {
@@ -189,7 +189,7 @@ pub struct EventDB {
 }
 
 #[derive(Insertable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::events)]
+#[diesel(table_name = crate::schema::spending_events)]
 pub struct NewEventDB {
     pub id: String,
     pub name: String,
@@ -202,7 +202,7 @@ pub struct NewEventDB {
 }
 
 impl crate::sync::SyncOutboxModel for EventDB {
-    const ENTITY: SyncEntity = SyncEntity::Event;
+    const ENTITY: SyncEntity = SyncEntity::SpendingEvent;
     fn sync_entity_id(&self) -> &str {
         &self.id
     }
@@ -238,8 +238,8 @@ impl EventsRepository {
 impl EventsRepositoryTrait for EventsRepository {
     async fn list(&self) -> Result<Vec<Event>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows = events::table
-            .order(events::start_date.desc())
+        let rows = spending_events::table
+            .order(spending_events::start_date.desc())
             .load::<EventDB>(&mut conn)
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -248,7 +248,7 @@ impl EventsRepositoryTrait for EventsRepository {
 
     async fn get(&self, id: &str) -> Result<Option<Event>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let row = events::table
+        let row = spending_events::table
             .find(id)
             .first::<EventDB>(&mut conn)
             .optional()
@@ -271,7 +271,7 @@ impl EventsRepositoryTrait for EventsRepository {
         };
         self.writer
             .exec_tx(move |tx| {
-                let inserted = diesel::insert_into(events::table)
+                let inserted = diesel::insert_into(spending_events::table)
                     .values(&row)
                     .returning(EventDB::as_returning())
                     .get_result(tx.conn())
@@ -288,7 +288,7 @@ impl EventsRepositoryTrait for EventsRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let mut existing: EventDB = events::table
+                let mut existing: EventDB = spending_events::table
                     .find(&id)
                     .first::<EventDB>(tx.conn())
                     .map_err(StorageError::from)?;
@@ -309,14 +309,14 @@ impl EventsRepositoryTrait for EventsRepository {
                 }
                 existing.updated_at = chrono::Utc::now().to_rfc3339();
 
-                diesel::update(events::table.find(&id))
+                diesel::update(spending_events::table.find(&id))
                     .set((
-                        events::name.eq(&existing.name),
-                        events::description.eq(&existing.description),
-                        events::event_type_id.eq(&existing.event_type_id),
-                        events::start_date.eq(&existing.start_date),
-                        events::end_date.eq(&existing.end_date),
-                        events::updated_at.eq(&existing.updated_at),
+                        spending_events::name.eq(&existing.name),
+                        spending_events::description.eq(&existing.description),
+                        spending_events::event_type_id.eq(&existing.event_type_id),
+                        spending_events::start_date.eq(&existing.start_date),
+                        spending_events::end_date.eq(&existing.end_date),
+                        spending_events::updated_at.eq(&existing.updated_at),
                     ))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
@@ -332,7 +332,7 @@ impl EventsRepositoryTrait for EventsRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let affected = diesel::delete(events::table.find(&id))
+                let affected = diesel::delete(spending_events::table.find(&id))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
                 if affected > 0 {
@@ -346,8 +346,8 @@ impl EventsRepositoryTrait for EventsRepository {
 
     async fn count_by_type(&self, event_type_id: &str) -> Result<usize> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let count: i64 = events::table
-            .filter(events::event_type_id.eq(event_type_id))
+        let count: i64 = spending_events::table
+            .filter(spending_events::event_type_id.eq(event_type_id))
             .count()
             .get_result(&mut conn)
             .map_err(StorageError::from)

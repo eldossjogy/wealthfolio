@@ -26,8 +26,8 @@ pub const APP_SYNC_TABLES: [&str; 31] = [
     "import_templates",
     // Spending budget groups have no FK deps.
     "budget_groups",
-    // Spending event_types — no FK deps.
-    "event_types",
+    // Spending event types — no FK deps.
+    "spending_event_types",
     // Depends on: import_templates
     "import_account_templates",
     // No FK deps (base table)
@@ -39,11 +39,11 @@ pub const APP_SYNC_TABLES: [&str; 31] = [
     // Spending activity↔category join. Depends on: activities, taxonomies, taxonomy_categories
     "activity_taxonomy_assignments",
     // Spending categorization rules. Depends on: accounts (optional FK), taxonomies, taxonomy_categories
-    "categorization_rules",
-    // Spending events. Depends on: event_types
-    "events",
-    // Spending activity↔event tag. Depends on: activities, events
-    "activity_events",
+    "spending_categorization_rules",
+    // Spending events. Depends on: spending_event_types
+    "spending_events",
+    // Spending activity↔event tag. Depends on: activities, spending_events
+    "spending_activity_events",
     // Depends on: budget_groups, taxonomy_categories
     "budget_group_assignments",
     "budget_targets",
@@ -87,12 +87,15 @@ pub enum SyncEntity {
     ImportRun,
     Portfolio,
     PortfolioAccount,
-    // Spending module (wealthfolio-spending crate)
+    // Spending module (wealthfolio-spending crate). Prefixed with `Spending*`
+    // because the bare names (`Event`, `EventType`, `CategorizationRule`)
+    // would clash with the codebase's existing event-system vocabulary
+    // (DomainEvent, EventBus, sync_applied_events, etc.).
     ActivityTaxonomyAssignment,
-    ActivityEvent,
-    CategorizationRule,
-    Event,
-    EventType,
+    SpendingActivityEvent,
+    SpendingCategorizationRule,
+    SpendingEvent,
+    SpendingEventType,
     BudgetGroup,
     BudgetGroupAssignment,
     BudgetTarget,
@@ -322,10 +325,10 @@ mod tests {
             SyncEntity::Portfolio,
             SyncEntity::PortfolioAccount,
             SyncEntity::ActivityTaxonomyAssignment,
-            SyncEntity::ActivityEvent,
-            SyncEntity::CategorizationRule,
-            SyncEntity::Event,
-            SyncEntity::EventType,
+            SyncEntity::SpendingActivityEvent,
+            SyncEntity::SpendingCategorizationRule,
+            SyncEntity::SpendingEvent,
+            SyncEntity::SpendingEventType,
             SyncEntity::BudgetGroup,
             SyncEntity::BudgetGroupAssignment,
             SyncEntity::BudgetTarget,
@@ -357,10 +360,10 @@ mod tests {
             "\"portfolio\"",
             "\"portfolio_account\"",
             "\"activity_taxonomy_assignment\"",
-            "\"activity_event\"",
-            "\"categorization_rule\"",
-            "\"event\"",
-            "\"event_type\"",
+            "\"spending_activity_event\"",
+            "\"spending_categorization_rule\"",
+            "\"spending_event\"",
+            "\"spending_event_type\"",
             "\"budget_group\"",
             "\"budget_group_assignment\"",
             "\"budget_target\"",

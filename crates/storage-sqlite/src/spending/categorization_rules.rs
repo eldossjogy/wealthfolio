@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::categorization_rules;
+use crate::schema::spending_categorization_rules;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule, RuleMatchType,
@@ -19,7 +19,7 @@ use wealthfolio_spending::categorization_rules::{
 };
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::categorization_rules)]
+#[diesel(table_name = crate::schema::spending_categorization_rules)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 #[serde(rename_all = "camelCase")]
 pub struct CategorizationRuleDB {
@@ -42,7 +42,7 @@ pub struct CategorizationRuleDB {
 }
 
 #[derive(Insertable, AsChangeset, Serialize, Deserialize, Debug, Clone)]
-#[diesel(table_name = crate::schema::categorization_rules)]
+#[diesel(table_name = crate::schema::spending_categorization_rules)]
 pub struct NewCategorizationRuleDB {
     pub id: String,
     pub name: String,
@@ -63,7 +63,7 @@ pub struct NewCategorizationRuleDB {
 }
 
 impl crate::sync::SyncOutboxModel for CategorizationRuleDB {
-    const ENTITY: SyncEntity = SyncEntity::CategorizationRule;
+    const ENTITY: SyncEntity = SyncEntity::SpendingCategorizationRule;
     fn sync_entity_id(&self) -> &str {
         &self.id
     }
@@ -113,8 +113,8 @@ impl CategorizationRulesRepository {
 impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
     async fn list(&self) -> Result<Vec<CategorizationRule>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows = categorization_rules::table
-            .order(categorization_rules::priority.desc())
+        let rows = spending_categorization_rules::table
+            .order(spending_categorization_rules::priority.desc())
             .load::<CategorizationRuleDB>(&mut conn)
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -123,7 +123,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
 
     async fn get(&self, id: &str) -> Result<Option<CategorizationRule>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let row = categorization_rules::table
+        let row = spending_categorization_rules::table
             .find(id)
             .first::<CategorizationRuleDB>(&mut conn)
             .optional()
@@ -154,7 +154,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
         };
         self.writer
             .exec_tx(move |tx| {
-                let inserted = diesel::insert_into(categorization_rules::table)
+                let inserted = diesel::insert_into(spending_categorization_rules::table)
                     .values(&row)
                     .returning(CategorizationRuleDB::as_returning())
                     .get_result(tx.conn())
@@ -175,7 +175,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let mut existing: CategorizationRuleDB = categorization_rules::table
+                let mut existing: CategorizationRuleDB = spending_categorization_rules::table
                     .find(&id)
                     .first::<CategorizationRuleDB>(tx.conn())
                     .map_err(StorageError::from)?;
@@ -213,19 +213,19 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                 }
                 existing.updated_at = chrono::Utc::now().to_rfc3339();
 
-                diesel::update(categorization_rules::table.find(&id))
+                diesel::update(spending_categorization_rules::table.find(&id))
                     .set((
-                        categorization_rules::name.eq(&existing.name),
-                        categorization_rules::pattern.eq(&existing.pattern),
-                        categorization_rules::match_type.eq(&existing.match_type),
-                        categorization_rules::taxonomy_id.eq(&existing.taxonomy_id),
-                        categorization_rules::category_id.eq(&existing.category_id),
-                        categorization_rules::activity_type.eq(&existing.activity_type),
-                        categorization_rules::priority.eq(existing.priority),
-                        categorization_rules::is_global.eq(existing.is_global),
-                        categorization_rules::account_id.eq(&existing.account_id),
-                        categorization_rules::preset_modified.eq(existing.preset_modified),
-                        categorization_rules::updated_at.eq(&existing.updated_at),
+                        spending_categorization_rules::name.eq(&existing.name),
+                        spending_categorization_rules::pattern.eq(&existing.pattern),
+                        spending_categorization_rules::match_type.eq(&existing.match_type),
+                        spending_categorization_rules::taxonomy_id.eq(&existing.taxonomy_id),
+                        spending_categorization_rules::category_id.eq(&existing.category_id),
+                        spending_categorization_rules::activity_type.eq(&existing.activity_type),
+                        spending_categorization_rules::priority.eq(existing.priority),
+                        spending_categorization_rules::is_global.eq(existing.is_global),
+                        spending_categorization_rules::account_id.eq(&existing.account_id),
+                        spending_categorization_rules::preset_modified.eq(existing.preset_modified),
+                        spending_categorization_rules::updated_at.eq(&existing.updated_at),
                     ))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
@@ -242,7 +242,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let affected = diesel::delete(categorization_rules::table.find(&id))
+                let affected = diesel::delete(spending_categorization_rules::table.find(&id))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
                 if affected > 0 {
@@ -258,8 +258,8 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
         let preset_id = preset_id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let rows: Vec<CategorizationRuleDB> = categorization_rules::table
-                    .filter(categorization_rules::preset_id.eq(&preset_id))
+                let rows: Vec<CategorizationRuleDB> = spending_categorization_rules::table
+                    .filter(spending_categorization_rules::preset_id.eq(&preset_id))
                     .load::<CategorizationRuleDB>(tx.conn())
                     .map_err(StorageError::from)?;
 
@@ -270,13 +270,13 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                 for row in rows {
                     if row.preset_modified != 0 {
                         // Detach: clear preset metadata, keep the rule as user-owned.
-                        diesel::update(categorization_rules::table.find(&row.id))
+                        diesel::update(spending_categorization_rules::table.find(&row.id))
                             .set((
-                                categorization_rules::preset_id.eq::<Option<String>>(None),
-                                categorization_rules::preset_rule_key.eq::<Option<String>>(None),
-                                categorization_rules::preset_version.eq::<Option<String>>(None),
-                                categorization_rules::preset_modified.eq(0),
-                                categorization_rules::updated_at.eq(&now),
+                                spending_categorization_rules::preset_id.eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_rule_key.eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_version.eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_modified.eq(0),
+                                spending_categorization_rules::updated_at.eq(&now),
                             ))
                             .execute(tx.conn())
                             .map_err(StorageError::from)?;
@@ -289,7 +289,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         tx.update(&detached)?;
                         kept += 1;
                     } else {
-                        diesel::delete(categorization_rules::table.find(&row.id))
+                        diesel::delete(spending_categorization_rules::table.find(&row.id))
                             .execute(tx.conn())
                             .map_err(StorageError::from)?;
                         tx.delete::<CategorizationRuleDB>(row.id.clone());
