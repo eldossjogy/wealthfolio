@@ -370,11 +370,7 @@ function formatLotDate(lot: AssetLotView) {
   return date ? formatDate(date) : "-";
 }
 
-function getLotDisplayValues(
-  lot: AssetLotView,
-  marketPrice: number,
-  contractMultiplier: number,
-) {
+function getLotDisplayValues(lot: AssetLotView, marketPrice: number, contractMultiplier: number) {
   const isSnapshot = lot.source === "SNAPSHOT_POSITION";
   const splitRatio = lot.splitRatio || 1;
   const rowContractMultiplier = lot.contractMultiplier || contractMultiplier || 1;
