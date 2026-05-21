@@ -15,10 +15,10 @@
 -- This migration is intentionally additive:
 --   * The legacy positions JSON column is NOT cleared - read paths still
 --     resolve through it, dual-write keeps both representations populated.
+--   * CALCULATED snapshots are derived data and are cleared so the normal
+--     portfolio calculation rebuilds snapshots and transaction lots together.
 --   * No read-path switchover; no Phase B columns (alternative_market_value,
 --     daily_portfolio_valuation) or pseudo-account cleanups.
---   * Lots are populated by application-side backfill on first startup; this
---     migration only creates the schema.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -32,7 +32,8 @@ CREATE TABLE lots (
     asset_id            TEXT    NOT NULL,
 
     -- Open state - who opened the lot, when, and at what basis.
-    -- open_activity_id is NULL for lots created from HOLDINGS-mode snapshots.
+    -- open_activity_id may be NULL when compiler-generated lot IDs do not
+    -- correspond to real activity rows.
     open_date           TEXT    NOT NULL,
     open_activity_id    TEXT,
     original_quantity   TEXT    NOT NULL,
@@ -127,47 +128,14 @@ CREATE TABLE snapshot_positions (
 CREATE INDEX idx_snapshot_positions_snapshot_id ON snapshot_positions(snapshot_id);
 CREATE INDEX idx_snapshot_positions_asset_id    ON snapshot_positions(asset_id);
 
--- Backfill snapshot_positions from existing positions JSON for HOLDINGS-mode
--- snapshots. One-shot atomic INSERT - no resume logic needed.
---
--- Notes:
---   * json_extract on numeric fields can produce scientific notation
---     (e.g. 1e-08). Wrap in printf('%.20f') + rtrim to produce the decimal
---     text format that Decimal::from_str expects.
---   * Filter to assetIds that still exist in `assets`. The legacy JSON
---     column has no FK constraint, so a snapshot can reference an asset
---     that has since been deleted. PRAGMA foreign_keys is OFF during
---     migrations (see db::run_migrations), so an orphan would silently
---     INSERT here — but later runtime writes (FK=ON) would fail when the
---     same (snapshot_id, asset_id) is re-inserted by write_snapshot_positions,
---     regressing the user's ability to save the snapshot. Drop the orphan
---     rows at backfill time so the relational table starts clean.
-INSERT INTO snapshot_positions (
-    snapshot_id, asset_id, quantity, average_cost, total_cost_basis,
-    currency, inception_date, is_alternative, contract_multiplier,
-    created_at, last_updated
-)
-SELECT
-    hs.id,
-    json_extract(pos.value, '$.assetId'),
-    rtrim(rtrim(printf('%.20f', json_extract(pos.value, '$.quantity')), '0'), '.'),
-    rtrim(rtrim(printf('%.20f', json_extract(pos.value, '$.averageCost')), '0'), '.'),
-    rtrim(rtrim(printf('%.20f', json_extract(pos.value, '$.totalCostBasis')), '0'), '.'),
-    json_extract(pos.value, '$.currency'),
-    COALESCE(json_extract(pos.value, '$.inceptionDate'), '1970-01-01T00:00:00Z'),
-    COALESCE(json_extract(pos.value, '$.isAlternative'), 0),
-    rtrim(rtrim(printf('%.20f', COALESCE(json_extract(pos.value, '$.contractMultiplier'), 1)), '0'), '.'),
-    COALESCE(json_extract(pos.value, '$.createdAt'), '1970-01-01T00:00:00Z'),
-    COALESCE(json_extract(pos.value, '$.lastUpdated'), '1970-01-01T00:00:00Z')
-FROM holdings_snapshots hs,
-     json_each(hs.positions) pos
-WHERE hs.positions IS NOT NULL
-  AND hs.positions != '{}'
-  AND hs.positions != ''
-  AND json_extract(pos.value, '$.assetId') IS NOT NULL
-  AND EXISTS (
-      SELECT 1 FROM assets WHERE id = json_extract(pos.value, '$.assetId')
-  );
+-- Drop derived calculated snapshots and valuation rows so the existing
+-- portfolio calculation path rebuilds them together and writes
+-- transaction-derived lots. User-entered and imported HOLDINGS snapshots are
+-- preserved.
+DELETE FROM holdings_snapshots
+WHERE source = 'CALCULATED';
+
+DELETE FROM daily_account_valuation;
 
 -- NOTE: positions JSON is intentionally NOT cleared. Read paths still resolve
 -- through it; the relational table is a parallel write surface for now. A

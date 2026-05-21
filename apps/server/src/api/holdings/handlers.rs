@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
+    lots::AssetLotViewRow,
     portfolio::{
         allocation::{AllocationHoldings, PortfolioAllocations},
         holdings::Holding,
@@ -24,8 +25,8 @@ use crate::{error::ApiResult, main_lib::AppState};
 
 use super::dto::{
     AccountIdQuery, AllocationFilterBody, AllocationHoldingsQuery, AssetHoldingsQuery,
-    CheckHoldingsImportRequest, CheckHoldingsImportResult, DeleteSnapshotQuery, FilterBody,
-    HistoryQuery, HoldingItemQuery, HoldingsSnapshotInput, ImportHoldingsCsvRequest,
+    AssetLotsQuery, CheckHoldingsImportRequest, CheckHoldingsImportResult, DeleteSnapshotQuery,
+    FilterBody, HistoryQuery, HoldingItemQuery, HoldingsSnapshotInput, ImportHoldingsCsvRequest,
     ImportHoldingsCsvResult, SaveManualHoldingsRequest, SnapshotDateQuery, SnapshotInfo,
     SnapshotsQuery, SymbolCheckResult,
 };
@@ -136,6 +137,17 @@ pub async fn get_asset_holdings(
         }
     }
     Ok(Json(result))
+}
+
+pub async fn get_asset_lots(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<AssetLotsQuery>,
+) -> ApiResult<Json<Vec<AssetLotViewRow>>> {
+    let rows = state
+        .lots_repository
+        .get_asset_lot_view(&q.asset_id, q.include_snapshot_positions.unwrap_or(false))
+        .await?;
+    Ok(Json(rows))
 }
 
 pub async fn get_historical_valuations(
@@ -338,8 +350,7 @@ pub async fn delete_snapshot_handler(
         .into());
     }
 
-    // Delete the snapshot via the service so lots are kept in sync with
-    // whichever snapshot now occupies "latest" for this account.
+    // Delete via the service so snapshot deletion stays behind one entry point.
     state
         .snapshot_service
         .delete_snapshot_for_account(&q.account_id, &[target_date])

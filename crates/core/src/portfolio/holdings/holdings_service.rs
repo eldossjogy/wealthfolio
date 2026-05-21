@@ -1199,14 +1199,6 @@ mod tests {
             unimplemented!("unused in holdings service tests")
         }
 
-        async fn backfill_lots_for_holdings_accounts(&self) -> Result<usize> {
-            unimplemented!("unused in holdings service tests")
-        }
-
-        async fn refresh_lots_from_latest_snapshot(&self, _account_id: &str) -> Result<()> {
-            unimplemented!("unused in holdings service tests")
-        }
-
         async fn delete_snapshot_for_account(
             &self,
             _account_id: &str,

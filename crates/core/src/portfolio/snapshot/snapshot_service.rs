@@ -110,32 +110,10 @@ pub trait SnapshotServiceTrait: Send + Sync {
     /// This enables history charting, valuation engines, and provides an inception boundary.
     async fn ensure_holdings_history(&self, account_id: &str) -> Result<()>;
 
-    /// Populate the `lots` table from current HOLDINGS-mode snapshots. Called
-    /// once on first launch after the lots table is introduced, since
-    /// HOLDINGS-mode accounts skip `recalculate_holdings_snapshots` and the
-    /// activity-driven lot-write hook never fires for them.
-    async fn backfill_lots_for_holdings_accounts(&self) -> Result<usize>;
-
-    /// Re-derive lots from whichever snapshot now occupies "latest" for the
-    /// account. Three-way branch on the new latest:
-    ///
-    ///   * No snapshot left → clear the account's lot rows.
-    ///   * Non-calculated (HOLDINGS-mode) → re-derive one synthetic lot per
-    ///     held asset from the snapshot's positions.
-    ///   * Calculated → no-op. TRANSACTIONS-mode lots are maintained by the
-    ///     activity-replay pipeline.
-    ///
-    /// Used by `delete_snapshot_for_account` after a repository-level delete.
-    /// Also exposed for unusual maintenance paths (bulk overwrites,
-    /// admin-driven fixes) that bypass the encapsulated delete method.
-    async fn refresh_lots_from_latest_snapshot(&self, account_id: &str) -> Result<()>;
-
-    /// Delete snapshot(s) on the given dates and keep the lots table in sync.
+    /// Delete snapshot(s) on the given dates.
     /// Preferred entry point for UI-driven snapshot deletion — encapsulates
-    /// the repo delete + `refresh_lots_from_latest_snapshot` so callers
-    /// cannot accidentally leave lots pointing at a deleted snapshot's
-    /// state. Higher-level orchestration (orphan-synthetic cleanup,
-    /// valuation recalc, frontend events) stays with the caller.
+    /// repository deletion while higher-level orchestration (valuation recalc,
+    /// frontend events) stays with the caller.
     async fn delete_snapshot_for_account(
         &self,
         account_id: &str,
@@ -409,13 +387,13 @@ impl SnapshotService {
             // Runs for every mode (Full, IncrementalFromLast, SinceDate). An
             // earlier revision skipped incremental modes for TRANSACTIONS-mode
             // accounts to guard against pre-PR snapshots carrying baked-in
-            // split quantities, but the startup `backfill_lots_if_needed`
-            // path already does a Full recalc on first launch with this
-            // version, rewriting every account's snapshots with the new
-            // semantics. After that, incremental modes seed from known-good
-            // snapshots and produce correct lots. The skip was preventing the
-            // normal activity-edit flow (planner emits SinceDate) from ever
-            // updating lots.
+            // split quantities, but the lots migration clears CALCULATED
+            // snapshots so the next normal portfolio update rebuilds from
+            // activity history and writes lots with the new semantics. After
+            // that, incremental modes seed from known-good snapshots and
+            // produce correct lots. The skip was preventing the normal
+            // activity-edit flow (planner emits SinceDate) from ever updating
+            // lots.
             //
             // Skips only TOTAL: that pseudo-account has no activities of its
             // own; its positions are aggregated from per-account state and
@@ -1817,45 +1795,6 @@ impl SnapshotServiceTrait for SnapshotService {
             account_id, snapshot.snapshot_date
         );
 
-        // Dual-write lots for HOLDINGS-mode snapshots — but only when the
-        // snapshot being saved is the latest for the account. Editing a
-        // historical snapshot must not overwrite current open lots with
-        // stale state. The TOTAL pseudo-account has no lots of its own.
-        if let Some(lot_repo) = &self.lot_repository {
-            let is_latest = account_id != PORTFOLIO_TOTAL_ACCOUNT_ID
-                && self
-                    .snapshot_repository
-                    .get_snapshots_by_account(account_id, Some(snapshot.snapshot_date), None)?
-                    .into_iter()
-                    .all(|s| s.snapshot_date <= snapshot.snapshot_date);
-
-            if is_latest {
-                // HOLDINGS-mode positions don't carry per-acquisition lot
-                // detail — manual_snapshot_service constructs each Position
-                // with an empty `lots: VecDeque`. Calling
-                // `extract_lot_records` here returns [] and then
-                // `replace_lots_for_account(&[])` would wipe the synthetic
-                // HOLDINGS lots that the startup backfill (or a prior save)
-                // had populated. Use the synthetic derivation that mirrors
-                // the position aggregates — same as
-                // `backfill_lots_for_holdings_accounts` and
-                // `refresh_lots_from_latest_snapshot`.
-                let open_date = snapshot.snapshot_date.format("%Y-%m-%d").to_string();
-                let lot_records =
-                    synthetic_holdings_lot_records(account_id, &snapshot.positions, &open_date);
-                lot_repo
-                    .replace_lots_for_account(account_id, &lot_records)
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            "Failed to write lots for HOLDINGS account {} from manual snapshot: {}",
-                            account_id, e
-                        );
-                        e
-                    })?;
-            }
-        }
-
         // Emit HoldingsChanged event after successful save
         let asset_ids: Vec<String> = snapshot
             .positions
@@ -1969,148 +1908,6 @@ impl SnapshotServiceTrait for SnapshotService {
         Ok(())
     }
 
-    /// Populate the `lots` table from current HOLDINGS-mode snapshots.
-    ///
-    /// HOLDINGS-mode accounts skip `recalculate_holdings_snapshots` (they have
-    /// no activities to replay), so the lot-write hook in the calculator path
-    /// never fires for them. On first startup after this PR lands, the lots
-    /// table is empty for HOLDINGS accounts — this routine derives one
-    /// synthetic lot per (account, asset) from the latest non-calculated
-    /// snapshot and writes it.
-    ///
-    /// Returns the number of lot rows written across all accounts.
-    async fn backfill_lots_for_holdings_accounts(&self) -> Result<usize> {
-        let lot_repo = match &self.lot_repository {
-            Some(r) => r.clone(),
-            None => return Ok(0),
-        };
-
-        let accounts = self.account_repository.list(Some(true), None, None)?;
-        let holdings_accounts: Vec<_> = accounts
-            .into_iter()
-            .filter(|a| a.tracking_mode == TrackingMode::Holdings)
-            .collect();
-
-        if holdings_accounts.is_empty() {
-            return Ok(0);
-        }
-
-        let mut total = 0usize;
-
-        for acc in &holdings_accounts {
-            // Lots reflect current state, so derive them from the LATEST
-            // non-calculated snapshot rather than the earliest.
-            let latest = match self
-                .snapshot_repository
-                .get_snapshots_by_account(&acc.id, None, None)?
-                .into_iter()
-                .filter(|s| s.source != SnapshotSource::Calculated)
-                .max_by_key(|s| s.snapshot_date)
-            {
-                Some(s) => s,
-                None => continue,
-            };
-
-            let positions = self
-                .snapshot_repository
-                .get_snapshot_positions(&latest.id)?;
-
-            let open_date = latest.snapshot_date.format("%Y-%m-%d").to_string();
-            let lot_records = synthetic_holdings_lot_records(&acc.id, &positions, &open_date);
-
-            let count = lot_records.len();
-            if let Err(e) = lot_repo
-                .replace_lots_for_account(&acc.id, &lot_records)
-                .await
-            {
-                warn!(
-                    "Failed to backfill lots for HOLDINGS account {}: {}",
-                    acc.id, e
-                );
-                continue;
-            }
-            if count > 0 {
-                info!(
-                    "Backfilled {} lot(s) for HOLDINGS account {}",
-                    count, acc.id
-                );
-            }
-            total += count;
-        }
-
-        info!(
-            "HOLDINGS lot backfill complete: {} lot(s) across {} account(s)",
-            total,
-            holdings_accounts.len()
-        );
-        Ok(total)
-    }
-
-    async fn refresh_lots_from_latest_snapshot(&self, account_id: &str) -> Result<()> {
-        let lot_repo = match &self.lot_repository {
-            Some(r) => r.clone(),
-            None => return Ok(()),
-        };
-
-        let latest = self.get_latest_holdings_snapshot(account_id)?;
-
-        match latest {
-            // No snapshot left — clear the account's lot rows.
-            None => {
-                lot_repo
-                    .replace_lots_for_account(account_id, &[])
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            "Failed to clear lots for account {} after snapshot delete: {}",
-                            account_id, e
-                        );
-                        e
-                    })?;
-            }
-            // Non-calculated (HOLDINGS-mode) — re-derive lots from the new
-            // latest snapshot's positions.
-            Some(snapshot)
-                if matches!(
-                    snapshot.source,
-                    SnapshotSource::ManualEntry
-                        | SnapshotSource::BrokerImported
-                        | SnapshotSource::CsvImport
-                        | SnapshotSource::Synthetic
-                ) =>
-            {
-                let positions = self
-                    .snapshot_repository
-                    .get_snapshot_positions(&snapshot.id)?;
-
-                let open_date = snapshot.snapshot_date.format("%Y-%m-%d").to_string();
-                let lot_records =
-                    synthetic_holdings_lot_records(account_id, &positions, &open_date);
-
-                let count = lot_records.len();
-                lot_repo
-                    .replace_lots_for_account(account_id, &lot_records)
-                    .await
-                    .map_err(|e| {
-                        error!(
-                            "Failed to refresh lots for account {} after snapshot delete: {}",
-                            account_id, e
-                        );
-                        e
-                    })?;
-                info!(
-                    "Refreshed {} lot(s) for account {} from new latest snapshot on {}",
-                    count, account_id, snapshot.snapshot_date
-                );
-            }
-            // CALCULATED — lots are managed by the activity-replay pipeline.
-            // The next recalc will rebuild them correctly.
-            Some(_) => {}
-        }
-
-        Ok(())
-    }
-
     async fn delete_snapshot_for_account(
         &self,
         account_id: &str,
@@ -2119,57 +1916,8 @@ impl SnapshotServiceTrait for SnapshotService {
         self.snapshot_repository
             .delete_snapshots_for_account_and_dates(account_id, dates)
             .await?;
-        self.refresh_lots_from_latest_snapshot(account_id).await?;
         Ok(())
     }
-}
-
-/// Build the synthetic HOLDINGS lot rows that represent the latest non-
-/// calculated snapshot for an account.
-///
-/// HOLDINGS-mode positions don't carry per-acquisition lot detail (the user
-/// enters aggregate quantity + average cost), so the lots table holds one
-/// synthetic row per (account, asset) with the aggregate values copied
-/// across. `open_activity_id` is always None — these aren't tied to any
-/// activity row — and `split_ratio` is fixed at "1" because we don't know
-/// the split history of imported positions.
-///
-/// Shared by `backfill_lots_for_holdings_accounts`,
-/// `refresh_lots_from_latest_snapshot`, and the
-/// `save_manual_snapshot` lot hook. Without this helper, the
-/// `save_manual_snapshot` path was incorrectly building lots from the
-/// in-memory `Position::lots` VecDeque — which manual entry leaves empty —
-/// and `replace_lots_for_account(&[])` would wipe the account's lots on
-/// every save.
-fn synthetic_holdings_lot_records(
-    account_id: &str,
-    positions: &std::collections::HashMap<String, crate::portfolio::snapshot::Position>,
-    open_date: &str,
-) -> Vec<crate::lots::LotRecord> {
-    let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    positions
-        .values()
-        .filter(|p| p.quantity > rust_decimal::Decimal::ZERO)
-        .map(|p| crate::lots::LotRecord {
-            id: format!("HOLDINGS-{}-{}", account_id, p.asset_id),
-            account_id: account_id.to_string(),
-            asset_id: p.asset_id.clone(),
-            open_date: open_date.to_string(),
-            open_activity_id: None,
-            original_quantity: p.quantity.to_string(),
-            remaining_quantity: p.quantity.to_string(),
-            cost_per_unit: p.average_cost.to_string(),
-            original_cost_basis: p.total_cost_basis.to_string(),
-            remaining_cost_basis: p.total_cost_basis.to_string(),
-            fee_allocated: "0".to_string(),
-            split_ratio: "1".to_string(),
-            is_closed: false,
-            close_date: None,
-            close_activity_id: None,
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        })
-        .collect()
 }
 
 /// Orders accounts for a given day so that TRANSFER_OUT sources are processed

@@ -108,14 +108,6 @@ async fn main() -> anyhow::Result<()> {
     // Start background broker sync scheduler (4-hour interval)
     scheduler::start_broker_sync_scheduler(state.clone());
 
-    // First-launch lot backfill — populates the lots table from existing
-    // snapshots / activities the first time this build runs against an
-    // older database. No-op on subsequent launches.
-    let backfill_state = state.clone();
-    tokio::spawn(async move {
-        scheduler::backfill_lots_if_needed(&backfill_state).await;
-    });
-
     // Start periodic market data sync (6h interval, 2min initial delay)
     let quote_svc = state.quote_service.clone();
     tokio::spawn(async move {

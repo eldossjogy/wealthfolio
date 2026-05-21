@@ -127,14 +127,6 @@ mod desktop {
             scheduler::run_startup_sync(&startup_handle, &startup_context).await;
         });
 
-        // First-launch lot backfill — populates the lots table from existing
-        // snapshots / activities the first time this build runs against an
-        // older database. No-op on subsequent launches.
-        let backfill_context = Arc::clone(&context);
-        tauri::async_runtime::spawn(async move {
-            scheduler::backfill_lots_if_needed(&backfill_context).await;
-        });
-
         // Start periodic market data sync (6h interval, 2min initial delay)
         let periodic_quote_service = Arc::clone(&context.quote_service);
         tauri::async_runtime::spawn(async move {
@@ -403,6 +395,7 @@ pub fn run() {
             commands::portfolio::get_holdings,
             commands::portfolio::get_holding,
             commands::portfolio::get_asset_holdings,
+            commands::portfolio::get_asset_lots,
             commands::portfolio::get_portfolio_allocations,
             commands::portfolio::get_holdings_by_allocation,
             commands::portfolio::get_income_summary,

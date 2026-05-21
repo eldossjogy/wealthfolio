@@ -40,13 +40,11 @@ impl SnapshotRepository {
             return Ok(());
         }
 
-        // Capture positions for the snapshot_positions dual-write. The JSON
-        // column on holdings_snapshots is still populated via the
-        // AccountStateSnapshotDB conversion; the relational table is a
-        // parallel write surface.
+        // Capture positions for the snapshot_positions dual-write. Include
+        // empty maps so replacing a snapshot with no positions clears stale
+        // relational rows for that snapshot.
         let positions_to_write: Vec<(String, HashMap<String, Position>)> = snapshots
             .iter()
-            .filter(|s| !s.positions.is_empty())
             .map(|s| (s.id.clone(), s.positions.clone()))
             .collect();
 
@@ -640,7 +638,6 @@ impl SnapshotRepository {
         // invariant for every Full recalc.
         let positions_to_write: Vec<(String, HashMap<String, Position>)> = filtered_snapshots
             .iter()
-            .filter(|s| !s.positions.is_empty())
             .map(|s| (s.id.clone(), s.positions.clone()))
             .collect();
 
@@ -738,12 +735,7 @@ impl SnapshotRepository {
         use crate::schema::holdings_snapshots::dsl::*;
 
         let snap_id = snapshot.id.clone();
-        let positions_to_write: Option<HashMap<String, Position>> =
-            if !snapshot.positions.is_empty() {
-                Some(snapshot.positions.clone())
-            } else {
-                None
-            };
+        let positions_to_write = snapshot.positions.clone();
         let db_model = AccountStateSnapshotDB::from(snapshot.clone());
         debug!(
             "Saving/updating snapshot for account {} on date {}",
@@ -759,10 +751,9 @@ impl SnapshotRepository {
 
                 tx.insert(&db_model)?;
 
-                // Dual-write positions to the relational table.
-                if let Some(ref pos_map) = positions_to_write {
-                    Self::write_snapshot_positions(tx.conn(), &snap_id, pos_map)?;
-                }
+                // Dual-write positions to the relational table. Empty maps
+                // intentionally clear any stale relational rows.
+                Self::write_snapshot_positions(tx.conn(), &snap_id, &positions_to_write)?;
 
                 Ok(())
             })
@@ -1237,6 +1228,50 @@ mod tests {
         .expect("Failed to create test account");
     }
 
+    fn create_test_asset(pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>, asset_id: &str) {
+        let mut conn = get_connection(pool).expect("Failed to get connection");
+        diesel::sql_query(format!(
+            "INSERT INTO assets (id, kind, name, display_code, notes, metadata, is_active, quote_mode, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, created_at, updated_at) \
+             VALUES ('{}', 'INVESTMENT', 'Test Asset', 'TEST', NULL, NULL, 1, 'MANUAL', 'USD', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            asset_id
+        ))
+        .execute(&mut conn)
+        .expect("Failed to create test asset");
+    }
+
+    fn create_test_position(account_id: &str, asset_id: &str) -> Position {
+        let now = chrono::Utc::now();
+        Position {
+            id: format!("POS-{}-{}", account_id, asset_id),
+            account_id: account_id.to_string(),
+            asset_id: asset_id.to_string(),
+            quantity: Decimal::from(10),
+            average_cost: Decimal::from(25),
+            total_cost_basis: Decimal::from(250),
+            currency: "USD".to_string(),
+            inception_date: now,
+            lots: Default::default(),
+            created_at: now,
+            last_updated: now,
+            is_alternative: false,
+            contract_multiplier: Decimal::ONE,
+        }
+    }
+
+    fn count_snapshot_positions(
+        pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>,
+        snapshot_id_value: &str,
+    ) -> i64 {
+        use crate::schema::snapshot_positions::dsl as sp;
+
+        let mut conn = get_connection(pool).expect("Failed to get connection");
+        sp::snapshot_positions
+            .filter(sp::snapshot_id.eq(snapshot_id_value))
+            .select(count_star())
+            .first::<i64>(&mut conn)
+            .expect("Failed to count snapshot positions")
+    }
+
     /// Helper to create a test snapshot with specific source
     fn create_test_snapshot(
         account_id: &str,
@@ -1258,6 +1293,76 @@ mod tests {
             calculated_at: chrono::Utc::now().naive_utc(),
             source,
         }
+    }
+
+    #[tokio::test]
+    async fn test_save_or_update_snapshot_clears_positions_when_empty() {
+        let (repo, pool, _temp_dir) = create_test_repository().await;
+        let account_id = "test-account-empty-update";
+        let asset_id = "asset-empty-update";
+        create_test_account(&pool, account_id);
+        create_test_asset(&pool, asset_id);
+
+        let mut snapshot = create_test_snapshot(
+            account_id,
+            NaiveDate::from_ymd_opt(2024, 5, 1).unwrap(),
+            SnapshotSource::ManualEntry,
+        );
+        snapshot.positions.insert(
+            asset_id.to_string(),
+            create_test_position(account_id, asset_id),
+        );
+
+        repo.save_or_update_snapshot(&snapshot)
+            .await
+            .expect("save snapshot with position");
+        assert_eq!(count_snapshot_positions(&pool, &snapshot.id), 1);
+
+        snapshot.positions.clear();
+        repo.save_or_update_snapshot(&snapshot)
+            .await
+            .expect("save snapshot with no positions");
+
+        assert_eq!(
+            count_snapshot_positions(&pool, &snapshot.id),
+            0,
+            "empty snapshot updates must clear stale relational positions"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_snapshots_clears_positions_when_empty() {
+        let (repo, pool, _temp_dir) = create_test_repository().await;
+        let account_id = "test-account-empty-batch";
+        let asset_id = "asset-empty-batch";
+        create_test_account(&pool, account_id);
+        create_test_asset(&pool, asset_id);
+
+        let mut snapshot = create_test_snapshot(
+            account_id,
+            NaiveDate::from_ymd_opt(2024, 5, 2).unwrap(),
+            SnapshotSource::Calculated,
+        );
+        snapshot.positions.insert(
+            asset_id.to_string(),
+            create_test_position(account_id, asset_id),
+        );
+
+        repo.save_snapshots(std::slice::from_ref(&snapshot))
+            .await
+            .expect("save batch snapshot with position");
+        assert_eq!(count_snapshot_positions(&pool, &snapshot.id), 1);
+
+        snapshot.positions.clear();
+        repo.save_snapshots(std::slice::from_ref(&snapshot))
+            .await
+            .expect("save batch snapshot with no positions");
+
+        assert_eq!(
+            count_snapshot_positions(&pool, &snapshot.id),
+            0,
+            "empty batch snapshot writes must clear stale relational positions"
+        );
     }
 
     #[tokio::test]

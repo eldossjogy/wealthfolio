@@ -3,6 +3,8 @@
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::sql_query;
+use diesel::sql_types::Text;
 use diesel::sqlite::SqliteConnection;
 use std::sync::Arc;
 
@@ -13,7 +15,10 @@ use log::warn;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 use wealthfolio_core::errors::Result;
-use wealthfolio_core::lots::{LotClosure, LotRecord, LotRepositoryTrait};
+use wealthfolio_core::lots::{
+    AssetLotViewRow, AssetLotViewSource, LotClosure, LotRecord, LotRepositoryTrait,
+};
+use wealthfolio_core::portfolio::snapshot::Position;
 
 // ── Diesel model ──────────────────────────────────────────────────────────────
 
@@ -38,6 +43,18 @@ struct LotRecordDB {
     created_at: String,
     updated_at: String,
     split_ratio: String,
+}
+
+#[derive(Debug, QueryableByName)]
+struct LatestHoldingsSnapshotRow {
+    #[diesel(sql_type = Text)]
+    snapshot_id: String,
+    #[diesel(sql_type = Text)]
+    account_id: String,
+    #[diesel(sql_type = Text)]
+    snapshot_date: String,
+    #[diesel(sql_type = Text)]
+    positions: String,
 }
 
 impl From<LotRecordDB> for LotRecord {
@@ -204,6 +221,46 @@ impl LotRepositoryTrait for LotsRepository {
             .load(&mut conn)
             .map_err(StorageError::from)?;
         Ok(rows.into_iter().map(LotRecord::from).collect())
+    }
+
+    async fn get_asset_lot_view(
+        &self,
+        asset_id: &str,
+        include_snapshot_positions: bool,
+    ) -> Result<Vec<AssetLotViewRow>> {
+        use crate::schema::accounts::dsl as accounts_dsl;
+        use crate::schema::lots::dsl;
+
+        let mut conn = get_connection(&self.pool)?;
+        let transaction_rows: Vec<LotRecordDB> = dsl::lots
+            .inner_join(accounts_dsl::accounts.on(accounts_dsl::id.eq(dsl::account_id)))
+            .filter(dsl::asset_id.eq(asset_id))
+            .filter(dsl::is_closed.eq(0))
+            .filter(accounts_dsl::is_active.eq(true))
+            .select(LotRecordDB::as_select())
+            .order((dsl::open_date.asc(), dsl::account_id.asc(), dsl::id.asc()))
+            .load(&mut conn)
+            .map_err(StorageError::from)?;
+
+        let mut rows: Vec<AssetLotViewRow> = transaction_rows
+            .into_iter()
+            .map(transaction_lot_view_row)
+            .collect();
+
+        if include_snapshot_positions {
+            rows.extend(load_snapshot_lot_view_rows(&mut conn, asset_id)?);
+        }
+
+        rows.sort_by(|a, b| {
+            let a_date = a.acquisition_date.as_ref().or(a.snapshot_date.as_ref());
+            let b_date = b.acquisition_date.as_ref().or(b.snapshot_date.as_ref());
+            a_date
+                .cmp(&b_date)
+                .then_with(|| a.account_id.cmp(&b.account_id))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        Ok(rows)
     }
 
     async fn get_all_lots(&self) -> Result<Vec<LotRecord>> {
@@ -472,6 +529,205 @@ impl LotRepositoryTrait for LotsRepository {
     }
 }
 
+fn parse_decimal(value: &str) -> Decimal {
+    value.parse::<Decimal>().unwrap_or(Decimal::ZERO)
+}
+
+fn parse_nonzero_ratio(value: &str) -> Decimal {
+    match value.parse::<Decimal>() {
+        Ok(r) if !r.is_zero() => r,
+        _ => Decimal::ONE,
+    }
+}
+
+fn transaction_lot_view_row(row: LotRecordDB) -> AssetLotViewRow {
+    let split_ratio = parse_nonzero_ratio(&row.split_ratio);
+    let remaining_quantity = parse_decimal(&row.remaining_quantity);
+    let unit_cost = parse_decimal(&row.cost_per_unit) / split_ratio;
+
+    AssetLotViewRow {
+        id: row.id,
+        account_id: row.account_id,
+        asset_id: row.asset_id,
+        source: AssetLotViewSource::TransactionLot,
+        quantity: remaining_quantity * split_ratio,
+        cost_basis: parse_decimal(&row.remaining_cost_basis),
+        unit_cost,
+        fees: parse_decimal(&row.fee_allocated),
+        acquisition_date: Some(row.open_date),
+        snapshot_date: None,
+        is_closed: row.is_closed != 0,
+    }
+}
+
+fn snapshot_position_view_row(
+    snapshot: &LatestHoldingsSnapshotRow,
+    quantity: Decimal,
+    average_cost: Decimal,
+    total_cost_basis: Decimal,
+    asset_id: &str,
+) -> AssetLotViewRow {
+    AssetLotViewRow {
+        id: format!(
+            "SNAPSHOT-{}-{}-{}",
+            snapshot.snapshot_id, snapshot.account_id, asset_id
+        ),
+        account_id: snapshot.account_id.clone(),
+        asset_id: asset_id.to_string(),
+        source: AssetLotViewSource::SnapshotPosition,
+        quantity,
+        cost_basis: total_cost_basis,
+        unit_cost: average_cost,
+        fees: Decimal::ZERO,
+        acquisition_date: None,
+        snapshot_date: Some(snapshot.snapshot_date.clone()),
+        is_closed: false,
+    }
+}
+
+fn load_snapshot_lot_view_rows(
+    conn: &mut SqliteConnection,
+    asset_id_param: &str,
+) -> Result<Vec<AssetLotViewRow>> {
+    let latest_snapshots: Vec<LatestHoldingsSnapshotRow> = sql_query(
+        r#"
+        SELECT
+            hs.id AS snapshot_id,
+            hs.account_id AS account_id,
+            CAST(hs.snapshot_date AS TEXT) AS snapshot_date,
+            hs.positions AS positions
+        FROM holdings_snapshots hs
+        JOIN accounts a ON a.id = hs.account_id
+        JOIN (
+            SELECT hs2.account_id, MAX(hs2.snapshot_date) AS max_snapshot_date
+            FROM holdings_snapshots hs2
+            JOIN accounts a2 ON a2.id = hs2.account_id
+            WHERE hs2.source <> 'CALCULATED'
+              AND a2.tracking_mode = 'HOLDINGS'
+              AND a2.is_active = 1
+            GROUP BY hs2.account_id
+        ) latest
+          ON latest.account_id = hs.account_id
+         AND latest.max_snapshot_date = hs.snapshot_date
+        WHERE hs.source <> 'CALCULATED'
+          AND a.tracking_mode = 'HOLDINGS'
+          AND a.is_active = 1
+        ORDER BY hs.account_id ASC, hs.id ASC
+        "#,
+    )
+    .load(conn)
+    .map_err(StorageError::from)?;
+
+    if latest_snapshots.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let snapshot_ids: Vec<String> = latest_snapshots
+        .iter()
+        .map(|s| s.snapshot_id.clone())
+        .collect();
+
+    let populated_snapshot_ids: HashSet<String> = {
+        use crate::schema::snapshot_positions::dsl as sp;
+        sp::snapshot_positions
+            .select(sp::snapshot_id)
+            .filter(sp::snapshot_id.eq_any(&snapshot_ids))
+            .distinct()
+            .load(conn)
+            .map_err(StorageError::from)?
+            .into_iter()
+            .collect()
+    };
+
+    let relational_positions: HashMap<String, (Decimal, Decimal, Decimal)> = {
+        use crate::schema::snapshot_positions::dsl as sp;
+        let rows: Vec<(String, String, String, String)> = sp::snapshot_positions
+            .filter(sp::snapshot_id.eq_any(&snapshot_ids))
+            .filter(sp::asset_id.eq(asset_id_param))
+            .select((
+                sp::snapshot_id,
+                sp::quantity,
+                sp::average_cost,
+                sp::total_cost_basis,
+            ))
+            .load(conn)
+            .map_err(StorageError::from)?;
+
+        rows.into_iter()
+            .map(|(snapshot_id, quantity, average_cost, total_cost_basis)| {
+                (
+                    snapshot_id,
+                    (
+                        parse_decimal(&quantity),
+                        parse_decimal(&average_cost),
+                        parse_decimal(&total_cost_basis),
+                    ),
+                )
+            })
+            .collect()
+    };
+
+    let mut rows = Vec::new();
+    for snapshot in &latest_snapshots {
+        if let Some((quantity, average_cost, total_cost_basis)) =
+            relational_positions.get(&snapshot.snapshot_id).copied()
+        {
+            rows.push(snapshot_position_view_row(
+                snapshot,
+                quantity,
+                average_cost,
+                total_cost_basis,
+                asset_id_param,
+            ));
+            continue;
+        }
+
+        if populated_snapshot_ids.contains(&snapshot.snapshot_id) {
+            continue;
+        }
+
+        let positions = deserialize_positions_json(&snapshot.positions, &snapshot.account_id);
+        if let Some(position) = positions.get(asset_id_param) {
+            rows.push(snapshot_position_view_row(
+                snapshot,
+                position.quantity,
+                position.average_cost,
+                position.total_cost_basis,
+                asset_id_param,
+            ));
+        }
+    }
+
+    Ok(rows)
+}
+
+/// Deserialize the legacy `holdings_snapshots.positions` JSON column into a
+/// position map. Returns empty for "{}" or unparseable input. `acct_id` is
+/// stamped onto each Position so callers see a consistent account_id even
+/// if older serialized payloads lacked the field.
+fn deserialize_positions_json(json: &str, acct_id: &str) -> HashMap<String, Position> {
+    if json.is_empty() || json == "{}" {
+        return HashMap::new();
+    }
+    match serde_json::from_str::<HashMap<String, Position>>(json) {
+        Ok(mut map) => {
+            for pos in map.values_mut() {
+                if pos.account_id.is_empty() {
+                    pos.account_id = acct_id.to_string();
+                }
+            }
+            map
+        }
+        Err(e) => {
+            warn!(
+                "Failed to parse positions JSON fallback (acct {}): {}",
+                acct_id, e
+            );
+            HashMap::new()
+        }
+    }
+}
+
 /// Returns the subset of `candidate_ids` that exist in `assets`. Used by lot
 /// write paths to drop records whose asset has been deleted while the legacy
 /// positions JSON still referenced it — without this filter, the lots table's
@@ -607,16 +863,24 @@ mod tests {
         (repo, pool, dir)
     }
 
-    fn insert_account(pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>, id: &str) {
+    fn insert_account_with_tracking_mode(
+        pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>,
+        id: &str,
+        tracking_mode: &str,
+    ) {
         let mut conn = get_connection(pool).unwrap();
         diesel::sql_query(format!(
             "INSERT INTO accounts (id, name, account_type, currency, is_default, is_active, \
              created_at, updated_at, tracking_mode, is_archived) \
-             VALUES ('{}', 'Test', 'REGULAR', 'USD', 0, 1, datetime('now'), datetime('now'), 'TRANSACTIONS', 0)",
-            id
+             VALUES ('{}', 'Test', 'REGULAR', 'USD', 0, 1, datetime('now'), datetime('now'), '{}', 0)",
+            id, tracking_mode
         ))
         .execute(&mut conn)
         .unwrap();
+    }
+
+    fn insert_account(pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>, id: &str) {
+        insert_account_with_tracking_mode(pool, id, "TRANSACTIONS");
     }
 
     fn insert_asset(pool: &Arc<Pool<ConnectionManager<SqliteConnection>>>, id: &str) {
@@ -1035,5 +1299,108 @@ mod tests {
             Some(rust_decimal::Decimal::from(50)),
             "non-split lots return remaining_quantity unchanged"
         );
+    }
+
+    #[tokio::test]
+    async fn asset_lot_view_can_append_latest_holdings_snapshot_positions() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_account_with_tracking_mode(&pool, "acc_holdings", "HOLDINGS");
+        insert_asset(&pool, "AAPL");
+
+        repo.replace_lots_for_account("acc1", &[make_lot_record("lot-1", "acc1", "AAPL", "50")])
+            .await
+            .unwrap();
+
+        let mut conn = get_connection(&pool).unwrap();
+        diesel::sql_query(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, \
+             cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, \
+             cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES ('snap-holdings', 'acc_holdings', '2026-05-20', 'USD', '{}', '{}', \
+             '2400', '0', '2026-05-20T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+        )
+        .execute(&mut conn)
+        .unwrap();
+        diesel::sql_query(
+            "INSERT INTO snapshot_positions (snapshot_id, asset_id, quantity, average_cost, \
+             total_cost_basis, currency, inception_date, is_alternative, contract_multiplier, \
+             created_at, last_updated) \
+             VALUES ('snap-holdings', 'AAPL', '12', '200', '2400', 'USD', \
+             '2026-05-20T00:00:00Z', 0, '1', '2026-05-20T00:00:00Z', \
+             '2026-05-20T00:00:00Z')",
+        )
+        .execute(&mut conn)
+        .unwrap();
+        drop(conn);
+
+        let transaction_only = repo.get_asset_lot_view("AAPL", false).await.unwrap();
+        assert_eq!(transaction_only.len(), 1);
+        assert_eq!(
+            transaction_only[0].source,
+            AssetLotViewSource::TransactionLot
+        );
+
+        let with_snapshots = repo.get_asset_lot_view("AAPL", true).await.unwrap();
+        assert_eq!(with_snapshots.len(), 2);
+
+        let snapshot_row = with_snapshots
+            .iter()
+            .find(|row| row.source == AssetLotViewSource::SnapshotPosition)
+            .expect("snapshot aggregate row");
+        assert_eq!(snapshot_row.account_id, "acc_holdings");
+        assert_eq!(snapshot_row.quantity, Decimal::from(12));
+        assert_eq!(snapshot_row.unit_cost, Decimal::from(200));
+        assert_eq!(snapshot_row.cost_basis, Decimal::from(2400));
+        assert_eq!(snapshot_row.snapshot_date.as_deref(), Some("2026-05-20"));
+    }
+
+    #[tokio::test]
+    async fn asset_lot_view_falls_back_to_snapshot_positions_json() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account_with_tracking_mode(&pool, "acc_holdings_json", "HOLDINGS");
+        insert_asset(&pool, "AAPL");
+
+        let now = chrono::Utc::now();
+        let position = Position {
+            id: "POS-AAPL-acc_holdings_json".to_string(),
+            account_id: "acc_holdings_json".to_string(),
+            asset_id: "AAPL".to_string(),
+            quantity: Decimal::from(3),
+            average_cost: Decimal::from(25),
+            total_cost_basis: Decimal::from(75),
+            currency: "USD".to_string(),
+            inception_date: now,
+            lots: Default::default(),
+            created_at: now,
+            last_updated: now,
+            is_alternative: false,
+            contract_multiplier: Decimal::ONE,
+        };
+        let positions_json =
+            serde_json::to_string(&HashMap::from([("AAPL".to_string(), position)]))
+                .unwrap()
+                .replace('\'', "''");
+
+        let mut conn = get_connection(&pool).unwrap();
+        diesel::sql_query(format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, \
+             cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, \
+             cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES ('snap-json', 'acc_holdings_json', '2026-05-20', 'USD', '{}', '{}', \
+             '75', '0', '2026-05-20T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            positions_json, "{}"
+        ))
+        .execute(&mut conn)
+        .unwrap();
+        drop(conn);
+
+        let rows = repo.get_asset_lot_view("AAPL", true).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source, AssetLotViewSource::SnapshotPosition);
+        assert_eq!(rows[0].account_id, "acc_holdings_json");
+        assert_eq!(rows[0].quantity, Decimal::from(3));
+        assert_eq!(rows[0].unit_cost, Decimal::from(25));
+        assert_eq!(rows[0].cost_basis, Decimal::from(75));
     }
 }

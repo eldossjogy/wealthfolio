@@ -114,9 +114,8 @@ pub struct Lot {
     ///
     /// Set to `Some(activity.id)` for normal BUY lots (`add_lot`) and for
     /// transferred sub-lots whose ID is the TRANSFER_IN activity. Left
-    /// `None` for HOLDINGS-mode lots (no underlying activity) and for
-    /// composite-id transfer sub-lots whose ID does not directly correspond
-    /// to an activity row in this account.
+    /// `None` for composite-id transfer sub-lots whose ID does not directly
+    /// correspond to an activity row in this account.
     ///
     /// `#[serde(default)]` keeps backward compatibility with snapshots
     /// serialized to JSON before this field existed; old snapshots

@@ -1,8 +1,6 @@
--- Schema-only reversal. Does NOT restore data - the snapshot_positions
--- backfill from JSON is one-shot and will not be re-emitted on a later
--- re-migration. The legacy positions JSON column is untouched by this
--- migration (and by its reversal), so HOLDINGS-mode read paths keep
--- working through the JSON either way.
+-- Schema-only reversal. The legacy positions JSON column is untouched by this
+-- migration (and by its reversal), so HOLDINGS-mode read paths keep working
+-- through the JSON either way.
 
 DROP INDEX IF EXISTS idx_snapshot_positions_asset_id;
 DROP INDEX IF EXISTS idx_snapshot_positions_snapshot_id;

@@ -47,8 +47,7 @@ pub struct LotClosure {
     pub close_activity_id: Option<String>,
     /// The activity that originally opened this lot. Carried through so the
     /// closure-insert can preserve the FK link instead of writing NULL.
-    /// `None` only for lots that don't correspond to an activity row (e.g.
-    /// HOLDINGS-mode synthetic lots, which do not flow through this path).
+    /// `None` only for lots that don't correspond to an activity row.
     pub open_activity_id: Option<String>,
 
     // ── Fields needed to INSERT the lot if it doesn't exist yet ──
@@ -102,6 +101,17 @@ pub trait LotRepositoryTrait: Send + Sync {
     /// Returns every lot row (open and closed) for the given asset across all accounts.
     async fn get_lots_for_asset(&self, asset_id: &str) -> Result<Vec<LotRecord>>;
 
+    /// Returns the read-model rows used by the asset Lots view.
+    ///
+    /// Transaction-derived lots come from the `lots` table. When requested,
+    /// latest HOLDINGS-mode snapshot positions are appended as aggregate
+    /// rows; they are not persisted as tax lots.
+    async fn get_asset_lot_view(
+        &self,
+        asset_id: &str,
+        include_snapshot_positions: bool,
+    ) -> Result<Vec<AssetLotViewRow>>;
+
     /// Returns every lot row (open and closed) across all accounts.
     /// Used when computing valuations for the TOTAL pseudo-account.
     async fn get_all_lots(&self) -> Result<Vec<LotRecord>>;
@@ -124,7 +134,6 @@ pub trait LotRepositoryTrait: Send + Sync {
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>>;
 
     /// Returns the total number of lot rows (open and closed) in the lots table.
-    /// Used by the startup backfill to check if the table is empty.
     fn count_lots(&self) -> Result<i64>;
 }
 
@@ -181,6 +190,34 @@ pub struct LotRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetLotViewSource {
+    TransactionLot,
+    SnapshotPosition,
+}
+
+/// UI-facing lot read model for an asset.
+///
+/// Snapshot rows are aggregate positions from the latest HOLDINGS-mode account
+/// snapshots. They intentionally share the view with real transaction lots
+/// without becoming rows in the `lots` table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLotViewRow {
+    pub id: String,
+    pub account_id: String,
+    pub asset_id: String,
+    pub source: AssetLotViewSource,
+    pub quantity: Decimal,
+    pub cost_basis: Decimal,
+    pub unit_cost: Decimal,
+    pub fees: Decimal,
+    pub acquisition_date: Option<String>,
+    pub snapshot_date: Option<String>,
+    pub is_closed: bool,
+}
+
 // Tax-conclusion concepts (disposal method, wash-sale, holding period) live in
 // future tax-overlay tables. The neutral lots table intentionally stores only
 // inventory facts.
@@ -193,7 +230,7 @@ pub struct LotRecord {
 /// Each open lot in every position of the snapshot becomes one row.
 /// `open_activity_id` is set from the in-memory `Lot.source_activity_id` so
 /// the FK CASCADE removes the row when its activity is deleted. For
-/// HOLDINGS-mode lots and synthetic lots that don't correspond to an
+/// compiler-generated synthetic activity legs that don't correspond to an
 /// activity row, `source_activity_id` is `None` and the column stays NULL.
 /// `original_quantity` comes from `lot.original_quantity` when available (new
 /// snapshots). For old snapshots that predate the field (where it deserializes

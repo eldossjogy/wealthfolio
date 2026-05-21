@@ -6,15 +6,16 @@ import {
   TableHeader,
   TableRow,
 } from "@wealthfolio/ui/components/ui/table";
-import { Lot } from "@/lib/types";
+import type { AssetLotViewRow } from "@/lib/types";
 import { formatAmount } from "@wealthfolio/ui";
 import { formatDate, formatQuantity } from "@/lib/utils";
+import { Badge } from "@wealthfolio/ui/components/ui/badge";
 import { Card, CardContent } from "@wealthfolio/ui/components/ui/card";
 import { GainAmount } from "@wealthfolio/ui";
 import { GainPercent } from "@wealthfolio/ui";
 
 interface AssetLotsTableProps {
-  lots: Lot[];
+  lots: AssetLotViewRow[];
   currency: string;
   marketPrice: number;
 }
@@ -25,8 +26,18 @@ export const AssetLotsTable = ({ lots, currency, marketPrice }: AssetLotsTablePr
   }
 
   const sortedLots = [...lots].sort(
-    (a, b) => new Date(a.acquisitionDate).getTime() - new Date(b.acquisitionDate).getTime(),
+    (a, b) =>
+      new Date(a.acquisitionDate ?? a.snapshotDate ?? "").getTime() -
+      new Date(b.acquisitionDate ?? b.snapshotDate ?? "").getTime(),
   );
+
+  const getDateLabel = (lot: AssetLotViewRow) => {
+    const date = lot.acquisitionDate ?? lot.snapshotDate;
+    return date ? formatDate(date) : "-";
+  };
+
+  const getSourceLabel = (lot: AssetLotViewRow) =>
+    lot.source === "SNAPSHOT_POSITION" ? "Snapshot" : "Transaction";
 
   return (
     <Card className="mt-4">
@@ -36,9 +47,10 @@ export const AssetLotsTable = ({ lots, currency, marketPrice }: AssetLotsTablePr
           <Table>
             <TableHeader className="bg-muted">
               <TableRow>
-                <TableHead className="w-[160px]">Acquired Date</TableHead>
+                <TableHead className="w-[160px]">Date</TableHead>
+                <TableHead>Source</TableHead>
                 <TableHead className="text-right">Quantity</TableHead>
-                <TableHead className="text-right">Acquisition Price</TableHead>
+                <TableHead className="text-right">Unit Cost</TableHead>
                 <TableHead className="text-right">Fees</TableHead>
                 <TableHead className="text-right">Cost Basis</TableHead>
                 <TableHead className="text-right">Market Value</TableHead>
@@ -53,14 +65,15 @@ export const AssetLotsTable = ({ lots, currency, marketPrice }: AssetLotsTablePr
 
                 return (
                   <TableRow key={lot.id}>
-                    <TableCell className="font-medium">{formatDate(lot.acquisitionDate)}</TableCell>
+                    <TableCell className="font-medium">{getDateLabel(lot)}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{getSourceLabel(lot)}</Badge>
+                    </TableCell>
                     <TableCell className="text-right">{formatQuantity(lot.quantity)}</TableCell>
                     <TableCell className="text-right">
-                      {formatAmount(lot.acquisitionPrice, currency)}
+                      {formatAmount(lot.unitCost, currency)}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {formatAmount(lot.acquisitionFees, currency)}
-                    </TableCell>
+                    <TableCell className="text-right">{formatAmount(lot.fees, currency)}</TableCell>
                     <TableCell className="text-right">
                       {formatAmount(lot.costBasis, currency)}
                     </TableCell>
@@ -94,7 +107,10 @@ export const AssetLotsTable = ({ lots, currency, marketPrice }: AssetLotsTablePr
             return (
               <div key={lot.id} className="space-y-2 p-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{formatDate(lot.acquisitionDate)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{getDateLabel(lot)}</span>
+                    <Badge variant="secondary">{getSourceLabel(lot)}</Badge>
+                  </div>
                   <div className="flex items-center space-x-2">
                     <GainAmount
                       value={gainLossAmount}
@@ -107,13 +123,13 @@ export const AssetLotsTable = ({ lots, currency, marketPrice }: AssetLotsTablePr
                 <div className="text-muted-foreground grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                   <span>Quantity</span>
                   <span className="text-foreground text-right">{formatQuantity(lot.quantity)}</span>
-                  <span>Acq. Price</span>
+                  <span>Unit Cost</span>
                   <span className="text-foreground text-right">
-                    {formatAmount(lot.acquisitionPrice, currency)}
+                    {formatAmount(lot.unitCost, currency)}
                   </span>
                   <span>Fees</span>
                   <span className="text-foreground text-right">
-                    {formatAmount(lot.acquisitionFees, currency)}
+                    {formatAmount(lot.fees, currency)}
                   </span>
                   <span>Cost Basis</span>
                   <span className="text-foreground text-right">
