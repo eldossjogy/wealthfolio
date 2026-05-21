@@ -1057,12 +1057,10 @@ fn apply_remote_event_lww_tx(
                     // JSON and reinsert here" fix is deferred to Phase B's
                     // read-path switchover.
                     if matches!(entity, SyncEntity::Snapshot) {
-                        diesel::sql_query(format!(
-                            "DELETE FROM snapshot_positions WHERE snapshot_id = '{}'",
-                            escape_sqlite_str(&entity_id_value)
-                        ))
-                        .execute(conn)
-                        .map_err(StorageError::from)?;
+                        diesel::sql_query("DELETE FROM snapshot_positions WHERE snapshot_id = ?")
+                            .bind::<diesel::sql_types::Text, _>(entity_id_value.clone())
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
                     }
                 }
             }

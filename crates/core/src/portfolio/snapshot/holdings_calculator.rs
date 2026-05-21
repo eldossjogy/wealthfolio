@@ -956,12 +956,13 @@ impl HoldingsCalculator {
 
     /// Handle SPLIT activity.
     ///
-    /// Multiplies the cumulative `split_ratio` of every open lot whose
-    /// `acquisition_date < activity.activity_date`, leaving `quantity`,
+    /// Multiplies the cumulative `split_ratio` of every open lot acquired
+    /// before the split's user-local calendar date, leaving `quantity`,
     /// `acquisition_price`, `cost_basis`, and `acquisition_fees` unchanged.
-    /// Lots opened on or after the split date are not affected (their as-acquired
-    /// units are already post-split). See positions_model::Position::apply_split
-    /// and docs/architecture/data_model.md §3.5.
+    /// Lots opened on or after the split date are not affected (their
+    /// as-acquired units are already post-split). See
+    /// positions_model::Position::apply_split and
+    /// docs/architecture/data_model.md §3.5.
     ///
     /// SPLIT has no cash effect. Fractional cashouts must be reported by the
     /// importer as a paired SELL activity; this handler does not synthesize one.
@@ -1002,7 +1003,11 @@ impl HoldingsCalculator {
         }
 
         if let Some(position) = state.positions.get_mut(asset_id) {
-            position.apply_split(ratio, activity.activity_date, &activity.id)?;
+            let split_date = self.activity_local_date(activity);
+            let tz = parse_user_timezone_or_default(&self.timezone.read().unwrap());
+            position.apply_split(ratio, split_date, &activity.id, |instant| {
+                activity_date_in_tz(instant, tz)
+            })?;
         } else {
             // Position not yet open in this account — split is a no-op for now.
             // If a TRANSFER_IN later brings lots whose acquisition_date predates

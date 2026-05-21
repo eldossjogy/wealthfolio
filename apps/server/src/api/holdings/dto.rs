@@ -51,8 +51,8 @@ pub struct AssetHoldingsQuery {
 pub struct AssetLotsQuery {
     #[serde(rename = "assetId")]
     pub asset_id: String,
-    #[serde(rename = "includeSnapshotPositions")]
-    pub include_snapshot_positions: Option<bool>,
+    #[serde(rename = "includeSnapshotPositions", default)]
+    pub include_snapshot_positions: bool,
 }
 
 #[derive(Deserialize)]

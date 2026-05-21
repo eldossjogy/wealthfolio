@@ -745,6 +745,56 @@ mod tests {
     }
 
     #[test]
+    fn test_split_uses_user_local_calendar_date_for_lot_eligibility() {
+        let calculator = create_calculator_with_timezone(
+            Arc::new(MockFxService::new()),
+            Arc::new(RwLock::new("USD".to_string())),
+            "America/Los_Angeles",
+        );
+
+        let previous_snapshot = create_initial_snapshot("acc_1", "USD", "2025-01-14");
+        let mut buy_activity = create_default_activity(
+            "buy_same_local_day",
+            ActivityType::Buy,
+            "AAPL",
+            dec!(10),
+            dec!(100),
+            dec!(0),
+            "USD",
+            "2025-01-15",
+        );
+        let mut split_activity = create_default_activity(
+            "split_same_local_day",
+            ActivityType::Split,
+            "AAPL",
+            dec!(2),
+            dec!(0),
+            dec!(0),
+            "USD",
+            "2025-01-15",
+        );
+
+        // Both instants are 2025-01-15 in America/Los_Angeles. The buy
+        // timestamp is earlier in UTC, but split eligibility is calendar-day
+        // based, so a lot opened on the split's local date must not be split.
+        buy_activity.activity_date = Utc.with_ymd_and_hms(2025, 1, 15, 8, 30, 0).unwrap();
+        split_activity.activity_date = Utc.with_ymd_and_hms(2025, 1, 15, 9, 30, 0).unwrap();
+
+        let result = calculator
+            .calculate_next_holdings(
+                &previous_snapshot,
+                &[buy_activity, split_activity],
+                NaiveDate::from_ymd_opt(2025, 1, 15).unwrap(),
+            )
+            .unwrap();
+
+        assert!(result.warnings.is_empty());
+        let position = result.snapshot.positions.get("AAPL").unwrap();
+        assert_eq!(position.quantity, dec!(10));
+        assert_eq!(position.lots[0].effective_split_ratio(), dec!(1));
+    }
+
+    #[test]
     fn test_sell_activity_updates_holdings_and_cash() {
         let mock_fx_service = Arc::new(MockFxService::new());
         let account_currency = "CAD";

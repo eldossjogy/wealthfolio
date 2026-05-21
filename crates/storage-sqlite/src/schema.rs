@@ -315,17 +315,17 @@ diesel::table! {
         open_date -> Text,
         open_activity_id -> Nullable<Text>,
         original_quantity -> Text,
-        remaining_quantity -> Text,
         cost_per_unit -> Text,
         original_cost_basis -> Text,
         remaining_cost_basis -> Text,
         fee_allocated -> Text,
+        remaining_quantity -> Text,
+        split_ratio -> Text,
         is_closed -> Integer,
         close_date -> Nullable<Text>,
         close_activity_id -> Nullable<Text>,
         created_at -> Text,
         updated_at -> Text,
-        split_ratio -> Text,
     }
 }
 

@@ -210,12 +210,12 @@ pub async fn get_asset_holdings(
 pub async fn get_asset_lots(
     state: State<'_, Arc<ServiceContext>>,
     asset_id: String,
-    include_snapshot_positions: Option<bool>,
+    include_snapshot_positions: bool,
 ) -> Result<Vec<AssetLotView>, String> {
     debug!("Get lot view rows for asset {}", asset_id);
     state
         .lots_repository
-        .get_asset_lot_view(&asset_id, include_snapshot_positions.unwrap_or(false))
+        .get_asset_lot_view(&asset_id, include_snapshot_positions)
         .await
         .map_err(|e| e.to_string())
 }

@@ -19,6 +19,7 @@ mod tests {
     use crate::constants::{DECIMAL_PRECISION, PORTFOLIO_TOTAL_ACCOUNT_ID};
     use crate::errors::{Error, Result as AppResult};
     use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
+    use crate::lots::{AssetLotView, LotClosure, LotRecord, LotRepositoryTrait};
     use crate::portfolio::snapshot::{
         AccountStateSnapshot, Lot, Position, SnapshotRecalcMode, SnapshotRepositoryTrait,
         SnapshotService, SnapshotServiceTrait,
@@ -767,6 +768,81 @@ mod tests {
             _asset_id: &str,
         ) -> AppResult<(Vec<String>, Vec<String>)> {
             Ok((Vec::new(), Vec::new()))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct FailingLotRepository;
+
+    impl FailingLotRepository {
+        fn failure() -> Error {
+            Error::Database(crate::errors::DatabaseError::QueryFailed(
+                "forced lot sync failure".to_string(),
+            ))
+        }
+    }
+
+    #[async_trait]
+    impl LotRepositoryTrait for FailingLotRepository {
+        async fn replace_lots_for_account(
+            &self,
+            _account_id: &str,
+            _lots: &[LotRecord],
+        ) -> AppResult<()> {
+            Err(Self::failure())
+        }
+
+        async fn get_open_lots_for_account(&self, _account_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_open_lots(&self) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_as_of_date(
+            &self,
+            _account_ids: &[String],
+            _date: NaiveDate,
+        ) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots_for_account(&self, _account_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_for_asset(&self, _asset_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_asset_lot_view(
+            &self,
+            _asset_id: &str,
+            _include_snapshot_positions: bool,
+        ) -> AppResult<Vec<AssetLotView>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots(&self) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn sync_lots_for_account(
+            &self,
+            _account_id: &str,
+            _open_lots: &[LotRecord],
+            _closures: &[LotClosure],
+        ) -> AppResult<()> {
+            Err(Self::failure())
+        }
+
+        async fn get_open_position_quantities(&self) -> AppResult<HashMap<String, Decimal>> {
+            Ok(HashMap::new())
+        }
+
+        fn count_lots(&self) -> AppResult<i64> {
+            Ok(0)
         }
     }
 
@@ -1548,6 +1624,67 @@ mod tests {
             .await
             .unwrap();
         assert!(saved >= 2, "at least two keyframes expected");
+    }
+
+    #[tokio::test]
+    async fn test_recalculate_holdings_snapshots_surfaces_lot_sync_errors() {
+        let base_currency_arc = Arc::new(RwLock::new("USD".to_string()));
+
+        let mut account_repo = MockAccountRepository::new();
+        let acc = create_test_account("acc1", "USD", "Test Account");
+        account_repo.add_account(acc.clone());
+        let account_repo = Arc::new(account_repo);
+
+        let activity_date = NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
+        let deposit = create_test_activity(
+            "dep1",
+            &acc.id,
+            Some("CASH:USD"),
+            "DEPOSIT",
+            activity_date,
+            None,
+            None,
+            Some(dec!(10000)),
+            "USD",
+        );
+        let buy = create_test_activity(
+            "buy1",
+            &acc.id,
+            Some("AAPL"),
+            "BUY",
+            activity_date,
+            Some(dec!(10)),
+            Some(dec!(150)),
+            Some(dec!(1500)),
+            "USD",
+        );
+        let activity_repo = Arc::new(MockActivityRepositoryWithData::new(vec![deposit, buy]));
+
+        let fx = Arc::new(MockFxService::new());
+        let snapshot_repo = Arc::new(MockSnapshotRepository::new());
+        let asset_repo = Arc::new(MockAssetRepository::new());
+
+        let svc = SnapshotService::new(
+            base_currency_arc,
+            account_repo,
+            activity_repo,
+            snapshot_repo.clone(),
+            asset_repo,
+            fx,
+        )
+        .with_lot_repository(Arc::new(FailingLotRepository));
+
+        let err = svc
+            .recalculate_holdings_snapshots(None, SnapshotRecalcMode::IncrementalFromLast)
+            .await
+            .expect_err("lot sync failure should be returned");
+
+        assert!(err.to_string().contains("lot sync failed for 1 account(s)"));
+        assert!(err.to_string().contains("forced lot sync failure"));
+        assert!(
+            !snapshot_repo.get_saved_snapshots().is_empty(),
+            "snapshot write should happen before the dual-write error is surfaced"
+        );
     }
 
     #[tokio::test]

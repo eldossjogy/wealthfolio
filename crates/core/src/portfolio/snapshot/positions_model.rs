@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use log::{debug, error, warn};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -705,14 +705,6 @@ impl Position {
         // Convert the final Vec back to VecDeque and assign to self.lots
         self.lots = vec_lots.into();
 
-        // Debug: log remaining lots after FIFO reduction
-        for lot in &self.lots {
-            debug!(
-                "[LOT-DEBUG] reduce_lots_fifo result: id={} asset={} quantity={} original_quantity={}",
-                lot.id, self.asset_id, lot.quantity, lot.original_quantity
-            );
-        }
-
         self.recalculate_aggregates();
 
         Ok(FifoReductionResult {
@@ -724,9 +716,10 @@ impl Position {
         })
     }
 
-    /// Applies a stock split by multiplying the cumulative `split_ratio` of every
-    /// open lot opened **before** `split_date`. Lots opened on or after the split
-    /// date are not affected (they were acquired in post-split units).
+    /// Applies a stock split by multiplying the cumulative `split_ratio` of
+    /// every open lot opened **before** `split_date`. The caller supplies the
+    /// same calendar-date projection for `split_date` and each lot acquisition
+    /// date, so timezone boundaries are handled consistently.
     ///
     /// Lot `quantity`, `acquisition_price`, `cost_basis`, and `acquisition_fees`
     /// are all immutable: splits never change the dollars paid or the as-acquired
@@ -740,8 +733,9 @@ impl Position {
     pub fn apply_split(
         &mut self,
         split_ratio: Decimal,
-        split_date: DateTime<Utc>,
+        split_date: NaiveDate,
         activity_id: &str,
+        lot_acquisition_date: impl Fn(DateTime<Utc>) -> NaiveDate,
     ) -> Result<()> {
         if !split_ratio.is_sign_positive() || split_ratio.is_zero() {
             return Err(CalculatorError::InvalidActivity(format!(
@@ -755,7 +749,7 @@ impl Position {
             split_ratio, self.id, split_date
         );
         for lot in self.lots.iter_mut() {
-            if lot.acquisition_date < split_date {
+            if lot_acquisition_date(lot.acquisition_date) < split_date {
                 let prior = lot.effective_split_ratio();
                 lot.split_ratio = prior * split_ratio;
             }

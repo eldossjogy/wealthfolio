@@ -397,9 +397,9 @@ impl SnapshotService {
             //
             // Skips only TOTAL: that pseudo-account has no activities of its
             // own; its positions are aggregated from per-account state and
-            // don't belong as their own lot rows. HOLDINGS-mode accounts use
-            // a different write path (save_manual_snapshot) and don't come
-            // through this loop.
+            // don't belong as their own lot rows. HOLDINGS-mode positions are
+            // exposed as aggregate AssetLotView rows from latest snapshots,
+            // not persisted as synthetic tax lots.
             if let Some(lot_repo) = &self.lot_repository {
                 if acc_id == PORTFOLIO_TOTAL_ACCOUNT_ID {
                     continue;
