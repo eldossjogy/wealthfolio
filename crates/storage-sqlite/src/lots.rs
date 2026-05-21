@@ -52,6 +52,8 @@ struct LatestHoldingsSnapshotRow {
     #[diesel(sql_type = Text)]
     account_id: String,
     #[diesel(sql_type = Text)]
+    account_name: String,
+    #[diesel(sql_type = Text)]
     snapshot_date: String,
     #[diesel(sql_type = Text)]
     positions: String,
@@ -235,16 +237,37 @@ impl LotRepositoryTrait for LotsRepository {
         let transaction_rows: Vec<LotRecordDB> = dsl::lots
             .inner_join(accounts_dsl::accounts.on(accounts_dsl::id.eq(dsl::account_id)))
             .filter(dsl::asset_id.eq(asset_id))
-            .filter(dsl::is_closed.eq(0))
             .filter(accounts_dsl::is_active.eq(true))
             .select(LotRecordDB::as_select())
             .order((dsl::open_date.asc(), dsl::account_id.asc(), dsl::id.asc()))
             .load(&mut conn)
             .map_err(StorageError::from)?;
 
+        let account_names: HashMap<String, String> = if transaction_rows.is_empty() {
+            HashMap::new()
+        } else {
+            let account_ids: Vec<String> = transaction_rows
+                .iter()
+                .map(|row| row.account_id.clone())
+                .collect();
+            accounts_dsl::accounts
+                .filter(accounts_dsl::id.eq_any(account_ids))
+                .select((accounts_dsl::id, accounts_dsl::name))
+                .load::<(String, String)>(&mut conn)
+                .map_err(StorageError::from)?
+                .into_iter()
+                .collect()
+        };
+
         let mut rows: Vec<AssetLotViewRow> = transaction_rows
             .into_iter()
-            .map(transaction_lot_view_row)
+            .map(|row| {
+                let account_name = account_names
+                    .get(&row.account_id)
+                    .cloned()
+                    .unwrap_or_else(|| row.account_id.clone());
+                transaction_lot_view_row(row, account_name)
+            })
             .collect();
 
         if include_snapshot_positions {
@@ -540,23 +563,28 @@ fn parse_nonzero_ratio(value: &str) -> Decimal {
     }
 }
 
-fn transaction_lot_view_row(row: LotRecordDB) -> AssetLotViewRow {
+fn transaction_lot_view_row(row: LotRecordDB, account_name: String) -> AssetLotViewRow {
     let split_ratio = parse_nonzero_ratio(&row.split_ratio);
     let remaining_quantity = parse_decimal(&row.remaining_quantity);
-    let unit_cost = parse_decimal(&row.cost_per_unit) / split_ratio;
+    let original_quantity = parse_decimal(&row.original_quantity);
 
     AssetLotViewRow {
         id: row.id,
         account_id: row.account_id,
+        account_name,
         asset_id: row.asset_id,
         source: AssetLotViewSource::TransactionLot,
         quantity: remaining_quantity * split_ratio,
+        original_quantity,
+        remaining_quantity,
         cost_basis: parse_decimal(&row.remaining_cost_basis),
-        unit_cost,
+        unit_cost: parse_decimal(&row.cost_per_unit),
         fees: parse_decimal(&row.fee_allocated),
+        split_ratio,
         acquisition_date: Some(row.open_date),
         snapshot_date: None,
         is_closed: row.is_closed != 0,
+        close_date: row.close_date,
     }
 }
 
@@ -573,15 +601,20 @@ fn snapshot_position_view_row(
             snapshot.snapshot_id, snapshot.account_id, asset_id
         ),
         account_id: snapshot.account_id.clone(),
+        account_name: snapshot.account_name.clone(),
         asset_id: asset_id.to_string(),
         source: AssetLotViewSource::SnapshotPosition,
         quantity,
+        original_quantity: quantity,
+        remaining_quantity: quantity,
         cost_basis: total_cost_basis,
         unit_cost: average_cost,
         fees: Decimal::ZERO,
+        split_ratio: Decimal::ONE,
         acquisition_date: None,
         snapshot_date: Some(snapshot.snapshot_date.clone()),
         is_closed: false,
+        close_date: None,
     }
 }
 
@@ -594,6 +627,7 @@ fn load_snapshot_lot_view_rows(
         SELECT
             hs.id AS snapshot_id,
             hs.account_id AS account_id,
+            a.name AS account_name,
             CAST(hs.snapshot_date AS TEXT) AS snapshot_date,
             hs.positions AS positions
         FROM holdings_snapshots hs
@@ -1353,6 +1387,43 @@ mod tests {
         assert_eq!(snapshot_row.unit_cost, Decimal::from(200));
         assert_eq!(snapshot_row.cost_basis, Decimal::from(2400));
         assert_eq!(snapshot_row.snapshot_date.as_deref(), Some("2026-05-20"));
+    }
+
+    #[tokio::test]
+    async fn asset_lot_view_includes_closed_lots_and_lifecycle_fields() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_asset(&pool, "AAPL");
+
+        let mut open_lot = make_lot_record("open-lot", "acc1", "AAPL", "10");
+        open_lot.split_ratio = "2".to_string();
+
+        let mut closed_lot = make_lot_record("closed-lot", "acc1", "AAPL", "5");
+        closed_lot.remaining_quantity = "0".to_string();
+        closed_lot.remaining_cost_basis = "0".to_string();
+        closed_lot.is_closed = true;
+        closed_lot.close_date = Some("2024-03-01".to_string());
+
+        repo.replace_lots_for_account("acc1", &[open_lot, closed_lot])
+            .await
+            .unwrap();
+
+        let rows = repo.get_asset_lot_view("AAPL", false).await.unwrap();
+        assert_eq!(rows.len(), 2);
+
+        let open_row = rows.iter().find(|row| row.id == "open-lot").unwrap();
+        assert_eq!(open_row.account_name, "Test");
+        assert_eq!(open_row.original_quantity, Decimal::from(10));
+        assert_eq!(open_row.remaining_quantity, Decimal::from(10));
+        assert_eq!(open_row.split_ratio, Decimal::from(2));
+        assert_eq!(open_row.quantity, Decimal::from(20));
+        assert!(!open_row.is_closed);
+
+        let closed_row = rows.iter().find(|row| row.id == "closed-lot").unwrap();
+        assert!(closed_row.is_closed);
+        assert_eq!(closed_row.remaining_quantity, Decimal::ZERO);
+        assert_eq!(closed_row.quantity, Decimal::ZERO);
+        assert_eq!(closed_row.close_date.as_deref(), Some("2024-03-01"));
     }
 
     #[tokio::test]

@@ -581,15 +581,20 @@ export type AssetLotViewSource = "TRANSACTION_LOT" | "SNAPSHOT_POSITION";
 export interface AssetLotViewRow {
   id: string;
   accountId: string;
+  accountName: string;
   assetId: string;
   source: AssetLotViewSource;
   quantity: number;
+  originalQuantity: number;
+  remainingQuantity: number;
   costBasis: number;
   unitCost: number;
   fees: number;
+  splitRatio: number;
   acquisitionDate?: string | null;
   snapshotDate?: string | null;
   isClosed: boolean;
+  closeDate?: string | null;
 }
 
 export interface Position {
@@ -621,6 +626,7 @@ export interface Holding {
   quantity: number;
   openDate?: string | Date | null;
   lots?: Lot[] | null;
+  contractMultiplier?: number | null;
   localCurrency: string;
   baseCurrency: string;
   fxRate?: number | null;

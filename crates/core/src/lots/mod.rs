@@ -207,15 +207,27 @@ pub enum AssetLotViewSource {
 pub struct AssetLotViewRow {
     pub id: String,
     pub account_id: String,
+    pub account_name: String,
     pub asset_id: String,
     pub source: AssetLotViewSource,
+    /// Effective current quantity. For transaction lots this is
+    /// `remaining_quantity * split_ratio`; snapshot positions are already
+    /// aggregate current quantities.
     pub quantity: Decimal,
+    /// As-acquired quantity for transaction lots. Snapshot positions report the
+    /// aggregate snapshot quantity here for shape consistency.
+    pub original_quantity: Decimal,
+    /// Remaining quantity in as-acquired units for transaction lots. Snapshot
+    /// positions report the aggregate snapshot quantity here.
+    pub remaining_quantity: Decimal,
     pub cost_basis: Decimal,
     pub unit_cost: Decimal,
     pub fees: Decimal,
+    pub split_ratio: Decimal,
     pub acquisition_date: Option<String>,
     pub snapshot_date: Option<String>,
     pub is_closed: bool,
+    pub close_date: Option<String>,
 }
 
 // Tax-conclusion concepts (disposal method, wash-sale, holding period) live in
