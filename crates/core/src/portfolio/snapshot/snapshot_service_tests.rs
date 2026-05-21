@@ -846,6 +846,91 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct RecordingLotRepository {
+        replaced_accounts: Arc<RwLock<Vec<String>>>,
+    }
+
+    impl RecordingLotRepository {
+        fn new() -> Self {
+            Self {
+                replaced_accounts: Arc::new(RwLock::new(Vec::new())),
+            }
+        }
+
+        fn replaced_accounts(&self) -> Vec<String> {
+            self.replaced_accounts.read().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl LotRepositoryTrait for RecordingLotRepository {
+        async fn replace_lots_for_account(
+            &self,
+            account_id: &str,
+            _lots: &[LotRecord],
+        ) -> AppResult<()> {
+            self.replaced_accounts
+                .write()
+                .unwrap()
+                .push(account_id.to_string());
+            Ok(())
+        }
+
+        async fn get_open_lots_for_account(&self, _account_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_open_lots(&self) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_as_of_date(
+            &self,
+            _account_ids: &[String],
+            _date: NaiveDate,
+        ) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots_for_account(&self, _account_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_for_asset(&self, _asset_id: &str) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_asset_lot_view(
+            &self,
+            _asset_id: &str,
+            _include_snapshot_positions: bool,
+        ) -> AppResult<Vec<AssetLotView>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots(&self) -> AppResult<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn sync_lots_for_account(
+            &self,
+            _account_id: &str,
+            _open_lots: &[LotRecord],
+            _closures: &[LotClosure],
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        async fn get_open_position_quantities(&self) -> AppResult<HashMap<String, Decimal>> {
+            Ok(HashMap::new())
+        }
+
+        fn count_lots(&self) -> AppResult<i64> {
+            Ok(0)
+        }
+    }
+
     // Mock SnapshotRepository that implements the trait
     #[derive(Clone, Debug)]
     struct MockSnapshotRepository {
@@ -1035,12 +1120,27 @@ mod tests {
 
         async fn overwrite_snapshots_for_account_in_range(
             &self,
-            _account_id: &str,
-            _start_date: NaiveDate,
-            _end_date: NaiveDate,
+            account_id: &str,
+            start_date: NaiveDate,
+            end_date: NaiveDate,
             snapshots_to_save: &[AccountStateSnapshot],
         ) -> AppResult<()> {
-            self.save_snapshots(snapshots_to_save).await
+            let mut saved_store = self.saved_snapshots.write().unwrap();
+            saved_store.clear();
+            saved_store.extend(snapshots_to_save.iter().cloned());
+
+            let mut store = self.snapshots.write().unwrap();
+            if let Some(account_snaps) = store.get_mut(account_id) {
+                account_snaps.retain(|snap| {
+                    snap.snapshot_date < start_date || snap.snapshot_date > end_date
+                });
+            }
+            if !snapshots_to_save.is_empty() {
+                let account_snaps = store.entry(account_id.to_string()).or_default();
+                account_snaps.extend(snapshots_to_save.iter().cloned());
+                account_snaps.sort_by_key(|snap| snap.snapshot_date);
+            }
+            Ok(())
         }
 
         async fn overwrite_multiple_account_snapshot_ranges(
@@ -1685,6 +1785,59 @@ mod tests {
             !snapshot_repo.get_saved_snapshots().is_empty(),
             "snapshot write should happen before the dual-write error is surfaced"
         );
+    }
+
+    #[tokio::test]
+    async fn test_since_date_recalc_clears_snapshots_and_lots_when_last_activity_deleted() {
+        let base_currency_arc = Arc::new(RwLock::new("CAD".to_string()));
+
+        let mut account_repo = MockAccountRepository::new();
+        let acc = create_test_account("acc1", "CAD", "Deleted Activity Account");
+        account_repo.add_account(acc.clone());
+        let account_repo = Arc::new(account_repo);
+
+        let activity_repo = Arc::new(MockActivityRepositoryWithData::new(Vec::new()));
+        let fx = Arc::new(MockFxService::new());
+        let snapshot_repo = Arc::new(MockSnapshotRepository::new());
+        let asset_repo = Arc::new(MockAssetRepository::new());
+
+        let today = valuation_date_today();
+        let stale_date = today.pred_opt().unwrap_or(today);
+        snapshot_repo.add_snapshots(vec![create_blank_snapshot(
+            &acc.id,
+            "CAD",
+            &stale_date.format("%Y-%m-%d").to_string(),
+        )]);
+
+        let lot_repo = RecordingLotRepository::new();
+        let lot_repo_assert = lot_repo.clone();
+        let svc = SnapshotService::new(
+            base_currency_arc,
+            account_repo,
+            activity_repo,
+            snapshot_repo.clone(),
+            asset_repo,
+            fx,
+        )
+        .with_lot_repository(Arc::new(lot_repo));
+
+        let saved = svc
+            .recalculate_holdings_snapshots(
+                Some(std::slice::from_ref(&acc.id)),
+                SnapshotRecalcMode::SinceDate(stale_date),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(saved, 0);
+        assert!(
+            snapshot_repo
+                .get_snapshots_by_account(&acc.id, None, None)
+                .unwrap()
+                .is_empty(),
+            "stale snapshots for the account should be deleted"
+        );
+        assert_eq!(lot_repo_assert.replaced_accounts(), vec![acc.id]);
     }
 
     #[tokio::test]

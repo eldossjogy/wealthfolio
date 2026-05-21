@@ -10,11 +10,9 @@
 //! at CRITICAL severity so they can be caught before the lots table becomes
 //! the authoritative source.
 //!
-//! `open_activity_id` is intentionally left NULL in this parallel-write phase.
-//! Transferred sub-lots use composite IDs (e.g. `<activity_id>_lot2`) that do not
-//! correspond to any row in the `activities` table, so linking them would violate
-//! the foreign-key constraint. The column will be populated once incremental lot
-//! maintenance replaces the full-replay approach.
+//! Lots that map directly to an activity keep that activity's id in
+//! `open_activity_id`. Synthetic sub-lots that do not correspond to an activity
+//! row leave it NULL to preserve the foreign-key constraint.
 
 use async_trait::async_trait;
 use chrono::{NaiveDate, Utc};
@@ -71,8 +69,8 @@ pub struct LotClosure {
 /// Persistence interface for lot rows.
 #[async_trait]
 pub trait LotRepositoryTrait: Send + Sync {
-    /// Replaces all open lot rows for the given account with the provided records.
-    /// Existing rows for the account are deleted before inserting new ones.
+    /// Replaces every lot row for the given account with the provided records.
+    /// Existing open and closed rows for the account are deleted before insert.
     async fn replace_lots_for_account(&self, account_id: &str, lots: &[LotRecord]) -> Result<()>;
 
     /// Returns all open (is_closed = 0) lot rows for the given account.
@@ -113,8 +111,9 @@ pub trait LotRepositoryTrait: Send + Sync {
     /// Used when computing valuations for the TOTAL pseudo-account.
     async fn get_all_lots(&self) -> Result<Vec<LotRecord>>;
 
-    /// Syncs the lots table for the given account without ever deleting rows:
+    /// Syncs the lots table for the given account while preserving closed history:
     /// - Open lots in `open_lots` are upserted (inserted if new, remaining_quantity updated if changed).
+    /// - Existing open lots missing from `open_lots` are removed.
     /// - Lots listed in `closures` are marked is_closed=1 with their close_date/activity.
     ///
     /// Replaces `replace_lots_for_account` once the transition to incremental lot maintenance

@@ -1009,10 +1009,8 @@ impl HoldingsCalculator {
                 activity_date_in_tz(instant, tz)
             })?;
         } else {
-            // Position not yet open in this account — split is a no-op for now.
-            // If a TRANSFER_IN later brings lots whose acquisition_date predates
-            // this split, the cumulative ratio recompute path (lots/mod.rs) will
-            // pick it up.
+            // Position not yet open in this account, so there are no local lots
+            // for this split to adjust.
             debug!(
                 "SPLIT activity {} for asset {} on {}: no open position, skipping.",
                 activity.id, asset_id, activity.activity_date

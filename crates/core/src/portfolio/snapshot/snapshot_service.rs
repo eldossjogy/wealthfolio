@@ -227,6 +227,50 @@ impl SnapshotService {
         }
     }
 
+    fn ensure_no_lot_sync_errors(lot_sync_errors: &[String]) -> Result<()> {
+        if lot_sync_errors.is_empty() {
+            return Ok(());
+        }
+
+        Err(Error::Database(crate::errors::DatabaseError::QueryFailed(
+            format!(
+                "lot sync failed for {} account(s): {}",
+                lot_sync_errors.len(),
+                lot_sync_errors.join("; ")
+            ),
+        )))
+    }
+
+    async fn clear_stale_account_state(
+        &self,
+        account_ids: &[String],
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        lot_sync_errors: &mut Vec<String>,
+    ) -> Result<()> {
+        for acc_id in account_ids {
+            debug!(
+                "Cleaning up stale snapshots for account {} (no remaining activities)",
+                acc_id
+            );
+            self.snapshot_repository
+                .overwrite_snapshots_for_account_in_range(acc_id, start_date, end_date, &[])
+                .await?;
+
+            if let Some(lot_repo) = &self.lot_repository {
+                if let Err(e) = lot_repo.replace_lots_for_account(acc_id, &[]).await {
+                    error!(
+                        "Failed to clear lots for account {} after activity deletion: {}",
+                        acc_id, e
+                    );
+                    lot_sync_errors.push(format!("{}: {}", acc_id, e));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // Create a virtual account object for TOTAL
     fn create_total_virtual_account(&self) -> Account {
         let now = Utc::now().naive_utc();
@@ -269,6 +313,8 @@ impl SnapshotService {
             return Ok(0);
         }
 
+        let mut lot_sync_errors: Vec<String> = Vec::new();
+
         if all_activities.is_empty() && matches!(mode, SnapshotRecalcMode::Full) {
             warn!("No activities found. Clearing snapshots due to Full recalc mode.");
             let ids_to_delete: Vec<String> = accounts_to_process.keys().cloned().collect();
@@ -291,6 +337,22 @@ impl SnapshotService {
             }
             return Ok(0);
         } else if all_activities.is_empty() {
+            if let SnapshotRecalcMode::SinceDate(since) = &mode {
+                warn!(
+                    "No activities found. Clearing stale snapshots from {} due to SinceDate recalc.",
+                    since
+                );
+                let ids_to_cleanup: Vec<String> = accounts_to_process.keys().cloned().collect();
+                self.clear_stale_account_state(
+                    &ids_to_cleanup,
+                    *since,
+                    calculation_end_date,
+                    &mut lot_sync_errors,
+                )
+                .await?;
+                Self::ensure_no_lot_sync_errors(&lot_sync_errors)?;
+                return Ok(0);
+            }
             warn!("No activities found for accounts. Calculation will be trivial.");
             return Ok(0);
         }
@@ -343,13 +405,6 @@ impl SnapshotService {
                 error!("  - {}", warning);
             }
         }
-
-        // Accumulate per-account lot sync failures so the loop can complete
-        // (other accounts' work still proceeds) but the function can return
-        // an aggregate error at the end. Without this, a lot-sync failure
-        // would be logged and silently swallowed, leaving the JSON snapshot
-        // and the lots table to diverge with no signal to the caller.
-        let mut lot_sync_errors: Vec<String> = Vec::new();
 
         // Persist keyframe snapshots
         for acc_id in accounts_needing_calculation.keys() {
@@ -451,40 +506,18 @@ impl SnapshotService {
         // were skipped by determine_calculation_range_and_initial_state, so their
         // old snapshots must be removed here.
         if let SnapshotRecalcMode::SinceDate(since) = &mode {
-            for acc_id in accounts_to_process.keys() {
-                if !accounts_needing_calculation.contains_key(acc_id) {
-                    debug!(
-                        "Cleaning up stale snapshots for account {} (no remaining activities)",
-                        acc_id
-                    );
-                    self.snapshot_repository
-                        .overwrite_snapshots_for_account_in_range(
-                            acc_id,
-                            *since,
-                            calculation_end_date,
-                            &[], // empty = delete old snapshots, insert nothing
-                        )
-                        .await?;
-
-                    // The lots that were derived from those activities are
-                    // now orphaned — clear them so the table stays in sync.
-                    // Accumulate failures into the same lot_sync_errors Vec
-                    // the main loop uses so the function surfaces a real Err
-                    // at the end. Without this, snapshots were deleted but a
-                    // failure clearing lots was warn-only — the caller saw
-                    // success while the lots table stayed populated against
-                    // the now-deleted snapshots.
-                    if let Some(lot_repo) = &self.lot_repository {
-                        if let Err(e) = lot_repo.replace_lots_for_account(acc_id, &[]).await {
-                            error!(
-                                "Failed to clear lots for account {} after activity deletion: {}",
-                                acc_id, e
-                            );
-                            lot_sync_errors.push(format!("{}: {}", acc_id, e));
-                        }
-                    }
-                }
-            }
+            let stale_account_ids: Vec<String> = accounts_to_process
+                .keys()
+                .filter(|acc_id| !accounts_needing_calculation.contains_key(*acc_id))
+                .cloned()
+                .collect();
+            self.clear_stale_account_state(
+                &stale_account_ids,
+                *since,
+                calculation_end_date,
+                &mut lot_sync_errors,
+            )
+            .await?;
         }
 
         // Surface any per-account lot-sync failures collected during the
@@ -493,15 +526,7 @@ impl SnapshotService {
         // lots table diverged. Returning Err signals the caller that the
         // dual-write contract was partially broken and a retry / Full
         // recalc is needed to bring things back in sync.
-        if !lot_sync_errors.is_empty() {
-            return Err(Error::Database(crate::errors::DatabaseError::QueryFailed(
-                format!(
-                    "lot sync failed for {} account(s): {}",
-                    lot_sync_errors.len(),
-                    lot_sync_errors.join("; ")
-                ),
-            )));
-        }
+        Self::ensure_no_lot_sync_errors(&lot_sync_errors)?;
 
         Ok(keyframes_to_save.len())
     }
