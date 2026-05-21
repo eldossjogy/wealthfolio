@@ -156,12 +156,6 @@ impl AllocationService {
                         .entry("__UNKNOWN__".to_string())
                         .or_insert(Decimal::ZERO) += market_value;
                 } else {
-                    // Normalize weights: if total exceeds 10000 bps (100%), scale down
-                    // proportionally so a single asset never contributes more than its
-                    // full market value to the portfolio total.
-                    let total_weight: i32 = taxonomy_assignments.iter().map(|(_, _, w)| w).sum();
-                    let weight_divisor = Decimal::from(total_weight.max(10000));
-
                     // In rollup mode: skip top-level category assignments when a child of
                     // that category is also assigned for this asset (leaf-wins principle).
                     // Without this guard, Americas + United States both roll up to Americas
@@ -183,7 +177,29 @@ impl AllocationService {
                             std::collections::HashSet::new()
                         };
 
-                    for (_, category_id, weight) in &taxonomy_assignments {
+                    // Build active assignment set after applying leaf-wins filter, then
+                    // normalize over only those active assignments. Computing total_weight
+                    // before filtering would dilute kept leaf weights by skipped parents.
+                    let active_assignments: Vec<_> = taxonomy_assignments
+                        .iter()
+                        .filter(|(_, category_id, _)| {
+                            if !rollup_to_top_level {
+                                return true;
+                            }
+                            let top = top_level_map
+                                .get(category_id.as_str())
+                                .copied()
+                                .unwrap_or(category_id.as_str());
+                            !(top == category_id.as_str()
+                                && top_levels_covered_by_children.contains(top))
+                        })
+                        .collect();
+
+                    let total_active_weight: i32 =
+                        active_assignments.iter().map(|(_, _, w)| *w).sum();
+                    let weight_divisor = Decimal::from(total_active_weight.max(10000));
+
+                    for (_, category_id, weight) in active_assignments.iter() {
                         let top_level_id = if rollup_to_top_level {
                             top_level_map
                                 .get(category_id.as_str())
@@ -192,14 +208,6 @@ impl AllocationService {
                         } else {
                             category_id.as_str()
                         };
-
-                        // Skip parent if a child assignment already covers this top-level
-                        if rollup_to_top_level
-                            && top_level_id == category_id.as_str()
-                            && top_levels_covered_by_children.contains(top_level_id)
-                        {
-                            continue;
-                        }
 
                         let weight_decimal = Decimal::from(*weight) / weight_divisor;
                         let weighted_value = market_value * weight_decimal;
@@ -551,22 +559,41 @@ impl AllocationService {
                 .collect()
         };
 
-        // Get assignments for all matching categories
-        let mut asset_to_weight: HashMap<String, i32> = HashMap::new();
+        // Get assignments for all matching categories, applying leaf-wins to avoid
+        // double-counting when both a parent and its child are assigned to the same asset.
+        // Separate direct (target category itself) from child category assignments.
+        // If an asset has child-level assignments, use those; otherwise fall back to direct.
+        let mut direct_weight: HashMap<String, i32> = HashMap::new();
+        let mut child_weight: HashMap<String, i32> = HashMap::new();
         for cat_id in &matching_category_ids {
             if *cat_id == "__UNKNOWN__" {
                 continue;
             }
+            let is_direct = *cat_id == category_id;
             if let Ok(assignments) = self
                 .taxonomy_service
                 .get_category_assignments(taxonomy_id, cat_id)
             {
                 for assignment in assignments {
-                    *asset_to_weight
-                        .entry(assignment.asset_id.clone())
-                        .or_insert(0) += assignment.weight;
+                    if is_direct {
+                        *direct_weight
+                            .entry(assignment.asset_id.clone())
+                            .or_insert(0) += assignment.weight;
+                    } else {
+                        *child_weight.entry(assignment.asset_id.clone()).or_insert(0) +=
+                            assignment.weight;
+                    }
                 }
             }
+        }
+        // Leaf-wins: prefer child weights; fall back to direct only when no child exists.
+        // Also normalize each asset's weight to at most 10000 bps (100%).
+        let mut asset_to_weight: HashMap<String, i32> = child_weight;
+        for (asset_id, weight) in direct_weight {
+            asset_to_weight.entry(asset_id).or_insert(weight);
+        }
+        for weight in asset_to_weight.values_mut() {
+            *weight = (*weight).min(10000);
         }
 
         // Calculate total value of matched holdings for weight calculation
