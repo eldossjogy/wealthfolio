@@ -377,10 +377,11 @@ function getLotDisplayValues(
 ) {
   const isSnapshot = lot.source === "SNAPSHOT_POSITION";
   const splitRatio = lot.splitRatio || 1;
+  const rowContractMultiplier = lot.contractMultiplier || contractMultiplier || 1;
   const remainingQuantity = isSnapshot ? lot.quantity : lot.remainingQuantity;
   const effectiveQuantity = isSnapshot ? lot.quantity : remainingQuantity * splitRatio;
   const isValuable = !lot.isClosed;
-  const marketValue = effectiveQuantity * marketPrice * contractMultiplier;
+  const marketValue = effectiveQuantity * marketPrice * rowContractMultiplier;
   const gainLossAmount = marketValue - lot.costBasis;
   const gainLossPercent = lot.costBasis !== 0 ? gainLossAmount / lot.costBasis : 0;
 

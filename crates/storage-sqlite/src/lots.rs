@@ -8,12 +8,14 @@ use diesel::sql_types::Text;
 use diesel::sqlite::SqliteConnection;
 use std::sync::Arc;
 
+use crate::assets::AssetDB;
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
 use chrono::NaiveDate;
 use log::warn;
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
+use wealthfolio_core::assets::Asset;
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::lots::{
     AssetLotViewRow, AssetLotViewSource, LotClosure, LotRecord, LotRepositoryTrait,
@@ -258,6 +260,7 @@ impl LotRepositoryTrait for LotsRepository {
                 .into_iter()
                 .collect()
         };
+        let contract_multiplier = load_asset_contract_multiplier(&mut conn, asset_id)?;
 
         let mut rows: Vec<AssetLotViewRow> = transaction_rows
             .into_iter()
@@ -266,7 +269,7 @@ impl LotRepositoryTrait for LotsRepository {
                     .get(&row.account_id)
                     .cloned()
                     .unwrap_or_else(|| row.account_id.clone());
-                transaction_lot_view_row(row, account_name)
+                transaction_lot_view_row(row, account_name, contract_multiplier)
             })
             .collect();
 
@@ -563,7 +566,11 @@ fn parse_nonzero_ratio(value: &str) -> Decimal {
     }
 }
 
-fn transaction_lot_view_row(row: LotRecordDB, account_name: String) -> AssetLotViewRow {
+fn transaction_lot_view_row(
+    row: LotRecordDB,
+    account_name: String,
+    contract_multiplier: Decimal,
+) -> AssetLotViewRow {
     let split_ratio = parse_nonzero_ratio(&row.split_ratio);
     let remaining_quantity = parse_decimal(&row.remaining_quantity);
     let original_quantity = parse_decimal(&row.original_quantity);
@@ -581,6 +588,7 @@ fn transaction_lot_view_row(row: LotRecordDB, account_name: String) -> AssetLotV
         unit_cost: parse_decimal(&row.cost_per_unit),
         fees: parse_decimal(&row.fee_allocated),
         split_ratio,
+        contract_multiplier,
         acquisition_date: Some(row.open_date),
         snapshot_date: None,
         is_closed: row.is_closed != 0,
@@ -593,6 +601,7 @@ fn snapshot_position_view_row(
     quantity: Decimal,
     average_cost: Decimal,
     total_cost_basis: Decimal,
+    contract_multiplier: Decimal,
     asset_id: &str,
 ) -> AssetLotViewRow {
     AssetLotViewRow {
@@ -611,6 +620,7 @@ fn snapshot_position_view_row(
         unit_cost: average_cost,
         fees: Decimal::ZERO,
         split_ratio: Decimal::ONE,
+        contract_multiplier,
         acquisition_date: None,
         snapshot_date: Some(snapshot.snapshot_date.clone()),
         is_closed: false,
@@ -673,9 +683,9 @@ fn load_snapshot_lot_view_rows(
             .collect()
     };
 
-    let relational_positions: HashMap<String, (Decimal, Decimal, Decimal)> = {
+    let relational_positions: HashMap<String, (Decimal, Decimal, Decimal, Decimal)> = {
         use crate::schema::snapshot_positions::dsl as sp;
-        let rows: Vec<(String, String, String, String)> = sp::snapshot_positions
+        let rows: Vec<(String, String, String, String, String)> = sp::snapshot_positions
             .filter(sp::snapshot_id.eq_any(&snapshot_ids))
             .filter(sp::asset_id.eq(asset_id_param))
             .select((
@@ -683,27 +693,31 @@ fn load_snapshot_lot_view_rows(
                 sp::quantity,
                 sp::average_cost,
                 sp::total_cost_basis,
+                sp::contract_multiplier,
             ))
             .load(conn)
             .map_err(StorageError::from)?;
 
         rows.into_iter()
-            .map(|(snapshot_id, quantity, average_cost, total_cost_basis)| {
-                (
-                    snapshot_id,
+            .map(
+                |(snapshot_id, quantity, average_cost, total_cost_basis, contract_multiplier)| {
                     (
-                        parse_decimal(&quantity),
-                        parse_decimal(&average_cost),
-                        parse_decimal(&total_cost_basis),
-                    ),
-                )
-            })
+                        snapshot_id,
+                        (
+                            parse_decimal(&quantity),
+                            parse_decimal(&average_cost),
+                            parse_decimal(&total_cost_basis),
+                            parse_nonzero_ratio(&contract_multiplier),
+                        ),
+                    )
+                },
+            )
             .collect()
     };
 
     let mut rows = Vec::new();
     for snapshot in &latest_snapshots {
-        if let Some((quantity, average_cost, total_cost_basis)) =
+        if let Some((quantity, average_cost, total_cost_basis, contract_multiplier)) =
             relational_positions.get(&snapshot.snapshot_id).copied()
         {
             rows.push(snapshot_position_view_row(
@@ -711,6 +725,7 @@ fn load_snapshot_lot_view_rows(
                 quantity,
                 average_cost,
                 total_cost_basis,
+                contract_multiplier,
                 asset_id_param,
             ));
             continue;
@@ -727,12 +742,32 @@ fn load_snapshot_lot_view_rows(
                 position.quantity,
                 position.average_cost,
                 position.total_cost_basis,
+                position.contract_multiplier,
                 asset_id_param,
             ));
         }
     }
 
     Ok(rows)
+}
+
+fn load_asset_contract_multiplier(
+    conn: &mut SqliteConnection,
+    asset_id_param: &str,
+) -> Result<Decimal> {
+    use crate::schema::assets::dsl;
+
+    let asset: Option<AssetDB> = dsl::assets
+        .filter(dsl::id.eq(asset_id_param))
+        .select(AssetDB::as_select())
+        .first(conn)
+        .optional()
+        .map_err(StorageError::from)?;
+
+    Ok(asset
+        .map(Asset::from)
+        .map(|asset| asset.contract_multiplier())
+        .unwrap_or(Decimal::ONE))
 }
 
 /// Deserialize the legacy `holdings_snapshots.positions` JSON column into a
@@ -1386,6 +1421,7 @@ mod tests {
         assert_eq!(snapshot_row.quantity, Decimal::from(12));
         assert_eq!(snapshot_row.unit_cost, Decimal::from(200));
         assert_eq!(snapshot_row.cost_basis, Decimal::from(2400));
+        assert_eq!(snapshot_row.contract_multiplier, Decimal::ONE);
         assert_eq!(snapshot_row.snapshot_date.as_deref(), Some("2026-05-20"));
     }
 
@@ -1394,6 +1430,11 @@ mod tests {
         let (repo, pool, _dir) = setup().await;
         insert_account(&pool, "acc1");
         insert_asset(&pool, "AAPL");
+        let mut conn = get_connection(&pool).unwrap();
+        diesel::sql_query("UPDATE assets SET instrument_type = 'OPTION' WHERE id = 'AAPL'")
+            .execute(&mut conn)
+            .unwrap();
+        drop(conn);
 
         let mut open_lot = make_lot_record("open-lot", "acc1", "AAPL", "10");
         open_lot.split_ratio = "2".to_string();
@@ -1416,6 +1457,7 @@ mod tests {
         assert_eq!(open_row.original_quantity, Decimal::from(10));
         assert_eq!(open_row.remaining_quantity, Decimal::from(10));
         assert_eq!(open_row.split_ratio, Decimal::from(2));
+        assert_eq!(open_row.contract_multiplier, Decimal::from(100));
         assert_eq!(open_row.quantity, Decimal::from(20));
         assert!(!open_row.is_closed);
 

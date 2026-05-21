@@ -591,6 +591,7 @@ export interface AssetLotViewRow {
   unitCost: number;
   fees: number;
   splitRatio: number;
+  contractMultiplier: number;
   acquisitionDate?: string | null;
   snapshotDate?: string | null;
   isClosed: boolean;

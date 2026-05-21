@@ -224,6 +224,7 @@ pub struct AssetLotViewRow {
     pub unit_cost: Decimal,
     pub fees: Decimal,
     pub split_ratio: Decimal,
+    pub contract_multiplier: Decimal,
     pub acquisition_date: Option<String>,
     pub snapshot_date: Option<String>,
     pub is_closed: bool,
