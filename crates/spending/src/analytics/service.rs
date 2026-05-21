@@ -1235,26 +1235,30 @@ impl AnalyticsService {
             })
             .collect();
 
-        // Load all activities once and index by event tag (sourced from the
-        // join table, not from a per-row column).
+        // Load all activities once, then narrow to the date window *before*
+        // hitting the join table — preloading tags for activities we'll drop
+        // immediately would pull in junk ids on a wide history.
         let activities = self
             .activity_repo
             .get_activities_by_account_ids(&target_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let activity_ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+        let activities_in_window: Vec<Activity> = activities
+            .into_iter()
+            .filter(|a| {
+                activity_date_in_window(
+                    &a.activity_date,
+                    window_start.as_ref(),
+                    window_end.as_ref(),
+                )
+            })
+            .collect();
+        let activity_ids: Vec<String> = activities_in_window.iter().map(|a| a.id.clone()).collect();
         let tag_map = self
             .activity_events
             .list_for_activities(&activity_ids)
             .await?;
         let mut by_event: HashMap<String, Vec<Activity>> = HashMap::new();
-        for a in activities {
-            if !activity_date_in_window(
-                &a.activity_date,
-                window_start.as_ref(),
-                window_end.as_ref(),
-            ) {
-                continue;
-            }
+        for a in activities_in_window {
             if let Some(eid) = tag_map.get(&a.id).cloned() {
                 let Some(classification) = classification_for(&a, &account_types) else {
                     continue;

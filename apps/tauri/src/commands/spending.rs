@@ -15,6 +15,7 @@ use wealthfolio_spending::budget::{
 };
 use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+    CashActivity,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, ImportPresetResult, NewCategorizationRule,
@@ -123,7 +124,7 @@ pub async fn update_spending_settings(
 pub async fn list_cash_activities(
     filter: Option<CashActivityFilter>,
     state: State<'_, Arc<ServiceContext>>,
-) -> Result<Vec<Activity>, String> {
+) -> Result<Vec<CashActivity>, String> {
     debug!("Listing cash activities...");
     state
         .cash_activity_service()

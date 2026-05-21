@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use wealthfolio_core::activities::ActivityRepositoryTrait;
+use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 
 use super::model::{Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent};
 use super::traits::{EventTypesRepositoryTrait, EventsRepositoryTrait};
@@ -120,28 +120,21 @@ impl EventsService {
         let updated = self.events_repo.update(id, patch).await?;
 
         // Untag activities that fell out of the new window on either narrowed
-        // side. We ask the join table for ids tagged to this event (cheap,
-        // indexed lookup) instead of scanning all activities for an event_id
-        // field that no longer exists on the row.
+        // side. Indexed lookup on activity_events gives us just the ids
+        // tagged to this event (typically small), and we fetch each by id
+        // instead of scanning the whole activities table.
         if narrowed_start || narrowed_end {
             let tagged_ids = self.activity_events.list_for_event(id).await?;
-            if !tagged_ids.is_empty() {
-                let all = self
+            for activity_id in &tagged_ids {
+                let a = self
                     .activity_repo
-                    .get_activities()
+                    .get_activity(activity_id)
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                let tagged: std::collections::HashSet<&str> =
-                    tagged_ids.iter().map(String::as_str).collect();
-                for a in &all {
-                    if !tagged.contains(a.id.as_str()) {
-                        continue;
-                    }
-                    if a.activity_date < new_start_dt || a.activity_date > new_end_dt {
-                        self.activity_repo
-                            .set_activity_event_id(&a.id, None)
-                            .await
-                            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                    }
+                if a.activity_date < new_start_dt || a.activity_date > new_end_dt {
+                    self.activity_repo
+                        .set_activity_event_id(&a.id, None)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 }
             }
         }
@@ -149,21 +142,29 @@ impl EventsService {
         // On expansion, surface count of newly-eligible (untagged) activities so
         // the frontend can offer a "tag these N activities" CTA. We do not
         // auto-tag.
+        //
+        // Perf: filter activities by the diff window (newly-included rows
+        // only) *before* preloading the tag map — preloading tags for the
+        // whole activity table is wasted work when most activities aren't
+        // even in the date diff.
         if expanded_start || expanded_end {
             let all = self
                 .activity_repo
                 .get_activities()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            let activity_ids: Vec<String> = all.iter().map(|a| a.id.clone()).collect();
+            let diff_candidates: Vec<&Activity> = all
+                .iter()
+                .filter(|a| a.activity_date >= new_start_dt && a.activity_date <= new_end_dt)
+                .filter(|a| a.activity_date < old_start_dt || a.activity_date > old_end_dt)
+                .collect();
+            let activity_ids: Vec<String> = diff_candidates.iter().map(|a| a.id.clone()).collect();
             let tag_map = self
                 .activity_events
                 .list_for_activities(&activity_ids)
                 .await?;
-            let newly_eligible = all
+            let newly_eligible = diff_candidates
                 .iter()
                 .filter(|a| !tag_map.contains_key(&a.id))
-                .filter(|a| a.activity_date >= new_start_dt && a.activity_date <= new_end_dt)
-                .filter(|a| a.activity_date < old_start_dt || a.activity_date > old_end_dt)
                 .count();
             if newly_eligible > 0 {
                 log::info!(
@@ -418,8 +419,20 @@ mod tests {
 
     #[async_trait]
     impl ActivityRepositoryTrait for MockActivityRepo {
-        fn get_activity(&self, _: &str) -> wealthfolio_core::Result<Activity> {
-            unimplemented!()
+        fn get_activity(&self, id: &str) -> wealthfolio_core::Result<Activity> {
+            self.activities
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|a| a.id == id)
+                .cloned()
+                .ok_or_else(|| {
+                    wealthfolio_core::errors::Error::Validation(
+                        wealthfolio_core::errors::ValidationError::InvalidInput(
+                            "not found".to_string(),
+                        ),
+                    )
+                })
         }
         fn get_activities(&self) -> wealthfolio_core::Result<Vec<Activity>> {
             Ok(self.activities.lock().unwrap().clone())

@@ -125,7 +125,7 @@ export interface Activity {
 
   /**
    * Optional spending event tag — sourced from the `activity_events` join
-   * table and surfaced on `CashActivityWithAssignments` (the spending
+   * table and surfaced on `CashActivity` (the spending
    * search response). Plain `getActivities()` lists don't populate this
    * field; consumers that need the tag should go through the spending
    * cash-activity search, which JOINs against `activity_events`.

@@ -102,19 +102,25 @@ fn default_limit() -> usize {
     50
 }
 
-/// Activity row enriched with its single-select activity-scope assignment.
+/// Canonical cash-activity row, returned by every spending read path
+/// (`list()` and `search()`). Flattens the portfolio-wide `Activity` and
+/// adds the spending-domain enrichments — single-select category assignment
+/// and the optional event tag — so callers always get the full shape in one
+/// round-trip.
+///
+/// Why this exists vs `Activity`: the core `Activity` struct is shared with
+/// the portfolio/investments path and stays free of spending-domain
+/// coupling. The enrichment fields live on the join tables
+/// (`activity_taxonomy_assignments`, `activity_events`) and only the
+/// spending feature's API surface joins them in.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CashActivityWithAssignments {
+pub struct CashActivity {
     #[serde(flatten)]
     pub activity: Activity,
-    /// All activity-scope assignments for this row (typically 0 or 1 for single-select).
+    /// Activity-scope assignments for this row. Typically 0 or 1 (single-select).
     pub assignments: Vec<ActivityTaxonomyAssignment>,
-    /// Spending event tag, sourced from the `activity_events` join table.
-    /// `None` when the activity isn't tagged. Surfaced here rather than on
-    /// the core `Activity` so the portfolio-side struct stays free of
-    /// spending-domain coupling; the frontend reads this field via the
-    /// `CashActivity` flattened projection.
+    /// Spending event tag from the `activity_events` join. `None` when untagged.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
@@ -124,7 +130,7 @@ pub struct CashActivityWithAssignments {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CashActivitySearchResponse {
-    pub items: Vec<CashActivityWithAssignments>,
+    pub items: Vec<CashActivity>,
     /// Total rows matching the filters (for pagination UI).
     pub total_count: usize,
 }

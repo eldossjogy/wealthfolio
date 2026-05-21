@@ -18,6 +18,7 @@ use wealthfolio_spending::budget::{
 };
 use wealthfolio_spending::cash_activities::{
     CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+    CashActivity,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
@@ -105,7 +106,7 @@ async fn spawn_auto_categorize_for_opted_in_accounts(state: &Arc<AppState>) {
 async fn list_cash_activities(
     State(state): State<Arc<AppState>>,
     Query(filter): Query<CashActivityFilter>,
-) -> ApiResult<Json<Vec<Activity>>> {
+) -> ApiResult<Json<Vec<CashActivity>>> {
     let activities = state.cash_activity_service.list(filter).await?;
     Ok(Json(activities))
 }

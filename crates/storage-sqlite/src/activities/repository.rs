@@ -482,13 +482,21 @@ impl ActivityRepositoryTrait for ActivityRepository {
                         })?;
                     }
                     None => {
-                        diesel::delete(
+                        // Only emit the sync tombstone when an actual row
+                        // was removed. Calling tx.delete unconditionally on
+                        // a no-op DELETE writes `last_op = Delete` in the
+                        // sync metadata for an entity the network never saw
+                        // — and a subsequent Create from another device
+                        // would then get rejected by LWW as resurrection.
+                        let removed = diesel::delete(
                             activity_events::table
                                 .filter(activity_events::activity_id.eq(&activity_id)),
                         )
                         .execute(tx.conn())
                         .map_err(StorageError::from)?;
-                        tx.delete::<ActivityEventDB>(activity_id.clone());
+                        if removed > 0 {
+                            tx.delete::<ActivityEventDB>(activity_id.clone());
+                        }
                     }
                 }
                 // 2) Bump activities.updated_at + load fresh row.

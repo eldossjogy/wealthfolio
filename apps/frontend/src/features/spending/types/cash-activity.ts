@@ -18,8 +18,6 @@ export interface ActivityTaxonomyAssignment {
   updatedAt: string;
 }
 
-export type CashActivity = Activity;
-
 export type CashActivityStatusFilter = "all" | "needs_review" | "uncategorized" | "categorized";
 
 export type CashActivitySortField = "date" | "amount";
@@ -44,12 +42,21 @@ export interface CashActivitySearchRequest {
   limit?: number;
 }
 
-/** Activity row enriched with its single-select assignments (typically 0 or 1). */
-export interface CashActivityWithAssignments extends Activity {
+/**
+ * Canonical cash-activity row. Mirrors
+ * `wealthfolio_spending::cash_activities::CashActivity` — the portfolio-wide
+ * `Activity` flattened with spending-domain enrichments (single-select
+ * assignment + optional event tag). Both `list()` and `search()` return this
+ * shape; consumers should always use it instead of bare `Activity` when in
+ * the spending feature.
+ */
+export interface CashActivity extends Activity {
   assignments: ActivityTaxonomyAssignment[];
+  /** Spending event tag from the `activity_events` join. `undefined` when untagged. */
+  eventId?: string | null;
 }
 
 export interface CashActivitySearchResponse {
-  items: CashActivityWithAssignments[];
+  items: CashActivity[];
   totalCount: number;
 }

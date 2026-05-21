@@ -7,7 +7,7 @@ import { searchCashActivities } from "../adapters/cash-activities";
 import type {
   CashActivitySearchRequest,
   CashActivitySearchResponse,
-  CashActivityWithAssignments,
+  CashActivity,
 } from "../types/cash-activity";
 
 const PAGE_SIZE = 50;
@@ -42,7 +42,7 @@ export function useCashActivitySearch(
     enabled,
   });
 
-  const items: CashActivityWithAssignments[] = useMemo(
+  const items: CashActivity[] = useMemo(
     () => query.data?.pages.flatMap((p) => p.items) ?? [],
     [query.data],
   );

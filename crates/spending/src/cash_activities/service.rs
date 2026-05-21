@@ -11,9 +11,8 @@ use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 
 use super::{
     model::{
-        CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-        CashActivitySortField, CashActivityStatusFilter, CashActivityWithAssignments,
-        SortDirection,
+        CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+        CashActivitySortField, CashActivityStatusFilter, SortDirection,
     },
     CASH_ACTIVITY_TYPES,
 };
@@ -49,10 +48,18 @@ impl CashActivityService {
         }
     }
 
-    /// List cash activities matching the (legacy) filter, scoped to opted-in spending accounts.
-    /// Returns empty vec if spending tracking is disabled or no accounts opted in.
-    /// Kept for backward compatibility with the legacy `list_cash_activities` endpoint.
-    pub async fn list(&self, filter: CashActivityFilter) -> Result<Vec<Activity>> {
+    /// List cash activities matching the (legacy) filter, scoped to opted-in
+    /// spending accounts. Returns empty vec if spending tracking is disabled
+    /// or no accounts opted in.
+    ///
+    /// Returns `CashActivity` (same shape as `search()` items)
+    /// so consumers get the activity row, its category assignments, and its
+    /// event tag in a single round-trip. Before the activity_events
+    /// refactor, `Activity` carried `event_id` directly; we now JOIN it in
+    /// here so the frontend doesn't need a second query (and so a single
+    /// regression on either path can't diverge from the other — `list()`
+    /// previously missed the event-tag enrichment `search()` got).
+    pub async fn list(&self, filter: CashActivityFilter) -> Result<Vec<CashActivity>> {
         let s = self.settings.get().await?;
         if !s.enabled || s.account_ids.is_empty() {
             return Ok(Vec::new());
@@ -82,7 +89,27 @@ impl CashActivityService {
         )?;
 
         activities.sort_by(|a, b| b.activity_date.cmp(&a.activity_date));
-        Ok(activities)
+
+        // Batch-enrich with assignments + event tags. Mirrors the tail of
+        // `search()`. The ids list is the *retained* rows, so we never fetch
+        // joins for activities we've already filtered out.
+        let ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+        let asgs = self.assignments.list_for_activities(&ids).await?;
+        let mut by_activity = group_assignments_owned(asgs);
+        let mut tag_map = self.activity_events.list_for_activities(&ids).await?;
+        let items: Vec<CashActivity> = activities
+            .into_iter()
+            .map(|a| {
+                let assignments = by_activity.remove(&a.id).unwrap_or_default();
+                let event_id = tag_map.remove(&a.id);
+                CashActivity {
+                    activity: a,
+                    assignments,
+                    event_id,
+                }
+            })
+            .collect();
+        Ok(items)
     }
 
     /// Search/filter/paginate cash activities. Powers the spending Transactions page.
@@ -278,12 +305,12 @@ impl CashActivityService {
         let mut by_activity = group_assignments_owned(asgs);
         let mut tag_map = self.activity_events.list_for_activities(&page_ids).await?;
 
-        let items: Vec<CashActivityWithAssignments> = page
+        let items: Vec<CashActivity> = page
             .into_iter()
             .map(|a| {
                 let assignments = by_activity.remove(&a.id).unwrap_or_default();
                 let event_id = tag_map.remove(&a.id);
-                CashActivityWithAssignments {
+                CashActivity {
                     activity: a,
                     assignments,
                     event_id,
@@ -294,8 +321,15 @@ impl CashActivityService {
         Ok(CashActivitySearchResponse { items, total_count })
     }
 
-    /// Set or clear the `event_id` on an activity. Pass `None` to clear.
-    /// No-op-friendly: returns the updated activity.
+    /// Set or clear the spending-event tag on an activity. Pass `None` to clear.
+    ///
+    /// **Return contract**: returns the underlying `Activity` row, which does
+    /// **not** carry the new tag — `event_id` lives on the `activity_events`
+    /// join table, not on the activity row itself. Callers that need to read
+    /// the post-write tag back must round-trip through `search()` / `list()`
+    /// (which JOIN the tag in via `CashActivity`). The existing frontend
+    /// caller (`useCashActivities`) discards this return value and refetches
+    /// via the spending caches, which is the intended pattern.
     pub async fn set_event(&self, activity_id: &str, event_id: Option<String>) -> Result<Activity> {
         self.activity_repo
             .set_activity_event_id(activity_id, event_id)

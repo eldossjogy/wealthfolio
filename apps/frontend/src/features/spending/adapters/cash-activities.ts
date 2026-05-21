@@ -6,11 +6,14 @@ import type {
   CashActivityFilter,
   CashActivitySearchRequest,
   CashActivitySearchResponse,
+  CashActivity,
 } from "../types/cash-activity";
 
-export const listCashActivities = async (filter?: CashActivityFilter): Promise<Activity[]> => {
+export const listCashActivities = async (
+  filter?: CashActivityFilter,
+): Promise<CashActivity[]> => {
   try {
-    return await invoke<Activity[]>("list_cash_activities", { filter });
+    return await invoke<CashActivity[]>("list_cash_activities", { filter });
   } catch (error) {
     logger.error("Error listing cash activities.");
     throw error;

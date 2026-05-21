@@ -2,7 +2,7 @@ import type { Activity, TaxonomyCategory } from "@/lib/types";
 
 import type {
   ActivityTaxonomyAssignment,
-  CashActivityWithAssignments,
+  CashActivity,
 } from "../types/cash-activity";
 
 /** Stable sorted Set→array used in React Query keys (insertion order is unstable). */
@@ -41,7 +41,7 @@ export interface TransactionRowVM {
 }
 
 export function toRowVM(
-  item: CashActivityWithAssignments,
+  item: CashActivity,
   allCategories: Map<string, TaxonomyCategory>,
 ): TransactionRowVM {
   const asg = (item.assignments ?? []).find(

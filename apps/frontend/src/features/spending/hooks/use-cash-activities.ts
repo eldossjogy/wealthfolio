@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { QueryKeys } from "@/lib/query-keys";
-import type { Activity } from "@/lib/types";
 
 import {
   assignActivityCategory,
@@ -15,10 +14,20 @@ import {
   type BulkCategoryAssignment,
 } from "../adapters/cash-activities";
 import { invalidateSpendingCaches } from "../lib/invalidation";
-import type { ActivityTaxonomyAssignment, CashActivityFilter } from "../types/cash-activity";
+import type {
+  ActivityTaxonomyAssignment,
+  CashActivityFilter,
+  CashActivity,
+} from "../types/cash-activity";
 
+/**
+ * Returns cash activities enriched with their category assignments + event
+ * tag. Backed by `cash_activities/list()` which JOINs both side-tables in a
+ * single round-trip — see the service doc-comment for why the return shape
+ * matches `search()` items.
+ */
 export function useCashActivities(filter?: CashActivityFilter) {
-  return useQuery<Activity[], Error>({
+  return useQuery<CashActivity[], Error>({
     queryKey: [QueryKeys.SPENDING_TRANSACTIONS, filter ?? null],
     queryFn: () => listCashActivities(filter),
   });
