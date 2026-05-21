@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical list of local tables that participate in app-side device sync.
 /// Order matters: parent tables before children (FK dependencies).
-pub const APP_SYNC_TABLES: [&str; 26] = [
+pub const APP_SYNC_TABLES: [&str; 31] = [
     // Base tables (no FK deps)
     "platforms",
     "assets",
@@ -26,6 +26,8 @@ pub const APP_SYNC_TABLES: [&str; 26] = [
     "import_templates",
     // Spending budget groups have no FK deps.
     "budget_groups",
+    // Spending event_types — no FK deps.
+    "event_types",
     // Depends on: import_templates
     "import_account_templates",
     // No FK deps (base table)
@@ -34,6 +36,14 @@ pub const APP_SYNC_TABLES: [&str; 26] = [
     "taxonomy_categories",
     // Depends on: assets, taxonomy_categories
     "asset_taxonomy_assignments",
+    // Spending activity↔category join. Depends on: activities, taxonomies, taxonomy_categories
+    "activity_taxonomy_assignments",
+    // Spending categorization rules. Depends on: accounts (optional FK), taxonomies, taxonomy_categories
+    "categorization_rules",
+    // Spending events. Depends on: event_types
+    "events",
+    // Spending activity↔event tag. Depends on: activities, events
+    "activity_events",
     // Depends on: budget_groups, taxonomy_categories
     "budget_group_assignments",
     "budget_targets",
