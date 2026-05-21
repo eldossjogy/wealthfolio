@@ -3826,6 +3826,74 @@ impl ActivityServiceTrait for ActivityService {
         // leave its counterpart with an orphan source_group_id.
         self.link_imported_transfer_pairs(&insertable_source_slice, &mut insertable_new_activities);
 
+        // ── 5.5. Resolve symbols → asset_ids ─────────────────────────────────
+        // The save and sync paths call `prepare_activities_for_save` /
+        // `prepare_activities_for_sync`; the import path was missing the
+        // equivalent `prepare_activities_for_import` call. Without it,
+        // every activity submitted via `POST /api/v1/activities/import`
+        // lands with `asset_id = NULL` because the endpoint doesn't auto-
+        // resolve symbols and bridge importers (broker exports, CSV) send
+        // `symbol` + optional `exchange_mic` instead of pre-resolved
+        // asset_ids. NULL asset_id silently breaks lots / positions /
+        // holdings — the activity is accepted but doesn't contribute to
+        // any portfolio total.
+        //
+        // Delegate to `prepare_activities_for_import` per account so behavior
+        // matches the other write paths: `ensure_assets()` materializes
+        // missing assets and the per-activity `asset_id` is wired up before
+        // insert. Preserve the duplicate-decision `idempotency_key` (in
+        // particular the `None` set by force-import) so the prepare step's
+        // recompute doesn't clobber it — that would break the force-import
+        // contract tested by `test_import_force_import_bypasses_*`.
+        if !insertable_new_activities.is_empty() {
+            let mut indices_by_account: HashMap<String, Vec<usize>> = HashMap::new();
+            for (i, act) in insertable_new_activities.iter().enumerate() {
+                indices_by_account
+                    .entry(act.account_id.clone())
+                    .or_default()
+                    .push(i);
+            }
+            for (account_id, indices) in indices_by_account {
+                let account = match self.account_service.get_account(&account_id) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!(
+                            "import_activities: skipping asset resolution for account {} ({}); imported activities will land with asset_id=NULL",
+                            account_id, e
+                        );
+                        continue;
+                    }
+                };
+                let acct_activities: Vec<NewActivity> = indices
+                    .iter()
+                    .map(|&i| insertable_new_activities[i].clone())
+                    .collect();
+                let prep = self
+                    .prepare_activities_for_import(acct_activities, &account)
+                    .await?;
+                // `prep.prepared` is in input order, omitting any entries that
+                // errored; `prep.errors` carries the failed input indices.
+                let errored_inputs: HashSet<usize> = prep.errors.iter().map(|(i, _)| *i).collect();
+                let mut prep_iter = prep.prepared.into_iter();
+                for (rel_idx, abs_idx) in indices.iter().enumerate() {
+                    if errored_inputs.contains(&rel_idx) {
+                        continue;
+                    }
+                    if let Some(prepared) = prep_iter.next() {
+                        // Preserve the duplicate-decision idempotency_key — the
+                        // prepare step recomputes it from activity data and
+                        // would otherwise overwrite a deliberate `None` set by
+                        // force-import.
+                        let preserved_key =
+                            insertable_new_activities[*abs_idx].idempotency_key.clone();
+                        let mut updated = prepared.activity;
+                        updated.idempotency_key = preserved_key;
+                        insertable_new_activities[*abs_idx] = updated;
+                    }
+                }
+            }
+        }
+
         // ── 6. Ensure FX pairs (one batch call) ──────────────────────────────
         let mut fx_pairs: HashSet<(String, String)> = HashSet::new();
         for (new_act, (_, src)) in insertable_new_activities
