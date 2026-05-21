@@ -31,9 +31,9 @@ DROP INDEX IF EXISTS idx_categorization_rules_category;
 DROP INDEX IF EXISTS idx_categorization_rules_priority;
 DROP TABLE IF EXISTS categorization_rules;
 
--- Drop activities.event_id
-DROP INDEX IF EXISTS idx_activities_event;
-ALTER TABLE activities DROP COLUMN event_id;
+-- Drop activity_events join table
+DROP INDEX IF EXISTS idx_activity_events_event;
+DROP TABLE IF EXISTS activity_events;
 
 -- Drop events + event_types
 DROP INDEX IF EXISTS idx_events_dates;

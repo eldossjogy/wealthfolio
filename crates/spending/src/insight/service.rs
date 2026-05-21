@@ -1499,7 +1499,6 @@ mod tests {
                 needs_review: false,
                 created_at: date,
                 updated_at: date,
-                event_id: None,
             }
         }
     }
@@ -1542,7 +1541,6 @@ mod tests {
             needs_review: false,
             created_at: dt(2026, 5, 10),
             updated_at: dt(2026, 5, 10),
-            event_id: None,
         };
         let uncategorized = Activity {
             id: "a2".to_string(),

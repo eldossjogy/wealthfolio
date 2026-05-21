@@ -3,9 +3,10 @@
 -- Re-uses the taxonomies system (scope='activity') instead of forking a Categories table.
 --
 -- Adds:
---   - Columns: taxonomies.scope, taxonomy_categories.icon, activities.event_id
---   - Tables: activity_taxonomy_assignments, event_types, events, categorization_rules,
---             budget_groups, budget_group_assignments, budget_targets,
+--   - Columns: taxonomies.scope, taxonomy_categories.icon
+--   - Tables: activity_taxonomy_assignments, activity_events, event_types,
+--             events, categorization_rules, budget_groups,
+--             budget_group_assignments, budget_targets,
 --             budget_rollover_settings
 --   - Seeds: 'Spending Categories' + 'Income Sources' system taxonomies (scope='activity')
 --           with full category trees ported from PR #494; 7 default event types
@@ -80,11 +81,26 @@ CREATE INDEX idx_events_event_type ON events(event_type_id);
 CREATE INDEX idx_events_dates ON events(start_date, end_date);
 
 -- ============================================================================
--- 4. ACTIVITIES.EVENT_ID (FK to events)
+-- 4. ACTIVITY_EVENTS (join table — activity ⇄ event tag)
+--    Kept as a sidecar table rather than a column on `activities` so the core
+--    activities schema stays focused on portfolio fields (account, asset,
+--    type, amount, date) and isn't coupled to a spending-domain concept.
+--    Mirrors the activity_taxonomy_assignments pattern above.
+--
+--    1:1 by construction: PRIMARY KEY (activity_id) means at most one event
+--    tag per activity. CASCADE in both directions cleans up dangling rows.
 -- ============================================================================
 
-ALTER TABLE activities ADD COLUMN event_id TEXT REFERENCES events(id) ON DELETE SET NULL;
-CREATE INDEX idx_activities_event ON activities(event_id);
+CREATE TABLE activity_events (
+    activity_id TEXT NOT NULL PRIMARY KEY,
+    event_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_activity_events_event ON activity_events(event_id);
 
 -- ============================================================================
 -- 5. CATEGORIZATION_RULES (auto-categorization on create / import)

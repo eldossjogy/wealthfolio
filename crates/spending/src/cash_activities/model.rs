@@ -110,6 +110,14 @@ pub struct CashActivityWithAssignments {
     pub activity: Activity,
     /// All activity-scope assignments for this row (typically 0 or 1 for single-select).
     pub assignments: Vec<ActivityTaxonomyAssignment>,
+    /// Spending event tag, sourced from the `activity_events` join table.
+    /// `None` when the activity isn't tagged. Surfaced here rather than on
+    /// the core `Activity` so the portfolio-side struct stays free of
+    /// spending-domain coupling; the frontend reads this field via the
+    /// `CashActivity` flattened projection.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
 }
 
 /// Paginated response for cash-activity search.

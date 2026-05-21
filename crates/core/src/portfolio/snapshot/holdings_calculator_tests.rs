@@ -371,7 +371,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -420,7 +419,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -465,7 +463,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -2918,7 +2915,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -2965,7 +2961,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -4008,7 +4003,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         };
 
         let activities = vec![transfer_in_activity];

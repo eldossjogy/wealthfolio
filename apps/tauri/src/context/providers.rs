@@ -134,6 +134,16 @@ pub async fn initialize_context(
             writer.clone(),
         ),
     );
+    // Activity ↔ event tag join table (sidecar to activities; see
+    // crates/spending/src/activity_events for the design rationale).
+    let activity_events_repo: Arc<
+        dyn wealthfolio_spending::activity_events::ActivityEventsRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::activity_events::ActivityEventsRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
     let activity_taxonomy_assignment_service = Arc::new(
         wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService::new(
             activity_assignments_repo.clone(),
@@ -212,6 +222,7 @@ pub async fn initialize_context(
             account_repository.clone(),
             spending_settings_service.clone(),
             activity_taxonomy_assignment_service.clone(),
+            activity_events_repo.clone(),
         ),
     );
 
@@ -250,6 +261,7 @@ pub async fn initialize_context(
         event_types_repo,
         events_repo,
         activity_repository.clone(),
+        activity_events_repo.clone(),
     ));
 
     // Spending: budget
@@ -288,6 +300,7 @@ pub async fn initialize_context(
             taxonomy_service.clone(),
             events_service.clone(),
             fx_service.clone(),
+            activity_events_repo.clone(),
         ));
 
     // Spending: reconciled period insight (powers the Spending Insight dashboard).

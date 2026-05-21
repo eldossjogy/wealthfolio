@@ -435,7 +435,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 

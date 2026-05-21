@@ -440,20 +440,60 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .await
     }
 
+    /// Tag/untag via the `activity_events` join table. The relationship no
+    /// longer lives as a column on `activities`, so this writes to the
+    /// sidecar table instead. We still bump `activities.updated_at` so device
+    /// sync sees the surrounding edit, and we push a per-join-row outbox
+    /// entry (`SyncEntity::ActivityEvent`) so the tag itself replicates.
     async fn set_activity_event_id(
         &self,
         activity_id: &str,
         event_id: Option<String>,
     ) -> Result<Activity> {
+        use crate::schema::activity_events;
+        use crate::spending::activity_events::ActivityEventDB;
         let activity_id = activity_id.to_string();
         self.writer
             .exec_tx(move |tx| -> Result<Activity> {
                 let now = chrono::Utc::now().to_rfc3339();
+                // 1) Upsert / delete in activity_events.
+                match &event_id {
+                    Some(eid) => {
+                        diesel::insert_into(activity_events::table)
+                            .values((
+                                activity_events::activity_id.eq(&activity_id),
+                                activity_events::event_id.eq(eid),
+                                activity_events::created_at.eq(&now),
+                                activity_events::updated_at.eq(&now),
+                            ))
+                            .on_conflict(activity_events::activity_id)
+                            .do_update()
+                            .set((
+                                activity_events::event_id.eq(eid),
+                                activity_events::updated_at.eq(&now),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&ActivityEventDB {
+                            activity_id: activity_id.clone(),
+                            event_id: eid.clone(),
+                            created_at: now.clone(),
+                            updated_at: now.clone(),
+                        })?;
+                    }
+                    None => {
+                        diesel::delete(
+                            activity_events::table
+                                .filter(activity_events::activity_id.eq(&activity_id)),
+                        )
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
+                        tx.delete::<ActivityEventDB>(activity_id.clone());
+                    }
+                }
+                // 2) Bump activities.updated_at + load fresh row.
                 let updated = diesel::update(activities::table.find(&activity_id))
-                    .set((
-                        activities::event_id.eq(event_id.as_deref()),
-                        activities::updated_at.eq(&now),
-                    ))
+                    .set(activities::updated_at.eq(&now))
                     .get_result::<ActivityDB>(tx.conn())
                     .map_err(StorageError::from)?;
                 let activity = Activity::from(updated.clone());
@@ -2127,7 +2167,6 @@ mod tests {
             needs_review: 0,
             created_at: "2024-01-15T00:00:00+00:00".to_string(),
             updated_at: "2024-01-15T00:00:00+00:00".to_string(),
-            event_id: None,
         };
 
         diesel::insert_into(activities::table)
@@ -2170,7 +2209,6 @@ mod tests {
             import_run_id: None,
             is_user_modified: 0,
             needs_review: 0,
-            event_id: None,
             created_at: "2024-01-15T00:00:00+00:00".to_string(),
             updated_at: "2024-01-15T00:00:00+00:00".to_string(),
         };
@@ -2293,7 +2331,6 @@ mod tests {
                 notes: None,
                 fx_rate: None,
                 metadata: None,
-                event_id: None,
             })
             .await
             .expect("update activity");
@@ -2662,7 +2699,6 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-1".to_string()),
             import_run_id: None,
-            event_id: None,
         };
 
         let second = ActivityUpsert {
@@ -2687,7 +2723,6 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-2".to_string()),
             import_run_id: None,
-            event_id: None,
         };
 
         let first_result = repo
@@ -2772,7 +2807,6 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-1".to_string()),
             import_run_id: None,
-            event_id: None,
         };
 
         let second = ActivityUpsert {
@@ -2797,7 +2831,6 @@ mod tests {
             source_group_id: None,
             idempotency_key: Some("idemp-2".to_string()),
             import_run_id: None,
-            event_id: None,
         };
 
         let result = repo

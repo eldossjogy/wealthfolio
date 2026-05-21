@@ -29,6 +29,7 @@ pub struct CashActivityService {
     account_repo: Arc<dyn AccountRepositoryTrait>,
     settings: Arc<SpendingSettingsService>,
     assignments: Arc<ActivityTaxonomyAssignmentService>,
+    activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
 }
 
 impl CashActivityService {
@@ -37,12 +38,14 @@ impl CashActivityService {
         account_repo: Arc<dyn AccountRepositoryTrait>,
         settings: Arc<SpendingSettingsService>,
         assignments: Arc<ActivityTaxonomyAssignmentService>,
+        activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
     ) -> Self {
         Self {
             activity_repo,
             account_repo,
             settings,
             assignments,
+            activity_events,
         }
     }
 
@@ -124,10 +127,17 @@ impl CashActivityService {
 
         if let Some(events) = req.event_ids.as_deref() {
             if !events.is_empty() {
+                // Load per-activity tags from the join table once, then
+                // filter in-memory. Mirrors the analytics services' pattern.
+                let activity_ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+                let tag_map = self
+                    .activity_events
+                    .list_for_activities(&activity_ids)
+                    .await?;
                 activities.retain(|a| {
-                    a.event_id
-                        .as_deref()
-                        .map(|id| events.iter().any(|e| e == id))
+                    tag_map
+                        .get(&a.id)
+                        .map(|tag| events.iter().any(|e| e == tag))
                         .unwrap_or(false)
                 });
             }
@@ -261,18 +271,22 @@ impl CashActivityService {
         // Drop the rest — we no longer need them.
         drop(activities);
 
-        // Batch-fetch assignments for the paginated slice (always — clients use them for display).
+        // Batch-fetch assignments + event tags for the paginated slice.
+        // (Always — clients use both for display.)
         let page_ids: Vec<String> = page.iter().map(|a| a.id.clone()).collect();
         let asgs = self.assignments.list_for_activities(&page_ids).await?;
         let mut by_activity = group_assignments_owned(asgs);
+        let mut tag_map = self.activity_events.list_for_activities(&page_ids).await?;
 
         let items: Vec<CashActivityWithAssignments> = page
             .into_iter()
             .map(|a| {
                 let assignments = by_activity.remove(&a.id).unwrap_or_default();
+                let event_id = tag_map.remove(&a.id);
                 CashActivityWithAssignments {
                     activity: a,
                     assignments,
+                    event_id,
                 }
             })
             .collect();

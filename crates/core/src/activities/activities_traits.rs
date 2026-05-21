@@ -39,9 +39,11 @@ pub trait ActivityRepositoryTrait: Send + Sync {
     ) -> Result<ActivitySearchResponse>;
     async fn create_activity(&self, new_activity: NewActivity) -> Result<Activity>;
     async fn update_activity(&self, activity_update: ActivityUpdate) -> Result<Activity>;
-    /// Focused setter for `event_id` only — used by the spending module for inline
-    /// event-assignment without going through the full ActivityUpdate pipeline.
-    /// Pass `None` to clear.
+    /// Tag (or untag) an activity with a spending event. Backed by the
+    /// `activity_events` join table — the link does not live on the
+    /// `activities` row itself, so the returned `Activity` carries no
+    /// event-id field. Callers that need the current tag should read it
+    /// from the spending-side repository.
     async fn set_activity_event_id(
         &self,
         activity_id: &str,

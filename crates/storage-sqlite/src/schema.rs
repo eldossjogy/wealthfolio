@@ -50,7 +50,6 @@ diesel::table! {
         needs_review -> Integer,
         created_at -> Text,
         updated_at -> Text,
-        event_id -> Nullable<Text>,
     }
 }
 
@@ -498,6 +497,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    activity_events (activity_id) {
+        activity_id -> Text,
+        event_id -> Text,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::table! {
     event_types (id) {
         id -> Text,
         key -> Nullable<Text>,
@@ -613,7 +621,8 @@ diesel::joinable!(quotes -> assets (asset_id));
 diesel::joinable!(taxonomy_categories -> taxonomies (taxonomy_id));
 diesel::joinable!(activity_taxonomy_assignments -> activities (activity_id));
 diesel::joinable!(activity_taxonomy_assignments -> taxonomies (taxonomy_id));
-diesel::joinable!(activities -> events (event_id));
+diesel::joinable!(activity_events -> activities (activity_id));
+diesel::joinable!(activity_events -> events (event_id));
 diesel::joinable!(events -> event_types (event_type_id));
 diesel::joinable!(categorization_rules -> accounts (account_id));
 diesel::joinable!(categorization_rules -> taxonomies (taxonomy_id));
@@ -661,6 +670,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     taxonomies,
     taxonomy_categories,
     activity_taxonomy_assignments,
+    activity_events,
     event_types,
     events,
     categorization_rules,

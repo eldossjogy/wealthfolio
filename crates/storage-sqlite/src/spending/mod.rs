@@ -3,6 +3,7 @@
 //! defined in the spending crate against the shared SQLite schema.
 
 pub mod activity_assignments;
+pub mod activity_events;
 pub mod budget;
 pub mod categorization_rules;
 pub mod events;

@@ -94,7 +94,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         }
     }
 
@@ -287,7 +286,6 @@ mod tests {
             source_record_id: None,
             source_group_id: None,
             idempotency_key: None,
-            event_id: None,
         }
     }
 
@@ -495,7 +493,6 @@ mod tests {
             notes: None,
             fx_rate: None,
             metadata: None,
-            event_id: None,
         }
     }
 
@@ -795,7 +792,6 @@ mod tests {
             source_record_id: None,
             source_group_id: None,
             idempotency_key: None,
-            event_id: None,
         };
 
         assert_eq!(activity.get_quote_ccy(), Some("GBp"));

@@ -37,6 +37,7 @@ pub struct AnalyticsService {
     taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
     events_service: Arc<EventsService>,
     fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
+    activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
 }
 
 impl AnalyticsService {
@@ -48,6 +49,7 @@ impl AnalyticsService {
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         events_service: Arc<EventsService>,
         fx_service: Arc<dyn wealthfolio_core::fx::FxServiceTrait>,
+        activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
     ) -> Self {
         Self {
             activity_repo,
@@ -57,6 +59,7 @@ impl AnalyticsService {
             taxonomy_service,
             events_service,
             fx_service,
+            activity_events,
         }
     }
 
@@ -616,6 +619,16 @@ impl AnalyticsService {
             .map(|v| v.iter().cloned().collect());
         let only_with_events = include_all_events.unwrap_or(false);
 
+        // Preload activity → event_id map once. Used by the filter helper
+        // below in place of the old `a.event_id` field. Only loaded if at
+        // least one event-related filter is active.
+        let event_tags: HashMap<String, String> = if only_with_events || include_set.is_some() {
+            let ids: Vec<String> = spending_ids.clone();
+            self.activity_events.list_for_activities(&ids).await?
+        } else {
+            HashMap::new()
+        };
+
         // Year boundaries are user-perceived calendar dates: a UTC+12 user
         // just before midnight on New Year's Eve still considers themselves
         // in the outgoing year. We derive `year_now` from the user's local
@@ -638,14 +651,15 @@ impl AnalyticsService {
         // accounts and produced naive cross-currency sums.
         let currency = base_currency.to_string();
 
-        // Filter helper for an activity
+        // Filter helper for an activity — event membership is consulted via
+        // the preloaded tag map rather than a per-row column.
         let activity_passes = |a: &Activity| -> bool {
-            // Event filter (a's event_id must satisfy)
-            if only_with_events && a.event_id.is_none() {
+            let tag = event_tags.get(&a.id);
+            if only_with_events && tag.is_none() {
                 return false;
             }
             if let Some(set) = &include_set {
-                match &a.event_id {
+                match tag {
                     Some(eid) if set.contains(eid) => {}
                     _ => return false,
                 }
@@ -829,7 +843,6 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id: None,
         };
 
         (activity, (id.to_string(), Some(category_id.to_string())))
@@ -1222,11 +1235,17 @@ impl AnalyticsService {
             })
             .collect();
 
-        // Load all activities once and index by event_id
+        // Load all activities once and index by event tag (sourced from the
+        // join table, not from a per-row column).
         let activities = self
             .activity_repo
             .get_activities_by_account_ids(&target_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let activity_ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+        let tag_map = self
+            .activity_events
+            .list_for_activities(&activity_ids)
+            .await?;
         let mut by_event: HashMap<String, Vec<Activity>> = HashMap::new();
         for a in activities {
             if !activity_date_in_window(
@@ -1236,7 +1255,7 @@ impl AnalyticsService {
             ) {
                 continue;
             }
-            if let Some(eid) = a.event_id.clone() {
+            if let Some(eid) = tag_map.get(&a.id).cloned() {
                 let Some(classification) = classification_for(&a, &account_types) else {
                     continue;
                 };

@@ -482,6 +482,7 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::CustomTaxonomy => None,
         // Spending module entities
         SyncEntity::ActivityTaxonomyAssignment => Some(("activity_taxonomy_assignments", "id")),
+        SyncEntity::ActivityEvent => Some(("activity_events", "activity_id")),
         SyncEntity::CategorizationRule => Some(("categorization_rules", "id")),
         SyncEntity::Event => Some(("events", "id")),
         SyncEntity::EventType => Some(("event_types", "id")),

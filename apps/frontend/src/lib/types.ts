@@ -123,7 +123,13 @@ export interface Activity {
   notes?: string;
   metadata?: Record<string, unknown>;
 
-  /** Optional spending event tag (cash activities). */
+  /**
+   * Optional spending event tag — sourced from the `activity_events` join
+   * table and surfaced on `CashActivityWithAssignments` (the spending
+   * search response). Plain `getActivities()` lists don't populate this
+   * field; consumers that need the tag should go through the spending
+   * cash-activity search, which JOINs against `activity_events`.
+   */
   eventId?: string | null;
 
   // Source identity

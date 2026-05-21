@@ -125,10 +125,6 @@ pub struct ActivityDB {
     // Audit
     pub created_at: String,
     pub updated_at: String,
-
-    // Spending module: optional FK to events table
-    #[diesel(treat_none_as_null = true)]
-    pub event_id: Option<String>,
 }
 
 /// Model for activity details including related data
@@ -491,9 +487,6 @@ impl From<ActivityDB> for Activity {
                 log::error!("Failed to parse updated_at '{}'", db.updated_at);
                 Utc::now()
             }),
-
-            // Spending
-            event_id: db.event_id,
         }
     }
 }
@@ -583,9 +576,6 @@ impl From<NewActivity> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
-
-            // Spending
-            event_id: domain.event_id,
         }
     }
 }
@@ -675,9 +665,6 @@ impl From<ActivityUpdate> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
-
-            // Spending
-            event_id: domain.event_id.flatten(),
         }
     }
 }
@@ -764,9 +751,6 @@ impl From<ActivityUpsert> for ActivityDB {
             // Audit
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
-
-            // Spending
-            event_id: domain.event_id,
         }
     }
 }

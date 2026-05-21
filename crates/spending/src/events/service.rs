@@ -12,6 +12,7 @@ pub struct EventsService {
     types_repo: Arc<dyn EventTypesRepositoryTrait>,
     events_repo: Arc<dyn EventsRepositoryTrait>,
     activity_repo: Arc<dyn ActivityRepositoryTrait>,
+    activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
 }
 
 impl EventsService {
@@ -19,11 +20,13 @@ impl EventsService {
         types_repo: Arc<dyn EventTypesRepositoryTrait>,
         events_repo: Arc<dyn EventsRepositoryTrait>,
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
+        activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
     ) -> Self {
         Self {
             types_repo,
             events_repo,
             activity_repo,
+            activity_events,
         }
     }
 
@@ -116,21 +119,29 @@ impl EventsService {
 
         let updated = self.events_repo.update(id, patch).await?;
 
-        // Untag activities that fell out of the new window on either narrowed side.
+        // Untag activities that fell out of the new window on either narrowed
+        // side. We ask the join table for ids tagged to this event (cheap,
+        // indexed lookup) instead of scanning all activities for an event_id
+        // field that no longer exists on the row.
         if narrowed_start || narrowed_end {
-            let all = self
-                .activity_repo
-                .get_activities()
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            for a in &all {
-                if a.event_id.as_deref() != Some(id) {
-                    continue;
-                }
-                if a.activity_date < new_start_dt || a.activity_date > new_end_dt {
-                    self.activity_repo
-                        .set_activity_event_id(&a.id, None)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let tagged_ids = self.activity_events.list_for_event(id).await?;
+            if !tagged_ids.is_empty() {
+                let all = self
+                    .activity_repo
+                    .get_activities()
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let tagged: std::collections::HashSet<&str> =
+                    tagged_ids.iter().map(String::as_str).collect();
+                for a in &all {
+                    if !tagged.contains(a.id.as_str()) {
+                        continue;
+                    }
+                    if a.activity_date < new_start_dt || a.activity_date > new_end_dt {
+                        self.activity_repo
+                            .set_activity_event_id(&a.id, None)
+                            .await
+                            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                    }
                 }
             }
         }
@@ -143,9 +154,14 @@ impl EventsService {
                 .activity_repo
                 .get_activities()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let activity_ids: Vec<String> = all.iter().map(|a| a.id.clone()).collect();
+            let tag_map = self
+                .activity_events
+                .list_for_activities(&activity_ids)
+                .await?;
             let newly_eligible = all
                 .iter()
-                .filter(|a| a.event_id.is_none())
+                .filter(|a| !tag_map.contains_key(&a.id))
                 .filter(|a| a.activity_date >= new_start_dt && a.activity_date <= new_end_dt)
                 .filter(|a| a.activity_date < old_start_dt || a.activity_date > old_end_dt)
                 .count();
@@ -311,12 +327,18 @@ mod tests {
 
     // --------------- Mock activity repo ---------------
 
-    #[derive(Default)]
+    // Tag storage lives in a shared map so both the `set_activity_event_id`
+    // (ActivityRepo) and `list_for_activities` (ActivityEventsRepo) sides of
+    // the mock agree, mirroring how the real `activity_events` join table
+    // backs both call paths.
+    type TagStore = Arc<Mutex<std::collections::HashMap<String, String>>>;
+
     struct MockActivityRepo {
         activities: Mutex<Vec<Activity>>,
+        tags: TagStore,
     }
 
-    fn mk_activity(id: &str, date: DateTime<Utc>, event_id: Option<String>) -> Activity {
+    fn mk_activity(id: &str, date: DateTime<Utc>) -> Activity {
         Activity {
             id: id.to_string(),
             account_id: "acct1".to_string(),
@@ -345,7 +367,52 @@ mod tests {
             needs_review: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            event_id,
+        }
+    }
+
+    struct MockActivityEventsRepo {
+        tags: TagStore,
+    }
+
+    #[async_trait]
+    impl crate::activity_events::ActivityEventsRepositoryTrait for MockActivityEventsRepo {
+        async fn list_for_activities(
+            &self,
+            ids: &[String],
+        ) -> Result<std::collections::HashMap<String, String>> {
+            let tags = self.tags.lock().unwrap();
+            Ok(ids
+                .iter()
+                .filter_map(|id| tags.get(id).map(|eid| (id.clone(), eid.clone())))
+                .collect())
+        }
+        async fn list_for_event(&self, event_id: &str) -> Result<Vec<String>> {
+            Ok(self
+                .tags
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, eid)| eid.as_str() == event_id)
+                .map(|(aid, _)| aid.clone())
+                .collect())
+        }
+        async fn delete_by_event(&self, event_id: &str) -> Result<usize> {
+            let mut tags = self.tags.lock().unwrap();
+            let before = tags.len();
+            tags.retain(|_, eid| eid.as_str() != event_id);
+            Ok(before - tags.len())
+        }
+        async fn list_all(&self) -> Result<Vec<crate::activity_events::ActivityEvent>> {
+            let tags = self.tags.lock().unwrap();
+            Ok(tags
+                .iter()
+                .map(|(aid, eid)| crate::activity_events::ActivityEvent {
+                    activity_id: aid.clone(),
+                    event_id: eid.clone(),
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                })
+                .collect())
         }
     }
 
@@ -406,18 +473,25 @@ mod tests {
             activity_id: &str,
             event_id: Option<String>,
         ) -> wealthfolio_core::Result<Activity> {
-            let mut acts = self.activities.lock().unwrap();
-            let a = acts
-                .iter_mut()
-                .find(|a| a.id == activity_id)
-                .ok_or_else(|| {
-                    wealthfolio_core::errors::Error::Validation(
-                        wealthfolio_core::errors::ValidationError::InvalidInput(
-                            "not found".to_string(),
-                        ),
-                    )
-                })?;
-            a.event_id = event_id;
+            let acts = self.activities.lock().unwrap();
+            let a = acts.iter().find(|a| a.id == activity_id).ok_or_else(|| {
+                wealthfolio_core::errors::Error::Validation(
+                    wealthfolio_core::errors::ValidationError::InvalidInput(
+                        "not found".to_string(),
+                    ),
+                )
+            })?;
+            // Tag storage now lives in the shared TagStore (mirrors the
+            // `activity_events` join table). None == untag.
+            let mut tags = self.tags.lock().unwrap();
+            match event_id {
+                Some(eid) => {
+                    tags.insert(activity_id.to_string(), eid);
+                }
+                None => {
+                    tags.remove(activity_id);
+                }
+            }
             Ok(a.clone())
         }
         async fn delete_activity(&self, _: String) -> wealthfolio_core::Result<Activity> {
@@ -571,25 +645,37 @@ mod tests {
     fn make_service(
         events: Vec<Event>,
         activities: Vec<Activity>,
+        initial_tags: Vec<(&str, &str)>,
     ) -> (
         EventsService,
         Arc<MockEventsRepo>,
         Arc<MockActivityRepo>,
         Arc<MockTypesRepo>,
+        TagStore,
     ) {
         let events_repo = Arc::new(MockEventsRepo {
             events: Mutex::new(events),
         });
+        let tags: TagStore = Arc::new(Mutex::new(
+            initial_tags
+                .into_iter()
+                .map(|(aid, eid)| (aid.to_string(), eid.to_string()))
+                .collect(),
+        ));
         let activity_repo = Arc::new(MockActivityRepo {
             activities: Mutex::new(activities),
+            tags: tags.clone(),
         });
+        let activity_events_repo: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait> =
+            Arc::new(MockActivityEventsRepo { tags: tags.clone() });
         let types_repo = Arc::new(MockTypesRepo::default());
         let svc = EventsService::new(
             types_repo.clone() as Arc<dyn EventTypesRepositoryTrait>,
             events_repo.clone() as Arc<dyn EventsRepositoryTrait>,
             activity_repo.clone() as Arc<dyn ActivityRepositoryTrait>,
+            activity_events_repo,
         );
-        (svc, events_repo, activity_repo, types_repo)
+        (svc, events_repo, activity_repo, types_repo, tags)
     }
 
     fn ymd(y: i32, m: u32, d: u32) -> String {
@@ -613,7 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_event_rejects_inverted_range() {
-        let (svc, _, _, _) = make_service(vec![], vec![]);
+        let (svc, _, _, _, _) = make_service(vec![], vec![], vec![]);
         let err = svc
             .create_event(NewEvent {
                 id: None,
@@ -630,8 +716,11 @@ mod tests {
 
     #[tokio::test]
     async fn update_event_rejects_inverted_range() {
-        let (svc, _, _, _) =
-            make_service(vec![ev("ev1", &ymd(2024, 6, 1), &ymd(2024, 6, 10))], vec![]);
+        let (svc, _, _, _, _) = make_service(
+            vec![ev("ev1", &ymd(2024, 6, 1), &ymd(2024, 6, 10))],
+            vec![],
+            vec![],
+        );
         let mut patch = UpdateEvent::default();
         patch.start_date = Some(ymd(2024, 6, 20));
         let err = svc.update_event("ev1", patch).await.unwrap_err();
@@ -640,11 +729,12 @@ mod tests {
 
     #[tokio::test]
     async fn delete_type_rejects_when_in_use() {
-        let (svc, _, _, types) = make_service(
+        let (svc, _, _, types, _) = make_service(
             vec![Event {
                 event_type_id: "type1".to_string(),
                 ..ev("ev1", &ymd(2024, 6, 1), &ymd(2024, 6, 10))
             }],
+            vec![],
             vec![],
         );
         let err = svc.delete_type("type1").await.unwrap_err();
@@ -654,7 +744,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_type_passes_through_when_unused() {
-        let (svc, _, _, types) = make_service(vec![], vec![]);
+        let (svc, _, _, types, _) = make_service(vec![], vec![], vec![]);
         svc.delete_type("type1").await.unwrap();
         assert_eq!(types.deleted.lock().unwrap().len(), 1);
     }
@@ -664,22 +754,22 @@ mod tests {
         let in1 = Utc.with_ymd_and_hms(2024, 6, 5, 12, 0, 0).unwrap();
         let in2 = Utc.with_ymd_and_hms(2024, 6, 7, 12, 0, 0).unwrap();
         let out = Utc.with_ymd_and_hms(2024, 6, 9, 12, 0, 0).unwrap();
-        let (svc, _, activity_repo, _) = make_service(
+        let (svc, _, _, _, tags) = make_service(
             vec![ev("ev1", &ymd(2024, 6, 1), &ymd(2024, 6, 10))],
             vec![
-                mk_activity("a1", in1, Some("ev1".to_string())),
-                mk_activity("a2", in2, Some("ev1".to_string())),
-                mk_activity("a3", out, Some("ev1".to_string())),
+                mk_activity("a1", in1),
+                mk_activity("a2", in2),
+                mk_activity("a3", out),
             ],
+            vec![("a1", "ev1"), ("a2", "ev1"), ("a3", "ev1")],
         );
         let mut patch = UpdateEvent::default();
         patch.end_date = Some(ymd(2024, 6, 8));
         svc.update_event("ev1", patch).await.unwrap();
 
-        let acts = activity_repo.activities.lock().unwrap();
-        let by_id = |id: &str| acts.iter().find(|a| a.id == id).unwrap().event_id.clone();
-        assert_eq!(by_id("a1"), Some("ev1".to_string()));
-        assert_eq!(by_id("a2"), Some("ev1".to_string()));
-        assert_eq!(by_id("a3"), None);
+        let tags = tags.lock().unwrap();
+        assert_eq!(tags.get("a1"), Some(&"ev1".to_string()));
+        assert_eq!(tags.get("a2"), Some(&"ev1".to_string()));
+        assert_eq!(tags.get("a3"), None);
     }
 }

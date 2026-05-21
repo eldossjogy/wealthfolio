@@ -73,6 +73,7 @@ pub enum SyncEntity {
     ImportRun,
     // Spending module (wealthfolio-spending crate)
     ActivityTaxonomyAssignment,
+    ActivityEvent,
     CategorizationRule,
     Event,
     EventType,
@@ -303,6 +304,7 @@ mod tests {
             SyncEntity::CustomTaxonomy,
             SyncEntity::ImportRun,
             SyncEntity::ActivityTaxonomyAssignment,
+            SyncEntity::ActivityEvent,
             SyncEntity::CategorizationRule,
             SyncEntity::Event,
             SyncEntity::EventType,
@@ -335,6 +337,7 @@ mod tests {
             "\"custom_taxonomy\"",
             "\"import_run\"",
             "\"activity_taxonomy_assignment\"",
+            "\"activity_event\"",
             "\"categorization_rule\"",
             "\"event\"",
             "\"event_type\"",

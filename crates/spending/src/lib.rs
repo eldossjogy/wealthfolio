@@ -27,6 +27,7 @@
 
 pub mod activity_assignments;
 mod activity_classification;
+pub mod activity_events;
 pub mod analytics;
 pub mod budget;
 pub mod cash_activities;
