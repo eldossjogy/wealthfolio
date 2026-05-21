@@ -490,12 +490,19 @@ impl SnapshotService {
 
                     // The lots that were derived from those activities are
                     // now orphaned — clear them so the table stays in sync.
+                    // Accumulate failures into the same lot_sync_errors Vec
+                    // the main loop uses so the function surfaces a real Err
+                    // at the end. Without this, snapshots were deleted but a
+                    // failure clearing lots was warn-only — the caller saw
+                    // success while the lots table stayed populated against
+                    // the now-deleted snapshots.
                     if let Some(lot_repo) = &self.lot_repository {
                         if let Err(e) = lot_repo.replace_lots_for_account(acc_id, &[]).await {
-                            warn!(
+                            error!(
                                 "Failed to clear lots for account {} after activity deletion: {}",
                                 acc_id, e
                             );
+                            lot_sync_errors.push(format!("{}: {}", acc_id, e));
                         }
                     }
                 }

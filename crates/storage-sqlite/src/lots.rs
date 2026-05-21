@@ -392,29 +392,29 @@ impl LotRepositoryTrait for LotsRepository {
                     }
                 } else {
                     // Delete orphaned OPEN lots not produced by this pass.
-                    // Closed lots (is_closed=1) are mostly preserved because a
-                    // subsequent recalc may not reproduce closures
-                    // (take_disposed_lots drains the closure list on first
-                    // call). The exception is closed lots whose
-                    // open_activity_id is NULL — those can only have come from
-                    // an activity that was deleted (FK SET NULL) and a
-                    // subsequent rebuild that wrote a new lot under a new id.
-                    // Without this sweep, every wipe+reimport accumulates a
-                    // fresh duplicate of every single-pass-closed lot.
+                    // Closed lots (is_closed=1) are preserved across recalcs:
+                    // a subsequent incremental may not include earlier
+                    // activities in its replay window, so its `known_ids`
+                    // won't list historical closures (`take_disposed_lots`
+                    // drains the closure list, so they only appear in the
+                    // pass that produced them).
+                    //
+                    // The previous code also swept closed lots with
+                    // `open_activity_id IS NULL`, on the assumption that
+                    // those came from `FK ON DELETE SET NULL`. That premise
+                    // is wrong: the schema is `ON DELETE CASCADE` on
+                    // `open_activity_id` (see migration), so a deleted
+                    // opening activity removes the whole lot row — it never
+                    // leaves a NULL FK behind. Meanwhile the storage-layer
+                    // F1 fix normalizes synthetic compiler IDs (e.g.
+                    // `drip-1:buy`) to NULL `open_activity_id` for valid
+                    // closed lots; sweeping them was destroying real
+                    // closed-lot history for DRIP / staking /
+                    // dividend-in-kind activities on every incremental.
                     diesel::delete(
                         dsl::lots
                             .filter(dsl::account_id.eq(&account_id))
                             .filter(dsl::is_closed.eq(0))
-                            .filter(diesel::dsl::not(dsl::id.eq_any(&known_ids))),
-                    )
-                    .execute(conn)
-                    .map_err(StorageError::from)?;
-
-                    diesel::delete(
-                        dsl::lots
-                            .filter(dsl::account_id.eq(&account_id))
-                            .filter(dsl::is_closed.eq(1))
-                            .filter(dsl::open_activity_id.is_null())
                             .filter(diesel::dsl::not(dsl::id.eq_any(&known_ids))),
                     )
                     .execute(conn)

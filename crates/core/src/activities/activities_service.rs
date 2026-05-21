@@ -3857,8 +3857,15 @@ impl ActivityServiceTrait for ActivityService {
                 let account = match self.account_service.get_account(&account_id) {
                     Ok(a) => a,
                     Err(e) => {
+                        // Account lookup failed (test harness, broken state).
+                        // Leave the row alone — it'll be inserted with the
+                        // pre-prepare contents (typically `asset_id = NULL`).
+                        // We don't drop the row because cash activities like
+                        // DIVIDEND without a symbol are legitimate to import
+                        // even without prepare succeeding; the historical
+                        // test contract is to accept them as-is.
                         warn!(
-                            "import_activities: skipping asset resolution for account {} ({}); imported activities will land with asset_id=NULL",
+                            "import_activities: skipping asset resolution for account {} ({}); rows will be inserted with their pre-prepare values",
                             account_id, e
                         );
                         continue;
@@ -3873,6 +3880,18 @@ impl ActivityServiceTrait for ActivityService {
                     .await?;
                 // `prep.prepared` is in input order, omitting any entries that
                 // errored; `prep.errors` carries the failed input indices.
+                //
+                // Errored entries are left in `insertable_new_activities`
+                // with their pre-prepare contents (typically
+                // `asset_id = NULL`). The historical contract — exercised
+                // by `test_import_accepts_cash_dividend_without_symbol` —
+                // is that cash-flow activities (DIVIDEND without symbol,
+                // INTEREST, etc.) legitimately surface here as "errored"
+                // (revalidate fails because they don't fit the typed
+                // schema) but should still import with `asset_id = NULL`.
+                // Distinguishing "legitimate cash-only error" from "real
+                // symbol-resolution failure" requires reproducing
+                // `classify_import_activity`'s logic here; deferred.
                 let errored_inputs: HashSet<usize> = prep.errors.iter().map(|(i, _)| *i).collect();
                 let mut prep_iter = prep.prepared.into_iter();
                 for (rel_idx, abs_idx) in indices.iter().enumerate() {

@@ -63,6 +63,46 @@ fn quote_identifier(value: &str) -> String {
     format!("`{}`", value.replace('`', "``"))
 }
 
+/// Returns true if `synced_date` is the maximum non-calculated snapshot date
+/// for the account — i.e. the newly synced row is the new latest. Used to
+/// decide whether a sync UPDATE should wipe the account's synthetic HOLDINGS
+/// lots: an update to a historical (non-latest) snapshot doesn't invalidate
+/// the current lot rows derived from the actual latest snapshot.
+fn is_latest_non_calculated(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+    synced_date: &str,
+) -> Result<bool> {
+    use crate::schema::holdings_snapshots::dsl as hs;
+    let max_date: Option<String> = hs::holdings_snapshots
+        .filter(hs::account_id.eq(account_id))
+        .filter(hs::source.ne("CALCULATED"))
+        .select(diesel::dsl::max(hs::snapshot_date))
+        .first::<Option<String>>(conn)
+        .map_err(StorageError::from)?;
+    Ok(max_date.as_deref() == Some(synced_date))
+}
+
+/// Returns true if the deleted snapshot WAS the latest non-calculated
+/// snapshot for the account — i.e. no remaining non-calculated snapshot has
+/// a date >= the deleted one. Used on the DELETE branch where the row is
+/// already gone but we still want to decide whether to wipe synthetic lots.
+fn was_latest_non_calculated(
+    conn: &mut SqliteConnection,
+    account_id: &str,
+    deleted_date: &str,
+) -> Result<bool> {
+    use crate::schema::holdings_snapshots::dsl as hs;
+    let count: i64 = hs::holdings_snapshots
+        .filter(hs::account_id.eq(account_id))
+        .filter(hs::source.ne("CALCULATED"))
+        .filter(hs::snapshot_date.ge(deleted_date))
+        .count()
+        .get_result::<i64>(conn)
+        .map_err(StorageError::from)?;
+    Ok(count == 0)
+}
+
 #[derive(diesel::QueryableByName)]
 struct PragmaTableInfoRow {
     #[diesel(sql_type = diesel::sql_types::Text)]
@@ -976,21 +1016,20 @@ fn apply_remote_event_lww_tx(
             match op {
                 SyncOperation::Delete => {
                     // For SyncEntity::Snapshot: HOLDINGS-mode lots are
-                    // derived from the latest non-calculated snapshot for
-                    // an account, but they aren't linked to the snapshot
-                    // row via FK. Read the snapshot's account_id BEFORE
-                    // the row is deleted so we can clean up the synthetic
-                    // HOLDINGS lots that may have been derived from it.
-                    // (TODO: a heavier Phase B fix would re-derive from
-                    // the *new* latest snapshot to avoid emptiness between
-                    // sync-delete and the next local save.)
-                    let snapshot_account_id_for_lot_cleanup: Option<String> =
+                    // derived from the LATEST non-calculated snapshot for
+                    // an account but aren't FK-linked to any specific
+                    // snapshot row. Wipe synthetic lots only when the row
+                    // being deleted IS that latest — deleting a historical
+                    // snapshot doesn't invalidate current lots.
+                    //
+                    // Read account_id + date BEFORE the row is deleted.
+                    let snapshot_meta_for_lot_cleanup: Option<(String, String)> =
                         if matches!(entity, SyncEntity::Snapshot) {
                             use crate::schema::holdings_snapshots::dsl as hs;
                             hs::holdings_snapshots
                                 .find(entity_id_value.as_str())
-                                .select(hs::account_id)
-                                .first::<String>(conn)
+                                .select((hs::account_id, hs::snapshot_date))
+                                .first::<(String, String)>(conn)
                                 .optional()
                                 .map_err(StorageError::from)?
                         } else {
@@ -1007,13 +1046,24 @@ fn apply_remote_event_lww_tx(
                         .execute(conn)
                         .map_err(StorageError::from)?;
 
-                    if let Some(account_id) = snapshot_account_id_for_lot_cleanup {
-                        diesel::sql_query(format!(
-                            "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
-                            escape_sqlite_str(&account_id)
-                        ))
-                        .execute(conn)
-                        .map_err(StorageError::from)?;
+                    if let Some((account_id, deleted_date)) = snapshot_meta_for_lot_cleanup {
+                        // After the delete, find the new latest non-
+                        // calculated snapshot date for the account. If
+                        // there's still a row with `snapshot_date >=
+                        // deleted_date`, the deleted snapshot wasn't the
+                        // latest — leave synthetic lots alone.
+                        // (TODO: a heavier Phase B fix would re-derive
+                        // synthetic lots from the new latest. For now
+                        // wiping leaves them empty until the next local
+                        // save_manual_snapshot.)
+                        if was_latest_non_calculated(conn, &account_id, &deleted_date)? {
+                            diesel::sql_query(format!(
+                                "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
+                                escape_sqlite_str(&account_id)
+                            ))
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
+                        }
                     }
                 }
                 SyncOperation::Create | SyncOperation::Update => {
@@ -1096,35 +1146,37 @@ fn apply_remote_event_lww_tx(
                         .map_err(StorageError::from)?;
 
                         // Same concern for the lots table: synthetic
-                        // HOLDINGS-mode lots are derived from the latest
-                        // non-calculated snapshot but have no FK link to
-                        // the snapshot row, so an `ON CONFLICT DO UPDATE`
-                        // on `holdings_snapshots` doesn't propagate. Clear
-                        // them so the next save_manual_snapshot rebuilds.
+                        // HOLDINGS-mode lots are derived from the LATEST
+                        // non-calculated snapshot but aren't FK-linked.
+                        // Clear them only when the synced row is the new
+                        // latest for the account — historical-snapshot
+                        // updates don't invalidate current lots.
                         // (TODO: Phase B should re-derive from the new
-                        // latest here to avoid emptiness between sync and
-                        // the next save.)
+                        // latest here instead of leaving lots empty until
+                        // the next local save.)
                         //
-                        // Query account_id back out of the just-written
-                        // snapshot row rather than parsing it from the
+                        // Query account_id + snapshot_date from the
+                        // just-written row rather than parsing the
                         // payload — sidesteps any camelCase / snake_case
                         // ambiguity in the wire protocol.
-                        let account_id: Option<String> = {
+                        let snapshot_meta: Option<(String, String)> = {
                             use crate::schema::holdings_snapshots::dsl as hs;
                             hs::holdings_snapshots
                                 .find(entity_id_value.as_str())
-                                .select(hs::account_id)
-                                .first::<String>(conn)
+                                .select((hs::account_id, hs::snapshot_date))
+                                .first::<(String, String)>(conn)
                                 .optional()
                                 .map_err(StorageError::from)?
                         };
-                        if let Some(account_id) = account_id {
-                            diesel::sql_query(format!(
-                                "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
-                                escape_sqlite_str(&account_id)
-                            ))
-                            .execute(conn)
-                            .map_err(StorageError::from)?;
+                        if let Some((account_id, synced_date)) = snapshot_meta {
+                            if is_latest_non_calculated(conn, &account_id, &synced_date)? {
+                                diesel::sql_query(format!(
+                                    "DELETE FROM lots WHERE account_id = '{}' AND open_activity_id IS NULL",
+                                    escape_sqlite_str(&account_id)
+                                ))
+                                .execute(conn)
+                                .map_err(StorageError::from)?;
+                            }
                         }
                     }
                 }
@@ -5260,6 +5312,158 @@ mod tests {
         assert_eq!(
             after.c, 0,
             "synthetic HOLDINGS lots must be cleared on sync delete"
+        );
+    }
+
+    /// Regression: a sync UPDATE of a HISTORICAL snapshot (not the latest)
+    /// must NOT touch the account's synthetic HOLDINGS lots — those are
+    /// derived from the latest snapshot and remain correct.
+    #[tokio::test]
+    async fn replay_snapshot_update_preserves_lots_for_historical_snapshot() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account_for_test(&mut conn, "acc-historical-sync").expect("insert account");
+        diesel::sql_query(
+            "INSERT INTO assets (id, kind, name, display_code, notes, metadata, is_active, quote_mode, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, created_at, updated_at)
+             VALUES ('asset-hist', 'INVESTMENT', 'Asset', 'HST', NULL, NULL, 1, 'MANUAL', 'USD', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .execute(&mut conn)
+        .expect("insert asset");
+
+        // Two non-calculated snapshots: an earlier (historical) and a newer (latest).
+        diesel::sql_query(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES \
+             ('snap-historical', 'acc-historical-sync', '2026-01-01', 'USD', '{}', '{}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY'), \
+             ('snap-latest', 'acc-historical-sync', '2026-06-01', 'USD', '{}', '{}', '0', '0', '2026-06-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+        )
+        .execute(&mut conn)
+        .expect("insert snapshots");
+
+        // Synthetic lot derived from the LATEST snapshot.
+        diesel::sql_query(
+            "INSERT INTO lots (id, account_id, asset_id, open_date, open_activity_id, original_quantity, remaining_quantity, cost_per_unit, original_cost_basis, remaining_cost_basis, fee_allocated, is_closed, close_date, close_activity_id, created_at, updated_at, split_ratio) \
+             VALUES ('HOLDINGS-acc-historical-sync-asset-hist', 'acc-historical-sync', 'asset-hist', '2026-06-01', NULL, '10', '10', '100', '1000', '1000', '0', 0, NULL, NULL, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z', '1')",
+        )
+        .execute(&mut conn)
+        .expect("insert synthetic lot");
+
+        drop(conn);
+
+        // Remote sync updates the *historical* snapshot (date stays
+        // 2026-01-01, which is NOT the latest).
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                "snap-historical".to_string(),
+                SyncOperation::Update,
+                "evt-update-historical".to_string(),
+                "2026-07-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "snap-historical",
+                    "accountId": "acc-historical-sync",
+                    "snapshotDate": "2026-01-01",
+                    "currency": "USD",
+                    "positions": "{}",
+                    "cashBalances": "{}",
+                    "costBasis": "0",
+                    "netContribution": "0",
+                    "calculatedAt": "2026-07-01T00:00:00Z",
+                    "netContributionBase": "0",
+                    "cashTotalAccountCurrency": "0",
+                    "cashTotalBaseCurrency": "0",
+                    "source": "MANUAL_ENTRY",
+                }),
+            )
+            .await
+            .expect("apply historical snapshot update");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let after: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM lots WHERE account_id = 'acc-historical-sync' AND open_activity_id IS NULL",
+        )
+        .get_result(&mut conn)
+        .expect("count after");
+        assert_eq!(
+            after.c, 1,
+            "synthetic lot derived from the still-latest snapshot must NOT be wiped by a historical-snapshot update"
+        );
+    }
+
+    /// Mirror of the above for DELETE: deleting a historical snapshot must
+    /// not touch the account's synthetic HOLDINGS lots.
+    #[tokio::test]
+    async fn replay_snapshot_delete_preserves_lots_for_historical_snapshot() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account_for_test(&mut conn, "acc-hist-del").expect("insert account");
+        diesel::sql_query(
+            "INSERT INTO assets (id, kind, name, display_code, notes, metadata, is_active, quote_mode, quote_ccy, instrument_type, instrument_symbol, instrument_exchange_mic, provider_config, created_at, updated_at)
+             VALUES ('asset-hd', 'INVESTMENT', 'Asset', 'HD', NULL, NULL, 1, 'MANUAL', 'USD', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        )
+        .execute(&mut conn)
+        .expect("insert asset");
+
+        diesel::sql_query(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source) \
+             VALUES \
+             ('snap-hd-hist', 'acc-hist-del', '2026-01-01', 'USD', '{}', '{}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY'), \
+             ('snap-hd-latest', 'acc-hist-del', '2026-06-01', 'USD', '{}', '{}', '0', '0', '2026-06-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+        )
+        .execute(&mut conn)
+        .expect("insert snapshots");
+
+        diesel::sql_query(
+            "INSERT INTO lots (id, account_id, asset_id, open_date, open_activity_id, original_quantity, remaining_quantity, cost_per_unit, original_cost_basis, remaining_cost_basis, fee_allocated, is_closed, close_date, close_activity_id, created_at, updated_at, split_ratio) \
+             VALUES ('HOLDINGS-acc-hist-del-asset-hd', 'acc-hist-del', 'asset-hd', '2026-06-01', NULL, '10', '10', '100', '1000', '1000', '0', 0, NULL, NULL, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z', '1')",
+        )
+        .execute(&mut conn)
+        .expect("insert synthetic lot");
+
+        drop(conn);
+
+        // Delete the historical snapshot.
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                "snap-hd-hist".to_string(),
+                SyncOperation::Delete,
+                "evt-delete-historical".to_string(),
+                "2026-07-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({}),
+            )
+            .await
+            .expect("apply historical snapshot delete");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let after: CountRow = diesel::sql_query(
+            "SELECT COUNT(*) AS c FROM lots WHERE account_id = 'acc-hist-del' AND open_activity_id IS NULL",
+        )
+        .get_result(&mut conn)
+        .expect("count after");
+        assert_eq!(
+            after.c, 1,
+            "synthetic lot derived from the still-latest snapshot must NOT be wiped by a historical-snapshot delete"
         );
     }
 }
