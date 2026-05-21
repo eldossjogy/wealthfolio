@@ -7,7 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@wealthfolio/ui/components/ui/table";
-import type { AssetLotViewRow } from "@/lib/types";
+import type { AssetLotView } from "@/lib/types";
 import { formatAmount } from "@wealthfolio/ui";
 import { formatDate, formatQuantity } from "@/lib/utils";
 import { Badge } from "@wealthfolio/ui/components/ui/badge";
@@ -17,7 +17,7 @@ import { GainPercent } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 
 interface AssetLotsTableProps {
-  lots: AssetLotViewRow[];
+  lots: AssetLotView[];
   currency: string;
   marketPrice: number;
   contractMultiplier?: number;
@@ -58,10 +58,10 @@ export const AssetLotsTable = ({
 interface AccountLotGroupData {
   accountId: string;
   accountName: string;
-  lots: AssetLotViewRow[];
+  lots: AssetLotView[];
 }
 
-function groupLotsByAccount(lots: AssetLotViewRow[]): AccountLotGroupData[] {
+function groupLotsByAccount(lots: AssetLotView[]): AccountLotGroupData[] {
   const byAccount = new Map<string, AccountLotGroupData>();
 
   for (const lot of lots) {
@@ -82,7 +82,7 @@ function groupLotsByAccount(lots: AssetLotViewRow[]): AccountLotGroupData[] {
     .sort((a, b) => a.accountName.localeCompare(b.accountName));
 }
 
-function compareLots(a: AssetLotViewRow, b: AssetLotViewRow) {
+function compareLots(a: AssetLotView, b: AssetLotView) {
   const aRank = a.isClosed ? 2 : a.source === "SNAPSHOT_POSITION" ? 1 : 0;
   const bRank = b.isClosed ? 2 : b.source === "SNAPSHOT_POSITION" ? 1 : 0;
   if (aRank !== bRank) return aRank - bRank;
@@ -101,7 +101,7 @@ function AccountLotGroup({
   collapsible,
 }: {
   accountName: string;
-  lots: AssetLotViewRow[];
+  lots: AssetLotView[];
   currency: string;
   marketPrice: number;
   contractMultiplier: number;
@@ -183,7 +183,7 @@ function AssetLotTableRow({
   marketPrice,
   contractMultiplier,
 }: {
-  lot: AssetLotViewRow;
+  lot: AssetLotView;
   currency: string;
   marketPrice: number;
   contractMultiplier: number;
@@ -248,7 +248,7 @@ function AssetLotMobileRow({
   marketPrice,
   contractMultiplier,
 }: {
-  lot: AssetLotViewRow;
+  lot: AssetLotView;
   accountName?: string;
   currency: string;
   marketPrice: number;
@@ -325,7 +325,7 @@ function AssetLotMobileRow({
   );
 }
 
-function LotBadges({ lot }: { lot: AssetLotViewRow }) {
+function LotBadges({ lot }: { lot: AssetLotView }) {
   const isSnapshot = lot.source === "SNAPSHOT_POSITION";
   const hasSplit = !isSnapshot && lot.splitRatio !== 1;
 
@@ -352,7 +352,7 @@ function LotBadges({ lot }: { lot: AssetLotViewRow }) {
   );
 }
 
-function getGroupSummary(lots: AssetLotViewRow[]) {
+function getGroupSummary(lots: AssetLotView[]) {
   const snapshots = lots.filter((lot) => lot.source === "SNAPSHOT_POSITION").length;
   const open = lots.filter((lot) => lot.source !== "SNAPSHOT_POSITION" && !lot.isClosed).length;
   const closed = lots.filter((lot) => lot.source !== "SNAPSHOT_POSITION" && lot.isClosed).length;
@@ -365,13 +365,13 @@ function getGroupSummary(lots: AssetLotViewRow[]) {
   return parts.join(", ");
 }
 
-function formatLotDate(lot: AssetLotViewRow) {
+function formatLotDate(lot: AssetLotView) {
   const date = lot.acquisitionDate ?? lot.snapshotDate;
   return date ? formatDate(date) : "-";
 }
 
 function getLotDisplayValues(
-  lot: AssetLotViewRow,
+  lot: AssetLotView,
   marketPrice: number,
   contractMultiplier: number,
 ) {

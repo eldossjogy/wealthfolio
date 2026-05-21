@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
-    lots::AssetLotViewRow,
+    lots::AssetLotView,
     portfolio::{
         allocation::{AllocationHoldings, PortfolioAllocations},
         holdings::Holding,
@@ -142,7 +142,7 @@ pub async fn get_asset_holdings(
 pub async fn get_asset_lots(
     State(state): State<Arc<AppState>>,
     Query(q): Query<AssetLotsQuery>,
-) -> ApiResult<Json<Vec<AssetLotViewRow>>> {
+) -> ApiResult<Json<Vec<AssetLotView>>> {
     let rows = state
         .lots_repository
         .get_asset_lot_view(&q.asset_id, q.include_snapshot_positions.unwrap_or(false))

@@ -11,7 +11,7 @@ import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import { generateId } from "@/lib/id";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { AssetKind, AssetLotViewRow, Holding, Quote } from "@/lib/types";
+import type { AssetKind, AssetLotView, Holding, Quote } from "@/lib/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatedToggleGroup, Page, PageContent, PageHeader, SwipableView } from "@wealthfolio/ui";
 import { Badge } from "@wealthfolio/ui/components/ui/badge";
@@ -395,7 +395,7 @@ export const AssetProfilePage = () => {
   const isAltAsset = isAlternativeAsset(assetProfile?.kind);
   const isLiability = assetProfile?.kind === "LIABILITY";
 
-  const { data: assetLots = [] } = useQuery<AssetLotViewRow[], Error>({
+  const { data: assetLots = [] } = useQuery<AssetLotView[], Error>({
     queryKey: [QueryKeys.ASSET_LOTS, assetId, true],
     queryFn: () => getAssetLots(assetId, true),
     enabled: !!assetId && !isAssetProfileLoading && !isAltAsset,

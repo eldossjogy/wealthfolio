@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use wealthfolio_core::assets::Asset;
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::lots::{
-    AssetLotViewRow, AssetLotViewSource, LotClosure, LotRecord, LotRepositoryTrait,
+    AssetLotSource, AssetLotView, LotClosure, LotRecord, LotRepositoryTrait,
 };
 use wealthfolio_core::portfolio::snapshot::Position;
 
@@ -231,7 +231,7 @@ impl LotRepositoryTrait for LotsRepository {
         &self,
         asset_id: &str,
         include_snapshot_positions: bool,
-    ) -> Result<Vec<AssetLotViewRow>> {
+    ) -> Result<Vec<AssetLotView>> {
         use crate::schema::accounts::dsl as accounts_dsl;
         use crate::schema::lots::dsl;
 
@@ -262,7 +262,7 @@ impl LotRepositoryTrait for LotsRepository {
         };
         let contract_multiplier = load_asset_contract_multiplier(&mut conn, asset_id)?;
 
-        let mut rows: Vec<AssetLotViewRow> = transaction_rows
+        let mut rows: Vec<AssetLotView> = transaction_rows
             .into_iter()
             .map(|row| {
                 let account_name = account_names
@@ -570,17 +570,17 @@ fn transaction_lot_view_row(
     row: LotRecordDB,
     account_name: String,
     contract_multiplier: Decimal,
-) -> AssetLotViewRow {
+) -> AssetLotView {
     let split_ratio = parse_nonzero_ratio(&row.split_ratio);
     let remaining_quantity = parse_decimal(&row.remaining_quantity);
     let original_quantity = parse_decimal(&row.original_quantity);
 
-    AssetLotViewRow {
+    AssetLotView {
         id: row.id,
         account_id: row.account_id,
         account_name,
         asset_id: row.asset_id,
-        source: AssetLotViewSource::TransactionLot,
+        source: AssetLotSource::TransactionLot,
         quantity: remaining_quantity * split_ratio,
         original_quantity,
         remaining_quantity,
@@ -603,8 +603,8 @@ fn snapshot_position_view_row(
     total_cost_basis: Decimal,
     contract_multiplier: Decimal,
     asset_id: &str,
-) -> AssetLotViewRow {
-    AssetLotViewRow {
+) -> AssetLotView {
+    AssetLotView {
         id: format!(
             "SNAPSHOT-{}-{}-{}",
             snapshot.snapshot_id, snapshot.account_id, asset_id
@@ -612,7 +612,7 @@ fn snapshot_position_view_row(
         account_id: snapshot.account_id.clone(),
         account_name: snapshot.account_name.clone(),
         asset_id: asset_id.to_string(),
-        source: AssetLotViewSource::SnapshotPosition,
+        source: AssetLotSource::SnapshotPosition,
         quantity,
         original_quantity: quantity,
         remaining_quantity: quantity,
@@ -631,7 +631,7 @@ fn snapshot_position_view_row(
 fn load_snapshot_lot_view_rows(
     conn: &mut SqliteConnection,
     asset_id_param: &str,
-) -> Result<Vec<AssetLotViewRow>> {
+) -> Result<Vec<AssetLotView>> {
     let latest_snapshots: Vec<LatestHoldingsSnapshotRow> = sql_query(
         r#"
         SELECT
@@ -1405,17 +1405,14 @@ mod tests {
 
         let transaction_only = repo.get_asset_lot_view("AAPL", false).await.unwrap();
         assert_eq!(transaction_only.len(), 1);
-        assert_eq!(
-            transaction_only[0].source,
-            AssetLotViewSource::TransactionLot
-        );
+        assert_eq!(transaction_only[0].source, AssetLotSource::TransactionLot);
 
         let with_snapshots = repo.get_asset_lot_view("AAPL", true).await.unwrap();
         assert_eq!(with_snapshots.len(), 2);
 
         let snapshot_row = with_snapshots
             .iter()
-            .find(|row| row.source == AssetLotViewSource::SnapshotPosition)
+            .find(|row| row.source == AssetLotSource::SnapshotPosition)
             .expect("snapshot aggregate row");
         assert_eq!(snapshot_row.account_id, "acc_holdings");
         assert_eq!(snapshot_row.quantity, Decimal::from(12));
@@ -1510,7 +1507,7 @@ mod tests {
 
         let rows = repo.get_asset_lot_view("AAPL", true).await.unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].source, AssetLotViewSource::SnapshotPosition);
+        assert_eq!(rows[0].source, AssetLotSource::SnapshotPosition);
         assert_eq!(rows[0].account_id, "acc_holdings_json");
         assert_eq!(rows[0].quantity, Decimal::from(3));
         assert_eq!(rows[0].unit_cost, Decimal::from(25));

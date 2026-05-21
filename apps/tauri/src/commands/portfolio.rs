@@ -18,7 +18,7 @@ use wealthfolio_core::{
     allocation::{AllocationHoldings, PortfolioAllocations},
     holdings::Holding,
     income::IncomeSummary,
-    lots::AssetLotViewRow,
+    lots::AssetLotView,
     performance::{PerformanceMetrics, SimplePerformanceMetrics},
     portfolio::snapshot::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
@@ -211,7 +211,7 @@ pub async fn get_asset_lots(
     state: State<'_, Arc<ServiceContext>>,
     asset_id: String,
     include_snapshot_positions: Option<bool>,
-) -> Result<Vec<AssetLotViewRow>, String> {
+) -> Result<Vec<AssetLotView>, String> {
     debug!("Get lot view rows for asset {}", asset_id);
     state
         .lots_repository

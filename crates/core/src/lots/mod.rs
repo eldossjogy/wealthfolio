@@ -110,7 +110,7 @@ pub trait LotRepositoryTrait: Send + Sync {
         &self,
         asset_id: &str,
         include_snapshot_positions: bool,
-    ) -> Result<Vec<AssetLotViewRow>>;
+    ) -> Result<Vec<AssetLotView>>;
 
     /// Returns every lot row (open and closed) across all accounts.
     /// Used when computing valuations for the TOTAL pseudo-account.
@@ -192,7 +192,7 @@ pub struct LotRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum AssetLotViewSource {
+pub enum AssetLotSource {
     TransactionLot,
     SnapshotPosition,
 }
@@ -204,12 +204,12 @@ pub enum AssetLotViewSource {
 /// without becoming rows in the `lots` table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AssetLotViewRow {
+pub struct AssetLotView {
     pub id: String,
     pub account_id: String,
     pub account_name: String,
     pub asset_id: String,
-    pub source: AssetLotViewSource,
+    pub source: AssetLotSource,
     /// Effective current quantity. For transaction lots this is
     /// `remaining_quantity * split_ratio`; snapshot positions are already
     /// aggregate current quantities.

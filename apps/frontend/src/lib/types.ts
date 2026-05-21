@@ -576,14 +576,14 @@ export interface Lot {
   acquisitionFees: number;
 }
 
-export type AssetLotViewSource = "TRANSACTION_LOT" | "SNAPSHOT_POSITION";
+export type AssetLotSource = "TRANSACTION_LOT" | "SNAPSHOT_POSITION";
 
-export interface AssetLotViewRow {
+export interface AssetLotView {
   id: string;
   accountId: string;
   accountName: string;
   assetId: string;
-  source: AssetLotViewSource;
+  source: AssetLotSource;
   quantity: number;
   originalQuantity: number;
   remainingQuantity: number;
