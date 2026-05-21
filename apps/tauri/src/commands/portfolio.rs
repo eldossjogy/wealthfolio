@@ -129,19 +129,10 @@ async fn resolve_scope(
     filter: &AccountScope,
     state: &ServiceContext,
 ) -> Result<ResolvedAccountScope, String> {
-    match filter {
-        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
-        AccountScope::Account { account_id } => {
-            Ok(ResolvedAccountScope::Account(account_id.clone()))
-        }
-        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
-            let ids = state
-                .portfolio_service()
-                .resolve_account_filter(filter)
-                .map_err(|e| e.to_string())?;
-            Ok(ResolvedAccountScope::Accounts(ids))
-        }
-    }
+    state
+        .portfolio_service()
+        .resolve_account_scope(filter)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

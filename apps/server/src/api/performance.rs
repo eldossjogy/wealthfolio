@@ -123,16 +123,19 @@ async fn get_income_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IncomeSummaryBody>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    use wealthfolio_core::portfolios::AccountScope;
+    use wealthfolio_core::portfolios::ResolvedAccountScope;
+
     let account_ids: Option<Vec<String>> = match &body.filter {
-        None | Some(AccountScope::All) => None,
-        Some(AccountScope::Account { account_id }) => Some(vec![account_id.clone()]),
-        Some(AccountScope::Portfolio { .. }) | Some(AccountScope::Accounts { .. }) => Some(
-            state
-                .portfolio_service
-                .resolve_account_filter(body.filter.as_ref().unwrap())
-                .map_err(crate::error::ApiError::from)?,
-        ),
+        None => None,
+        Some(filter) => match state
+            .portfolio_service
+            .resolve_account_scope(filter)
+            .map_err(crate::error::ApiError::from)?
+        {
+            ResolvedAccountScope::TotalSnapshot => None,
+            ResolvedAccountScope::Account(id) => Some(vec![id]),
+            ResolvedAccountScope::Accounts(ids) => Some(ids),
+        },
     };
     let items = state
         .income_service

@@ -35,19 +35,10 @@ fn resolve_scope(
     filter: &AccountScope,
     state: &AppState,
 ) -> Result<ResolvedAccountScope, crate::error::ApiError> {
-    match filter {
-        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
-        AccountScope::Account { account_id } => {
-            Ok(ResolvedAccountScope::Account(account_id.clone()))
-        }
-        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
-            let ids = state
-                .portfolio_service
-                .resolve_account_filter(filter)
-                .map_err(crate::error::ApiError::from)?;
-            Ok(ResolvedAccountScope::Accounts(ids))
-        }
-    }
+    state
+        .portfolio_service
+        .resolve_account_scope(filter)
+        .map_err(crate::error::ApiError::from)
 }
 
 fn aggregated_id(_filter: &AccountScope) -> String {
