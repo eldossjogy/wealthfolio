@@ -443,7 +443,7 @@ export default function SpendingTabContent() {
           </button>
         </div>
       )}
-      <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
+      <div className="px-4 pb-6 pt-2 md:px-6 md:pb-2 lg:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
           <div>
             <div className="text-muted-foreground/80 text-[11px] font-semibold uppercase tracking-[0.12em]">

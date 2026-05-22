@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 
 import { Icons, PrivacyAmount, Skeleton } from "@wealthfolio/ui";
+import { useIsMobileViewport } from "@/hooks/use-platform";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -62,6 +63,7 @@ export function CategoryHierarchyTable({
   sort = "spent",
   onCategoryClick,
 }: CategoryHierarchyTableProps) {
+  const isMobile = useIsMobileViewport();
   const tree = useMemo(
     () => buildTree({ breakdown, priorBreakdown, budgetRows, taxonomyCategories, sort }),
     [breakdown, priorBreakdown, budgetRows, taxonomyCategories, sort],
@@ -150,6 +152,54 @@ export function CategoryHierarchyTable({
     return (
       <div className="text-muted-foreground py-8 text-center text-sm">
         No categorized spending in this period.
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className="text-foreground">
+        <ul className="space-y-1.5">
+          {groups
+            ? groups.map((group) => (
+                <MobileGroupRow
+                  key={group.id}
+                  group={group}
+                  currency={currency}
+                  onCategoryClick={onCategoryClick}
+                  expanded={!!expandedById[group.id]}
+                  onToggle={() => setRowExpanded(group.id, !expandedById[group.id])}
+                  expandedById={expandedById}
+                  onChildToggle={setRowExpanded}
+                />
+              ))
+            : tree.map((node) => (
+                <MobileCategoryRow
+                  key={node.id}
+                  node={node}
+                  currency={currency}
+                  onCategoryClick={onCategoryClick}
+                  expanded={!!expandedById[node.id]}
+                  onToggle={() => setRowExpanded(node.id, !expandedById[node.id])}
+                  standalone
+                />
+              ))}
+        </ul>
+        <div className="mt-4">
+          <div className="border-border/30 flex items-baseline justify-between gap-3 border-t pt-4">
+            <span className="text-muted-foreground/80 text-[10px] font-semibold uppercase tracking-[0.14em]">
+              Total spent
+            </span>
+            <span className="text-foreground text-xl font-semibold tabular-nums tracking-tight">
+              −<PrivacyAmount value={totals.spent} currency={currency} />
+            </span>
+          </div>
+          {totals.budgeted > 0 && (
+            <div className="text-muted-foreground/60 mt-0.5 text-right text-[11px] tabular-nums">
+              of <PrivacyAmount value={totals.budgeted} currency={currency} /> budgeted
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -534,3 +584,262 @@ const ChildRow = memo(function ChildRow({
     </tr>
   );
 });
+
+function DeltaPill({ delta, priorSpent }: { delta: number; priorSpent: number }) {
+  if (priorSpent === 0 || delta === 0) {
+    return (
+      <span className="text-muted-foreground/60 shrink-0 text-[11px] tabular-nums">
+        {formatDelta(delta, priorSpent)}
+      </span>
+    );
+  }
+  const up = delta > 0;
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+        up ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success",
+      )}
+    >
+      {formatDelta(delta, priorSpent)}
+    </span>
+  );
+}
+
+const MOBILE_CARD = "border-border/40 bg-card/40 rounded-2xl border";
+
+const MobileGroupRow = memo(function MobileGroupRow({
+  group,
+  currency,
+  onCategoryClick,
+  expanded,
+  onToggle,
+  expandedById,
+  onChildToggle,
+}: {
+  group: GroupNode;
+  currency: string;
+  onCategoryClick?: (categoryId: string) => void;
+  expanded: boolean;
+  onToggle: () => void;
+  expandedById: Record<string, boolean>;
+  onChildToggle: (id: string, value: boolean) => void;
+}) {
+  const hasChildren = group.children.length > 0;
+  const hasBudget = group.budgeted > 0;
+  const delta = group.spent - group.priorSpent;
+  const accent = group.color ?? "var(--muted-foreground)";
+
+  // Empty group — single-line card.
+  if (!hasChildren && !hasBudget) {
+    return (
+      <li className={cn(MOBILE_CARD, "flex items-center gap-2.5 px-4 py-3")}>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: accent }} />
+        <span className="text-foreground/75 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-[0.14em]">
+          {group.name}
+        </span>
+        <span className="text-foreground/90 shrink-0 text-sm font-medium tabular-nums">
+          −<PrivacyAmount value={group.spent} currency={currency} />
+        </span>
+        <DeltaPill delta={delta} priorSpent={group.priorSpent} />
+      </li>
+    );
+  }
+
+  return (
+    <li className={MOBILE_CARD}>
+      <button
+        type="button"
+        className="hover:bg-muted/20 block w-full rounded-2xl px-4 pb-3 pt-3 text-left transition-colors"
+        onClick={hasChildren ? onToggle : undefined}
+        disabled={!hasChildren}
+      >
+        <div className="flex items-center gap-2.5">
+          <span
+            className="block h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ backgroundColor: accent }}
+          />
+          <span className="text-foreground/75 flex-1 truncate text-[10.5px] font-semibold uppercase tracking-[0.14em]">
+            {group.name}
+          </span>
+          <DeltaPill delta={delta} priorSpent={group.priorSpent} />
+          {hasChildren && (
+            <Icons.ChevronRight
+              className={cn(
+                "text-muted-foreground/40 h-3.5 w-3.5 shrink-0 transition-transform",
+                expanded && "rotate-90",
+              )}
+            />
+          )}
+        </div>
+        <div className="mt-1.5 flex items-baseline justify-between gap-3 pl-4">
+          <span className="text-foreground text-[15px] font-semibold tabular-nums tracking-tight">
+            −<PrivacyAmount value={group.spent} currency={currency} />
+          </span>
+          {hasBudget && (
+            <span className="text-muted-foreground/60 shrink-0 text-[11px] tabular-nums">
+              of <PrivacyAmount value={group.budgeted} currency={currency} />
+            </span>
+          )}
+        </div>
+        {hasBudget && (
+          <div className="mt-1.5 pl-4">
+            <ProgressBar spent={group.spent} budget={group.budgeted} />
+          </div>
+        )}
+      </button>
+      {expanded && hasChildren && (
+        <ul className="border-border/30 mx-4 mt-1 space-y-1 border-t pb-3 pt-2">
+          {group.children.map((node) => (
+            <MobileCategoryRow
+              key={node.id}
+              node={node}
+              currency={currency}
+              onCategoryClick={onCategoryClick}
+              expanded={!!expandedById[node.id]}
+              onToggle={() => onChildToggle(node.id, !expandedById[node.id])}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+});
+
+const MobileCategoryRow = memo(function MobileCategoryRow({
+  node,
+  currency,
+  onCategoryClick,
+  expanded,
+  onToggle,
+  standalone = false,
+}: {
+  node: NodeRow;
+  currency: string;
+  onCategoryClick?: (categoryId: string) => void;
+  expanded: boolean;
+  onToggle: () => void;
+  /** Render as a standalone card (no enclosing group). */
+  standalone?: boolean;
+}) {
+  const hasChildren = node.children.length > 0;
+  const hasBudget = node.budgeted > 0;
+  const delta = node.spent - node.priorSpent;
+  const accent = node.color ?? "var(--muted-foreground)";
+  const tintBg = node.color ? `${node.color}1F` : "var(--muted)";
+  const clickable = !!onCategoryClick;
+
+  const pct = hasBudget ? (node.spent / node.budgeted) * 100 : 0;
+  const subtitle = hasBudget ? (
+    <>
+      <span className={cn("tabular-nums", pct > 100 ? "text-destructive" : undefined)}>
+        {pct.toFixed(0)}%
+      </span>
+      <span className="text-muted-foreground/50"> · of </span>
+      <PrivacyAmount value={node.budgeted} currency={currency} />
+    </>
+  ) : null;
+
+  return (
+    <li className={cn(standalone && MOBILE_CARD)}>
+      <div
+        className={cn(
+          "flex items-center gap-3 rounded-xl transition-colors",
+          standalone ? "px-4 py-3" : "py-2",
+          clickable && "hover:bg-muted/30 cursor-pointer",
+        )}
+        onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
+      >
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: tintBg, color: accent }}
+          aria-hidden
+        >
+          <CategoryIcon icon={node.icon} fallback={node.name} className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-foreground truncate text-sm font-semibold">{node.name}</div>
+          {subtitle && (
+            <div className="text-muted-foreground/70 mt-0.5 truncate text-[11px] tabular-nums">
+              {subtitle}
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-0.5">
+          <span className="text-foreground text-sm font-semibold tabular-nums">
+            −<PrivacyAmount value={node.spent} currency={currency} />
+          </span>
+          <DeltaPill delta={delta} priorSpent={node.priorSpent} />
+        </div>
+        {hasChildren && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="text-muted-foreground/40 hover:text-foreground -m-1 flex h-6 w-6 shrink-0 items-center justify-center rounded p-1"
+            aria-expanded={expanded}
+            aria-label="Toggle subcategories"
+          >
+            <Icons.ChevronDown
+              className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
+            />
+          </button>
+        )}
+      </div>
+      {expanded && hasChildren && (
+        <ul
+          className={cn(
+            "border-border/30 divide-border/30 mt-1 divide-y border-t pt-1",
+            standalone ? "mx-4 mb-3" : "ml-[52px]",
+          )}
+        >
+          {node.children.map((child) => (
+            <MobileSubcategoryRow
+              key={child.id}
+              node={child}
+              currency={currency}
+              parentColor={accent}
+              onCategoryClick={onCategoryClick}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+});
+
+function MobileSubcategoryRow({
+  node,
+  currency,
+  parentColor,
+  onCategoryClick,
+}: {
+  node: NodeRow;
+  currency: string;
+  parentColor: string;
+  onCategoryClick?: (categoryId: string) => void;
+}) {
+  const delta = node.spent - node.priorSpent;
+  const clickable = !!onCategoryClick;
+  return (
+    <li
+      className={cn(
+        "hover:bg-muted/20 flex items-center gap-2 py-1.5 text-[13px] transition-colors",
+        clickable && "cursor-pointer",
+      )}
+      onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
+    >
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: parentColor, opacity: 0.6 }}
+      />
+      <span className="text-muted-foreground/90 flex-1 truncate">{node.name}</span>
+      <DeltaPill delta={delta} priorSpent={node.priorSpent} />
+      <span className="text-muted-foreground/90 shrink-0 text-xs tabular-nums">
+        −<PrivacyAmount value={node.spent} currency={currency} />
+      </span>
+    </li>
+  );
+}

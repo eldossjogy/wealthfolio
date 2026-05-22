@@ -825,7 +825,7 @@ function BreakdownCanvas({
         </div>
       </header>
 
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="-mx-2 mb-3 flex gap-2 overflow-x-auto px-2 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
         {filterChips.map((chip) => {
           const active = filter === chip.id;
           return (
@@ -834,7 +834,7 @@ function BreakdownCanvas({
               type="button"
               onClick={() => setFilter(chip.id)}
               className={cn(
-                "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs transition-colors",
+                "inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3 py-1 text-xs transition-colors",
                 active
                   ? "bg-foreground text-background"
                   : "border-border/60 text-muted-foreground hover:text-foreground border bg-transparent",
@@ -854,7 +854,7 @@ function BreakdownCanvas({
         })}
       </div>
 
-      <div className="border-border/60 bg-card/40 overflow-hidden rounded-2xl border backdrop-blur-xl">
+      <div className="md:border-border/60 md:bg-card/40 md:overflow-hidden md:rounded-2xl md:border md:backdrop-blur-xl">
         <CategoryHierarchyTable
           breakdown={filteredBreakdown}
           priorBreakdown={priorBreakdown}
@@ -866,7 +866,8 @@ function BreakdownCanvas({
           isLoading={isLoading}
           onCategoryClick={onCategoryClick}
         />
-        <div className="text-muted-foreground/80 border-border/40 flex items-center justify-between border-t px-4 py-3 text-xs">
+        {/* Desktop footer: count + link */}
+        <div className="text-muted-foreground/80 border-border/40 hidden items-center justify-between border-t px-4 py-3 text-xs md:flex">
           <span className="tabular-nums">
             {shownCats} of {totalCats} categor{totalCats === 1 ? "y" : "ies"} shown
           </span>
@@ -875,6 +876,16 @@ function BreakdownCanvas({
             className="text-foreground hover:text-foreground/80 inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
           >
             Open transactions →
+          </Link>
+        </div>
+        {/* Mobile footer: full-width primary action */}
+        <div className="mt-4 md:hidden">
+          <Link
+            to="/activities?tab=spending"
+            className="bg-foreground text-background hover:bg-foreground/90 flex h-11 w-full items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors"
+          >
+            Open transactions
+            <Icons.ArrowRight className="h-4 w-4" aria-hidden />
           </Link>
         </div>
       </div>
