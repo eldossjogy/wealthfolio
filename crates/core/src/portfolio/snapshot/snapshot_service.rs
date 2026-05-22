@@ -111,9 +111,9 @@ pub trait SnapshotServiceTrait: Send + Sync {
     async fn ensure_holdings_history(&self, account_id: &str) -> Result<()>;
 
     /// Delete snapshot(s) on the given dates.
-    /// Preferred entry point for UI-driven snapshot deletion — encapsulates
-    /// repository deletion while higher-level orchestration (valuation recalc,
-    /// frontend events) stays with the caller.
+    /// Keep UI/API callers behind the snapshot service boundary even though
+    /// deletion currently delegates directly to storage. Higher-level
+    /// orchestration (valuation recalc, frontend events) stays with the caller.
     async fn delete_snapshot_for_account(
         &self,
         account_id: &str,
