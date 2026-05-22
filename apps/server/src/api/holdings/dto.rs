@@ -48,6 +48,14 @@ pub struct AssetHoldingsQuery {
 }
 
 #[derive(Deserialize)]
+pub struct AssetLotsQuery {
+    #[serde(rename = "assetId")]
+    pub asset_id: String,
+    #[serde(rename = "includeSnapshotPositions", default)]
+    pub include_snapshot_positions: bool,
+}
+
+#[derive(Deserialize)]
 pub struct HistoryQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
