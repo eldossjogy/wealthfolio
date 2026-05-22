@@ -19,6 +19,7 @@ import {
   type PeriodState,
 } from "../../../lib/change-descriptor";
 import { buildHeadline, type HeadlineFragment, type HeadlineModel } from "../../../lib/headline";
+import { UNCATEGORIZED_CATEGORY_ID } from "../../../lib/insight-projection";
 import { formatMonthName, formatMonthYear, formatPercentValue } from "./format";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
@@ -323,9 +324,10 @@ function computeMovers(
   const descriptors = describeCategories(aggregates, currentTotal, priorTotal);
   return descriptors.map((d) => {
     const m = meta.get(d.id);
+    const isUncategorized = d.id === UNCATEGORIZED_CATEGORY_ID;
     return {
       ...d,
-      name: m?.name ?? d.id,
+      name: isUncategorized ? "Uncategorized" : (m?.name ?? d.id),
       color: m?.color ?? null,
       icon: m?.icon ?? null,
     };
