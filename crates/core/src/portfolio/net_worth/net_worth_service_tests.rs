@@ -308,6 +308,17 @@ impl SnapshotRepositoryTrait for MockSnapshotRepository {
     ) -> Result<Option<AccountStateSnapshot>> {
         Ok(None)
     }
+
+    fn get_snapshot_positions(&self, _snapshot_id: &str) -> Result<HashMap<String, Position>> {
+        Ok(HashMap::new())
+    }
+
+    fn get_snapshot_positions_batch(
+        &self,
+        _snapshot_ids: &[String],
+    ) -> Result<HashMap<String, HashMap<String, Position>>> {
+        Ok(HashMap::new())
+    }
 }
 
 struct MockMarketDataRepository {

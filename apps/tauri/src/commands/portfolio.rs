@@ -18,6 +18,7 @@ use wealthfolio_core::{
     allocation::{AllocationHoldings, PortfolioAllocations},
     holdings::Holding,
     income::IncomeSummary,
+    lots::AssetLotView,
     performance::{PerformanceMetrics, SimplePerformanceMetrics},
     portfolio::snapshot::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
@@ -129,19 +130,10 @@ async fn resolve_scope(
     filter: &AccountScope,
     state: &ServiceContext,
 ) -> Result<ResolvedAccountScope, String> {
-    match filter {
-        AccountScope::All => Ok(ResolvedAccountScope::TotalSnapshot),
-        AccountScope::Account { account_id } => {
-            Ok(ResolvedAccountScope::Account(account_id.clone()))
-        }
-        AccountScope::Portfolio { .. } | AccountScope::Accounts { .. } => {
-            let ids = state
-                .portfolio_service()
-                .resolve_account_filter(filter)
-                .map_err(|e| e.to_string())?;
-            Ok(ResolvedAccountScope::Accounts(ids))
-        }
-    }
+    state
+        .portfolio_service()
+        .resolve_account_scope(filter)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -212,6 +204,20 @@ pub async fn get_asset_holdings(
         }
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_asset_lots(
+    state: State<'_, Arc<ServiceContext>>,
+    asset_id: String,
+    include_snapshot_positions: bool,
+) -> Result<Vec<AssetLotView>, String> {
+    debug!("Get lot view rows for asset {}", asset_id);
+    state
+        .lots_repository
+        .get_asset_lot_view(&asset_id, include_snapshot_positions)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1356,10 +1362,10 @@ pub async fn delete_snapshot(
         );
     }
 
-    // Delete the snapshot
+    // Delete via the service so snapshot deletion stays behind one entry point.
     state
-        .snapshot_repository()
-        .delete_snapshots_for_account_and_dates(&account_id, &[target_date])
+        .snapshot_service()
+        .delete_snapshot_for_account(&account_id, &[target_date])
         .await
         .map_err(|e| format!("Failed to delete snapshot: {}", e))?;
 
@@ -1368,7 +1374,7 @@ pub async fn delete_snapshot(
         snapshot.source, account_id, date
     );
 
-    // If no user-created snapshots remain, clean up orphan SYNTHETIC snapshots
+    // If no user-created snapshots remain, clean up orphan SYNTHETIC snapshots.
     let remaining = state
         .snapshot_repository()
         .get_snapshots_by_account(&account_id, None, None)
@@ -1386,8 +1392,8 @@ pub async fn delete_snapshot(
             .collect();
         if !synthetic_dates.is_empty() {
             state
-                .snapshot_repository()
-                .delete_snapshots_for_account_and_dates(&account_id, &synthetic_dates)
+                .snapshot_service()
+                .delete_snapshot_for_account(&account_id, &synthetic_dates)
                 .await
                 .map_err(|e| format!("Failed to clean up synthetic snapshots: {}", e))?;
             info!(

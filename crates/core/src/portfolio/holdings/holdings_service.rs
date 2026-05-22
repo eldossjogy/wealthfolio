@@ -1198,6 +1198,14 @@ mod tests {
         async fn ensure_holdings_history(&self, _account_id: &str) -> Result<()> {
             unimplemented!("unused in holdings service tests")
         }
+
+        async fn delete_snapshot_for_account(
+            &self,
+            _account_id: &str,
+            _dates: &[chrono::NaiveDate],
+        ) -> Result<()> {
+            unimplemented!("unused in holdings service tests")
+        }
     }
 
     struct MockValuationService {
@@ -1468,10 +1476,14 @@ mod tests {
                 position_id: "POS-TEST".to_string(),
                 acquisition_date: Utc::now(),
                 quantity: dec!(1),
+                original_quantity: dec!(1),
                 cost_basis: dec!(3000),
                 acquisition_price: dec!(3000),
                 acquisition_fees: dec!(0),
+                original_acquisition_fees: dec!(0),
                 fx_rate_to_position: None,
+                source_activity_id: None,
+                split_ratio: Decimal::ONE,
             }])),
             contract_multiplier: Decimal::ONE,
             local_currency: "GBp".to_string(),

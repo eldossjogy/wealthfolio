@@ -8,7 +8,7 @@ mod tests {
     use crate::errors::{DatabaseError, Error, Result};
     use crate::portfolios::{
         AccountScope, NewPortfolio, PortfolioRepositoryTrait, PortfolioService,
-        PortfolioServiceTrait, PortfolioUpdate, PortfolioWithAccounts,
+        PortfolioServiceTrait, PortfolioUpdate, PortfolioWithAccounts, ResolvedAccountScope,
     };
 
     // ── Mock portfolio repository ─────────────────────────────────────────────
@@ -89,6 +89,7 @@ mod tests {
             match filter {
                 AccountScope::All => Ok(vec!["a1".to_string(), "a2".to_string()]),
                 AccountScope::Account { account_id } => Ok(vec![account_id.clone()]),
+                AccountScope::Portfolio { portfolio_id } if portfolio_id == "empty" => Ok(vec![]),
                 AccountScope::Portfolio { portfolio_id: _ } => {
                     Ok(vec!["a1".to_string(), "a2".to_string()])
                 }
@@ -279,5 +280,36 @@ mod tests {
             })
             .unwrap();
         assert_eq!(ids, vec!["a1"]);
+    }
+
+    #[tokio::test]
+    async fn resolve_account_scope_all_uses_total_snapshot() {
+        let svc = make_service_with(MockPortfolioRepo::default(), &[]);
+        let scope = svc.resolve_account_scope(&AccountScope::All).unwrap();
+        assert!(matches!(scope, ResolvedAccountScope::TotalSnapshot));
+    }
+
+    #[tokio::test]
+    async fn resolve_account_scope_rejects_empty_accounts_scope() {
+        let svc = make_service_with(MockPortfolioRepo::default(), &[]);
+        let err = svc
+            .resolve_account_scope(&AccountScope::Accounts {
+                account_ids: vec![],
+            })
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+        assert!(err.to_string().contains("no accounts"));
+    }
+
+    #[tokio::test]
+    async fn resolve_account_scope_rejects_empty_portfolio_scope() {
+        let svc = make_service_with(MockPortfolioRepo::default(), &[]);
+        let err = svc
+            .resolve_account_scope(&AccountScope::Portfolio {
+                portfolio_id: "empty".to_string(),
+            })
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+        assert!(err.to_string().contains("no accounts"));
     }
 }

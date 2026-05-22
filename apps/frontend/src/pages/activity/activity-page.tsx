@@ -130,13 +130,13 @@ const ActivityPage = () => {
   const isDatagridView = viewMode === "datagrid";
 
   // Resolve the typed scope to a flat account ID list for the activity search.
-  const effectiveAccountIds = useMemo(() => {
+  const effectiveAccountIds = useMemo<string[] | undefined>(() => {
     if (accountScope.type === "account") return [accountScope.accountId];
     if (accountScope.type === "accounts") return accountScope.accountIds;
     if (accountScope.type === "portfolio") {
       return portfolios.find((p) => p.id === accountScope.portfolioId)?.accountIds ?? [];
     }
-    return []; // "all" → no filter
+    return undefined; // "all" → no filter
   }, [accountScope, portfolios]);
 
   // Accounts opted into the Spending module are shown on the Spending tab; the
@@ -159,7 +159,7 @@ const ActivityPage = () => {
   // the investment-only set.
   const effectiveInvestmentAccountIds = useMemo(() => {
     if (!isSpendingEnabled || spendingAccountIds.length === 0) return effectiveAccountIds;
-    if (effectiveAccountIds.length === 0) return investmentAccountIds;
+    if (!effectiveAccountIds || effectiveAccountIds.length === 0) return investmentAccountIds;
     const allowed = new Set(investmentAccountIds);
     return effectiveAccountIds.filter((id) => allowed.has(id));
   }, [effectiveAccountIds, investmentAccountIds, isSpendingEnabled, spendingAccountIds.length]);
@@ -385,14 +385,11 @@ const ActivityPage = () => {
       {isMobileViewport ? (
         <ActivityMobileControls
           accounts={investmentAccounts}
+          portfolios={portfolios}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
-          selectedAccountIds={effectiveAccountIds}
-          onAccountIdsChange={(ids) => {
-            if (ids.length === 0) setAccountScope({ type: "all" });
-            else if (ids.length === 1) setAccountScope({ type: "account", accountId: ids[0] });
-            else setAccountScope({ type: "accounts", accountIds: ids });
-          }}
+          accountScope={accountScope}
+          onAccountScopeChange={setAccountScope}
           selectedActivityTypes={selectedActivityTypes}
           onActivityTypesChange={setSelectedActivityTypes}
           isCompactView={isCompactView}
