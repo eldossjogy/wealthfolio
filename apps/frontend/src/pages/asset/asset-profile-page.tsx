@@ -1255,12 +1255,16 @@ export const AssetProfilePage = () => {
 
             {/* Lots Content: Requires profile and lot rows */}
             {profile && assetLots.length > 0 && (
-              <TabsContent value="lots" className="pt-6">
+              <TabsContent value="lots">
                 <AssetLotsTable
                   lots={assetLots}
                   currency={symbolHolding?.currency ?? profile.currency ?? baseCurrency}
                   marketPrice={Number(holding?.price ?? profile.marketPrice)}
                   contractMultiplier={Number(holding?.contractMultiplier ?? 1)}
+                  dayChangeAmount={
+                    holding?.dayChange?.local != null ? Number(holding.dayChange.local) : null
+                  }
+                  dayChangePct={holding?.dayChangePct ?? null}
                 />
               </TabsContent>
             )}
