@@ -126,7 +126,13 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
 
         let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
 
-        let holdings = if account_id.is_none() {
+        let holdings = if let Some(account_id) = account_id {
+            self.env
+                .holdings_service()
+                .get_holdings(account_id, &self.base_currency)
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        } else {
             let accounts = self
                 .env
                 .account_service()
@@ -136,15 +142,6 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
             self.env
                 .holdings_service()
                 .get_holdings_for_accounts(&account_ids, &self.base_currency, "all")
-                .await
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
-        } else {
-            self.env
-                .holdings_service()
-                .get_holdings(
-                    account_id.expect("single-account branch checked"),
-                    &self.base_currency,
-                )
                 .await
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
         };

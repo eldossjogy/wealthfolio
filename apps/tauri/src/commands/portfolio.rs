@@ -342,7 +342,12 @@ pub async fn get_historical_valuations(
                 )
                 .map_err(|e| e.to_string())
         }
-    } else if account_id.is_none() {
+    } else if let Some(account_id) = account_id {
+        state
+            .valuation_service()
+            .get_historical_valuations(&account_id, from_date_opt, to_date_opt)
+            .map_err(|e| e.to_string())
+    } else {
         let base_currency = state.get_base_currency();
         let resolved = state
             .portfolio_service()
@@ -357,12 +362,6 @@ pub async fn get_historical_valuations(
                 from_date_opt,
                 to_date_opt,
             )
-            .map_err(|e| e.to_string())
-    } else {
-        let account_id = account_id.expect("account_id checked as Some above");
-        state
-            .valuation_service()
-            .get_historical_valuations(&account_id, from_date_opt, to_date_opt)
             .map_err(|e| e.to_string())
     }
 }
@@ -488,9 +487,9 @@ pub async fn calculate_performance_history(
         _ => None,
     });
 
-    if item_type == "account" && filter.is_some() {
+    if let (true, Some(filter)) = (item_type == "account", filter) {
         let base_currency = state.get_base_currency();
-        let account_filter = filter.expect("checked is_some").into_account_filter()?;
+        let account_filter = filter.into_account_filter()?;
         let resolved = state
             .portfolio_service()
             .resolve_account_scope(&account_filter, &base_currency)
@@ -563,9 +562,9 @@ pub async fn calculate_performance_summary(
         _ => None,
     });
 
-    if item_type == "account" && filter.is_some() {
+    if let (true, Some(filter)) = (item_type == "account", filter) {
         let base_currency = state.get_base_currency();
-        let account_filter = filter.expect("checked is_some").into_account_filter()?;
+        let account_filter = filter.into_account_filter()?;
         let resolved = state
             .portfolio_service()
             .resolve_account_scope(&account_filter, &base_currency)

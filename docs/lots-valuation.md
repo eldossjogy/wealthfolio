@@ -74,8 +74,8 @@ Implementation:
   reads to scoped aggregation.
 - Frontend keeps `AccountScope` union, removes string shortcut hooks like
   `useHoldings(string)`, and uses scope object query keys.
-- Migration deletes existing aggregate account rows from `holdings_snapshots` and
-  `daily_account_valuation`.
+- Migration deletes existing aggregate account rows from `holdings_snapshots`
+  and `daily_account_valuation`.
 - Sync apply ignores inbound aggregate `holdings_snapshots`.
 
 Checks:

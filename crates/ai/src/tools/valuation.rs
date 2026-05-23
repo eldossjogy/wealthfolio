@@ -128,7 +128,24 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
             .unwrap_or_else(|| end_date - chrono::Duration::days(DEFAULT_VALUATIONS_DAYS));
 
         // Fetch valuations based on account scope
-        let valuations: Vec<ValuationPointDto> = if account_id.is_none() {
+        let valuations: Vec<ValuationPointDto> = if let Some(account_id) = account_id {
+            // Single account valuations
+            let account_valuations = self
+                .env
+                .valuation_service()
+                .get_historical_valuations(account_id, Some(start_date), Some(end_date))
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+
+            account_valuations
+                .into_iter()
+                .map(|v| ValuationPointDto {
+                    date: v.valuation_date.format("%Y-%m-%d").to_string(),
+                    total_value: v.total_value_base.to_f64().unwrap_or(0.0),
+                    net_contribution: v.net_contribution_base.to_f64().unwrap_or(0.0),
+                    currency: self.base_currency.clone(),
+                })
+                .collect()
+        } else {
             let accounts = self
                 .env
                 .account_service()
@@ -145,27 +162,6 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
                     Some(end_date),
                 )
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
-                .into_iter()
-                .map(|v| ValuationPointDto {
-                    date: v.valuation_date.format("%Y-%m-%d").to_string(),
-                    total_value: v.total_value_base.to_f64().unwrap_or(0.0),
-                    net_contribution: v.net_contribution_base.to_f64().unwrap_or(0.0),
-                    currency: self.base_currency.clone(),
-                })
-                .collect()
-        } else {
-            // Single account valuations
-            let account_valuations = self
-                .env
-                .valuation_service()
-                .get_historical_valuations(
-                    account_id.expect("single-account branch checked"),
-                    Some(start_date),
-                    Some(end_date),
-                )
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-
-            account_valuations
                 .into_iter()
                 .map(|v| ValuationPointDto {
                     date: v.valuation_date.format("%Y-%m-%d").to_string(),

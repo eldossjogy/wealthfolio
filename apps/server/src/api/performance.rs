@@ -88,12 +88,12 @@ async fn calculate_performance_history(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let tracking_mode = parse_tracking_mode(body.tracking_mode);
-    let metrics = if body.item_type == "account" && body.filter.is_some() {
+    let metrics = if let (true, Some(filter)) = (body.item_type == "account", body.filter.as_ref())
+    {
         let base = state.base_currency.read().unwrap().clone();
-        let filter = body.filter.unwrap();
         let resolved = state
             .portfolio_service
-            .resolve_account_scope(&filter, &base)
+            .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
         let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
         state
@@ -129,12 +129,12 @@ async fn calculate_performance_summary(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let tracking_mode = parse_tracking_mode(body.tracking_mode);
-    let metrics = if body.item_type == "account" && body.filter.is_some() {
+    let metrics = if let (true, Some(filter)) = (body.item_type == "account", body.filter.as_ref())
+    {
         let base = state.base_currency.read().unwrap().clone();
-        let filter = body.filter.unwrap();
         let resolved = state
             .portfolio_service
-            .resolve_account_scope(&filter, &base)
+            .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
         let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
         state

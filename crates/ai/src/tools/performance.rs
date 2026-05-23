@@ -162,7 +162,19 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
         let end_date = Local::now().date_naive();
         let start_date = period_to_start_date(&period, end_date);
 
-        let metrics = if account_id.is_none() {
+        let metrics = if let Some(account_id) = account_id {
+            self.env
+                .performance_service()
+                .calculate_performance_history(
+                    "account",
+                    account_id,
+                    start_date,
+                    Some(end_date),
+                    None,
+                )
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        } else {
             let accounts = self
                 .env
                 .account_service()
@@ -185,18 +197,6 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
                     &account_tracking_modes,
                     start_date,
                     Some(end_date),
-                )
-                .await
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
-        } else {
-            self.env
-                .performance_service()
-                .calculate_performance_history(
-                    "account",
-                    account_id.expect("single-account branch checked"),
-                    start_date,
-                    Some(end_date),
-                    None,
                 )
                 .await
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?

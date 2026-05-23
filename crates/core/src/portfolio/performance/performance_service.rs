@@ -95,6 +95,16 @@ struct DailyReturnSample {
     excluded_from_compounding: bool,
 }
 
+struct ScopedPerformanceRequest<'a> {
+    scope_id: &'a str,
+    account_ids: &'a [String],
+    base_currency: &'a str,
+    account_tracking_modes: &'a HashMap<String, TrackingMode>,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+    include_returns_series: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ScopedTrackingComposition {
     TransactionsOnly,
@@ -376,14 +386,18 @@ impl PerformanceService {
 
     async fn calculate_scoped_performance(
         &self,
-        scope_id: &str,
-        account_ids: &[String],
-        base_currency: &str,
-        account_tracking_modes: &HashMap<String, TrackingMode>,
-        start_date_opt: Option<NaiveDate>,
-        end_date_opt: Option<NaiveDate>,
-        include_returns_series: bool,
+        request: ScopedPerformanceRequest<'_>,
     ) -> Result<PerformanceMetrics> {
+        let ScopedPerformanceRequest {
+            scope_id,
+            account_ids,
+            base_currency,
+            account_tracking_modes,
+            start_date: start_date_opt,
+            end_date: end_date_opt,
+            include_returns_series,
+        } = request;
+
         if let (Some(start), Some(end)) = (start_date_opt, end_date_opt) {
             if start > end {
                 return Err(errors::Error::Validation(ValidationError::InvalidInput(
@@ -1108,15 +1122,15 @@ impl PerformanceServiceTrait for PerformanceService {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     ) -> Result<PerformanceMetrics> {
-        self.calculate_scoped_performance(
+        self.calculate_scoped_performance(ScopedPerformanceRequest {
             scope_id,
             account_ids,
             base_currency,
             account_tracking_modes,
             start_date,
             end_date,
-            true,
-        )
+            include_returns_series: true,
+        })
         .await
     }
 
@@ -1159,15 +1173,15 @@ impl PerformanceServiceTrait for PerformanceService {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     ) -> Result<PerformanceMetrics> {
-        self.calculate_scoped_performance(
+        self.calculate_scoped_performance(ScopedPerformanceRequest {
             scope_id,
             account_ids,
             base_currency,
             account_tracking_modes,
             start_date,
             end_date,
-            false,
-        )
+            include_returns_series: false,
+        })
         .await
     }
 

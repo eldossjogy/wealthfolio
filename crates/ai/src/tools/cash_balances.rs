@@ -122,12 +122,10 @@ impl<E: AiEnvironment + 'static> Tool for GetCashBalancesTool<E> {
             .collect();
 
         let target_account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
-        let target_ids: Vec<String> = if target_account_id.is_none() {
-            accounts.iter().map(|a| a.id.clone()).collect()
+        let target_ids: Vec<String> = if let Some(target_account_id) = target_account_id {
+            vec![target_account_id.to_string()]
         } else {
-            vec![target_account_id
-                .expect("single-account branch checked")
-                .to_string()]
+            accounts.iter().map(|a| a.id.clone()).collect()
         };
         let valuation_by_account: HashMap<_, _> = self
             .env
