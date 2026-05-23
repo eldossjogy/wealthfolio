@@ -336,7 +336,7 @@ export const AccountsSummary = React.memo(
         const perf = performanceQueries[i]?.data;
         const fxRate = valuation.fxRateToBase ?? 1;
         const totalValueAccountCurrency = valuation.totalValue;
-        const totalValueBaseCurrency = totalValueAccountCurrency * fxRate;
+        const totalValueBaseCurrency = valuation.totalValueBase;
 
         const gainLossAccountCurrency = perf?.periodGain ?? null;
         const gainLossBaseCurrency =

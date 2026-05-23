@@ -1,30 +1,27 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { AccountValuation, DateRange } from "@/lib/types";
+import { AccountScope, AccountValuation, DateRange } from "@/lib/types";
 import { getHistoricalValuations } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
 import { format } from "date-fns";
-import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 
 export function useValuationHistory(
   dateRange: DateRange | undefined,
-  accountId: string = PORTFOLIO_ACCOUNT_ID,
+  filter: AccountScope = { type: "all" },
 ) {
+  const scopeKey = JSON.stringify(filter);
   const {
     data: valuationHistory,
     isLoading,
     isFetching,
   } = useQuery<AccountValuation[], Error>({
     queryKey: [
-      ...QueryKeys.valuationHistory(accountId),
+      ...QueryKeys.valuationHistory(scopeKey),
       dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : null,
       dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : null,
     ],
     queryFn: () => {
-      const fetchValuations = (id: string, start?: string, end?: string) =>
-        getHistoricalValuations(id, start, end);
-
       if (dateRange === undefined) {
-        return fetchValuations(accountId, undefined, undefined);
+        return getHistoricalValuations(filter, undefined, undefined);
       }
 
       if (!dateRange?.from || !dateRange?.to) {
@@ -32,8 +29,8 @@ export function useValuationHistory(
         return Promise.resolve([]);
       }
 
-      return fetchValuations(
-        accountId,
+      return getHistoricalValuations(
+        filter,
         format(dateRange.from, "yyyy-MM-dd"),
         format(dateRange.to, "yyyy-MM-dd"),
       );

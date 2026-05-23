@@ -441,7 +441,22 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "get_historical_valuations": {
-      const p = payload as { accountId?: string; startDate?: string; endDate?: string };
+      const p = payload as {
+        accountId?: string;
+        filter?: { type: string; accountId?: string; portfolioId?: string; accountIds?: string[] };
+        startDate?: string;
+        endDate?: string;
+      };
+      if (p?.filter) {
+        url = `${API_PREFIX}/valuations/history/query`;
+        method = "POST";
+        body = JSON.stringify({
+          filter: p.filter,
+          startDate: p.startDate,
+          endDate: p.endDate,
+        });
+        break;
+      }
       const params = new URLSearchParams();
       if (p?.accountId) params.set("accountId", p.accountId);
       if (p?.startDate) params.set("startDate", p.startDate);
@@ -556,25 +571,27 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "calculate_performance_history": {
-      const { itemType, itemId, startDate, endDate, trackingMode } = payload as {
+      const { itemType, itemId, startDate, endDate, trackingMode, filter } = payload as {
         itemType: string;
         itemId: string;
         startDate?: string;
         endDate?: string;
         trackingMode?: string;
+        filter?: unknown;
       };
-      body = JSON.stringify({ itemType, itemId, startDate, endDate, trackingMode });
+      body = JSON.stringify({ itemType, itemId, startDate, endDate, trackingMode, filter });
       break;
     }
     case "calculate_performance_summary": {
-      const { itemType, itemId, startDate, endDate, trackingMode } = payload as {
+      const { itemType, itemId, startDate, endDate, trackingMode, filter } = payload as {
         itemType: string;
         itemId: string;
         startDate?: string;
         endDate?: string;
         trackingMode?: string;
+        filter?: unknown;
       };
-      body = JSON.stringify({ itemType, itemId, startDate, endDate, trackingMode });
+      body = JSON.stringify({ itemType, itemId, startDate, endDate, trackingMode, filter });
       break;
     }
     case "check_update": {
