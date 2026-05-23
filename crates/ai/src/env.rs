@@ -191,14 +191,13 @@ pub mod test_env {
                 .accounts
                 .iter()
                 .filter(|account| {
-                    is_active_filter.map_or(true, |is_active| account.is_active == is_active)
+                    is_active_filter.is_none_or(|is_active| account.is_active == is_active)
                 })
                 .filter(|account| {
-                    is_archived_filter
-                        .map_or(true, |is_archived| account.is_archived == is_archived)
+                    is_archived_filter.is_none_or(|is_archived| account.is_archived == is_archived)
                 })
                 .filter(|account| {
-                    account_ids.map_or(true, |ids| ids.iter().any(|id| id == &account.id))
+                    account_ids.is_none_or(|ids| ids.iter().any(|id| id == &account.id))
                 })
                 .cloned()
                 .collect())
