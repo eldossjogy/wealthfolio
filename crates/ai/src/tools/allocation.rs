@@ -16,9 +16,9 @@ use crate::error::AiError;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAssetAllocationArgs {
-    /// Account ID, or "TOTAL" for all accounts.
-    #[serde(default = "default_account_id")]
-    pub account_id: String,
+    /// Account ID. Omit for all accounts.
+    #[serde(default)]
+    pub account_id: Option<String>,
 
     /// Grouping method: "class", "sector", "region", "risk", or "security_type".
     #[serde(default = "default_group_by")]
@@ -29,10 +29,6 @@ pub struct GetAssetAllocationArgs {
 
     /// Optional: category ID for drill-down (e.g., "TECHNOLOGY").
     pub category_id: Option<String>,
-}
-
-fn default_account_id() -> String {
-    "TOTAL".to_string()
 }
 
 fn default_group_by() -> String {
@@ -135,8 +131,7 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
                 "properties": {
                     "accountId": {
                         "type": "string",
-                        "description": "Account ID to get allocation for, or 'TOTAL' for all accounts",
-                        "default": "TOTAL"
+                        "description": "Account ID to get allocation for. Omit for all accounts."
                     },
                     "groupBy": {
                         "type": "string",
@@ -159,22 +154,48 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let account_id = &args.account_id;
+        let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
         let group_by = args.group_by.to_lowercase();
+        let scoped_account_ids = if account_id.is_none() {
+            Some(
+                self.env
+                    .account_service()
+                    .get_active_non_archived_accounts()
+                    .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+                    .into_iter()
+                    .map(|account| account.id)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
 
         // Drill-down mode: return holdings for a specific category
         if let (Some(taxonomy_id), Some(category_id)) = (&args.taxonomy_id, &args.category_id) {
-            let result = self
-                .env
-                .allocation_service()
-                .get_holdings_by_allocation(
-                    account_id,
-                    &self.base_currency,
-                    taxonomy_id,
-                    category_id,
-                )
-                .await
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            let result = if let Some(account_ids) = &scoped_account_ids {
+                self.env
+                    .allocation_service()
+                    .get_holdings_by_allocation_for_accounts(
+                        account_ids,
+                        &self.base_currency,
+                        taxonomy_id,
+                        category_id,
+                        "all",
+                    )
+                    .await
+                    .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            } else {
+                self.env
+                    .allocation_service()
+                    .get_holdings_by_allocation(
+                        account_id.expect("single-account branch checked"),
+                        &self.base_currency,
+                        taxonomy_id,
+                        category_id,
+                    )
+                    .await
+                    .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            };
 
             let holding_dtos: Vec<HoldingDto> = result
                 .holdings
@@ -200,12 +221,22 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
         }
 
         // Allocation mode: get allocation breakdown
-        let allocations = self
-            .env
-            .allocation_service()
-            .get_portfolio_allocations(account_id, &self.base_currency)
-            .await
-            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+        let allocations = if let Some(account_ids) = &scoped_account_ids {
+            self.env
+                .allocation_service()
+                .get_portfolio_allocations_for_accounts(account_ids, &self.base_currency, "all")
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        } else {
+            self.env
+                .allocation_service()
+                .get_portfolio_allocations(
+                    account_id.expect("single-account branch checked"),
+                    &self.base_currency,
+                )
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        };
 
         // Select the taxonomy based on group_by
         let taxonomy = match group_by.as_str() {
@@ -259,7 +290,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "class".to_string(),
                 taxonomy_id: None,
                 category_id: None,
@@ -279,7 +310,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "sector".to_string(),
                 taxonomy_id: None,
                 category_id: None,
@@ -298,7 +329,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "region".to_string(),
                 taxonomy_id: None,
                 category_id: None,
@@ -317,7 +348,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "risk".to_string(),
                 taxonomy_id: None,
                 category_id: None,
@@ -336,7 +367,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "invalid".to_string(),
                 taxonomy_id: None,
                 category_id: None,
@@ -352,7 +383,7 @@ mod tests {
 
         let result = tool
             .call(GetAssetAllocationArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 group_by: "sector".to_string(),
                 taxonomy_id: Some("industries_gics".to_string()),
                 category_id: Some("TECHNOLOGY".to_string()),

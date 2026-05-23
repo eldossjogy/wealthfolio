@@ -1,4 +1,4 @@
-import { createActivity, getAssetHoldings, getAssetLots, getHolding } from "@/adapters";
+import { createActivity, getAssetHoldings, getAssetLots, getHoldings } from "@/adapters";
 import { ActionPalette, type ActionPaletteGroup } from "@/components/action-palette";
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useHapticFeedback } from "@/hooks";
@@ -7,7 +7,6 @@ import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useQuoteHistory } from "@/hooks/use-quote-history";
 import { useSyncMarketDataMutation } from "@/hooks/use-sync-market-data";
 import { useAssetTaxonomyAssignments, useTaxonomy } from "@/hooks/use-taxonomies";
-import { PORTFOLIO_ACCOUNT_ID } from "@/lib/constants";
 import { generateId } from "@/lib/id";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
@@ -169,8 +168,18 @@ export const AssetProfilePage = () => {
     isLoading: isHoldingLoading,
     isError: isHoldingError,
   } = useQuery<Holding | null, Error>({
-    queryKey: [QueryKeys.HOLDING, PORTFOLIO_ACCOUNT_ID, assetId],
-    queryFn: () => getHolding(PORTFOLIO_ACCOUNT_ID, assetId),
+    queryKey: [QueryKeys.HOLDING, { type: "all" }, assetId],
+    queryFn: async () => {
+      const holdings = await getHoldings({ type: "all" });
+      return (
+        holdings.find(
+          (item) =>
+            item.id === assetId ||
+            item.instrument?.id === assetId ||
+            item.instrument?.symbol === assetId,
+        ) ?? null
+      );
+    },
     enabled: !!assetId,
   });
 
