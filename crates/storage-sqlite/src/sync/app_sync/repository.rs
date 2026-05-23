@@ -1636,10 +1636,9 @@ impl AppSyncRepository {
         seq_value: i64,
         payload_json: serde_json::Value,
     ) -> Result<bool> {
-        let is_snapshot_event = entity == SyncEntity::Snapshot;
         self.writer
             .exec(move |conn| {
-                let applied = apply_remote_event_lww_tx(
+                apply_remote_event_lww_tx(
                     conn,
                     entity,
                     entity_id_value,
@@ -1648,11 +1647,7 @@ impl AppSyncRepository {
                     client_timestamp_value,
                     seq_value,
                     payload_json,
-                )?;
-                if is_snapshot_event {
-                    delete_orphan_snapshot_rows(conn)?;
-                }
-                Ok(applied)
+                )
             })
             .await
     }
@@ -1687,12 +1682,8 @@ impl AppSyncRepository {
 
                 let result = (|| -> Result<usize> {
                     let mut applied = 0usize;
-                    let mut saw_snapshot_event = false;
                     for (entity, entity_id, op, event_id, client_timestamp, seq, payload) in events
                     {
-                        if entity == SyncEntity::Snapshot {
-                            saw_snapshot_event = true;
-                        }
                         if apply_remote_event_lww_tx(
                             conn,
                             entity,
@@ -1712,9 +1703,6 @@ impl AppSyncRepository {
                         {
                             applied += 1;
                         }
-                    }
-                    if saw_snapshot_event {
-                        delete_orphan_snapshot_rows(conn)?;
                     }
                     Ok(applied)
                 })();
@@ -2792,7 +2780,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_orphan_snapshot_batch_event_is_marked_applied_but_not_written() {
+    async fn remote_snapshot_batch_event_is_preserved_before_account_arrives() {
         #[derive(diesel::QueryableByName)]
         struct CountRow {
             #[diesel(sql_type = diesel::sql_types::BigInt)]
@@ -2838,7 +2826,7 @@ mod tests {
         ))
         .get_result(&mut conn)
         .expect("count orphan snapshots");
-        assert_eq!(snapshot_count.c, 0);
+        assert_eq!(snapshot_count.c, 1);
 
         let applied_count: i64 = sync_applied_events::table
             .filter(sync_applied_events::event_id.eq("evt-orphan-snapshot"))
@@ -2849,7 +2837,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_orphan_snapshot_single_event_is_marked_applied_but_not_written() {
+    async fn remote_snapshot_single_event_is_preserved_before_account_arrives() {
         #[derive(diesel::QueryableByName)]
         struct CountRow {
             #[diesel(sql_type = diesel::sql_types::BigInt)]
@@ -2895,7 +2883,7 @@ mod tests {
         ))
         .get_result(&mut conn)
         .expect("count orphan snapshots");
-        assert_eq!(snapshot_count.c, 0);
+        assert_eq!(snapshot_count.c, 1);
 
         let applied_count: i64 = sync_applied_events::table
             .filter(sync_applied_events::event_id.eq("evt-orphan-single-snapshot"))
@@ -2903,6 +2891,47 @@ mod tests {
             .first(&mut conn)
             .expect("count applied event");
         assert_eq!(applied_count, 1);
+        drop(conn);
+
+        let account_applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Account,
+                orphan_account_id.to_string(),
+                SyncOperation::Create,
+                "evt-orphan-single-account".to_string(),
+                "2026-02-01T00:00:01Z".to_string(),
+                2,
+                serde_json::json!({
+                    "id": orphan_account_id,
+                    "name": "Late Account",
+                    "accountType": "cash",
+                    "group": serde_json::Value::Null,
+                    "currency": "USD",
+                    "isDefault": false,
+                    "platformId": serde_json::Value::Null,
+                    "accountNumber": serde_json::Value::Null,
+                    "meta": serde_json::Value::Null,
+                    "provider": serde_json::Value::Null,
+                    "providerAccountId": serde_json::Value::Null,
+                    "isArchived": false,
+                    "isActive": true,
+                    "trackingMode": "portfolio"
+                }),
+            )
+            .await
+            .expect("apply late account event");
+
+        assert!(account_applied);
+        let mut conn = get_connection(&pool).expect("conn");
+        let account_count = count_account_rows(&pool, orphan_account_id);
+        assert_eq!(account_count, 1);
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(orphan_account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count preserved snapshot after account arrives");
+        assert_eq!(snapshot_count.c, 1);
     }
 
     #[tokio::test]

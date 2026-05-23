@@ -262,8 +262,13 @@ async fn run_portfolio_job(
     if market_sync_mode.requires_sync() {
         let market_data_service = context.quote_service();
         let snapshot_service = context.snapshot_service();
-        let account_ids_for_sync =
-            resolve_job_account_ids(context, accounts_to_recalc.as_ref()).unwrap_or_default();
+        let account_ids_for_sync = resolve_job_account_ids(context, None).unwrap_or_else(|err| {
+            warn!(
+                "Failed to resolve accounts for quote sync reconciliation: {}",
+                err
+            );
+            Vec::new()
+        });
 
         if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
             snapshot_service.as_ref(),
@@ -420,10 +425,18 @@ async fn run_portfolio_calculation(
     let snapshot_service = context.snapshot_service();
     // Update position status from latest real-account snapshots for quote sync planning.
     let quote_service = context.quote_service();
+    let quote_reconciliation_account_ids =
+        resolve_job_account_ids(context, None).unwrap_or_else(|err| {
+            warn!(
+                "Failed to resolve accounts for quote sync reconciliation: {}",
+                err
+            );
+            Vec::new()
+        });
     if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
         snapshot_service.as_ref(),
         quote_service.as_ref(),
-        &account_ids_vec,
+        &quote_reconciliation_account_ids,
     )
     .await
     {

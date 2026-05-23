@@ -112,6 +112,12 @@ enum ScopedTrackingComposition {
     Mixed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExternalFlowBasis {
+    AccountCurrency,
+    BaseCurrency,
+}
+
 impl PerformanceService {
     pub fn new(
         valuation_service: Arc<dyn ValuationServiceTrait + Send + Sync>,
@@ -167,6 +173,7 @@ impl PerformanceService {
     /// than to emit an absurd number.
     fn compute_compounded_daily_returns<F>(
         history: &[DailyAccountValuation],
+        flow_basis: ExternalFlowBasis,
         mut visit: F,
     ) -> Result<(Decimal, Decimal, Vec<String>)>
     where
@@ -190,7 +197,7 @@ impl PerformanceService {
                 )));
             }
 
-            let (inflow, outflow) = Self::daily_external_flows(prev_point, curr_point);
+            let (inflow, outflow) = Self::daily_external_flows(prev_point, curr_point, flow_basis);
 
             let twr_denominator = prev_point.total_value + inflow;
             let modified_dietz_denominator = prev_point.total_value + ((inflow - outflow) / two);
@@ -238,18 +245,26 @@ impl PerformanceService {
     fn daily_external_flows(
         prev_point: &DailyAccountValuation,
         curr_point: &DailyAccountValuation,
+        flow_basis: ExternalFlowBasis,
     ) -> (Decimal, Decimal) {
-        let explicit_base_flows = !curr_point.external_inflow_base.is_zero()
-            || !curr_point.external_outflow_base.is_zero();
+        let cash_flow = match flow_basis {
+            ExternalFlowBasis::AccountCurrency => {
+                curr_point.net_contribution - prev_point.net_contribution
+            }
+            ExternalFlowBasis::BaseCurrency => {
+                let explicit_base_flows = !curr_point.external_inflow_base.is_zero()
+                    || !curr_point.external_outflow_base.is_zero();
 
-        if explicit_base_flows {
-            return (
-                curr_point.external_inflow_base,
-                curr_point.external_outflow_base,
-            );
-        }
+                if explicit_base_flows {
+                    return (
+                        curr_point.external_inflow_base,
+                        curr_point.external_outflow_base,
+                    );
+                }
 
-        let cash_flow = curr_point.net_contribution - prev_point.net_contribution;
+                curr_point.net_contribution_base - prev_point.net_contribution_base
+            }
+        };
         if cash_flow.is_sign_negative() {
             (Decimal::ZERO, -cash_flow)
         } else {
@@ -427,13 +442,15 @@ impl PerformanceService {
         }
 
         let mut metrics = match scoped_tracking_composition {
-            ScopedTrackingComposition::TransactionsOnly => Self::compute_account_performance(
-                &full_history,
-                Some(TrackingMode::Transactions),
-                start_date_opt,
-                include_returns_series,
-            )?,
-            ScopedTrackingComposition::HoldingsOnly => Self::compute_account_performance(
+            ScopedTrackingComposition::TransactionsOnly => {
+                Self::compute_scoped_account_performance(
+                    &full_history,
+                    Some(TrackingMode::Transactions),
+                    start_date_opt,
+                    include_returns_series,
+                )?
+            }
+            ScopedTrackingComposition::HoldingsOnly => Self::compute_scoped_account_performance(
                 &full_history,
                 Some(TrackingMode::Holdings),
                 start_date_opt,
@@ -493,6 +510,37 @@ impl PerformanceService {
         start_date_opt: Option<NaiveDate>,
         include_returns_series: bool,
     ) -> Result<PerformanceMetrics> {
+        Self::compute_account_performance_with_flow_basis(
+            full_history,
+            tracking_mode,
+            start_date_opt,
+            include_returns_series,
+            ExternalFlowBasis::AccountCurrency,
+        )
+    }
+
+    fn compute_scoped_account_performance(
+        full_history: &[DailyAccountValuation],
+        tracking_mode: Option<TrackingMode>,
+        start_date_opt: Option<NaiveDate>,
+        include_returns_series: bool,
+    ) -> Result<PerformanceMetrics> {
+        Self::compute_account_performance_with_flow_basis(
+            full_history,
+            tracking_mode,
+            start_date_opt,
+            include_returns_series,
+            ExternalFlowBasis::BaseCurrency,
+        )
+    }
+
+    fn compute_account_performance_with_flow_basis(
+        full_history: &[DailyAccountValuation],
+        tracking_mode: Option<TrackingMode>,
+        start_date_opt: Option<NaiveDate>,
+        include_returns_series: bool,
+        flow_basis: ExternalFlowBasis,
+    ) -> Result<PerformanceMetrics> {
         debug_assert!(full_history.len() >= 2);
 
         let start_point = full_history.first().unwrap();
@@ -521,6 +569,7 @@ impl PerformanceService {
         let (cumulative_twr, cumulative_modified_dietz, warnings) =
             Self::compute_compounded_daily_returns(
                 full_history,
+                flow_basis,
                 |prev_point, curr_point, sample| {
                     if !include_returns_series {
                         return;
@@ -1638,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn perf_uses_explicit_base_flows_for_foreign_currency_accounts() {
+    fn scoped_perf_uses_explicit_base_flows_for_foreign_currency_accounts() {
         let mut prev = valuation("2026-04-01", dec!(100), dec!(100), dec!(100), dec!(100));
         let mut curr = valuation("2026-04-02", dec!(210), dec!(200), dec!(210), dec!(200));
         prev.account_currency = "EUR".to_string();
@@ -1653,10 +1702,40 @@ mod tests {
         curr.net_contribution_base = dec!(220);
         curr.external_inflow_base = dec!(110);
 
-        let (inflow, outflow) = PerformanceService::daily_external_flows(&prev, &curr);
+        let (inflow, outflow) =
+            PerformanceService::daily_external_flows(&prev, &curr, ExternalFlowBasis::BaseCurrency);
 
         assert_eq!(inflow, dec!(110));
         assert_eq!(outflow, Decimal::ZERO);
+    }
+
+    #[test]
+    fn account_perf_uses_account_currency_flows_for_foreign_currency_accounts() {
+        let mut prev = valuation("2026-04-01", dec!(100), dec!(100), dec!(100), dec!(100));
+        let mut curr = valuation("2026-04-02", dec!(210), dec!(200), dec!(210), dec!(200));
+        prev.account_currency = "EUR".to_string();
+        prev.base_currency = "USD".to_string();
+        prev.fx_rate_to_base = dec!(1.1);
+        prev.total_value_base = dec!(110);
+        prev.net_contribution_base = dec!(110);
+        curr.account_currency = "EUR".to_string();
+        curr.base_currency = "USD".to_string();
+        curr.fx_rate_to_base = dec!(1.1);
+        curr.total_value_base = dec!(231);
+        curr.net_contribution_base = dec!(220);
+        curr.external_inflow_base = dec!(110);
+
+        let result = PerformanceService::compute_account_performance(
+            &[prev, curr],
+            Some(TrackingMode::Transactions),
+            None,
+            false,
+        )
+        .expect("foreign-currency account performance should compute");
+
+        assert_eq!(result.currency, "EUR");
+        assert_eq!(result.gain_loss_amount, Some(dec!(10)));
+        assert_eq!(result.cumulative_modified_dietz, Some(dec!(0.06666667)));
     }
 
     /// HOLDINGS mode uses the cost-basis formula in both paths. TWR/MWR are

@@ -401,8 +401,14 @@ pub async fn delete_snapshot_handler(
         );
     }
 
-    // Update position status from account snapshots for quote sync planning.
-    let account_ids = vec![q.account_id.clone()];
+    // Quote sync lifecycle is global; a single-account snapshot change must not
+    // make holdings in other accounts look closed.
+    let account_ids: Vec<String> = state
+        .account_service
+        .get_non_archived_accounts()?
+        .into_iter()
+        .map(|account| account.id)
+        .collect();
     if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
         state.snapshot_service.as_ref(),
         state.quote_service.as_ref(),

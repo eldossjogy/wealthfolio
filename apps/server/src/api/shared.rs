@@ -144,13 +144,15 @@ pub async fn process_portfolio_job(
     } else {
         accounts_for_scope.iter().map(|a| a.id.clone()).collect()
     };
+    let quote_reconciliation_account_ids: Vec<String> =
+        accounts_for_scope.iter().map(|a| a.id.clone()).collect();
 
     // Only perform market sync if the mode requires it
     if config.market_sync_mode.requires_sync() {
         if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
             state.snapshot_service.as_ref(),
             state.quote_service.as_ref(),
-            &account_ids,
+            &quote_reconciliation_account_ids,
         )
         .await
         {
@@ -234,7 +236,7 @@ pub async fn process_portfolio_job(
     if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
         state.snapshot_service.as_ref(),
         state.quote_service.as_ref(),
-        &account_ids,
+        &quote_reconciliation_account_ids,
     )
     .await
     {
