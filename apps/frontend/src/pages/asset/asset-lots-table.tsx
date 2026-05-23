@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,6 +9,7 @@ import {
 } from "@wealthfolio/ui/components/ui/table";
 import type { AssetLotView } from "@/lib/types";
 import {
+  Button,
   GainAmount,
   GainPercent,
   PrivacyAmount,
@@ -46,13 +47,35 @@ export const AssetLotsTable = ({
   dayChangeAmount = null,
   dayChangePct = null,
 }: AssetLotsTableProps) => {
+  const groups = useMemo(
+    () =>
+      lots && lots.length > 0 ? groupLotsByAccount(lots, marketPrice, contractMultiplier) : [],
+    [lots, marketPrice, contractMultiplier],
+  );
+  const totals = useMemo(() => computeTotals(groups), [groups]);
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
+
   if (!lots || lots.length === 0) {
     return null;
   }
 
-  const groups = groupLotsByAccount(lots, marketPrice, contractMultiplier);
-  const totals = computeTotals(groups);
-  const isMultiAccount = groups.length > 1;
+  const toggleAccount = (accountId: string) => {
+    setExpandedAccounts((prev) => {
+      const next = new Set(prev);
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
+      return next;
+    });
+  };
+
+  const allExpanded = groups.length > 0 && groups.every((g) => expandedAccounts.has(g.accountId));
+  const toggleAll = () => {
+    if (allExpanded) {
+      setExpandedAccounts(new Set());
+    } else {
+      setExpandedAccounts(new Set(groups.map((g) => g.accountId)));
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -70,12 +93,28 @@ export const AssetLotsTable = ({
       </Card>
       <Card>
         <CardContent className="p-0">
+          <div className="flex items-center justify-end border-b px-4 py-2">
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={toggleAll}>
+              {allExpanded ? (
+                <>
+                  <Icons.ChevronUp className="mr-1 h-3.5 w-3.5" />
+                  Collapse all
+                </>
+              ) : (
+                <>
+                  <Icons.ChevronDown className="mr-1 h-3.5 w-3.5" />
+                  Expand all
+                </>
+              )}
+            </Button>
+          </div>
           {groups.map((group, index) => (
             <AccountLotGroup
               key={group.accountId}
               group={group}
               currency={currency}
-              collapsible={isMultiAccount}
+              expanded={expandedAccounts.has(group.accountId)}
+              onToggle={() => toggleAccount(group.accountId)}
               isFirst={index === 0}
             />
           ))}
@@ -366,17 +405,16 @@ function AllocationBar({
 function AccountLotGroup({
   group,
   currency,
-  collapsible,
+  expanded,
+  onToggle,
   isFirst,
 }: {
   group: AccountLotGroupData;
   currency: string;
-  collapsible: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   isFirst: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
-
-  const showExpander = collapsible;
   const Chevron = expanded ? Icons.ChevronDown : Icons.ChevronRight;
 
   return (
@@ -389,14 +427,10 @@ function AccountLotGroup({
       >
         <button
           type="button"
-          onClick={() => showExpander && setExpanded((v) => !v)}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2",
-            showExpander ? "hover:text-foreground" : "cursor-default",
-          )}
-          disabled={!showExpander}
+          onClick={onToggle}
+          className="hover:text-foreground flex min-w-0 flex-1 items-center gap-2"
         >
-          {showExpander && <Chevron className="text-muted-foreground h-4 w-4 shrink-0" />}
+          <Chevron className="text-muted-foreground h-4 w-4 shrink-0" />
           <span className="text-foreground font-serif text-[18px] font-normal leading-none tracking-tight">
             {group.accountName}
           </span>
