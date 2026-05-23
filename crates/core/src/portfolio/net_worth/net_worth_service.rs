@@ -521,9 +521,7 @@ impl NetWorthServiceTrait for NetWorthService {
         }
 
         let mut portfolio_by_date: BTreeMap<NaiveDate, PortfolioState> = BTreeMap::new();
-        let accounts = self
-            .account_repository
-            .list(Some(true), Some(false), None)?;
+        let accounts = self.account_repository.list(None, Some(false), None)?;
         for account in accounts {
             let valuations = self.valuation_repository.get_historical_valuations(
                 &account.id,

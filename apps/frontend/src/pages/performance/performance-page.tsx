@@ -42,18 +42,16 @@ import {
   Separator,
 } from "@wealthfolio/ui";
 import { subMonths } from "date-fns";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AccountSelector } from "../../components/account-selector";
 import { AccountSelectorMobile } from "../../components/account-selector-mobile";
 import { BenchmarkSymbolSelectorMobile } from "../../components/benchmark-symbol-selector-mobile";
 import { useCalculatePerformanceHistory } from "./hooks/use-performance-data";
-
-const ALL_PORTFOLIO_ITEM: TrackedItem = {
-  id: PORTFOLIO_SCOPE_ID,
-  type: "account",
-  name: "All Portfolio",
-  accountScope: { type: "all" },
-};
+import {
+  ALL_PORTFOLIO_ITEM,
+  migratePerformanceSelectedItemId,
+  migratePerformanceSelectedItems,
+} from "./performance-selection";
 
 // Define the type expected by the chart
 interface ChartDataItem {
@@ -295,11 +293,11 @@ const SelectedItemBadge = ({
 
 export default function PerformancePage() {
   const isMobile = useIsMobileViewport();
-  const [selectedItems, setSelectedItems] = usePersistentState<TrackedItem[]>(
+  const [storedSelectedItems, setSelectedItems] = usePersistentState<TrackedItem[]>(
     "performance:selectedItems",
     [ALL_PORTFOLIO_ITEM],
   );
-  const [selectedItemId, setSelectedItemId] = usePersistentState<string | null>(
+  const [storedSelectedItemId, setSelectedItemId] = usePersistentState<string | null>(
     "performance:selectedItemId",
     null,
   );
@@ -314,6 +312,23 @@ export default function PerformancePage() {
   // State for mobile dropdown menu
   const [accountSheetOpen, setAccountSheetOpen] = useState(false);
   const [benchmarkSheetOpen, setBenchmarkSheetOpen] = useState(false);
+  const selectedItems = useMemo(
+    () => migratePerformanceSelectedItems(storedSelectedItems),
+    [storedSelectedItems],
+  );
+  const selectedItemId = migratePerformanceSelectedItemId(storedSelectedItemId);
+
+  useEffect(() => {
+    if (selectedItems !== storedSelectedItems) {
+      setSelectedItems(selectedItems);
+    }
+  }, [selectedItems, setSelectedItems, storedSelectedItems]);
+
+  useEffect(() => {
+    if (selectedItemId !== storedSelectedItemId) {
+      setSelectedItemId(selectedItemId);
+    }
+  }, [selectedItemId, setSelectedItemId, storedSelectedItemId]);
 
   // Helper function to sort comparison items (accounts first, then symbols)
   const sortComparisonItems = (items: TrackedItem[]): TrackedItem[] => {

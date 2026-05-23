@@ -252,14 +252,15 @@ fn handle_portfolio_calculation(
         let snapshot_service = context.snapshot_service();
         let valuation_service = context.valuation_service();
 
-        // Step 0: Resolve initially targeted active accounts for individual calculations.
-        // This list might be empty if account_ids_input is None and no accounts are active,
-        // or if account_ids_input specified accounts that are now all inactive.
-        let initially_targeted_active_accounts: Vec<String> =
-            match account_service.list_accounts(Some(true), None, account_ids_input.as_deref()) {
-                Ok(accounts) => accounts.iter().map(|a| a.id.clone()).collect(),
+        // Step 0: Resolve account scope. Specific requests are processed as-is;
+        // full recalculations rebuild every non-archived account, including closed accounts.
+        let account_ids: Vec<String> = if let Some(target_ids) = account_ids_input {
+            target_ids
+        } else {
+            match account_service.get_non_archived_accounts() {
+                Ok(accounts) => accounts.into_iter().map(|a| a.id).collect(),
                 Err(e) => {
-                    let err_msg = format!("Failed to list active accounts: {}", e);
+                    let err_msg = format!("Failed to list non-archived accounts: {}", e);
                     error!("{}", err_msg);
                     if let Err(e_emit) = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &err_msg) {
                         error!(
@@ -269,15 +270,13 @@ fn handle_portfolio_calculation(
                     }
                     return;
                 }
-            };
+            }
+        };
 
-        // --- Step 1: Calculate Account-Specific Snapshots (only if there are specific active accounts to process) ---
-        if !initially_targeted_active_accounts.is_empty() {
+        // --- Step 1: Calculate Account-Specific Snapshots ---
+        if !account_ids.is_empty() {
             let account_snapshot_result = snapshot_service
-                .recalculate_holdings_snapshots(
-                    Some(initially_targeted_active_accounts.as_slice()),
-                    snapshot_mode.clone(),
-                )
+                .recalculate_holdings_snapshots(Some(account_ids.as_slice()), snapshot_mode.clone())
                 .await;
 
             if let Err(e) = account_snapshot_result {
@@ -300,7 +299,7 @@ fn handle_portfolio_calculation(
         if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
             snapshot_service.as_ref(),
             quote_service.as_ref(),
-            &initially_targeted_active_accounts,
+            &account_ids,
         )
         .await
         {
@@ -311,7 +310,7 @@ fn handle_portfolio_calculation(
         }
 
         // --- Step 3: Calculate Valuation History ---
-        let accounts_for_valuation = initially_targeted_active_accounts;
+        let accounts_for_valuation = account_ids;
 
         if !accounts_for_valuation.is_empty() {
             let history_futures = accounts_for_valuation.iter().map(|account_id| {

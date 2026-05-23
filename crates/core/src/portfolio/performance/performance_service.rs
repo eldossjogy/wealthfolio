@@ -664,6 +664,14 @@ impl PerformanceService {
             actual_end_date,
             simple_total_return,
         );
+        if full_history
+            .iter()
+            .any(|point| point.total_value.is_sign_negative())
+        {
+            return Err(errors::Error::Validation(ValidationError::InvalidInput(
+                "Account scope has negative portfolio value in its history. Please review the underlying transactions and holdings.".to_string(),
+            )));
+        }
 
         let mut returns = Vec::new();
         let mut daily_returns_for_risk = Vec::new();
@@ -1698,5 +1706,25 @@ mod tests {
         assert!(result.cumulative_twr.is_none());
         assert!(result.cumulative_modified_dietz.is_none());
         assert!(!result.warnings.is_empty());
+    }
+
+    #[test]
+    fn mixed_scope_rejects_negative_portfolio_value_without_series() {
+        let history = vec![
+            valuation("2026-05-01", dec!(100), dec!(100), dec!(100), dec!(100)),
+            valuation("2026-05-02", dec!(-50), dec!(100), dec!(-50), dec!(100)),
+        ];
+
+        for include_series in [true, false] {
+            let err = PerformanceService::compute_mixed_scope_performance(&history, include_series)
+                .expect_err("mixed scope should reject negative portfolio value");
+
+            assert!(
+                format!("{}", err).contains("negative portfolio value"),
+                "expected 'negative portfolio value' in error (include_series={}), got: {}",
+                include_series,
+                err
+            );
+        }
     }
 }

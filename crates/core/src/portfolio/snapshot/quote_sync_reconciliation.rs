@@ -44,10 +44,6 @@ pub async fn reconcile_quote_sync_from_latest_account_snapshots(
         }
     }
 
-    if current_holdings.is_empty() {
-        return Ok(false);
-    }
-
     quote_service
         .update_position_status_from_holdings(&current_holdings)
         .await?;

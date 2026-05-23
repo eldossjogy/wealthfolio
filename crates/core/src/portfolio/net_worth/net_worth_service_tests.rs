@@ -1461,6 +1461,30 @@ fn test_history_portfolio_only_no_alt_assets() {
 }
 
 #[test]
+fn test_history_includes_closed_non_archived_accounts() {
+    let d1 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+    let closed_account =
+        create_test_account_with_archive_state("closed-1", "SECURITIES", "USD", false, false);
+    let mut valuation = create_total_valuation(d1, dec!(50000), dec!(48000));
+    valuation.id = "closed-1_2024-01-01".to_string();
+    valuation.account_id = "closed-1".to_string();
+
+    let service = create_net_worth_service_with_valuations(
+        vec![closed_account],
+        vec![],
+        vec![],
+        vec![],
+        vec![valuation],
+    );
+
+    let history = service.get_net_worth_history(d1, d1).unwrap();
+
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].portfolio_value, dec!(50000));
+    assert_eq!(history[0].net_worth, dec!(50000));
+}
+
+#[test]
 fn test_history_alt_assets_only_no_portfolio() {
     // Edge case: user only has alternative assets, no portfolio
     let d1 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
