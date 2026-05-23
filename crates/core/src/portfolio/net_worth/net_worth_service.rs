@@ -512,17 +512,8 @@ impl NetWorthServiceTrait for NetWorthService {
         );
 
         // =====================================================================
-        // 1. Load TOTAL account valuations (pre-calculated portfolio summary)
+        // 1. Load real-account valuations and aggregate base-currency portfolio state
         // =====================================================================
-        // The TOTAL account has aggregated values already converted to base currency.
-        // Fields: total_value, net_contribution, fx_rate_to_base (always 1 for TOTAL)
-        let total_valuations = self.valuation_repository.get_historical_valuations(
-            "TOTAL",
-            Some(start_date),
-            Some(end_date),
-        )?;
-
-        // Build portfolio lookup by date
         #[derive(Clone)]
         struct PortfolioState {
             value: Decimal,
@@ -530,15 +521,25 @@ impl NetWorthServiceTrait for NetWorthService {
         }
 
         let mut portfolio_by_date: BTreeMap<NaiveDate, PortfolioState> = BTreeMap::new();
-        for val in &total_valuations {
-            // TOTAL account is already in base currency (fx_rate_to_base = 1)
-            portfolio_by_date.insert(
-                val.valuation_date,
-                PortfolioState {
-                    value: val.total_value,
-                    net_contribution: val.net_contribution,
-                },
-            );
+        let accounts = self
+            .account_repository
+            .list(Some(true), Some(false), None)?;
+        for account in accounts {
+            let valuations = self.valuation_repository.get_historical_valuations(
+                &account.id,
+                Some(start_date),
+                Some(end_date),
+            )?;
+            for val in valuations {
+                let entry = portfolio_by_date
+                    .entry(val.valuation_date)
+                    .or_insert_with(|| PortfolioState {
+                        value: Decimal::ZERO,
+                        net_contribution: Decimal::ZERO,
+                    });
+                entry.value += val.total_value_base;
+                entry.net_contribution += val.net_contribution_base;
+            }
         }
 
         // =====================================================================

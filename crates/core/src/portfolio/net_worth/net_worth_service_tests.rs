@@ -1,7 +1,7 @@
 //! Unit tests for net worth service.
 
 use super::*;
-use crate::accounts::{Account, AccountRepositoryTrait, AccountUpdate, NewAccount};
+use crate::accounts::{account_types, Account, AccountRepositoryTrait, AccountUpdate, NewAccount};
 use crate::assets::{
     Asset, AssetKind, AssetRepositoryTrait, NewAsset, ProviderProfile, QuoteMode,
     UpdateAssetProfile,
@@ -259,14 +259,6 @@ impl SnapshotRepositoryTrait for MockSnapshotRepository {
         &self,
         _new_snapshots: &[AccountStateSnapshot],
     ) -> Result<()> {
-        unimplemented!()
-    }
-
-    fn get_total_portfolio_snapshots(
-        &self,
-        _start_date: Option<NaiveDate>,
-        _end_date: Option<NaiveDate>,
-    ) -> Result<Vec<AccountStateSnapshot>> {
         unimplemented!()
     }
 
@@ -754,6 +746,15 @@ impl ValuationRepositoryTrait for MockValuationRepository {
         Ok(())
     }
 
+    async fn replace_valuations_for_account(
+        &self,
+        _account_id: &str,
+        _since_date: Option<NaiveDate>,
+        _valuation_records: &[DailyAccountValuation],
+    ) -> Result<()> {
+        Ok(())
+    }
+
     fn get_historical_valuations(
         &self,
         account_id: &str,
@@ -764,6 +765,23 @@ impl ValuationRepositoryTrait for MockValuationRepository {
             .valuations
             .iter()
             .filter(|v| v.account_id == account_id)
+            .filter(|v| start_date.map(|sd| v.valuation_date >= sd).unwrap_or(true))
+            .filter(|v| end_date.map(|ed| v.valuation_date <= ed).unwrap_or(true))
+            .cloned()
+            .collect();
+        Ok(filtered)
+    }
+
+    fn get_historical_valuations_for_accounts(
+        &self,
+        account_ids: &[String],
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<DailyAccountValuation>> {
+        let filtered: Vec<_> = self
+            .valuations
+            .iter()
+            .filter(|v| account_ids.contains(&v.account_id))
             .filter(|v| start_date.map(|sd| v.valuation_date >= sd).unwrap_or(true))
             .filter(|v| end_date.map(|ed| v.valuation_date <= ed).unwrap_or(true))
             .cloned()
@@ -965,7 +983,18 @@ fn create_net_worth_service_with_valuations(
     valuations: Vec<DailyAccountValuation>,
 ) -> NetWorthService {
     let base_currency = Arc::new(RwLock::new("USD".to_string()));
-    let account_repo = Arc::new(MockAccountRepository::new(accounts));
+    let effective_accounts = if accounts.is_empty() && !valuations.is_empty() {
+        valuations
+            .iter()
+            .map(|valuation| valuation.account_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|account_id| create_test_account(&account_id, account_types::SECURITIES, "USD"))
+            .collect()
+    } else {
+        accounts
+    };
+    let account_repo = Arc::new(MockAccountRepository::new(effective_accounts));
     let asset_repo = Arc::new(MockAssetRepository::new(assets));
     let snapshot_repo = Arc::new(MockSnapshotRepository::new(snapshots));
     let market_data_repo = Arc::new(MockMarketDataRepository::new(quotes));
@@ -989,8 +1018,8 @@ fn create_total_valuation(
     net_contribution: Decimal,
 ) -> DailyAccountValuation {
     DailyAccountValuation {
-        id: format!("TOTAL_{}", date),
-        account_id: "TOTAL".to_string(),
+        id: format!("account-1_{}", date),
+        account_id: "account-1".to_string(),
         valuation_date: date,
         account_currency: "USD".to_string(),
         base_currency: "USD".to_string(),
@@ -1000,6 +1029,14 @@ fn create_total_valuation(
         total_value,
         cost_basis: net_contribution,
         net_contribution,
+        cash_balance_base: Decimal::ZERO,
+        investment_market_value_base: total_value,
+        total_value_base: total_value,
+        cost_basis_base: net_contribution,
+        net_contribution_base: net_contribution,
+        external_inflow_base: Decimal::ZERO,
+        external_outflow_base: Decimal::ZERO,
+        performance_eligible_value_base: total_value,
         calculated_at: Utc::now(),
     }
 }
@@ -1324,7 +1361,7 @@ fn test_history_basic_portfolio_with_alt_assets() {
     let d4 = NaiveDate::from_ymd_opt(2024, 1, 4).unwrap();
     let d5 = NaiveDate::from_ymd_opt(2024, 1, 5).unwrap();
 
-    // Portfolio valuations (TOTAL account)
+    // Portfolio valuations
     let valuations = vec![
         create_total_valuation(d1, dec!(100000), dec!(95000)), // $5K gain
         create_total_valuation(d2, dec!(101000), dec!(95000)), // $6K gain
