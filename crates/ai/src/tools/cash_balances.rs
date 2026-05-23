@@ -113,7 +113,7 @@ impl<E: AiEnvironment + 'static> Tool for GetCashBalancesTool<E> {
         let accounts = self
             .env
             .account_service()
-            .get_active_accounts()
+            .get_active_non_archived_accounts()
             .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
 
         let account_map: HashMap<String, (String, String)> = accounts

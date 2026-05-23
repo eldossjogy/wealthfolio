@@ -184,25 +184,24 @@ pub mod test_env {
         fn list_accounts(
             &self,
             is_active_filter: Option<bool>,
-            _is_archived_filter: Option<bool>,
-            _account_ids: Option<&[String]>,
+            is_archived_filter: Option<bool>,
+            account_ids: Option<&[String]>,
         ) -> CoreResult<Vec<Account>> {
-            let accounts = match is_active_filter {
-                Some(true) => self
-                    .accounts
-                    .iter()
-                    .filter(|a| a.is_active)
-                    .cloned()
-                    .collect(),
-                Some(false) => self
-                    .accounts
-                    .iter()
-                    .filter(|a| !a.is_active)
-                    .cloned()
-                    .collect(),
-                None => self.accounts.clone(),
-            };
-            Ok(accounts)
+            Ok(self
+                .accounts
+                .iter()
+                .filter(|account| {
+                    is_active_filter.map_or(true, |is_active| account.is_active == is_active)
+                })
+                .filter(|account| {
+                    is_archived_filter
+                        .map_or(true, |is_archived| account.is_archived == is_archived)
+                })
+                .filter(|account| {
+                    account_ids.map_or(true, |ids| ids.iter().any(|id| id == &account.id))
+                })
+                .cloned()
+                .collect())
         }
 
         fn get_accounts_by_ids(&self, account_ids: &[String]) -> CoreResult<Vec<Account>> {
@@ -215,16 +214,11 @@ pub mod test_env {
         }
 
         fn get_non_archived_accounts(&self) -> CoreResult<Vec<Account>> {
-            Ok(self.accounts.clone())
+            self.list_accounts(None, Some(false), None)
         }
 
         fn get_active_non_archived_accounts(&self) -> CoreResult<Vec<Account>> {
-            Ok(self
-                .accounts
-                .iter()
-                .filter(|a| a.is_active)
-                .cloned()
-                .collect())
+            self.list_accounts(Some(true), Some(false), None)
         }
 
         fn get_base_currency(&self) -> Option<String> {
@@ -1506,6 +1500,41 @@ pub mod test_env {
 
         async fn update_config(&self, _config: HealthConfig) -> CoreResult<()> {
             Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn account(id: &str, is_active: bool, is_archived: bool) -> Account {
+            Account {
+                id: id.to_string(),
+                name: id.to_string(),
+                is_active,
+                is_archived,
+                ..Account::default()
+            }
+        }
+
+        #[test]
+        fn mock_account_service_filters_active_non_archived_accounts() {
+            let service = MockAccountService {
+                accounts: vec![
+                    account("visible", true, false),
+                    account("archived", true, true),
+                    account("hidden", false, false),
+                ],
+            };
+
+            let ids: Vec<String> = service
+                .get_active_non_archived_accounts()
+                .expect("accounts")
+                .into_iter()
+                .map(|account| account.id)
+                .collect();
+
+            assert_eq!(ids, vec!["visible"]);
         }
     }
 }

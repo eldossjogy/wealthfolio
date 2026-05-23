@@ -30,10 +30,7 @@ pub async fn reconcile_quote_sync_from_latest_account_snapshots(
     quote_service: &dyn QuoteServiceTrait,
     account_ids: &[String],
 ) -> Result<bool> {
-    let Some(current_holdings) = latest_account_snapshot_holdings(snapshot_service, account_ids)?
-    else {
-        return Ok(false);
-    };
+    let current_holdings = latest_account_snapshot_holdings(snapshot_service, account_ids)?;
 
     quote_service
         .update_position_status_from_holdings(&current_holdings)
@@ -44,22 +41,18 @@ pub async fn reconcile_quote_sync_from_latest_account_snapshots(
 fn latest_account_snapshot_holdings(
     snapshot_service: &dyn SnapshotServiceTrait,
     account_ids: &[String],
-) -> Result<Option<HashMap<String, Decimal>>> {
-    if account_ids.is_empty() {
-        return Ok(None);
-    }
-
+) -> Result<HashMap<String, Decimal>> {
     let mut current_holdings: HashMap<String, Decimal> = HashMap::new();
     for account_id in account_ids {
         let Some(snapshot) = snapshot_service.get_latest_holdings_snapshot(account_id)? else {
-            return Ok(None);
+            continue;
         };
         for (asset_id, quantity) in holdings_quantities(&snapshot) {
             *current_holdings.entry(asset_id).or_insert(Decimal::ZERO) += quantity;
         }
     }
 
-    Ok(Some(current_holdings))
+    Ok(current_holdings)
 }
 
 #[cfg(test)]
@@ -162,16 +155,16 @@ mod tests {
     }
 
     #[test]
-    fn latest_holdings_returns_none_when_no_account_has_snapshot() {
+    fn latest_holdings_returns_empty_when_no_account_has_snapshot() {
         let service = MockSnapshotService::default();
         let result = latest_account_snapshot_holdings(&service, &["acc-1".to_string()])
             .expect("snapshot lookup should succeed");
 
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn latest_holdings_returns_none_when_any_account_snapshot_is_missing() {
+    fn latest_holdings_uses_available_snapshots_when_an_account_is_missing() {
         let mut service = MockSnapshotService::default();
         service.snapshots.insert(
             "acc-1".to_string(),
@@ -182,7 +175,8 @@ mod tests {
             latest_account_snapshot_holdings(&service, &["acc-1".to_string(), "acc-2".to_string()])
                 .expect("snapshot lookup should succeed");
 
-        assert!(result.is_none());
+        assert_eq!(result.get("asset-a"), Some(&dec!(3)));
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -193,8 +187,7 @@ mod tests {
             .insert("acc-1".to_string(), snapshot("acc-1", &[]));
 
         let result = latest_account_snapshot_holdings(&service, &["acc-1".to_string()])
-            .expect("snapshot lookup should succeed")
-            .expect("empty snapshot still counts as a current holdings view");
+            .expect("snapshot lookup should succeed");
 
         assert!(result.is_empty());
     }
@@ -213,8 +206,7 @@ mod tests {
 
         let result =
             latest_account_snapshot_holdings(&service, &["acc-1".to_string(), "acc-2".to_string()])
-                .expect("snapshot lookup should succeed")
-                .expect("at least one snapshot exists");
+                .expect("snapshot lookup should succeed");
 
         assert_eq!(result.get("asset-a"), Some(&dec!(5)));
         assert_eq!(result.get("asset-b"), Some(&dec!(1)));

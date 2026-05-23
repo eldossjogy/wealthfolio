@@ -259,7 +259,7 @@ impl<E: AiEnvironment> RecordActivityTool<E> {
         let accounts = self
             .env
             .account_service()
-            .get_active_accounts()
+            .get_active_non_archived_accounts()
             .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
 
         self.build_output_with_accounts(args, &accounts).await

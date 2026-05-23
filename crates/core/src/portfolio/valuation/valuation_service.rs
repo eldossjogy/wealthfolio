@@ -9,7 +9,7 @@ use crate::portfolio::performance::{
     classify_flow_for_scope, classify_transfer_for_account_scope, infer_paired_transfer_account_id,
     FlowType, PerformanceScope,
 };
-use crate::portfolio::snapshot::SnapshotServiceTrait;
+use crate::portfolio::snapshot::{Position, SnapshotServiceTrait};
 use crate::portfolio::valuation::valuation_calculator::calculate_valuation;
 use crate::portfolio::valuation::valuation_model::{DailyAccountValuation, NegativeBalanceInfo};
 use crate::portfolio::valuation::ValuationRepositoryTrait;
@@ -172,6 +172,14 @@ impl ValuationService {
         ids.dedup();
         let digest = Sha256::digest(ids.join("\n").as_bytes());
         hex::encode(&digest[..8])
+    }
+
+    fn position_requires_price_quote(position: &Position) -> bool {
+        !position.is_alternative
+    }
+
+    fn position_counts_for_quote_gating(position: &Position) -> bool {
+        Self::position_requires_price_quote(position) && !position.quantity.is_zero()
     }
 
     async fn fetch_fx_rates_for_range(
@@ -673,6 +681,9 @@ impl ValuationServiceTrait for ValuationService {
                 required_fx_pairs.insert((account_curr.to_string(), base_curr.clone()));
             }
             for (asset_id, position) in &snapshot.positions {
+                if !Self::position_requires_price_quote(position) {
+                    continue;
+                }
                 required_asset_ids.insert(asset_id.clone());
                 let position_currency = normalize_currency_code(&position.currency);
                 if position_currency != account_curr {
@@ -766,7 +777,7 @@ impl ValuationServiceTrait for ValuationService {
                 let quotable_positions: Vec<_> = holdings_snapshot
                     .positions
                     .iter()
-                    .filter(|(_, position)| !position.quantity.is_zero())
+                    .filter(|(_, position)| Self::position_counts_for_quote_gating(position))
                     .map(|(symbol, _)| symbol)
                     .filter(|symbol| assets_with_quotes.contains(*symbol))
                     .cloned()
@@ -1042,6 +1053,33 @@ mod tests {
             performance_eligible_value_base: total_value_base,
             calculated_at: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
         }
+    }
+
+    #[test]
+    fn quote_gating_ignores_alternative_positions() {
+        let market_position = Position {
+            quantity: dec!(1),
+            is_alternative: false,
+            ..Position::default()
+        };
+        let alternative_position = Position {
+            quantity: dec!(1),
+            is_alternative: true,
+            ..Position::default()
+        };
+
+        assert!(ValuationService::position_requires_price_quote(
+            &market_position
+        ));
+        assert!(ValuationService::position_counts_for_quote_gating(
+            &market_position
+        ));
+        assert!(!ValuationService::position_requires_price_quote(
+            &alternative_position
+        ));
+        assert!(!ValuationService::position_counts_for_quote_gating(
+            &alternative_position
+        ));
     }
 
     #[test]

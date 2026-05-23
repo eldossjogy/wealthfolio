@@ -163,7 +163,7 @@ impl<E: AiEnvironment + 'static> Tool for SearchActivitiesTool<E> {
             let accounts = self
                 .env
                 .account_service()
-                .get_active_accounts()
+                .get_active_non_archived_accounts()
                 .unwrap_or_default();
             let is_known_id = accounts.iter().any(|a| a.id == *raw);
             if is_known_id {

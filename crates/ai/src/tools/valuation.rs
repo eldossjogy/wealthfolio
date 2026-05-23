@@ -149,7 +149,7 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
             let accounts = self
                 .env
                 .account_service()
-                .get_active_accounts()
+                .get_active_non_archived_accounts()
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
             let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
             self.env

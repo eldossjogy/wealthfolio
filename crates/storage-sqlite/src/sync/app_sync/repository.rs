@@ -44,6 +44,23 @@ fn validate_sync_table(table: &str) -> Result<()> {
     ))))
 }
 
+fn canonical_sync_table_set(tables: Vec<String>) -> Result<Vec<String>> {
+    if tables.is_empty() {
+        return Ok(APP_SYNC_TABLES.iter().map(|t| t.to_string()).collect());
+    }
+
+    let requested = tables.into_iter().collect::<HashSet<_>>();
+    for table in &requested {
+        validate_sync_table(table)?;
+    }
+
+    Ok(APP_SYNC_TABLES
+        .iter()
+        .filter(|table| requested.contains::<str>(*table))
+        .map(|table| table.to_string())
+        .collect())
+}
+
 #[derive(Clone)]
 struct PayloadColumnCatalog {
     writable: HashSet<String>,
@@ -2109,17 +2126,7 @@ impl AppSyncRepository {
     ) -> Result<()> {
         self.writer
             .exec(move |conn| {
-                let table_set = if tables.is_empty() {
-                    APP_SYNC_TABLES
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                } else {
-                    tables
-                };
-                for table in &table_set {
-                    validate_sync_table(table)?;
-                }
+                let table_set = canonical_sync_table_set(tables)?;
 
                 let now = Utc::now().to_rfc3339();
                 let escaped_path = escape_sqlite_str(&snapshot_db_path);
@@ -2493,6 +2500,29 @@ mod tests {
         run_migrations(&db_path).expect("migrate db");
         let pool = create_pool(&db_path).expect("create pool");
         let mut conn = get_connection(&pool).expect("conn");
+        let sql = format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
+             VALUES ('snap-{}', '{}', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            escape_sqlite_str(account_id),
+            escape_sqlite_str(account_id)
+        );
+        diesel::sql_query(sql)
+            .execute(&mut conn)
+            .expect("insert snapshot");
+        db_path
+    }
+
+    fn create_snapshot_db_with_account_and_holding_snapshot(account_id: &str) -> String {
+        let app_data = tempdir()
+            .expect("tempdir")
+            .keep()
+            .to_string_lossy()
+            .to_string();
+        let db_path = init(&app_data).expect("init db");
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account_for_test(&mut conn, account_id).expect("insert account");
         let sql = format!(
             "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
              VALUES ('snap-{}', '{}', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
@@ -3224,6 +3254,40 @@ mod tests {
                 .get_result(&mut conn)
                 .expect("count snapshots");
         assert_eq!(snapshot_count.c, 0);
+    }
+
+    #[tokio::test]
+    async fn snapshot_restore_uses_canonical_table_order_for_requested_tables() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let account_id = "acc-reordered-restore";
+        let snapshot_path = create_snapshot_db_with_account_and_holding_snapshot(account_id);
+
+        repo.restore_snapshot_tables_from_file(
+            snapshot_path,
+            vec!["holdings_snapshots".to_string(), "accounts".to_string()],
+            91,
+            "device-reordered-restore".to_string(),
+            Some(1),
+        )
+        .await
+        .expect("restore snapshot");
+
+        assert_eq!(count_account_rows(&pool, account_id), 1);
+        let mut conn = get_connection(&pool).expect("conn");
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count restored snapshots");
+        assert_eq!(snapshot_count.c, 1);
     }
 
     #[tokio::test]

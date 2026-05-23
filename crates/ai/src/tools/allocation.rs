@@ -160,7 +160,7 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
             Some(
                 self.env
                     .account_service()
-                    .get_active_accounts()
+                    .get_active_non_archived_accounts()
                     .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
                     .into_iter()
                     .map(|account| account.id)
