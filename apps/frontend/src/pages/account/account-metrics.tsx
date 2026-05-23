@@ -88,7 +88,7 @@ interface AccountMetricsProps {
   /** If true, hides the inline balance edit (HOLDINGS mode accounts should use the Update Holdings sheet) */
   hideBalanceEdit?: boolean;
   balanceLabel?: string;
-  /** If true, shows only Volatility/MaxDrawdown and hides TWR/MWR (HOLDINGS mode doesn't track cash flows) */
+  /** If true, shows only Volatility/MaxDrawdown and hides flow-adjusted returns. */
   isHoldingsMode?: boolean;
 }
 
@@ -240,7 +240,7 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
         ) : isHoldingsMode ? (
           <>
             <p className="text-muted-foreground m-0 p-0 text-xs">
-              TWR/MWR not available. Requires transaction tracking.
+              Flow-adjusted returns require transaction tracking.
             </p>
             {lastUpdated && (
               <p className="text-muted-foreground m-0 p-0 text-xs">Last updated: {lastUpdated}</p>

@@ -18,7 +18,7 @@ pub struct NetWorthHistoryPoint {
     pub date: NaiveDate,
 
     // ─── Component Values ───────────────────────────────────────────────
-    /// Portfolio value from TOTAL account (investments + cash) in base currency
+    /// Portfolio value from real-account base-currency valuations
     pub portfolio_value: Decimal,
     /// Alternative assets value (properties, vehicles, collectibles, precious metals, other)
     pub alternative_assets_value: Decimal,

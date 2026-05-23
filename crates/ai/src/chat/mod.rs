@@ -37,7 +37,7 @@ use crate::types::{
 };
 // Used only by the inline `mod tests` (test-only fixtures + redact tests).
 #[cfg(test)]
-use crate::types::{ChatMessageContent, MessageAttachment};
+use crate::types::MessageAttachment;
 
 fn derive_initial_thread_title(first_user_message: &str) -> Option<String> {
     let trimmed = first_user_message.trim();
@@ -467,7 +467,6 @@ impl<E: AiEnvironment + 'static> ChatService<E> {
 mod tests {
     use super::*;
     use crate::env::test_env::MockEnvironment;
-    use std::collections::HashMap;
 
     fn test_attachment(name: &str, data: &str) -> MessageAttachment {
         MessageAttachment {

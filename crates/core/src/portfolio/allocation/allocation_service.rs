@@ -16,8 +16,7 @@ use super::{AllocationHoldings, CategoryAllocation, PortfolioAllocations, Taxono
 /// Trait for allocation service.
 #[async_trait]
 pub trait AllocationServiceTrait: Send + Sync {
-    /// Computes portfolio allocations for an account.
-    /// If account_id is "PORTFOLIO", computes for all accounts.
+    /// Computes portfolio allocations for a real account.
     async fn get_portfolio_allocations(
         &self,
         account_id: &str,

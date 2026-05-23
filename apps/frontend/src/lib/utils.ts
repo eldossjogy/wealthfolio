@@ -389,14 +389,17 @@ export function calculatePerformanceMetrics(
   const first = history[0];
   const last = history[history.length - 1];
 
-  const ncFlow = Number(last.netContribution) - Number(first.netContribution);
-  const mvGain = Number(last.totalValue) - Number(first.totalValue);
+  const valueFor = (valuation: AccountValuation) => Number(valuation.totalValueBase);
+  const contributionFor = (valuation: AccountValuation) => Number(valuation.netContributionBase);
+
+  const ncFlow = contributionFor(last) - contributionFor(first);
+  const mvGain = valueFor(last) - valueFor(first);
   const gain$ = mvGain - ncFlow; // profit / loss
 
   // ── all‑time ROI ────────────────────────────────────────────────
   if (isAllTime) {
-    const totalNC = Number(last.netContribution);
-    const gain = Number(last.totalValue) - totalNC;
+    const totalNC = contributionFor(last);
+    const gain = valueFor(last) - totalNC;
 
     return {
       gainLossAmount: gain,
@@ -410,13 +413,13 @@ export function calculatePerformanceMetrics(
     const prev = history[i - 1];
     const curr = history[i];
 
-    const cf = Number(curr.netContribution) - Number(prev.netContribution); // deposit(+)/withdraw(-)
-    const mv0 = Number(prev.totalValue);
+    const cf = contributionFor(curr) - contributionFor(prev); // deposit(+)/withdraw(-)
+    const mv0 = valueFor(prev);
     if (mv0 === 0) {
       continue; // skip day zero if portfolio just opened
     }
 
-    const dailyReturn = (Number(curr.totalValue) - cf) / mv0;
+    const dailyReturn = (valueFor(curr) - cf) / mv0;
     twr *= dailyReturn;
   }
 

@@ -206,6 +206,14 @@ diesel::table! {
         total_value -> Text,
         cost_basis -> Text,
         net_contribution -> Text,
+        cash_balance_base -> Text,
+        investment_market_value_base -> Text,
+        total_value_base -> Text,
+        cost_basis_base -> Text,
+        net_contribution_base -> Text,
+        external_inflow_base -> Text,
+        external_outflow_base -> Text,
+        performance_eligible_value_base -> Text,
         calculated_at -> Text,
     }
 }

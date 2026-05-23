@@ -19,7 +19,6 @@ import {
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import {
   AccountPurpose,
-  PORTFOLIO_ACCOUNT_ID,
   HOLDING_CATEGORY_FILTERS,
   apiKindToAlternativeAssetKind,
 } from "@/lib/constants";
@@ -138,7 +137,7 @@ export const HoldingsPage = () => {
 
   // Check if the selected account supports manual holdings editing
   const canEditHoldings = useMemo(() => {
-    if (!selectedAccount || selectedAccount.id === PORTFOLIO_ACCOUNT_ID) {
+    if (!selectedAccount) {
       return false;
     }
     return canAddHoldings(selectedAccount);

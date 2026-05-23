@@ -34,7 +34,7 @@ use wealthfolio_core::{
     portfolio::allocation::{AllocationHoldings, AllocationServiceTrait, PortfolioAllocations},
     portfolio::fire::RetirementOverview,
     portfolio::income::{IncomeServiceTrait, IncomeSummary},
-    portfolio::performance::{PerformanceMetrics, PerformanceServiceTrait},
+    portfolio::performance::{PerformanceMetrics, PerformanceServiceTrait, ReturnMethod},
     quotes::{
         LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
         QuoteSyncState, SymbolSearchResult, SymbolSyncPlan, SyncMode, SyncResult,
@@ -105,25 +105,21 @@ impl AccountServiceTrait for MockAccountService {
     fn list_accounts(
         &self,
         is_active_filter: Option<bool>,
-        _is_archived_filter: Option<bool>,
-        _account_ids: Option<&[String]>,
+        is_archived_filter: Option<bool>,
+        account_ids: Option<&[String]>,
     ) -> CoreResult<Vec<Account>> {
-        let accounts = match is_active_filter {
-            Some(true) => self
-                .accounts
-                .iter()
-                .filter(|a| a.is_active)
-                .cloned()
-                .collect(),
-            Some(false) => self
-                .accounts
-                .iter()
-                .filter(|a| !a.is_active)
-                .cloned()
-                .collect(),
-            None => self.accounts.clone(),
-        };
-        Ok(accounts)
+        Ok(self
+            .accounts
+            .iter()
+            .filter(|account| {
+                is_active_filter.is_none_or(|is_active| account.is_active == is_active)
+            })
+            .filter(|account| {
+                is_archived_filter.is_none_or(|is_archived| account.is_archived == is_archived)
+            })
+            .filter(|account| account_ids.is_none_or(|ids| ids.iter().any(|id| id == &account.id)))
+            .cloned()
+            .collect())
     }
 
     fn get_accounts_by_ids(&self, account_ids: &[String]) -> CoreResult<Vec<Account>> {
@@ -136,16 +132,11 @@ impl AccountServiceTrait for MockAccountService {
     }
 
     fn get_non_archived_accounts(&self) -> CoreResult<Vec<Account>> {
-        Ok(self.accounts.clone())
+        self.list_accounts(None, Some(false), None)
     }
 
     fn get_active_non_archived_accounts(&self) -> CoreResult<Vec<Account>> {
-        Ok(self
-            .accounts
-            .iter()
-            .filter(|a| a.is_active)
-            .cloned()
-            .collect())
+        self.list_accounts(Some(true), Some(false), None)
     }
 
     fn get_base_currency(&self) -> Option<String> {
@@ -468,6 +459,17 @@ impl ValuationServiceTrait for MockValuationService {
     fn get_historical_valuations(
         &self,
         _account_id: &str,
+        _start_date: Option<NaiveDate>,
+        _end_date: Option<NaiveDate>,
+    ) -> CoreResult<Vec<DailyAccountValuation>> {
+        Ok(self.valuations.clone())
+    }
+
+    fn get_historical_valuations_for_accounts(
+        &self,
+        _scope_id: &str,
+        _account_ids: &[String],
+        _base_currency: &str,
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
     ) -> CoreResult<Vec<DailyAccountValuation>> {
@@ -1114,7 +1116,7 @@ impl IncomeServiceTrait for MockIncomeService {
         _account_ids: Option<&[String]>,
     ) -> CoreResult<Vec<IncomeSummary>> {
         Ok(vec![
-            IncomeSummary::new("TOTAL", "USD".to_string()),
+            IncomeSummary::new("ALL", "USD".to_string()),
             IncomeSummary::new("YTD", "USD".to_string()),
             IncomeSummary::new("LAST_YEAR", "USD".to_string()),
         ])
@@ -1148,12 +1150,30 @@ impl PerformanceServiceTrait for MockPerformanceService {
             annualized_twr: Some(rust_decimal::Decimal::ZERO),
             simple_return: rust_decimal::Decimal::ZERO,
             annualized_simple_return: rust_decimal::Decimal::ZERO,
+            cumulative_modified_dietz: Some(rust_decimal::Decimal::ZERO),
+            annualized_modified_dietz: Some(rust_decimal::Decimal::ZERO),
             cumulative_mwr: Some(rust_decimal::Decimal::ZERO),
             annualized_mwr: Some(rust_decimal::Decimal::ZERO),
             volatility: rust_decimal::Decimal::ZERO,
             max_drawdown: rust_decimal::Decimal::ZERO,
             is_holdings_mode: false,
+            return_method: ReturnMethod::NotApplicable,
+            is_mixed_tracking_mode: false,
+            warnings: Vec::new(),
         })
+    }
+
+    async fn calculate_performance_history_for_accounts(
+        &self,
+        scope_id: &str,
+        _account_ids: &[String],
+        _base_currency: &str,
+        _account_tracking_modes: &std::collections::HashMap<String, TrackingMode>,
+        _start_date: Option<NaiveDate>,
+        _end_date: Option<NaiveDate>,
+    ) -> CoreResult<PerformanceMetrics> {
+        self.calculate_performance_history("account", scope_id, None, None, None)
+            .await
     }
 
     async fn calculate_performance_summary(
@@ -1177,12 +1197,30 @@ impl PerformanceServiceTrait for MockPerformanceService {
             annualized_twr: Some(rust_decimal::Decimal::ZERO),
             simple_return: rust_decimal::Decimal::ZERO,
             annualized_simple_return: rust_decimal::Decimal::ZERO,
+            cumulative_modified_dietz: Some(rust_decimal::Decimal::ZERO),
+            annualized_modified_dietz: Some(rust_decimal::Decimal::ZERO),
             cumulative_mwr: Some(rust_decimal::Decimal::ZERO),
             annualized_mwr: Some(rust_decimal::Decimal::ZERO),
             volatility: rust_decimal::Decimal::ZERO,
             max_drawdown: rust_decimal::Decimal::ZERO,
             is_holdings_mode: false,
+            return_method: ReturnMethod::NotApplicable,
+            is_mixed_tracking_mode: false,
+            warnings: Vec::new(),
         })
+    }
+
+    async fn calculate_performance_summary_for_accounts(
+        &self,
+        scope_id: &str,
+        _account_ids: &[String],
+        _base_currency: &str,
+        _account_tracking_modes: &std::collections::HashMap<String, TrackingMode>,
+        _start_date: Option<NaiveDate>,
+        _end_date: Option<NaiveDate>,
+    ) -> CoreResult<PerformanceMetrics> {
+        self.calculate_performance_summary("account", scope_id, None, None, None)
+            .await
     }
 
     fn calculate_accounts_simple_performance(
@@ -1396,5 +1434,40 @@ impl HealthServiceTrait for MockHealthService {
 
     async fn update_config(&self, _config: HealthConfig) -> CoreResult<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, is_active: bool, is_archived: bool) -> Account {
+        Account {
+            id: id.to_string(),
+            name: id.to_string(),
+            is_active,
+            is_archived,
+            ..Account::default()
+        }
+    }
+
+    #[test]
+    fn mock_account_service_filters_active_non_archived_accounts() {
+        let service = MockAccountService {
+            accounts: vec![
+                account("visible", true, false),
+                account("archived", true, true),
+                account("hidden", false, false),
+            ],
+        };
+
+        let ids: Vec<String> = service
+            .get_active_non_archived_accounts()
+            .expect("accounts")
+            .into_iter()
+            .map(|account| account.id)
+            .collect();
+
+        assert_eq!(ids, vec!["visible"]);
     }
 }

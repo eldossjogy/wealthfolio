@@ -7,7 +7,8 @@ export const DISPLAY_DECIMAL_PRECISION = 2;
 // Wealthfolio Connect Portal URL - centralized configuration
 export const WEALTHFOLIO_CONNECT_PORTAL_URL = "https://connect.wealthfolio.app";
 
-export const PORTFOLIO_ACCOUNT_ID = "TOTAL";
+export const PORTFOLIO_SCOPE_ID = "portfolio:all";
+export const PORTFOLIO_ACCOUNT_TYPE = "PORTFOLIO";
 
 /**
  * Creates a synthetic "All Portfolio" account used as default selection
@@ -15,9 +16,9 @@ export const PORTFOLIO_ACCOUNT_ID = "TOTAL";
  */
 export function createPortfolioAccount(baseCurrency: string) {
   return {
-    id: PORTFOLIO_ACCOUNT_ID,
+    id: PORTFOLIO_SCOPE_ID,
     name: "All Portfolio",
-    accountType: "PORTFOLIO" as never,
+    accountType: PORTFOLIO_ACCOUNT_TYPE as never,
     balance: 0,
     currency: baseCurrency,
     isDefault: false,

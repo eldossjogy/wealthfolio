@@ -15,7 +15,8 @@ import {
   AccountPurpose,
   AccountType,
   accountSupportsPurpose,
-  PORTFOLIO_ACCOUNT_ID,
+  PORTFOLIO_ACCOUNT_TYPE,
+  PORTFOLIO_SCOPE_ID,
 } from "@/lib/constants";
 import { Account } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,7 @@ import { Icons, type Icon } from "@wealthfolio/ui";
 import { forwardRef, useState } from "react";
 
 // Custom type for UI purposes that extends the standard AccountType
-type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_ID;
+type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_TYPE;
 
 // Map account types to icons for visual distinction
 const accountTypeIcons: Record<string, Icon> = {
@@ -31,7 +32,7 @@ const accountTypeIcons: Record<string, Icon> = {
   CASH: Icons.DollarSign,
   CREDIT_CARD: Icons.CreditCard,
   CRYPTOCURRENCY: Icons.Bitcoin,
-  [PORTFOLIO_ACCOUNT_ID]: Icons.Wallet,
+  [PORTFOLIO_ACCOUNT_TYPE]: Icons.Wallet,
 };
 
 interface AccountSelectorMobileProps {
@@ -53,9 +54,9 @@ interface UIAccount extends Omit<Account, "accountType"> {
 // Create a portfolio account for UI purposes
 function createPortfolioAccount(baseCurrency: string): UIAccount {
   return {
-    id: PORTFOLIO_ACCOUNT_ID,
+    id: PORTFOLIO_SCOPE_ID,
     name: "All Portfolio",
-    accountType: PORTFOLIO_ACCOUNT_ID,
+    accountType: PORTFOLIO_ACCOUNT_TYPE,
     currency: baseCurrency,
     group: undefined,
     isActive: true,
@@ -129,7 +130,7 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
 
     const getAccountTypeLabel = (type: string): string => {
       switch (type) {
-        case PORTFOLIO_ACCOUNT_ID:
+        case PORTFOLIO_ACCOUNT_TYPE:
           return "Portfolio";
         case "SECURITIES":
           return "Securities Accounts";

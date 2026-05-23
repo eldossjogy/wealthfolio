@@ -333,3 +333,43 @@ describe("scope-based routing — get_income_summary", () => {
     });
   });
 });
+
+describe("scope-based routing — performance filters", () => {
+  const commands = [
+    { command: "calculate_performance_history", path: "/api/v1/performance/history" },
+    { command: "calculate_performance_summary", path: "/api/v1/performance/summary" },
+  ] as const;
+  const scopes = [
+    { name: "all", filter: { type: "all" } },
+    { name: "portfolio", filter: { type: "portfolio", portfolioId: "pf_1" } },
+    { name: "accounts", filter: { type: "accounts", accountIds: ["acc_1", "acc_2"] } },
+  ] as const;
+
+  for (const { command, path } of commands) {
+    for (const { name, filter } of scopes) {
+      it(`${command} sends ${name} filter`, async () => {
+        const mock = stubFetch();
+        await invoke(command, {
+          itemType: "account",
+          itemId: "portfolio:all",
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          trackingMode: "TRANSACTIONS",
+          filter,
+        });
+
+        const { url, method, body } = lastCall(mock);
+        expect(url).toBe(path);
+        expect(method).toBe("POST");
+        expect(JSON.parse(body as string)).toEqual({
+          itemType: "account",
+          itemId: "portfolio:all",
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          trackingMode: "TRANSACTIONS",
+          filter,
+        });
+      });
+    }
+  }
+});

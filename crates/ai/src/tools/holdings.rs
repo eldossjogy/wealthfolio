@@ -17,9 +17,9 @@ use crate::error::AiError;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetHoldingsArgs {
-    /// Account ID, or "TOTAL" for all accounts.
-    #[serde(default = "default_account_id")]
-    pub account_id: String,
+    /// Account ID. Omit for all accounts.
+    #[serde(default)]
+    pub account_id: Option<String>,
 
     /// View mode: "table", "treemap", or "both". Default is "treemap".
     /// - "table": Show holdings as a detailed list with values and gains
@@ -27,10 +27,6 @@ pub struct GetHoldingsArgs {
     /// - "both": Show treemap first, then table below
     #[serde(default = "default_view_mode")]
     pub view_mode: String,
-}
-
-fn default_account_id() -> String {
-    "TOTAL".to_string()
 }
 
 fn default_view_mode() -> String {
@@ -105,14 +101,13 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Get portfolio holdings for an account or all accounts. Returns symbol, quantity, market value, cost basis, and gain/loss for each holding. Use account_id='TOTAL' for aggregate holdings across all accounts. Use viewMode to control display: 'treemap' for visual composition chart with daily performance, 'table' for detailed list, or 'both' to show both views.".to_string(),
+            description: "Get portfolio holdings for an account or all accounts. Returns symbol, quantity, market value, cost basis, and gain/loss for each holding. Omit accountId for aggregate holdings across all accounts. Use viewMode to control display: 'treemap' for visual composition chart with daily performance, 'table' for detailed list, or 'both' to show both views.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "accountId": {
                         "type": "string",
-                        "description": "Account ID to get holdings for, or 'TOTAL' for all accounts",
-                        "default": "TOTAL"
+                        "description": "Account ID to get holdings for. Omit for all accounts."
                     },
                     "viewMode": {
                         "type": "string",
@@ -129,15 +124,27 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         use std::collections::HashMap;
 
-        let account_id = &args.account_id;
+        let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
 
-        // Fetch holdings
-        let holdings = self
-            .env
-            .holdings_service()
-            .get_holdings(account_id, &self.base_currency)
-            .await
-            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+        let holdings = if let Some(account_id) = account_id {
+            self.env
+                .holdings_service()
+                .get_holdings(account_id, &self.base_currency)
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        } else {
+            let accounts = self
+                .env
+                .account_service()
+                .get_active_non_archived_accounts()
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+            self.env
+                .holdings_service()
+                .get_holdings_for_accounts(&account_ids, &self.base_currency, "all")
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        };
 
         // Build account_id → name lookup
         let accounts = self
@@ -199,7 +206,7 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
             holdings: holdings_dto,
             total_value,
             currency: self.base_currency.clone(),
-            account_scope: account_id.clone(),
+            account_scope: account_id.unwrap_or("all").to_string(),
             view_mode: args.view_mode.clone(),
             truncated: if truncated { Some(true) } else { None },
             original_count: if truncated {
@@ -223,14 +230,14 @@ mod tests {
 
         let result = tool
             .call(GetHoldingsArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 view_mode: "treemap".to_string(),
             })
             .await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
-        assert_eq!(output.account_scope, "TOTAL");
+        assert_eq!(output.account_scope, "all");
         assert_eq!(output.currency, "USD");
         assert_eq!(output.view_mode, "treemap");
     }
@@ -242,7 +249,7 @@ mod tests {
 
         let result = tool
             .call(GetHoldingsArgs {
-                account_id: "acc-123".to_string(),
+                account_id: Some("acc-123".to_string()),
                 view_mode: "table".to_string(),
             })
             .await;

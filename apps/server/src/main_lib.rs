@@ -15,7 +15,7 @@ use wealthfolio_connect::{
 };
 use wealthfolio_core::addons::{AddonService, AddonServiceTrait};
 use wealthfolio_core::{
-    accounts::AccountService,
+    accounts::{AccountService, AccountServiceTrait},
     activities::{ActivityService as CoreActivityService, ActivityServiceTrait},
     assets::{
         AlternativeAssetRepositoryTrait, AlternativeAssetService, AlternativeAssetServiceTrait,
@@ -137,6 +137,57 @@ pub fn init_tracing() {
             .with(fmt::layer().with_target(true).with_line_number(true))
             .init();
     }
+}
+
+fn portfolio_history_backfill_needed(state: &AppState) -> bool {
+    let accounts = match state.account_service.get_non_archived_accounts() {
+        Ok(accounts) => accounts,
+        Err(err) => {
+            warn!("Failed to inspect accounts for valuation backfill: {}", err);
+            return false;
+        }
+    };
+    let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+    if account_ids.is_empty() {
+        return false;
+    }
+
+    let latest = match state.valuation_service.get_latest_valuations(&account_ids) {
+        Ok(latest) => latest,
+        Err(err) => {
+            warn!("Failed to inspect valuation history for backfill: {}", err);
+            return false;
+        }
+    };
+    let accounts_with_valuations: std::collections::HashSet<_> = latest
+        .into_iter()
+        .map(|valuation| valuation.account_id)
+        .collect();
+    let missing_ids: Vec<String> = account_ids
+        .into_iter()
+        .filter(|account_id| !accounts_with_valuations.contains(account_id))
+        .collect();
+    if missing_ids.is_empty() {
+        return false;
+    }
+
+    if matches!(
+        state
+            .activity_service
+            .get_first_activity_date(Some(&missing_ids)),
+        Ok(Some(_))
+    ) {
+        return true;
+    }
+
+    missing_ids.iter().any(|account_id| {
+        matches!(
+            state
+                .snapshot_service
+                .get_latest_holdings_snapshot(account_id),
+            Ok(Some(_))
+        )
+    })
 }
 
 #[cfg(feature = "device-sync")]
@@ -338,13 +389,16 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     );
 
     let valuation_repository = Arc::new(ValuationRepository::new(pool.clone(), writer.clone()));
-    let valuation_service = Arc::new(ValuationService::new(
-        base_currency.clone(),
-        valuation_repository.clone(),
-        snapshot_service.clone(),
-        quote_service.clone(),
-        fx_service.clone(),
-    ));
+    let valuation_service = Arc::new(
+        ValuationService::new(
+            base_currency.clone(),
+            valuation_repository.clone(),
+            snapshot_service.clone(),
+            quote_service.clone(),
+            fx_service.clone(),
+        )
+        .with_activity_repository(activity_repository.clone(), timezone.clone()),
+    );
 
     let net_worth_service: Arc<dyn NetWorthServiceTrait + Send + Sync> =
         Arc::new(NetWorthService::new(
@@ -721,6 +775,13 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
 
     #[cfg(feature = "device-sync")]
     start_sync_outbox_wake_worker(sync_outbox_wake_receiver, Arc::clone(&state));
+
+    if portfolio_history_backfill_needed(&state) {
+        tracing::info!(
+            "Valuation rows are missing after startup; enqueueing full portfolio rebuild."
+        );
+        crate::api::shared::trigger_full_portfolio_recalc(Arc::clone(&state));
+    }
 
     Ok(state)
 }

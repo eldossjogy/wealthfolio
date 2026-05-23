@@ -286,7 +286,7 @@ const AccountPage = () => {
 
   const { valuationHistory, isLoading: isValuationHistoryLoading } = useValuationHistory(
     dateRange,
-    id,
+    { type: "account", accountId: id },
   );
 
   const currentValuation = valuationHistory?.[valuationHistory.length - 1];
@@ -318,7 +318,7 @@ const AccountPage = () => {
   };
 
   const percentageToDisplay = useMemo(() => {
-    // For HOLDINGS mode, always use simple return since TWR/MWR are not meaningful
+    // For HOLDINGS mode, always use simple return since flow-adjusted returns are not meaningful
     // (they require transaction history to track cash flows)
     if (isHoldingsMode) {
       return frontendSimpleReturn;
@@ -326,9 +326,9 @@ const AccountPage = () => {
     if (selectedIntervalCode === "ALL") {
       return frontendSimpleReturn;
     }
-    // For other intervals, if accountPerformance is available, use cumulativeMwr
+    // For other intervals, use Modified Dietz with the legacy MWR alias as fallback.
     if (accountPerformance) {
-      return accountPerformance.cumulativeMwr ?? 0;
+      return accountPerformance.cumulativeModifiedDietz ?? accountPerformance.cumulativeMwr ?? 0;
     }
     return 0; // Default if no specific logic matches or data is unavailable
   }, [accountPerformance, selectedIntervalCode, frontendSimpleReturn, isHoldingsMode]);

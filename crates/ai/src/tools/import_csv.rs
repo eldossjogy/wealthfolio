@@ -944,7 +944,7 @@ impl<E: AiEnvironment + 'static> Tool for ImportCsvTool<E> {
         let accounts = self
             .env
             .account_service()
-            .get_active_accounts()
+            .get_active_non_archived_accounts()
             .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
 
         let available_accounts: Vec<AccountOption> = accounts

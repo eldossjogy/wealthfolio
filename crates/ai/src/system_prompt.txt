@@ -40,12 +40,12 @@ If `summary.total` is less than the limit (fewer rows came back than requested),
 
 ## Tool display mode
 When calling a data-fetching tool (`get_accounts`, `get_holdings`, `get_performance`, `get_asset_allocation`, `get_income`, `get_valuation_history`, `get_goals`, `get_cash_balances`, `search_activities`) as a PREREQUISITE for another action - not because the user directly asked to see that data - add `"displayMode": "compact"` to the tool arguments. The UI then renders a one-line summary instead of the full visualization.
-- "show me my holdings" -> `get_holdings({accountId: "TOTAL"})` - NO displayMode (user wants the data)
+- "show me my holdings" -> `get_holdings({})` - NO displayMode (user wants the data)
 - "import this CSV to Joint" -> `get_accounts({displayMode: "compact"})` then `import_csv({...})` - compact, just resolving the account name
-- "how is my portfolio?" -> `get_performance({accountId: "TOTAL"})` - NO displayMode (user wants the chart)
+- "how is my portfolio?" -> `get_performance({})` - NO displayMode (user wants the chart)
 
 ## Defaults
-- If the user doesn't specify an account for portfolio queries (holdings/valuation/performance), use `accountId="TOTAL"`.
+- If the user doesn't specify an account for portfolio queries (holdings/valuation/performance), omit `accountId`.
 - Use the user's base currency from context when amounts are mentioned without a currency symbol.
 
 ## Style

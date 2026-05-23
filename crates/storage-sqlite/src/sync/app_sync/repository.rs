@@ -44,6 +44,23 @@ fn validate_sync_table(table: &str) -> Result<()> {
     ))))
 }
 
+fn canonical_sync_table_set(tables: Vec<String>) -> Result<Vec<String>> {
+    if tables.is_empty() {
+        return Ok(APP_SYNC_TABLES.iter().map(|t| t.to_string()).collect());
+    }
+
+    let requested = tables.into_iter().collect::<HashSet<_>>();
+    for table in &requested {
+        validate_sync_table(table)?;
+    }
+
+    Ok(APP_SYNC_TABLES
+        .iter()
+        .filter(|table| requested.contains::<str>(*table))
+        .map(|table| table.to_string())
+        .collect())
+}
+
 #[derive(Clone)]
 struct PayloadColumnCatalog {
     writable: HashSet<String>,
@@ -84,7 +101,7 @@ struct TableRowCountResult {
 }
 
 const USER_SYNCABLE_HOLDINGS_SNAPSHOTS_FILTER: &str =
-    "source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')";
+    "account_id IN (SELECT id FROM accounts) AND source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')";
 const MANUAL_QUOTES_FILTER: &str = "source = 'MANUAL'";
 const USER_IMPORT_RUNS_FILTER: &str =
     "UPPER(run_type) = 'IMPORT' AND UPPER(source_system) IN ('CSV', 'MANUAL')";
@@ -456,6 +473,27 @@ fn snapshot_filter_for_table(table: &str) -> Option<&'static str> {
         .iter()
         .find(|(t, _)| *t == table)
         .map(|(_, f)| *f)
+}
+
+fn delete_orphan_snapshot_rows(conn: &mut SqliteConnection) -> Result<()> {
+    diesel::sql_query(
+        "DELETE FROM snapshot_positions
+         WHERE snapshot_id IN (
+             SELECT id FROM holdings_snapshots
+             WHERE account_id NOT IN (SELECT id FROM accounts)
+         )",
+    )
+    .execute(conn)
+    .map_err(StorageError::from)?;
+
+    diesel::sql_query(
+        "DELETE FROM holdings_snapshots
+         WHERE account_id NOT IN (SELECT id FROM accounts)",
+    )
+    .execute(conn)
+    .map_err(StorageError::from)?;
+
+    Ok(())
 }
 
 fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static str)> {
@@ -2098,17 +2136,7 @@ impl AppSyncRepository {
     ) -> Result<()> {
         self.writer
             .exec(move |conn| {
-                let table_set = if tables.is_empty() {
-                    APP_SYNC_TABLES
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                } else {
-                    tables
-                };
-                for table in &table_set {
-                    validate_sync_table(table)?;
-                }
+                let table_set = canonical_sync_table_set(tables)?;
 
                 let now = Utc::now().to_rfc3339();
                 let escaped_path = escape_sqlite_str(&snapshot_db_path);
@@ -2181,9 +2209,14 @@ impl AppSyncRepository {
                             .map(|column| quote_identifier(column))
                             .collect::<Vec<_>>()
                             .join(", ");
-                        let copy_sql = format!(
-                            "INSERT INTO {table_ident} ({columns_sql}) SELECT {columns_sql} FROM {alias_ident}.{table_ident}"
-                        );
+                        let copy_sql = match snapshot_filter_for_table(table) {
+                            Some(where_clause) => format!(
+                                "INSERT INTO {table_ident} ({columns_sql}) SELECT {columns_sql} FROM {alias_ident}.{table_ident} WHERE {where_clause}"
+                            ),
+                            None => format!(
+                                "INSERT INTO {table_ident} ({columns_sql}) SELECT {columns_sql} FROM {alias_ident}.{table_ident}"
+                            ),
+                        };
                         // For filtered tables, only delete rows matching the filter so
                         // unfiltered rows (e.g. system taxonomies) are preserved.
                         let clear_sql = match snapshot_filter_for_table(table) {
@@ -2195,6 +2228,9 @@ impl AppSyncRepository {
                         diesel::sql_query(clear_sql)
                             .execute(conn)
                             .map_err(StorageError::from)?;
+                        if table == "holdings_snapshots" {
+                            delete_orphan_snapshot_rows(conn)?;
+                        }
                         diesel::sql_query(copy_sql)
                             .execute(conn)
                             .map_err(StorageError::from)?;
@@ -2461,6 +2497,51 @@ mod tests {
         let pool = create_pool(&db_path).expect("create pool");
         let mut conn = get_connection(&pool).expect("conn");
         insert_account_for_test(&mut conn, account_id).expect("insert account");
+        db_path
+    }
+
+    fn create_snapshot_db_with_holding_snapshot(account_id: &str) -> String {
+        let app_data = tempdir()
+            .expect("tempdir")
+            .keep()
+            .to_string_lossy()
+            .to_string();
+        let db_path = init(&app_data).expect("init db");
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let mut conn = get_connection(&pool).expect("conn");
+        let sql = format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
+             VALUES ('snap-{}', '{}', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            escape_sqlite_str(account_id),
+            escape_sqlite_str(account_id)
+        );
+        diesel::sql_query(sql)
+            .execute(&mut conn)
+            .expect("insert snapshot");
+        db_path
+    }
+
+    fn create_snapshot_db_with_account_and_holding_snapshot(account_id: &str) -> String {
+        let app_data = tempdir()
+            .expect("tempdir")
+            .keep()
+            .to_string_lossy()
+            .to_string();
+        let db_path = init(&app_data).expect("init db");
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account_for_test(&mut conn, account_id).expect("insert account");
+        let sql = format!(
+            "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
+             VALUES ('snap-{}', '{}', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            escape_sqlite_str(account_id),
+            escape_sqlite_str(account_id)
+        );
+        diesel::sql_query(sql)
+            .execute(&mut conn)
+            .expect("insert snapshot");
         db_path
     }
 
@@ -2739,6 +2820,161 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_snapshot_batch_event_is_preserved_before_account_arrives() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let orphan_account_id = "orphan-snapshot-account";
+
+        let applied = repo
+            .apply_remote_events_lww_batch(vec![(
+                SyncEntity::Snapshot,
+                "snap-orphan-remote".to_string(),
+                SyncOperation::Update,
+                "evt-orphan-snapshot".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "snap-orphan-remote",
+                    "accountId": orphan_account_id,
+                    "snapshotDate": "2026-01-01",
+                    "currency": "USD",
+                    "positions": "{}",
+                    "cashBalances": "{}",
+                    "costBasis": "0",
+                    "netContribution": "0",
+                    "calculatedAt": "2026-01-01T00:00:00Z",
+                    "netContributionBase": "0",
+                    "cashTotalAccountCurrency": "0",
+                    "cashTotalBaseCurrency": "0",
+                    "source": "MANUAL_ENTRY",
+                }),
+            )])
+            .await
+            .expect("apply orphan snapshot event");
+
+        assert_eq!(applied, 1);
+        let mut conn = get_connection(&pool).expect("conn");
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(orphan_account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count orphan snapshots");
+        assert_eq!(snapshot_count.c, 1);
+
+        let applied_count: i64 = sync_applied_events::table
+            .filter(sync_applied_events::event_id.eq("evt-orphan-snapshot"))
+            .select(count_star())
+            .first(&mut conn)
+            .expect("count applied event");
+        assert_eq!(applied_count, 1);
+    }
+
+    #[tokio::test]
+    async fn remote_snapshot_single_event_is_preserved_before_account_arrives() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let orphan_account_id = "orphan-single-snapshot-account";
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Snapshot,
+                "snap-orphan-single".to_string(),
+                SyncOperation::Update,
+                "evt-orphan-single-snapshot".to_string(),
+                "2026-02-01T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "snap-orphan-single",
+                    "accountId": orphan_account_id,
+                    "snapshotDate": "2026-01-01",
+                    "currency": "USD",
+                    "positions": "{}",
+                    "cashBalances": "{}",
+                    "costBasis": "0",
+                    "netContribution": "0",
+                    "calculatedAt": "2026-01-01T00:00:00Z",
+                    "netContributionBase": "0",
+                    "cashTotalAccountCurrency": "0",
+                    "cashTotalBaseCurrency": "0",
+                    "source": "MANUAL_ENTRY",
+                }),
+            )
+            .await
+            .expect("apply orphan snapshot event");
+
+        assert!(applied);
+        let mut conn = get_connection(&pool).expect("conn");
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(orphan_account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count orphan snapshots");
+        assert_eq!(snapshot_count.c, 1);
+
+        let applied_count: i64 = sync_applied_events::table
+            .filter(sync_applied_events::event_id.eq("evt-orphan-single-snapshot"))
+            .select(count_star())
+            .first(&mut conn)
+            .expect("count applied event");
+        assert_eq!(applied_count, 1);
+        drop(conn);
+
+        let account_applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Account,
+                orphan_account_id.to_string(),
+                SyncOperation::Create,
+                "evt-orphan-single-account".to_string(),
+                "2026-02-01T00:00:01Z".to_string(),
+                2,
+                serde_json::json!({
+                    "id": orphan_account_id,
+                    "name": "Late Account",
+                    "accountType": "cash",
+                    "group": serde_json::Value::Null,
+                    "currency": "USD",
+                    "isDefault": false,
+                    "platformId": serde_json::Value::Null,
+                    "accountNumber": serde_json::Value::Null,
+                    "meta": serde_json::Value::Null,
+                    "provider": serde_json::Value::Null,
+                    "providerAccountId": serde_json::Value::Null,
+                    "isArchived": false,
+                    "isActive": true,
+                    "trackingMode": "portfolio"
+                }),
+            )
+            .await
+            .expect("apply late account event");
+
+        assert!(account_applied);
+        let mut conn = get_connection(&pool).expect("conn");
+        let account_count = count_account_rows(&pool, orphan_account_id);
+        assert_eq!(account_count, 1);
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(orphan_account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count preserved snapshot after account arrives");
+        assert_eq!(snapshot_count.c, 1);
+    }
+
+    #[tokio::test]
     async fn remote_goal_create_does_not_reuse_deleted_id() {
         let (pool, writer) = setup_db();
         let repo = AppSyncRepository::new(pool.clone(), writer.clone());
@@ -2987,6 +3223,81 @@ mod tests {
             .await;
         assert!(result.is_err(), "restore should fail for invalid snapshot");
         assert_eq!(repo.get_cursor().expect("cursor"), 15);
+    }
+
+    #[tokio::test]
+    async fn snapshot_restore_drops_orphan_snapshot_rows() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let orphan_account_id = "orphan-restore-account";
+        let snapshot_path = create_snapshot_db_with_holding_snapshot(orphan_account_id);
+        {
+            let mut conn = get_connection(&pool).expect("conn");
+            diesel::sql_query(format!(
+                "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
+                 VALUES ('local-orphan-snapshot', '{}', '2025-12-31', 'USD', '{{}}', '{{}}', '0', '0', '2025-12-31T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+                escape_sqlite_str(orphan_account_id)
+            ))
+            .execute(&mut conn)
+            .expect("insert local orphan snapshot");
+        }
+
+        repo.restore_snapshot_tables_from_file(
+            snapshot_path,
+            vec!["holdings_snapshots".to_string()],
+            90,
+            "device-orphan-snapshot".to_string(),
+            Some(1),
+        )
+        .await
+        .expect("restore snapshot");
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let snapshot_count: CountRow =
+            diesel::sql_query("SELECT COUNT(*) AS c FROM holdings_snapshots")
+                .get_result(&mut conn)
+                .expect("count snapshots");
+        assert_eq!(snapshot_count.c, 0);
+    }
+
+    #[tokio::test]
+    async fn snapshot_restore_uses_canonical_table_order_for_requested_tables() {
+        #[derive(diesel::QueryableByName)]
+        struct CountRow {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            c: i64,
+        }
+
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let account_id = "acc-reordered-restore";
+        let snapshot_path = create_snapshot_db_with_account_and_holding_snapshot(account_id);
+
+        repo.restore_snapshot_tables_from_file(
+            snapshot_path,
+            vec!["holdings_snapshots".to_string(), "accounts".to_string()],
+            91,
+            "device-reordered-restore".to_string(),
+            Some(1),
+        )
+        .await
+        .expect("restore snapshot");
+
+        assert_eq!(count_account_rows(&pool, account_id), 1);
+        let mut conn = get_connection(&pool).expect("conn");
+        let snapshot_count: CountRow = diesel::sql_query(format!(
+            "SELECT COUNT(*) AS c FROM holdings_snapshots WHERE account_id = '{}'",
+            escape_sqlite_str(account_id)
+        ))
+        .get_result(&mut conn)
+        .expect("count restored snapshots");
+        assert_eq!(snapshot_count.c, 1);
     }
 
     #[tokio::test]
@@ -4466,13 +4777,15 @@ mod tests {
         .execute(&mut conn)
         .expect("insert asset");
 
-        diesel::sql_query(
+        diesel::sql_query(format!(
             "INSERT INTO holdings_snapshots (id, account_id, snapshot_date, currency, positions, cash_balances, cost_basis, net_contribution, calculated_at, net_contribution_base, cash_total_account_currency, cash_total_base_currency, source)
              VALUES
-             ('11111111-1111-4111-8111-111111111111', 'acc-export-filter', '2026-01-01', 'USD', '{}', '{}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY'),
-             ('22222222-2222-4222-8222-222222222222', 'acc-export-filter', '2026-01-02', 'USD', '{}', '{}', '0', '0', '2026-01-02T00:00:00Z', '0', '0', '0', 'BROKER_IMPORTED'),
-             ('33333333-3333-4333-8333-333333333333', 'acc-export-filter', '2026-01-03', 'USD', '{}', '{}', '0', '0', '2026-01-03T00:00:00Z', '0', '0', '0', 'CALCULATED')",
-        )
+             ('11111111-1111-4111-8111-111111111111', 'acc-export-filter', '2026-01-01', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-01T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY'),
+             ('22222222-2222-4222-8222-222222222222', 'acc-export-filter', '2026-01-02', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-02T00:00:00Z', '0', '0', '0', 'BROKER_IMPORTED'),
+             ('33333333-3333-4333-8333-333333333333', 'acc-export-filter', '2026-01-03', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-03T00:00:00Z', '0', '0', '0', 'CALCULATED'),
+             ('66666666-6666-4666-8666-666666666666', '{}', '2026-01-04', 'USD', '{{}}', '{{}}', '0', '0', '2026-01-04T00:00:00Z', '0', '0', '0', 'MANUAL_ENTRY')",
+            escape_sqlite_str("orphan-export-filter")
+        ))
         .execute(&mut conn)
         .expect("insert snapshots");
 

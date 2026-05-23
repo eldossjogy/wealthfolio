@@ -921,6 +921,14 @@ export interface AccountValuation {
   totalValue: number;
   costBasis: number;
   netContribution: number;
+  cashBalanceBase: number;
+  investmentMarketValueBase: number;
+  totalValueBase: number;
+  costBasisBase: number;
+  netContributionBase: number;
+  externalInflowBase: number;
+  externalOutflowBase: number;
+  performanceEligibleValueBase: number;
   calculatedAt: string;
 }
 
@@ -1021,14 +1029,27 @@ export interface PerformanceMetrics {
   annualizedTwr?: number | null;
   simpleReturn: number;
   annualizedSimpleReturn: number;
-  /** Money-weighted return (null for HOLDINGS mode - requires cash flow tracking) */
+  /** Modified Dietz return (null for HOLDINGS mode - requires cash flow tracking) */
+  cumulativeModifiedDietz?: number | null;
+  /** Annualized Modified Dietz return (null for HOLDINGS mode) */
+  annualizedModifiedDietz?: number | null;
+  /** Legacy alias for Modified Dietz */
   cumulativeMwr?: number | null;
-  /** Annualized MWR (null for HOLDINGS mode) */
+  /** Legacy alias for annualized Modified Dietz */
   annualizedMwr?: number | null;
   volatility: number;
   maxDrawdown: number;
   /** Indicates if this is a HOLDINGS mode account (no cash flow tracking) */
   isHoldingsMode?: boolean;
+  returnMethod?:
+    | "timeWeighted"
+    | "moneyWeighted"
+    | "modifiedDietz"
+    | "simpleReturn"
+    | "symbolPriceBased"
+    | "notApplicable";
+  isMixedTrackingMode?: boolean;
+  warnings?: string[];
 }
 
 export interface NewAsset {
@@ -1097,6 +1118,7 @@ export interface TrackedItem {
   id: string;
   type: "account" | "symbol";
   name: string;
+  accountScope?: AccountScope;
 }
 
 // Addon Store Types
@@ -1358,7 +1380,7 @@ export interface NetWorthHistoryPoint {
   date: string;
 
   // Component values
-  /** Portfolio value from TOTAL account (investments + cash) as decimal string */
+  /** Portfolio value from aggregated real-account valuations as decimal string */
   portfolioValue: string;
   /** Alternative assets value (properties, vehicles, collectibles, etc.) as decimal string */
   alternativeAssetsValue: string;
@@ -2008,6 +2030,8 @@ export interface SnapshotInfo {
   positionCount: number;
   /** Number of cash currencies in this snapshot */
   cashCurrencyCount: number;
+  /** Total cash converted to account currency */
+  cashTotalAccountCurrency: string;
 }
 
 // ============================================================================

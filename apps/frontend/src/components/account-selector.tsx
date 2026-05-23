@@ -20,12 +20,13 @@ import {
   AccountPurpose,
   AccountType,
   accountSupportsPurpose,
-  PORTFOLIO_ACCOUNT_ID,
+  PORTFOLIO_ACCOUNT_TYPE,
+  PORTFOLIO_SCOPE_ID,
 } from "@/lib/constants";
 import { AnimatePresence, motion } from "motion/react";
 
 // Custom type for UI purposes that extends the standard AccountType
-type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_ID;
+type UIAccountType = AccountType | typeof PORTFOLIO_ACCOUNT_TYPE;
 
 // Map account types to icons for visual distinction
 const accountTypeIcons: Record<string, Icon> = {
@@ -33,7 +34,7 @@ const accountTypeIcons: Record<string, Icon> = {
   CASH: Icons.DollarSign,
   CREDIT_CARD: Icons.CreditCard,
   CRYPTOCURRENCY: Icons.Bitcoin,
-  [PORTFOLIO_ACCOUNT_ID]: Icons.Wallet,
+  [PORTFOLIO_ACCOUNT_TYPE]: Icons.Wallet,
 };
 
 interface AccountSelectorProps {
@@ -63,9 +64,9 @@ interface UIAccount extends Omit<Account, "accountType"> {
 // Create a portfolio account for UI purposes
 function createPortfolioAccount(baseCurrency: string): UIAccount {
   return {
-    id: PORTFOLIO_ACCOUNT_ID,
+    id: PORTFOLIO_SCOPE_ID,
     name: "All Portfolio",
-    accountType: PORTFOLIO_ACCOUNT_ID as UIAccountType,
+    accountType: PORTFOLIO_ACCOUNT_TYPE as UIAccountType,
     balance: 0,
     currency: baseCurrency,
     isDefault: false,
@@ -163,7 +164,7 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
       const baseCurrency = settings?.baseCurrency ?? "USD"; // Default to USD if settings not loaded
       const portfolioAccount = createPortfolioAccount(baseCurrency);
       // Check if portfolio account already exists to avoid duplication
-      const portfolioExists = accounts.some((account) => account.id === PORTFOLIO_ACCOUNT_ID);
+      const portfolioExists = accounts.some((account) => account.id === PORTFOLIO_SCOPE_ID);
 
       if (!portfolioExists) {
         displayAccounts.push(portfolioAccount as Account);
@@ -181,8 +182,8 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
 
     // Sort groups to ensure PORTFOLIO appears first if it exists
     const sortedGroups = Object.entries(accountsByType).sort(([typeA], [typeB]) => {
-      if (typeA === PORTFOLIO_ACCOUNT_ID) return -1;
-      if (typeB === PORTFOLIO_ACCOUNT_ID) return 1;
+      if (typeA === PORTFOLIO_ACCOUNT_TYPE) return -1;
+      if (typeB === PORTFOLIO_ACCOUNT_TYPE) return 1;
       return 0;
     });
 

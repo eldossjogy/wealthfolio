@@ -418,34 +418,27 @@ function AccountLotGroup({
   const Chevron = expanded ? Icons.ChevronDown : Icons.ChevronRight;
 
   return (
-    <div className={cn(!isFirst && "pt-6")}>
-      <div
-        className={cn(
-          "from-muted/30 to-muted/5 flex min-h-[64px] flex-wrap items-center gap-x-4 gap-y-2 bg-gradient-to-b px-5 py-5",
-          isFirst ? "border-b" : "border-y",
-        )}
-      >
+    <div className={cn(!isFirst && "border-t")}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5">
         <button
           type="button"
           onClick={onToggle}
           className="hover:text-foreground flex min-w-0 flex-1 items-center gap-2"
         >
           <Chevron className="text-muted-foreground h-4 w-4 shrink-0" />
-          <span className="text-foreground font-serif text-[18px] font-normal leading-none tracking-tight">
-            {group.accountName}
-          </span>
+          <span className="text-foreground truncate text-sm font-medium">{group.accountName}</span>
           {group.allSnapshot && (
             <Badge variant="secondary" className="ml-1 text-[10px] uppercase tracking-wider">
               From snapshot
             </Badge>
           )}
-          <span className="text-muted-foreground truncate text-[11px]">
+          <span className="text-muted-foreground truncate text-xs">
             {group.lots.length} {group.lots.length === 1 ? "lot" : "lots"} ·{" "}
             {formatQuantity(group.shares)} {group.shares === 1 ? "share" : "shares"}
           </span>
         </button>
 
-        <div className="text-muted-foreground flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px]">
+        <div className="text-muted-foreground flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs">
           <span>
             Basis{" "}
             <PrivacyAmount
@@ -463,8 +456,13 @@ function AccountLotGroup({
             />
           </span>
           <div className="flex items-center gap-2">
-            <GainAmount value={group.gainLossAmount} currency={currency} displayCurrency={false} />
-            <GainPercent value={group.gainLossPercent} variant="badge" />
+            <GainAmount
+              value={group.gainLossAmount}
+              currency={currency}
+              displayCurrency={false}
+              className="text-xs"
+            />
+            <GainPercent value={group.gainLossPercent} variant="badge" className="text-xs" />
           </div>
         </div>
       </div>
