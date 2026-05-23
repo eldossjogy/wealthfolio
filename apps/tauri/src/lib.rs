@@ -23,8 +23,62 @@ use log::error;
 use log::warn;
 use tauri::{AppHandle, Emitter, Manager};
 
-use events::emit_app_ready;
+use events::{emit_app_ready, emit_portfolio_trigger_recalculate, PortfolioRequestPayload};
 use tauri_plugin_deep_link::DeepLinkExt;
+
+fn portfolio_history_backfill_needed(context: &Arc<context::ServiceContext>) -> bool {
+    let accounts = match context.account_service().get_non_archived_accounts() {
+        Ok(accounts) => accounts,
+        Err(err) => {
+            error!("Failed to inspect accounts for valuation backfill: {}", err);
+            return false;
+        }
+    };
+    let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+    if account_ids.is_empty() {
+        return false;
+    }
+
+    let latest = match context
+        .valuation_service()
+        .get_latest_valuations(&account_ids)
+    {
+        Ok(latest) => latest,
+        Err(err) => {
+            error!("Failed to inspect valuation history for backfill: {}", err);
+            return false;
+        }
+    };
+    let accounts_with_valuations: std::collections::HashSet<_> = latest
+        .into_iter()
+        .map(|valuation| valuation.account_id)
+        .collect();
+    let missing_ids: Vec<String> = account_ids
+        .into_iter()
+        .filter(|account_id| !accounts_with_valuations.contains(account_id))
+        .collect();
+    if missing_ids.is_empty() {
+        return false;
+    }
+
+    if matches!(
+        context
+            .activity_service()
+            .get_first_activity_date(Some(&missing_ids)),
+        Ok(Some(_))
+    ) {
+        return true;
+    }
+
+    missing_ids.iter().any(|account_id| {
+        matches!(
+            context
+                .snapshot_service()
+                .get_latest_holdings_snapshot(account_id),
+            Ok(Some(_))
+        )
+    })
+}
 
 #[cfg(feature = "device-sync")]
 fn start_sync_outbox_wake_worker(
@@ -119,6 +173,10 @@ mod desktop {
         // The frontend will trigger the initial portfolio update and update check after it's mounted
         emit_app_ready(&handle);
 
+        if portfolio_history_backfill_needed(&context) {
+            emit_portfolio_trigger_recalculate(&handle, PortfolioRequestPayload::builder().build());
+        }
+
         // Trigger startup sync (async, non-blocking)
         // After this, user manually triggers sync via button
         let startup_handle = handle.clone();
@@ -203,6 +261,13 @@ mod mobile {
                     // The frontend will trigger the initial portfolio update after it's mounted
                     emit_app_ready(&handle);
 
+                    if portfolio_history_backfill_needed(&context) {
+                        emit_portfolio_trigger_recalculate(
+                            &handle,
+                            PortfolioRequestPayload::builder().build(),
+                        );
+                    }
+
                     // Trigger startup broker sync (async, non-blocking).
                     // After this, user manually triggers sync via button.
                     let startup_handle = handle.clone();
@@ -264,14 +329,14 @@ pub fn run() {
     // Single-instance must be the first plugin registered (per Tauri docs).
     // With the "deep-link" feature, it automatically forwards deep link URLs
     // to the existing instance's on_open_url handler instead of spawning a new process.
-    #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        // Focus the existing window when a second instance is attempted
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
-    }));
+    // #[cfg(desktop)]
+    // let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    //     // Focus the existing window when a second instance is attempted
+    //     if let Some(window) = app.get_webview_window("main") {
+    //         let _ = window.unminimize();
+    //         let _ = window.set_focus();
+    //     }
+    // }));
 
     let builder = builder
         .plugin(

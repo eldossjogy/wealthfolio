@@ -3,10 +3,9 @@ use log::{error, info, warn};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{async_runtime::spawn, AppHandle, Emitter, Listener, Manager};
-use wealthfolio_core::constants::PORTFOLIO_TOTAL_ACCOUNT_ID;
 use wealthfolio_core::health::HealthServiceTrait;
 use wealthfolio_core::portfolio::snapshot::{
-    reconcile_quote_sync_from_latest_total_snapshot, SnapshotRecalcMode,
+    reconcile_quote_sync_from_latest_account_snapshots, SnapshotRecalcMode,
 };
 use wealthfolio_core::portfolio::valuation::ValuationRecalcMode;
 use wealthfolio_core::quotes::MarketSyncMode;
@@ -34,6 +33,22 @@ pub fn setup_event_listeners(handle: AppHandle) {
     });
 }
 
+fn resolve_listener_account_ids(
+    context: &Arc<ServiceContext>,
+    account_ids: Option<&Vec<String>>,
+) -> Result<Vec<String>, wealthfolio_core::Error> {
+    if let Some(target_ids) = account_ids {
+        return Ok(target_ids.clone());
+    }
+
+    Ok(context
+        .account_service()
+        .get_non_archived_accounts()?
+        .into_iter()
+        .map(|account| account.id)
+        .collect())
+}
+
 /// Handles the common logic for both portfolio update and recalculation requests.
 fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: bool) {
     let event_name = if force_recalc {
@@ -57,10 +72,14 @@ fn handle_portfolio_request(handle: AppHandle, payload_str: &str, force_recalc: 
                     if market_sync_mode.requires_sync() {
                         let market_data_service = context.quote_service();
                         let snapshot_service = context.snapshot_service();
+                        let account_ids_for_sync =
+                            resolve_listener_account_ids(&context, accounts_to_recalc.as_ref())
+                                .unwrap_or_default();
 
-                        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+                        if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
                             snapshot_service.as_ref(),
                             market_data_service.as_ref(),
+                            &account_ids_for_sync,
                         )
                         .await
                         {
@@ -276,27 +295,12 @@ fn handle_portfolio_calculation(
             }
         }
 
-        // --- Step 2: Calculate TOTAL portfolio snapshot ---
-        let total_result = snapshot_service
-            .recalculate_total_portfolio_snapshots(snapshot_mode)
-            .await;
-        if let Err(e) = total_result {
-            let err_msg = format!("Failed to calculate TOTAL portfolio snapshot: {}", e);
-            error!("{}", err_msg);
-            if let Err(e_emit) = app_handle.emit(PORTFOLIO_UPDATE_ERROR, &err_msg) {
-                error!(
-                    "Failed to emit {} event: {}",
-                    PORTFOLIO_UPDATE_ERROR, e_emit
-                );
-            }
-            return;
-        }
-
-        // --- Step 2.5: Update position status from TOTAL snapshot ---
+        // --- Step 2: Update position status from latest real-account snapshots ---
         let quote_service = context.quote_service();
-        if let Err(e) = reconcile_quote_sync_from_latest_total_snapshot(
+        if let Err(e) = reconcile_quote_sync_from_latest_account_snapshots(
             snapshot_service.as_ref(),
             quote_service.as_ref(),
+            &initially_targeted_active_accounts,
         )
         .await
         {
@@ -307,10 +311,7 @@ fn handle_portfolio_calculation(
         }
 
         // --- Step 3: Calculate Valuation History ---
-        let mut accounts_for_valuation = initially_targeted_active_accounts;
-        if !accounts_for_valuation.contains(&PORTFOLIO_TOTAL_ACCOUNT_ID.to_string()) {
-            accounts_for_valuation.push(PORTFOLIO_TOTAL_ACCOUNT_ID.to_string());
-        }
+        let accounts_for_valuation = initially_targeted_active_accounts;
 
         if !accounts_for_valuation.is_empty() {
             let history_futures = accounts_for_valuation.iter().map(|account_id| {

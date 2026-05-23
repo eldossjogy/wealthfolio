@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
+use wealthfolio_core::performance::ReturnMethod;
 
 // ============================================================================
 // Tool Arguments and Output
@@ -17,17 +18,13 @@ use crate::error::AiError;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPerformanceArgs {
-    /// Account ID, or "TOTAL" for all accounts.
-    #[serde(default = "default_account_id")]
-    pub account_id: String,
+    /// Account ID. Omit for all accounts.
+    #[serde(default)]
+    pub account_id: Option<String>,
 
     /// Period for performance calculation: "1M", "3M", "6M", "YTD", "1Y", "ALL".
     #[serde(default = "default_period")]
     pub period: String,
-}
-
-fn default_account_id() -> String {
-    "TOTAL".to_string()
 }
 
 fn default_period() -> String {
@@ -55,6 +52,9 @@ pub struct GetPerformanceOutput {
     /// Absolute gain/loss amount.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gain_loss_amount: Option<f64>,
+    /// Headline return for the selected period.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_return: Option<f64>,
     /// Annualized TWR.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annualized_twr: Option<f64>,
@@ -64,14 +64,27 @@ pub struct GetPerformanceOutput {
     pub annualized_simple_return: f64,
     /// Cumulative money-weighted return.
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub cumulative_modified_dietz: Option<f64>,
+    /// Annualized Modified Dietz.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annualized_modified_dietz: Option<f64>,
+    /// Legacy alias for Modified Dietz.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cumulative_mwr: Option<f64>,
-    /// Annualized MWR.
+    /// Legacy alias for annualized Modified Dietz.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annualized_mwr: Option<f64>,
     /// Portfolio volatility (annualized).
     pub volatility: f64,
     /// Maximum drawdown.
     pub max_drawdown: f64,
+    /// Method used for the headline return.
+    pub return_method: String,
+    /// True when the result combines transaction-mode and holdings-mode accounts.
+    pub is_mixed_tracking_mode: bool,
+    /// Caveats for unavailable metrics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 // ============================================================================
@@ -121,14 +134,13 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Get portfolio performance metrics including TWR, MWR, volatility, and max drawdown. Use account_id='TOTAL' for aggregate performance across all accounts.".to_string(),
+            description: "Get portfolio performance metrics including TWR, Modified Dietz, volatility, and max drawdown. Omit accountId for aggregate performance across all accounts.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "accountId": {
                         "type": "string",
-                        "description": "Account ID to get performance for, or 'TOTAL' for all accounts",
-                        "default": "TOTAL"
+                        "description": "Account ID to get performance for. Omit for all accounts."
                     },
                     "period": {
                         "type": "string",
@@ -143,20 +155,52 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let account_id = &args.account_id;
+        let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
         let period = args.period.to_uppercase();
 
         // Calculate date range
         let end_date = Local::now().date_naive();
         let start_date = period_to_start_date(&period, end_date);
 
-        // Use PerformanceService to calculate metrics
-        let metrics = self
-            .env
-            .performance_service()
-            .calculate_performance_history("account", account_id, start_date, Some(end_date), None)
-            .await
-            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+        let metrics = if account_id.is_none() {
+            let accounts = self
+                .env
+                .account_service()
+                .get_active_accounts()
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            let mut account_tracking_modes = std::collections::HashMap::new();
+            let account_ids: Vec<String> = accounts
+                .into_iter()
+                .map(|account| {
+                    account_tracking_modes.insert(account.id.clone(), account.tracking_mode);
+                    account.id
+                })
+                .collect();
+            self.env
+                .performance_service()
+                .calculate_performance_history_for_accounts(
+                    "all",
+                    &account_ids,
+                    &self.base_currency,
+                    &account_tracking_modes,
+                    start_date,
+                    Some(end_date),
+                )
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        } else {
+            self.env
+                .performance_service()
+                .calculate_performance_history(
+                    "account",
+                    account_id.expect("single-account branch checked"),
+                    start_date,
+                    Some(end_date),
+                    None,
+                )
+                .await
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+        };
 
         Ok(GetPerformanceOutput {
             id: metrics.id,
@@ -169,13 +213,27 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
             },
             cumulative_twr: metrics.cumulative_twr.and_then(|v| v.to_f64()),
             gain_loss_amount: metrics.gain_loss_amount.and_then(|v| v.to_f64()),
+            period_return: metrics.period_return.and_then(|v| v.to_f64()),
             annualized_twr: metrics.annualized_twr.and_then(|v| v.to_f64()),
             simple_return: metrics.simple_return.to_f64().unwrap_or(0.0),
             annualized_simple_return: metrics.annualized_simple_return.to_f64().unwrap_or(0.0),
+            cumulative_modified_dietz: metrics.cumulative_modified_dietz.and_then(|v| v.to_f64()),
+            annualized_modified_dietz: metrics.annualized_modified_dietz.and_then(|v| v.to_f64()),
             cumulative_mwr: metrics.cumulative_mwr.and_then(|v| v.to_f64()),
             annualized_mwr: metrics.annualized_mwr.and_then(|v| v.to_f64()),
             volatility: metrics.volatility.to_f64().unwrap_or(0.0),
             max_drawdown: metrics.max_drawdown.to_f64().unwrap_or(0.0),
+            return_method: match metrics.return_method {
+                ReturnMethod::TimeWeighted => "timeWeighted",
+                ReturnMethod::MoneyWeighted => "moneyWeighted",
+                ReturnMethod::ModifiedDietz => "modifiedDietz",
+                ReturnMethod::SimpleReturn => "simpleReturn",
+                ReturnMethod::SymbolPriceBased => "symbolPriceBased",
+                ReturnMethod::NotApplicable => "notApplicable",
+            }
+            .to_string(),
+            is_mixed_tracking_mode: metrics.is_mixed_tracking_mode,
+            warnings: metrics.warnings,
         })
     }
 }
@@ -192,7 +250,7 @@ mod tests {
 
         let result = tool
             .call(GetPerformanceArgs {
-                account_id: "TOTAL".to_string(),
+                account_id: None,
                 period: "YTD".to_string(),
             })
             .await;
@@ -209,7 +267,7 @@ mod tests {
 
         let result = tool
             .call(GetPerformanceArgs {
-                account_id: "acc-123".to_string(),
+                account_id: Some("acc-123".to_string()),
                 period: "1M".to_string(),
             })
             .await;

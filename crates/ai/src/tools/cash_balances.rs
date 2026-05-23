@@ -20,13 +20,9 @@ use crate::error::AiError;
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetCashBalancesArgs {
-    /// Account ID, or "TOTAL" for all accounts. Default: "TOTAL".
-    #[serde(default = "default_account_id")]
-    pub account_id: String,
-}
-
-fn default_account_id() -> String {
-    "TOTAL".to_string()
+    /// Account ID. Omit for all accounts.
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 /// Per-currency cash balance within an account.
@@ -105,7 +101,7 @@ impl<E: AiEnvironment + 'static> Tool for GetCashBalancesTool<E> {
                 "properties": {
                     "accountId": {
                         "type": "string",
-                        "description": "Account ID, or 'TOTAL' for all accounts. Default: 'TOTAL'."
+                        "description": "Account ID. Omit for all accounts."
                     }
                 },
                 "required": []
@@ -125,11 +121,13 @@ impl<E: AiEnvironment + 'static> Tool for GetCashBalancesTool<E> {
             .map(|a| (a.id.clone(), (a.name.clone(), a.currency.clone())))
             .collect();
 
-        let is_total = args.account_id == "TOTAL" || args.account_id.is_empty();
-        let target_ids: Vec<String> = if is_total {
+        let target_account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
+        let target_ids: Vec<String> = if target_account_id.is_none() {
             accounts.iter().map(|a| a.id.clone()).collect()
         } else {
-            vec![args.account_id.clone()]
+            vec![target_account_id
+                .expect("single-account branch checked")
+                .to_string()]
         };
         let valuation_by_account: HashMap<_, _> = self
             .env
@@ -300,11 +298,7 @@ mod tests {
     async fn test_get_cash_balances_basic() {
         let env = Arc::new(MockEnvironment::new());
         let tool = GetCashBalancesTool::new(env, "USD".to_string());
-        let result = tool
-            .call(GetCashBalancesArgs {
-                account_id: "TOTAL".to_string(),
-            })
-            .await;
+        let result = tool.call(GetCashBalancesArgs { account_id: None }).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().base_currency, "USD");
     }
@@ -343,6 +337,14 @@ mod tests {
                     total_value: Decimal::from(2350),
                     cost_basis: Decimal::ZERO,
                     net_contribution: Decimal::ZERO,
+                    cash_balance_base: Decimal::from(2350),
+                    investment_market_value_base: Decimal::ZERO,
+                    total_value_base: Decimal::from(2350),
+                    cost_basis_base: Decimal::ZERO,
+                    net_contribution_base: Decimal::ZERO,
+                    external_inflow_base: Decimal::ZERO,
+                    external_outflow_base: Decimal::ZERO,
+                    performance_eligible_value_base: Decimal::from(2350),
                     calculated_at: Utc::now(),
                 }],
             }),
@@ -351,9 +353,7 @@ mod tests {
         let tool = GetCashBalancesTool::new(env, "CAD".to_string());
 
         let result = tool
-            .call(GetCashBalancesArgs {
-                account_id: "TOTAL".to_string(),
-            })
+            .call(GetCashBalancesArgs { account_id: None })
             .await
             .unwrap();
 
