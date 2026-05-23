@@ -303,8 +303,6 @@ impl ValuationService {
             entry.total_value_base += valuation.total_value_base;
             entry.cost_basis_base += valuation.cost_basis_base;
             entry.net_contribution_base += valuation.net_contribution_base;
-            entry.external_inflow_base += valuation.external_inflow_base;
-            entry.external_outflow_base += valuation.external_outflow_base;
             entry.performance_eligible_value_base += valuation.performance_eligible_value_base;
             entry.calculated_at = entry.calculated_at.max(valuation.calculated_at);
         }
@@ -326,6 +324,16 @@ impl ValuationService {
         account_ids: &[String],
         histories: &[Vec<DailyAccountValuation>],
     ) -> CoreResult<()> {
+        if histories.len() != account_ids.len() {
+            return Err(CoreError::Calculation(CalculatorError::Calculation(
+                format!(
+                "Scoped valuation history count mismatch: expected {} account histories, got {}",
+                account_ids.len(),
+                histories.len()
+            ),
+            )));
+        }
+
         let union_dates: BTreeSet<NaiveDate> = histories
             .iter()
             .flat_map(|history| history.iter().map(|valuation| valuation.valuation_date))

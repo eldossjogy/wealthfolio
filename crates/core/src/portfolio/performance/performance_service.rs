@@ -242,7 +242,7 @@ impl PerformanceService {
         let explicit_base_flows = !curr_point.external_inflow_base.is_zero()
             || !curr_point.external_outflow_base.is_zero();
 
-        if explicit_base_flows && curr_point.account_currency == curr_point.base_currency {
+        if explicit_base_flows {
             return (
                 curr_point.external_inflow_base,
                 curr_point.external_outflow_base,
@@ -1635,6 +1635,28 @@ mod tests {
                 err
             );
         }
+    }
+
+    #[test]
+    fn perf_uses_explicit_base_flows_for_foreign_currency_accounts() {
+        let mut prev = valuation("2026-04-01", dec!(100), dec!(100), dec!(100), dec!(100));
+        let mut curr = valuation("2026-04-02", dec!(210), dec!(200), dec!(210), dec!(200));
+        prev.account_currency = "EUR".to_string();
+        prev.base_currency = "USD".to_string();
+        prev.fx_rate_to_base = dec!(1.1);
+        prev.total_value_base = dec!(110);
+        prev.net_contribution_base = dec!(110);
+        curr.account_currency = "EUR".to_string();
+        curr.base_currency = "USD".to_string();
+        curr.fx_rate_to_base = dec!(1.1);
+        curr.total_value_base = dec!(231);
+        curr.net_contribution_base = dec!(220);
+        curr.external_inflow_base = dec!(110);
+
+        let (inflow, outflow) = PerformanceService::daily_external_flows(&prev, &curr);
+
+        assert_eq!(inflow, dec!(110));
+        assert_eq!(outflow, Decimal::ZERO);
     }
 
     /// HOLDINGS mode uses the cost-basis formula in both paths. TWR/MWR are
