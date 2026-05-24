@@ -33,8 +33,8 @@ interface RulePresetPickerProps {
  * rules are detached and kept).
  */
 export function RulePresetPicker({ compact = false }: RulePresetPickerProps) {
-  const { data: presets = [], isLoading } = useRulePresets();
-  const { data: rules = [] } = useCategorizationRules();
+  const { data: presets = [], isLoading, isError: presetsErrored } = useRulePresets();
+  const { data: rules = [], isError: rulesErrored } = useCategorizationRules();
   const importMutation = useImportRulePreset();
   const removeMutation = useRemoveRulePreset();
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
@@ -53,6 +53,9 @@ export function RulePresetPicker({ compact = false }: RulePresetPickerProps) {
 
   if (isLoading) {
     return <div className="text-muted-foreground text-xs">Loading presets…</div>;
+  }
+  if (presetsErrored || rulesErrored) {
+    return <div className="text-destructive text-xs">Presets could not load.</div>;
   }
   if (presets.length === 0) return null;
 

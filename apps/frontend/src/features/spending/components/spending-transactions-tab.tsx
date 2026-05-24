@@ -260,8 +260,11 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       isLoading,
       isFetching,
       isFetchingNextPage,
+      isError,
+      error,
       hasNextPage,
       fetchNextPage,
+      refetch,
     } = useCashActivitySearch(searchRequest);
 
     const accountById = useMemo(() => {
@@ -574,6 +577,17 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
             <Skeleton className="h-12" />
             <Skeleton className="h-12" />
           </div>
+        ) : isError ? (
+          <EmptyPlaceholder>
+            <EmptyPlaceholder.Icon name="AlertTriangle" />
+            <EmptyPlaceholder.Title>Transactions could not load</EmptyPlaceholder.Title>
+            <EmptyPlaceholder.Description>
+              {error?.message ?? "Try refreshing the list."}
+            </EmptyPlaceholder.Description>
+            <Button variant="outline" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </EmptyPlaceholder>
         ) : rows.length === 0 ? (
           <EmptyPlaceholder>
             <EmptyPlaceholder.Icon name="Activity" />

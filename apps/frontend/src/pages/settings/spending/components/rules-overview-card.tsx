@@ -10,8 +10,16 @@ import {
 import { PRESET_FLAGS } from "@/features/spending/components/rule-preset-constants";
 
 export function RulesOverviewCard() {
-  const { data: rules = [], isLoading: rulesLoading } = useCategorizationRules();
-  const { data: presets = [], isLoading: presetsLoading } = useRulePresets();
+  const {
+    data: rules = [],
+    isLoading: rulesLoading,
+    isError: rulesErrored,
+  } = useCategorizationRules();
+  const {
+    data: presets = [],
+    isLoading: presetsLoading,
+    isError: presetsErrored,
+  } = useRulePresets();
   const isLoading = rulesLoading || presetsLoading;
 
   const total = rules.length;
@@ -35,6 +43,20 @@ export function RulesOverviewCard() {
 
   if (isLoading) {
     return <div className="bg-muted/40 h-44 w-full animate-pulse rounded-lg" />;
+  }
+
+  if (rulesErrored || presetsErrored) {
+    return (
+      <div className="bg-card rounded-lg border p-6">
+        <div className="flex items-start gap-3">
+          <Icons.AlertTriangle className="text-destructive mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <h3 className="text-base font-semibold">Categorization rules</h3>
+            <p className="text-muted-foreground mt-1 text-xs">Rules could not load.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (total === 0) {

@@ -18,6 +18,7 @@ export function computeEventsAggregate(
   events: EventSpendingSummary[],
   heatmapActivities: Activity[],
   accountTypeById?: Map<string, string>,
+  dailySpendByDate?: Map<string, number>,
 ): EventsAggregate {
   let totalSpent = 0;
   let totalEventDays = 0;
@@ -38,6 +39,7 @@ export function computeEventsAggregate(
     events,
     HEATMAP_PERIOD_DAYS,
     accountTypeById,
+    dailySpendByDate,
   );
   const expected = normalPace * totalEventDays;
   const lift = totalSpent - expected;
@@ -55,9 +57,10 @@ export function useEventsAggregate(
   events: EventSpendingSummary[],
   heatmapActivities: Activity[],
   accountTypeById?: Map<string, string>,
+  dailySpendByDate?: Map<string, number>,
 ): EventsAggregate {
   return useMemo(
-    () => computeEventsAggregate(events, heatmapActivities, accountTypeById),
-    [events, heatmapActivities, accountTypeById],
+    () => computeEventsAggregate(events, heatmapActivities, accountTypeById, dailySpendByDate),
+    [events, heatmapActivities, accountTypeById, dailySpendByDate],
   );
 }

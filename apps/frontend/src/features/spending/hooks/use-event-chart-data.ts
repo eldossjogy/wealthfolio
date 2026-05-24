@@ -174,6 +174,7 @@ export function useEventChartData(
   heatmapActivities: Activity[],
   accountTypeById: Map<string, string> | undefined,
   taxonomyCategories: TaxonomyCategory[],
+  dailySpendByDate?: Map<string, number>,
 ): EventChartData {
   const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
   const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
@@ -182,8 +183,9 @@ export function useEventChartData(
   const dailyDuring = event.totalSpending / days;
 
   const baseline = useMemo(
-    () => computeBaselinePace(heatmapActivities, [event], 12 * 7, accountTypeById),
-    [accountTypeById, heatmapActivities, event],
+    () =>
+      computeBaselinePace(heatmapActivities, [event], 12 * 7, accountTypeById, dailySpendByDate),
+    [accountTypeById, dailySpendByDate, heatmapActivities, event],
   );
 
   // Floor `expected` at zero before computing lift. `computeBaselinePace`

@@ -52,9 +52,7 @@ impl CategorizationRulesService {
         self.repo.get(id).await
     }
     pub async fn create(&self, new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
-        if new_rule.is_global && new_rule.account_id.is_some() {
-            return Err(SpendingError::GlobalRuleHasAccount.into());
-        }
+        validate_rule_scope(new_rule.is_global, new_rule.account_id.as_deref())?;
         validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
         self.repo.create(new_rule).await
     }
@@ -68,15 +66,16 @@ impl CategorizationRulesService {
             .repo
             .get(id)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Rule not found: {id}"))?;
+            .ok_or_else(|| SpendingError::NotFound {
+                entity: "Rule",
+                id: id.to_string(),
+            })?;
         let new_global = patch.is_global.unwrap_or(existing.is_global);
         let new_account = match &patch.account_id {
             Some(opt) => opt.clone(),
             None => existing.account_id.clone(),
         };
-        if new_global && new_account.is_some() {
-            return Err(SpendingError::GlobalRuleHasAccount.into());
-        }
+        validate_rule_scope(new_global, new_account.as_deref())?;
         let new_match_type = patch.match_type.unwrap_or(existing.match_type);
         let new_pattern = patch
             .pattern
@@ -224,15 +223,21 @@ impl CategorizationRulesService {
         preset_id: &str,
         category_resolver: &HashMap<String, (String, String)>,
     ) -> Result<ImportPresetResult> {
-        let preset = presets::load_preset(preset_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown preset: {preset_id}"))?;
+        let preset =
+            presets::load_preset(preset_id).ok_or_else(|| SpendingError::InvalidInput {
+                message: format!("Unknown preset: {preset_id}"),
+            })?;
 
         let existing_rules = self.repo.list().await?;
-        let installed_keys = presets::installed_rule_keys(
-            existing_rules
-                .iter()
-                .map(|r| (&r.preset_id, &r.preset_rule_key)),
-        );
+        let installed_by_key: HashMap<(String, String), CategorizationRule> = existing_rules
+            .into_iter()
+            .filter_map(|rule| {
+                Some((
+                    (rule.preset_id.clone()?, rule.preset_rule_key.clone()?),
+                    rule,
+                ))
+            })
+            .collect();
 
         let mut result = ImportPresetResult {
             preset_id: preset.preset_id.clone(),
@@ -242,10 +247,6 @@ impl CategorizationRulesService {
         };
 
         for rule in preset.rules {
-            if installed_keys.contains(&(preset.preset_id.clone(), rule.key.clone())) {
-                result.skipped_existing += 1;
-                continue;
-            }
             let Some((tax_id, cat_id)) = category_resolver.get(&rule.category_key).cloned() else {
                 log::warn!(
                     "Preset '{}' rule '{}' references unknown categoryKey '{}' — skipped",
@@ -256,24 +257,42 @@ impl CategorizationRulesService {
                 result.skipped_unknown_category += 1;
                 continue;
             };
+
+            let new_rule = NewCategorizationRule {
+                id: None,
+                name: rule.name,
+                pattern: rule.pattern,
+                match_type: RuleMatchType::parse(&rule.match_type),
+                taxonomy_id: Some(tax_id),
+                category_id: Some(cat_id),
+                activity_type: None,
+                priority: rule.priority,
+                is_global: true,
+                account_id: None,
+                preset_id: Some(preset.preset_id.clone()),
+                preset_rule_key: Some(rule.key.clone()),
+                preset_version: Some(preset.preset_version.clone()),
+            };
+            validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
+
+            let key = (preset.preset_id.clone(), rule.key);
+            let Some(installed) = installed_by_key.get(&key) else {
+                self.repo.create(new_rule).await?;
+                result.added += 1;
+                continue;
+            };
+
+            if installed.preset_modified
+                || installed.preset_version.as_deref() == Some(preset.preset_version.as_str())
+            {
+                result.skipped_existing += 1;
+                continue;
+            }
+
             self.repo
-                .create(NewCategorizationRule {
-                    id: None,
-                    name: rule.name,
-                    pattern: rule.pattern,
-                    match_type: RuleMatchType::parse(&rule.match_type),
-                    taxonomy_id: Some(tax_id),
-                    category_id: Some(cat_id),
-                    activity_type: None,
-                    priority: rule.priority,
-                    is_global: true,
-                    account_id: None,
-                    preset_id: Some(preset.preset_id.clone()),
-                    preset_rule_key: Some(rule.key),
-                    preset_version: Some(preset.preset_version.clone()),
-                })
+                .replace_preset_rule(&installed.id, new_rule)
                 .await?;
-            result.added += 1;
+            result.updated += 1;
         }
         Ok(result)
     }
@@ -304,6 +323,19 @@ fn validate_rule_pattern(match_type: &RuleMatchType, pattern: &str) -> Result<()
     compile_regex_pattern(pattern).map_err(|err| SpendingError::InvalidInput {
         message: format!("Invalid regex pattern: {err}"),
     })?;
+    Ok(())
+}
+
+fn validate_rule_scope(is_global: bool, account_id: Option<&str>) -> Result<()> {
+    if is_global && account_id.is_some() {
+        return Err(SpendingError::GlobalRuleHasAccount.into());
+    }
+    if !is_global && account_id.unwrap_or_default().is_empty() {
+        return Err(SpendingError::InvalidInput {
+            message: "Account-scoped rules require accountId".to_string(),
+        }
+        .into());
+    }
     Ok(())
 }
 
@@ -341,8 +373,30 @@ mod tests {
                 .find(|rule| rule.id == id)
                 .cloned())
         }
-        async fn create(&self, _n: NewCategorizationRule) -> Result<CategorizationRule> {
-            unimplemented!()
+        async fn create(&self, n: NewCategorizationRule) -> Result<CategorizationRule> {
+            let now = Utc::now().naive_utc();
+            let rule = CategorizationRule {
+                id: n
+                    .id
+                    .unwrap_or_else(|| format!("rule-{}", now.timestamp_nanos_opt().unwrap())),
+                name: n.name,
+                pattern: n.pattern,
+                match_type: n.match_type,
+                taxonomy_id: n.taxonomy_id,
+                category_id: n.category_id,
+                activity_type: n.activity_type,
+                priority: n.priority,
+                is_global: n.is_global,
+                account_id: n.account_id,
+                preset_id: n.preset_id,
+                preset_rule_key: n.preset_rule_key,
+                preset_version: n.preset_version,
+                preset_modified: false,
+                created_at: now,
+                updated_at: now,
+            };
+            self.rules.lock().unwrap().push(rule.clone());
+            Ok(rule)
         }
         async fn update(
             &self,
@@ -350,6 +404,32 @@ mod tests {
             _p: UpdateCategorizationRule,
         ) -> Result<CategorizationRule> {
             unimplemented!()
+        }
+        async fn replace_preset_rule(
+            &self,
+            id: &str,
+            n: NewCategorizationRule,
+        ) -> Result<CategorizationRule> {
+            let mut rules = self.rules.lock().unwrap();
+            let existing = rules
+                .iter_mut()
+                .find(|rule| rule.id == id)
+                .ok_or_else(|| anyhow::anyhow!("missing mock rule"))?;
+            existing.name = n.name;
+            existing.pattern = n.pattern;
+            existing.match_type = n.match_type;
+            existing.taxonomy_id = n.taxonomy_id;
+            existing.category_id = n.category_id;
+            existing.activity_type = n.activity_type;
+            existing.priority = n.priority;
+            existing.is_global = n.is_global;
+            existing.account_id = n.account_id;
+            existing.preset_id = n.preset_id;
+            existing.preset_rule_key = n.preset_rule_key;
+            existing.preset_version = n.preset_version;
+            existing.preset_modified = false;
+            existing.updated_at = Utc::now().naive_utc();
+            Ok(existing.clone())
         }
         async fn delete(&self, _id: &str) -> Result<()> {
             unimplemented!()
@@ -896,6 +976,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_rejects_account_scope_without_account_id() {
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(vec![]),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo::default());
+        let assignment_service = Arc::new(ActivityTaxonomyAssignmentService::new(
+            assignment_repo as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+        ));
+        let activity_repo = Arc::new(MockActivityRepo { activities: vec![] });
+        let svc = CategorizationRulesService::new(
+            rules_repo as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn ActivityRepositoryTrait>,
+            assignment_service,
+        );
+
+        let err = svc
+            .create(NewCategorizationRule {
+                id: None,
+                name: "x".to_string(),
+                pattern: "AMAZON".to_string(),
+                match_type: RuleMatchType::Contains,
+                taxonomy_id: Some("spending_categories".to_string()),
+                category_id: Some("cat_food".to_string()),
+                activity_type: None,
+                priority: 1,
+                is_global: false,
+                account_id: None,
+                preset_id: None,
+                preset_rule_key: None,
+                preset_version: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Account-scoped rules require accountId"));
+    }
+
+    #[tokio::test]
     async fn create_rejects_invalid_regex_pattern() {
         let rules_repo = Arc::new(MockRulesRepo {
             rules: Mutex::new(vec![]),
@@ -966,5 +1085,58 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Invalid regex pattern"));
+    }
+
+    #[tokio::test]
+    async fn import_preset_upgrades_unmodified_old_version_rule() {
+        let preset = presets::load_preset("us").unwrap();
+        let preset_rule = preset.rules.first().unwrap();
+        let mut installed = mk_rule(
+            "installed-rule",
+            "OLD PATTERN",
+            "spending_categories",
+            "old_cat",
+            1,
+        );
+        installed.preset_id = Some(preset.preset_id.clone());
+        installed.preset_rule_key = Some(preset_rule.key.clone());
+        installed.preset_version = Some("0.0.0".to_string());
+        installed.preset_modified = false;
+
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(vec![installed]),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo::default());
+        let assignment_service = Arc::new(ActivityTaxonomyAssignmentService::new(
+            assignment_repo as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+        ));
+        let activity_repo = Arc::new(MockActivityRepo { activities: vec![] });
+        let svc = CategorizationRulesService::new(
+            rules_repo.clone() as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn ActivityRepositoryTrait>,
+            assignment_service,
+        );
+        let mut resolver = HashMap::new();
+        resolver.insert(
+            preset_rule.category_key.clone(),
+            ("spending_categories".to_string(), "new_cat".to_string()),
+        );
+
+        let result = svc.import_preset("us", &resolver).await.unwrap();
+
+        assert_eq!(result.updated, 1);
+        let rules = rules_repo.rules.lock().unwrap();
+        let updated_rule = rules
+            .iter()
+            .find(|rule| rule.id == "installed-rule")
+            .unwrap();
+        assert_eq!(updated_rule.pattern, preset_rule.pattern);
+        assert_eq!(updated_rule.priority, preset_rule.priority);
+        assert_eq!(updated_rule.category_id.as_deref(), Some("new_cat"));
+        assert_eq!(
+            updated_rule.preset_version.as_deref(),
+            Some(preset.preset_version.as_str())
+        );
+        assert!(!updated_rule.preset_modified);
     }
 }

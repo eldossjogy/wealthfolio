@@ -1,4 +1,4 @@
-import { AccountType } from "@/lib/constants";
+import { AccountPurpose, accountSupportsPurpose, isLiabilityAccountType } from "@/lib/constants";
 
 /** Cash/card activity types tracked by the spending module. */
 export const CASH_ACTIVITY_TYPES = [
@@ -48,11 +48,11 @@ export const OUTFLOW_TYPES: CashActivityType[] = ["WITHDRAWAL", "TRANSFER_OUT", 
 export const INCOME_TYPES: CashActivityType[] = ["DEPOSIT", "TRANSFER_IN", "INTEREST"];
 
 export function isSpendingAccountType(accountType: string | undefined): boolean {
-  return accountType === AccountType.CASH || accountType === AccountType.CREDIT_CARD;
+  return accountSupportsPurpose(accountType, AccountPurpose.SPENDING);
 }
 
 export function isCreditCardAccountType(accountType: string | undefined): boolean {
-  return accountType === AccountType.CREDIT_CARD;
+  return isLiabilityAccountType(accountType);
 }
 
 export function getActivityTypesForAccount(accountType: string | undefined): CashActivityType[] {

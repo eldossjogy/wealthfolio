@@ -27,8 +27,8 @@ export function ModuleCard() {
   const mutation = useSpendingSettingsMutation();
   const { accounts } = useAccounts({ filterActive: true });
   const { data: budget } = useBudget();
-  const { data: rules } = useCategorizationRules();
-  const { data: presets } = useRulePresets();
+  const { data: rules, isError: rulesErrored } = useCategorizationRules();
+  const { data: presets, isError: presetsErrored } = useRulePresets();
 
   const enabled = settings?.enabled ?? false;
   const accountIds = useMemo(() => settings?.accountIds ?? [], [settings?.accountIds]);
@@ -67,6 +67,7 @@ export function ModuleCard() {
   }, [tracked]);
 
   // Rules + region count (regions = installed country presets)
+  const rulesUnavailable = rulesErrored || presetsErrored;
   const ruleCount = rules?.length ?? 0;
   const regionCount = useMemo(() => (presets ?? []).filter((p) => p.installed).length, [presets]);
 
@@ -165,9 +166,15 @@ export function ModuleCard() {
             />
             <HeroStat
               label="Categorization"
-              value={ruleCount}
-              unit={ruleCount === 1 ? "rule" : "rules"}
-              sub={regionCount > 0 ? `${regionCount} region${regionCount === 1 ? "" : "s"}` : "—"}
+              value={rulesUnavailable ? "—" : ruleCount}
+              unit={rulesUnavailable ? undefined : ruleCount === 1 ? "rule" : "rules"}
+              sub={
+                rulesUnavailable
+                  ? "Rules unavailable"
+                  : regionCount > 0
+                    ? `${regionCount} region${regionCount === 1 ? "" : "s"}`
+                    : "—"
+              }
             />
             <HeroStat
               label="Planned vs income"

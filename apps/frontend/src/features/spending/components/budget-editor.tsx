@@ -168,7 +168,7 @@ export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
               });
             }
           }}
-          canDelete={groups.some((g) => g.id !== row.group.id)}
+          canDelete={!row.group.isSystem && groups.some((g) => g.id !== row.group.id)}
           deletePending={mutations.removeGroup.isPending}
           onSaveGroupRollover={(enabled, startingBalance) =>
             mutations.upsertRollover.mutate({
@@ -245,6 +245,7 @@ export function BudgetEditor({ mode, periodKey }: BudgetEditorProps) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
           <BudgetSummary budget={budget} currency={currency} mode={mode} />
+          <BudgetFxNote budget={budget} currency={currency} />
           {groupSection}
         </div>
         <div className="space-y-4">
@@ -347,6 +348,16 @@ function BudgetSummary({
         ))}
       </div>
     </section>
+  );
+}
+
+function BudgetFxNote({ budget, currency }: { budget: BudgetSnapshot; currency: string }) {
+  if (!budget.computed.fxAsOf) return null;
+
+  return (
+    <div className="border-border/60 bg-muted/30 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
+      Targets are entered in {currency}; actuals use FX rates around {budget.computed.fxAsOf}.
+    </div>
   );
 }
 

@@ -210,6 +210,7 @@ pub struct BudgetSnapshotState {
 pub struct BudgetSnapshotComputed {
     pub currency: String,
     pub period_key: String,
+    pub fx_as_of: Option<String>,
     pub group_rows: Vec<BudgetGroupRow>,
     pub ungrouped_rows: Vec<BudgetCategoryRow>,
     pub income_rows: Vec<BudgetCategoryRow>,
@@ -235,6 +236,7 @@ impl BudgetSnapshot {
             computed: BudgetSnapshotComputed {
                 currency,
                 period_key,
+                fx_as_of: None,
                 group_rows: Vec::new(),
                 ungrouped_rows: Vec::new(),
                 income_rows: Vec::new(),

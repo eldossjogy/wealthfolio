@@ -19,6 +19,7 @@ use super::model::{
 use super::traits::BudgetRepositoryTrait;
 use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
 use crate::activity_classification::{activity_abs_amount, classify_activity};
+use crate::error::SpendingError;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
@@ -388,6 +389,13 @@ impl BudgetService {
                     .filter(|c| c.overspent)
                     .count(),
         };
+        let fx_as_of = if is_month_view {
+            month_end(&period_key)
+                .ok()
+                .map(|date| date.date_naive().to_string())
+        } else {
+            None
+        };
 
         Ok(BudgetSnapshot {
             state: BudgetSnapshotState {
@@ -399,6 +407,7 @@ impl BudgetService {
             computed: BudgetSnapshotComputed {
                 currency: currency.to_string(),
                 period_key,
+                fx_as_of,
                 group_rows,
                 ungrouped_rows: vec![],
                 income_rows,
@@ -449,10 +458,16 @@ impl BudgetService {
         timezone: &str,
     ) -> Result<BudgetSnapshot> {
         let groups = self.repo.list_groups().await?;
-        groups
+        let group = groups
             .iter()
             .find(|g| g.id == id)
             .ok_or_else(|| anyhow!("Budget group not found"))?;
+        if group.is_system {
+            return Err(SpendingError::InvalidInput {
+                message: "System budget groups cannot be deleted".to_string(),
+            }
+            .into());
+        }
         if reassign_to_group_id == id {
             return Err(anyhow!(
                 "Cannot reassign categories to the group being deleted"
@@ -472,8 +487,9 @@ impl BudgetService {
                 category_id: a.category_id,
             })
             .collect::<Vec<_>>();
-        self.repo.upsert_group_assignments(reassignments).await?;
-        self.repo.delete_group(id).await?;
+        self.repo
+            .delete_group_and_reassign(id, reassign_to_group_id, reassignments)
+            .await?;
         self.get(period_key, currency, timezone).await
     }
 
@@ -522,6 +538,7 @@ impl BudgetService {
         timezone: &str,
     ) -> Result<BudgetSnapshot> {
         validate_period_key(&target.period_key)?;
+        validate_budget_target(&target)?;
         self.repo.upsert_target(target).await?;
         self.get(period_key, currency, timezone).await
     }
@@ -545,6 +562,7 @@ impl BudgetService {
         timezone: &str,
     ) -> Result<BudgetSnapshot> {
         validate_month_key(&setting.start_month)?;
+        validate_rollover_setting(&setting)?;
         match setting.target_type {
             BudgetRolloverTargetType::Group if setting.enabled => {
                 let group_id = setting
@@ -734,10 +752,9 @@ impl BudgetService {
         let end = month_end(end_period)?;
         let activities = self
             .activity_repo
-            .get_activities_by_account_ids(&account_ids)
+            .get_activities_by_account_ids_in_date_range(&account_ids, start, end)
             .map_err(|e| anyhow!(e.to_string()))?
             .into_iter()
-            .filter(|a| a.activity_date >= start && a.activity_date <= end)
             .collect::<Vec<_>>();
         let activity_ids = activities.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
         let assignments = self
@@ -1073,6 +1090,67 @@ fn validate_period_key(period_key: &str) -> Result<()> {
     } else {
         validate_month_key(period_key)
     }
+}
+
+fn validate_budget_target(target: &NewBudgetTarget) -> Result<()> {
+    match target.target_type {
+        BudgetTargetType::Category => {
+            if target.taxonomy_id.as_deref().unwrap_or_default().is_empty()
+                || target.category_id.as_deref().unwrap_or_default().is_empty()
+                || target.group_id.is_some()
+            {
+                return Err(invalid_budget_input(
+                    "Category target requires taxonomyId and categoryId only",
+                ));
+            }
+        }
+        BudgetTargetType::GroupBuffer => {
+            if target.group_id.as_deref().unwrap_or_default().is_empty()
+                || target.taxonomy_id.is_some()
+                || target.category_id.is_some()
+            {
+                return Err(invalid_budget_input(
+                    "Group buffer target requires groupId only",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_rollover_setting(setting: &NewBudgetRolloverSetting) -> Result<()> {
+    match setting.target_type {
+        BudgetRolloverTargetType::Category => {
+            if setting.taxonomy_id.as_deref() != Some(SPENDING_TAXONOMY)
+                || setting
+                    .category_id
+                    .as_deref()
+                    .unwrap_or_default()
+                    .is_empty()
+                || setting.group_id.is_some()
+            {
+                return Err(invalid_budget_input(
+                    "Category rollover requires spending taxonomyId and categoryId only",
+                ));
+            }
+        }
+        BudgetRolloverTargetType::Group => {
+            if setting.group_id.as_deref().unwrap_or_default().is_empty()
+                || setting.taxonomy_id.is_some()
+                || setting.category_id.is_some()
+            {
+                return Err(invalid_budget_input("Group rollover requires groupId only"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn invalid_budget_input(message: &str) -> anyhow::Error {
+    SpendingError::InvalidInput {
+        message: message.to_string(),
+    }
+    .into()
 }
 
 fn validate_month_key(period_key: &str) -> Result<()> {

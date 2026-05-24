@@ -94,8 +94,16 @@ export function CategoryTransactionsSheet({
     [ids, startIso, endIso],
   );
 
-  const { items, totalCount, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useCashActivitySearch(searchRequest, { enabled: open && ids.length > 0 });
+  const {
+    items,
+    totalCount,
+    isLoading,
+    isError,
+    error,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useCashActivitySearch(searchRequest, { enabled: open && ids.length > 0 });
 
   const { accounts = [] } = useAccounts({ filterActive: false });
   const accountById = useMemo(() => {
@@ -349,6 +357,11 @@ export function CategoryTransactionsSheet({
                 {Array.from({ length: 6 }).map((_, i) => (
                   <Skeleton key={i} className="h-14 w-full rounded-xl" />
                 ))}
+              </div>
+            ) : isError ? (
+              <div className="text-destructive border-border/60 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-10 text-center text-sm">
+                <Icons.AlertTriangle className="h-6 w-6 opacity-70" aria-hidden />
+                <div>{error?.message ?? "Transactions could not load."}</div>
               </div>
             ) : items.length === 0 ? (
               <div className="text-muted-foreground border-border/60 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-10 text-center text-sm">

@@ -32,6 +32,7 @@ export interface WhatChangedStageProps {
   range: ReportsRange;
   currentReport: MonthlyReport | undefined;
   priorReport: MonthlyReport | undefined;
+  trendReport?: MonthlyReport;
   months: MonthBucket[];
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
@@ -50,6 +51,7 @@ export function WhatChangedStage({
   range,
   currentReport,
   priorReport,
+  trendReport,
   months,
   taxonomyCategories,
   currency,
@@ -104,7 +106,7 @@ export function WhatChangedStage({
       <HeadlineCard headline={headline} currency={currency} isLoading={isLoading} />
       <CategoryTrendsSection
         months={months}
-        currentReport={currentReport}
+        currentReport={trendReport ?? currentReport}
         taxonomyCategories={taxonomyCategories}
         movers={movers}
         periodState={periodState}

@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@wealthfolio/ui";
 import type { Account } from "@/lib/types";
-import { cn, formatAmount, formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
@@ -60,9 +60,7 @@ function TransactionRowImpl({
   const amount = parseFloat(a.amount ?? "0");
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const accountName = account?.name ?? a.accountId;
-  const rowAriaLabel = `Select ${a.activityType.toLowerCase()} ${
-    a.notes ?? ""
-  } for ${formatAmount(safeAmount, a.currency)}`.trim();
+  const rowAriaLabel = isSelected ? "Deselect transaction" : "Select transaction";
 
   return (
     <TableRow

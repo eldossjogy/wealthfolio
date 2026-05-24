@@ -23,6 +23,7 @@ export interface WhenWhereStageProps {
   /** Last 12 weeks of cash activities (for the heatmap). */
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
+  dailySpendByDate?: Map<string, number>;
   events: EventSpendingSummary[];
   /** True when the events query failed. Used to render an error state instead of
    * the "Create event" empty CTA, which would otherwise mask the failure. */
@@ -44,6 +45,7 @@ export interface WhenWhereStageProps {
 export function WhenWhereStage({
   heatmapActivities,
   accountTypeById,
+  dailySpendByDate,
   events,
   eventsErrored = false,
   onRetryEvents,
@@ -109,6 +111,7 @@ export function WhenWhereStage({
                 rangeEnd={rangeEnd}
                 heatmapActivities={heatmapActivities}
                 accountTypeById={accountTypeById}
+                dailySpendByDate={dailySpendByDate}
                 selectedId={selectedId}
                 onSelect={setOverride}
                 windowOffset={windowOffset}
@@ -124,6 +127,7 @@ export function WhenWhereStage({
                 currency={currency}
                 heatmapActivities={heatmapActivities}
                 accountTypeById={accountTypeById}
+                dailySpendByDate={dailySpendByDate}
                 onSelect={setOverride}
               />
             )}

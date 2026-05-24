@@ -13,6 +13,18 @@ pub trait ActivityRepositoryTrait: Send + Sync {
     fn get_activities(&self) -> Result<Vec<Activity>>;
     fn get_activities_by_account_id(&self, account_id: &str) -> Result<Vec<Activity>>;
     fn get_activities_by_account_ids(&self, account_ids: &[String]) -> Result<Vec<Activity>>;
+    fn get_activities_by_account_ids_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_utc: DateTime<Utc>,
+        end_utc: DateTime<Utc>,
+    ) -> Result<Vec<Activity>> {
+        let mut activities = self.get_activities_by_account_ids(account_ids)?;
+        activities.retain(|activity| {
+            activity.activity_date >= start_utc && activity.activity_date <= end_utc
+        });
+        Ok(activities)
+    }
     fn get_trading_activities(&self) -> Result<Vec<Activity>>;
     fn get_income_activities(&self) -> Result<Vec<Activity>>;
     /// Fetches contribution-eligible activities (DEPOSIT, TRANSFER_IN, TRANSFER_OUT, CREDIT)

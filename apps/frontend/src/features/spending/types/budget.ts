@@ -140,6 +140,7 @@ export interface BudgetSnapshot {
   computed: {
     currency: string;
     periodKey: string;
+    fxAsOf: string | null;
     groupRows: BudgetGroupRow[];
     ungroupedRows: BudgetCategoryRow[];
     incomeRows: BudgetCategoryRow[];

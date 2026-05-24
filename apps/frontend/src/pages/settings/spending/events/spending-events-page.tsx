@@ -32,8 +32,12 @@ import { SpendingBackLink } from "../components/spending-back-link";
 
 export default function SpendingEventsPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
-  const { data: events = [], isLoading: eventsLoading } = useSpendingEvents();
-  const { data: eventTypes = [], isLoading: typesLoading } = useEventTypes();
+  const {
+    data: events = [],
+    isLoading: eventsLoading,
+    isError: eventsErrored,
+  } = useSpendingEvents();
+  const { data: eventTypes = [], isLoading: typesLoading, isError: typesErrored } = useEventTypes();
   const { remove: removeEventType } = useEventTypeMutations();
   const { remove: removeEvent } = useSpendingEventMutations();
   const { openEventDialog, openEventTypeDialog } = useEventDialog();
@@ -111,6 +115,14 @@ export default function SpendingEventsPage() {
           <Skeleton className="h-12" />
           <Skeleton className="h-12" />
         </div>
+      ) : eventsErrored || typesErrored ? (
+        <EmptyPlaceholder>
+          <EmptyPlaceholder.Icon name="AlertTriangle" />
+          <EmptyPlaceholder.Title>Events could not load</EmptyPlaceholder.Title>
+          <EmptyPlaceholder.Description>
+            Try again before editing event types or tagged events.
+          </EmptyPlaceholder.Description>
+        </EmptyPlaceholder>
       ) : eventTypes.length > 0 ? (
         <div className="divide-border divide-y rounded-md border">
           {eventTypes.map((type) => {

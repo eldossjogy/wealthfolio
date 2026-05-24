@@ -24,6 +24,8 @@ use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, Upd
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
+const MAX_BULK_CATEGORY_ASSIGNMENTS: usize = 1_000;
+
 /// Fire-and-forget auto-categorize for direct (user-initiated) triggers:
 /// settings changes that broaden the spending scope, and rule mutations that
 /// could re-classify existing uncategorized activities. `only_uncategorized=true`
@@ -134,6 +136,9 @@ pub async fn list_cash_activities(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<CashActivity>, String> {
     debug!("Listing cash activities...");
+    if !spending_enabled(&state).await? {
+        return Ok(Vec::new());
+    }
     state
         .cash_activity_service()
         .list(filter.unwrap_or_default())
@@ -147,6 +152,12 @@ pub async fn search_cash_activities(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<CashActivitySearchResponse, String> {
     debug!("Searching cash activities...");
+    if !spending_enabled(&state).await? {
+        return Ok(CashActivitySearchResponse {
+            items: Vec::new(),
+            total_count: 0,
+        });
+    }
     state
         .cash_activity_service()
         .search(request.unwrap_or_default())
@@ -214,6 +225,11 @@ pub async fn bulk_assign_categories(
     items: Vec<BulkCategoryAssignment>,
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<ActivityTaxonomyAssignment>, String> {
+    if items.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
+        return Err(format!(
+            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} category assignments can be submitted at once"
+        ));
+    }
     state
         .activity_taxonomy_assignment_service()
         .assign_many_single_select(&items)

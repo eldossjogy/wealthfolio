@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use wealthfolio_core::accounts::account_types;
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 use wealthfolio_core::activities::ActivityError;
 use wealthfolio_core::activities::{
     import_type, Activity, ActivityBulkIdentifierMapping, ActivityBulkMutationResult,
@@ -856,6 +856,28 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(activities_db.into_iter().map(Activity::from).collect())
     }
 
+    fn get_activities_by_account_ids_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_utc: DateTime<Utc>,
+        end_utc: DateTime<Utc>,
+    ) -> Result<Vec<Activity>> {
+        let mut conn = get_connection(&self.pool)?;
+
+        let activities_db = activities::table
+            .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+            .filter(accounts::is_archived.eq(false))
+            .filter(activities::account_id.eq_any(account_ids))
+            .filter(activities::activity_date.ge(start_utc.to_rfc3339()))
+            .filter(activities::activity_date.le(end_utc.to_rfc3339()))
+            .select(ActivityDB::as_select())
+            .order(activities::activity_date.asc())
+            .load::<ActivityDB>(&mut conn)
+            .map_err(StorageError::from)?;
+
+        Ok(activities_db.into_iter().map(Activity::from).collect())
+    }
+
     /// Calculates the average cost for an asset in an account
     fn calculate_average_cost(&self, account_id: &str, asset_id: &str) -> Result<Decimal> {
         let mut conn = get_connection(&self.pool)?;
@@ -1328,11 +1350,27 @@ impl ActivityRepositoryTrait for ActivityRepository {
 
         const CONTRIBUTION_TYPES: [&str; 4] = ["DEPOSIT", "TRANSFER_IN", "TRANSFER_OUT", "CREDIT"];
 
-        let results = activities::table
-            .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+        let account_rows = accounts::table
             .filter(accounts::id.eq_any(account_ids))
             .filter(accounts::is_archived.eq(false))
-            .filter(accounts::account_type.ne(account_types::CREDIT_CARD))
+            .select((accounts::id, accounts::account_type))
+            .load::<(String, String)>(&mut conn)
+            .map_err(StorageError::from)?;
+        let eligible_account_ids: Vec<String> = account_rows
+            .into_iter()
+            .filter(|(_, account_type)| {
+                account_supports_purpose(account_type, AccountPurpose::ContributionLimits)
+            })
+            .map(|(id, _)| id)
+            .collect();
+        if eligible_account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let results = activities::table
+            .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+            .filter(accounts::id.eq_any(eligible_account_ids))
+            .filter(accounts::is_archived.eq(false))
             .filter(activities::activity_type.eq_any(CONTRIBUTION_TYPES))
             .filter(activities::activity_date.ge(start_utc.to_rfc3339()))
             .filter(activities::activity_date.lt(end_exclusive_utc.to_rfc3339()))
@@ -1433,6 +1471,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
              a.currency,
              a.account_id,
              acc.name as account_name,
+             acc.account_type,
              CASE
                  WHEN (
                        (a.activity_type = 'INTEREST' AND UPPER(a.subtype) = 'STAKING_REWARD')
@@ -1455,7 +1494,6 @@ impl ActivityRepositoryTrait for ActivityRepository {
                  AND date(a.activity_date) = q.day
              WHERE a.activity_type IN ('DIVIDEND', 'INTEREST', 'OTHER_INCOME')
              AND acc.is_archived = 0
-             AND acc.account_type != 'CREDIT_CARD'
              {account_filter}
              ORDER BY a.activity_date"
         );
@@ -1482,6 +1520,8 @@ impl ActivityRepositoryTrait for ActivityRepository {
             #[diesel(sql_type = diesel::sql_types::Text)]
             pub account_name: String,
             #[diesel(sql_type = diesel::sql_types::Text)]
+            pub account_type: String,
+            #[diesel(sql_type = diesel::sql_types::Text)]
             pub amount: String,
         }
 
@@ -1492,9 +1532,12 @@ impl ActivityRepositoryTrait for ActivityRepository {
         // Transform raw results into IncomeData
         let results = raw_results
             .into_iter()
-            .map(|raw| {
+            .filter_map(|raw| {
+                if !account_supports_purpose(&raw.account_type, AccountPurpose::Income) {
+                    return None;
+                }
                 let amount = Decimal::from_str(&raw.amount).unwrap_or_else(|_| Decimal::zero());
-                Ok(IncomeData {
+                Some(Ok(IncomeData {
                     date: raw.date,
                     income_type: raw.income_type,
                     asset_id: raw.asset_id,
@@ -1505,7 +1548,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
                     amount,
                     account_id: raw.account_id,
                     account_name: raw.account_name,
-                })
+                }))
             })
             .collect::<Result<Vec<IncomeData>>>()?; // Collect into Result
 

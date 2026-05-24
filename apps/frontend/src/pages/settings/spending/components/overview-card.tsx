@@ -27,6 +27,9 @@ interface OverviewCardProps {
   emptyDescription: string;
   emptyCtaLabel: string;
   isLoading?: boolean;
+  isError?: boolean;
+  errorTitle?: string;
+  errorDescription?: string;
   maxVisible?: number;
   /** Renders a stacked distribution bar above the chips. */
   showDistribution?: boolean;
@@ -44,6 +47,9 @@ export function OverviewCard({
   emptyDescription,
   emptyCtaLabel,
   isLoading = false,
+  isError = false,
+  errorTitle = "Could not load",
+  errorDescription = "Try again from the manage page.",
   maxVisible = 7,
   showDistribution = false,
   chipShape = "pill",
@@ -75,6 +81,14 @@ export function OverviewCard({
       <CardContent className="p-6 pt-0">
         {isLoading ? (
           <div className="bg-muted/40 h-12 w-full animate-pulse rounded-md" />
+        ) : isError ? (
+          <div className="flex items-start gap-3 py-2">
+            <Icons.AlertTriangle className="text-destructive mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="text-foreground text-sm font-medium">{errorTitle}</div>
+              <p className="text-muted-foreground text-xs">{errorDescription}</p>
+            </div>
+          </div>
         ) : isEmpty ? (
           <div className="space-y-3 py-2">
             <div>

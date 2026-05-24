@@ -92,7 +92,7 @@ export function EventFormDialog({
   onCreated,
   onUpdated,
 }: Props) {
-  const { data: eventTypes = [] } = useEventTypes();
+  const { data: eventTypes = [], isError: eventTypesErrored } = useEventTypes();
   const { create, update } = useSpendingEventMutations();
   const { create: createType } = useEventTypeMutations();
   const setEventOnActivity = useSetActivityEvent();
@@ -333,95 +333,100 @@ export function EventFormDialog({
                 <FormItem className="flex flex-col">
                   <FormLabel>Event Type</FormLabel>
                   {!showCreateType ? (
-                    <Popover open={typePopoverOpen} onOpenChange={setTypePopoverOpen}>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <button
-                            type="button"
-                            aria-label={
-                              selectedType
-                                ? `Change event type (${selectedType.name})`
-                                : "Select event type"
-                            }
-                            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
-                          >
-                            {selectedType ? (
-                              <span className="flex min-w-0 items-center gap-2">
-                                {selectedType.color && (
-                                  <span
-                                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                    style={{ backgroundColor: selectedType.color }}
-                                    aria-hidden="true"
-                                  />
-                                )}
-                                <span className="truncate">{selectedType.name}</span>
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">Select event type</span>
-                            )}
-                            <Icons.ChevronDown
-                              className="ml-2 h-4 w-4 shrink-0 opacity-50"
-                              aria-hidden="true"
-                            />
-                          </button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        className="w-[--radix-popover-trigger-width] p-0"
-                        align="start"
-                      >
-                        <Command>
-                          <CommandInput placeholder="Search event types..." />
-                          <CommandList>
-                            <CommandEmpty>No event types found.</CommandEmpty>
-                            {eventTypes.length > 0 && (
+                    <>
+                      <Popover open={typePopoverOpen} onOpenChange={setTypePopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <button
+                              type="button"
+                              aria-label={
+                                selectedType
+                                  ? `Change event type (${selectedType.name})`
+                                  : "Select event type"
+                              }
+                              className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                            >
+                              {selectedType ? (
+                                <span className="flex min-w-0 items-center gap-2">
+                                  {selectedType.color && (
+                                    <span
+                                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                      style={{ backgroundColor: selectedType.color }}
+                                      aria-hidden="true"
+                                    />
+                                  )}
+                                  <span className="truncate">{selectedType.name}</span>
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">Select event type</span>
+                              )}
+                              <Icons.ChevronDown
+                                className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-[--radix-popover-trigger-width] p-0"
+                          align="start"
+                        >
+                          <Command>
+                            <CommandInput placeholder="Search event types..." />
+                            <CommandList>
+                              <CommandEmpty>No event types found.</CommandEmpty>
+                              {eventTypes.length > 0 && (
+                                <CommandGroup>
+                                  {eventTypes.map((t) => {
+                                    const isSelected = field.value === t.id;
+                                    return (
+                                      <CommandItem
+                                        key={t.id}
+                                        value={t.name}
+                                        onSelect={() => {
+                                          field.onChange(t.id);
+                                          setTypePopoverOpen(false);
+                                        }}
+                                        className="flex items-center gap-2"
+                                      >
+                                        {t.color && (
+                                          <span
+                                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                            style={{ backgroundColor: t.color }}
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                        <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                                        {isSelected && (
+                                          <Icons.Check className="text-muted-foreground h-3.5 w-3.5" />
+                                        )}
+                                      </CommandItem>
+                                    );
+                                  })}
+                                </CommandGroup>
+                              )}
+                              <CommandSeparator />
                               <CommandGroup>
-                                {eventTypes.map((t) => {
-                                  const isSelected = field.value === t.id;
-                                  return (
-                                    <CommandItem
-                                      key={t.id}
-                                      value={t.name}
-                                      onSelect={() => {
-                                        field.onChange(t.id);
-                                        setTypePopoverOpen(false);
-                                      }}
-                                      className="flex items-center gap-2"
-                                    >
-                                      {t.color && (
-                                        <span
-                                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                          style={{ backgroundColor: t.color }}
-                                          aria-hidden="true"
-                                        />
-                                      )}
-                                      <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                                      {isSelected && (
-                                        <Icons.Check className="text-muted-foreground h-3.5 w-3.5" />
-                                      )}
-                                    </CommandItem>
-                                  );
-                                })}
+                                <CommandItem
+                                  value="__create_new_type__"
+                                  onSelect={() => {
+                                    setTypePopoverOpen(false);
+                                    setShowCreateType(true);
+                                  }}
+                                  className="text-primary flex items-center gap-2"
+                                >
+                                  <Icons.Plus className="h-3.5 w-3.5" />
+                                  Create new type
+                                </CommandItem>
                               </CommandGroup>
-                            )}
-                            <CommandSeparator />
-                            <CommandGroup>
-                              <CommandItem
-                                value="__create_new_type__"
-                                onSelect={() => {
-                                  setTypePopoverOpen(false);
-                                  setShowCreateType(true);
-                                }}
-                                className="text-primary flex items-center gap-2"
-                              >
-                                <Icons.Plus className="h-3.5 w-3.5" />
-                                Create new type
-                              </CommandItem>
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {eventTypesErrored && (
+                        <p className="text-destructive text-xs">Event types could not load.</p>
+                      )}
+                    </>
                   ) : (
                     <div className="border-input bg-muted/20 space-y-3 rounded-md border p-3">
                       <div className="flex items-center justify-between">

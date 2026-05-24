@@ -95,7 +95,10 @@ impl EventsService {
             .events_repo
             .get(id)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Event not found: {id}"))?;
+            .ok_or_else(|| SpendingError::NotFound {
+                entity: "Event",
+                id: id.to_string(),
+            })?;
 
         let new_start = patch
             .start_date
@@ -178,6 +181,13 @@ impl EventsService {
         Ok(updated)
     }
     pub async fn delete_event(&self, id: &str) -> Result<()> {
+        if self.events_repo.get(id).await?.is_none() {
+            return Err(SpendingError::NotFound {
+                entity: "Event",
+                id: id.to_string(),
+            }
+            .into());
+        }
         self.events_repo.delete(id).await
     }
 }
@@ -210,7 +220,10 @@ fn parse_event_bound(s: &str) -> Result<DateTime<Utc>> {
         let naive = date.and_hms_opt(0, 0, 0).unwrap();
         return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
     }
-    Err(anyhow::anyhow!("Unparseable event date: {s}"))
+    Err(SpendingError::InvalidInput {
+        message: format!("Unparseable event date: {s}"),
+    }
+    .into())
 }
 
 #[cfg(test)]

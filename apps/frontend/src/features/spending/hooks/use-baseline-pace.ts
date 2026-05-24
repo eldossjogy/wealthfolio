@@ -25,6 +25,7 @@ export function computeBaselinePace(
   excludeEvents: EventSpendingSummary[],
   periodDays: number,
   accountTypeById?: Map<string, string>,
+  dailySpendByDate?: Map<string, number>,
 ): number {
   const exclude = new Set<string>();
   for (const ev of excludeEvents) {
@@ -40,12 +41,20 @@ export function computeBaselinePace(
     }
   }
   let total = 0;
-  for (const a of activities) {
-    const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (spendingAmount === 0) continue;
-    const dayKey = a.activityDate.slice(0, 10);
-    if (exclude.has(dayKey)) continue;
-    total += spendingAmount;
+  if (dailySpendByDate) {
+    for (const [dayKey, spendingAmount] of dailySpendByDate) {
+      if (spendingAmount === 0) continue;
+      if (exclude.has(dayKey)) continue;
+      total += spendingAmount;
+    }
+  } else {
+    for (const a of activities) {
+      const spendingAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+      if (spendingAmount === 0) continue;
+      const dayKey = a.activityDate.slice(0, 10);
+      if (exclude.has(dayKey)) continue;
+      total += spendingAmount;
+    }
   }
   const eligibleDays = Math.max(0, periodDays - exclude.size);
   return eligibleDays === 0 ? 0 : Math.max(0, total) / eligibleDays;
@@ -56,9 +65,11 @@ export function useBaselinePace(
   excludeEvents: EventSpendingSummary[],
   periodDays: number,
   accountTypeById?: Map<string, string>,
+  dailySpendByDate?: Map<string, number>,
 ): number {
   return useMemo(
-    () => computeBaselinePace(activities, excludeEvents, periodDays, accountTypeById),
-    [activities, excludeEvents, periodDays, accountTypeById],
+    () =>
+      computeBaselinePace(activities, excludeEvents, periodDays, accountTypeById, dailySpendByDate),
+    [activities, excludeEvents, periodDays, accountTypeById, dailySpendByDate],
   );
 }

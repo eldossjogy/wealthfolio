@@ -201,9 +201,10 @@ const ActivityPage = () => {
     if (isDatagridView && pageIndex !== 0) {
       setPageIndex(0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    effectiveAccountIds,
+    effectiveInvestmentAccountIds,
+    isDatagridView,
+    pageIndex,
     selectedActivityTypes,
     selectedInstrumentTypes,
     statusFilter,

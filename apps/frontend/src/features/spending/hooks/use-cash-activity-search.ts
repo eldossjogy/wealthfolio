@@ -54,6 +54,7 @@ export function useCashActivitySearch(
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     isFetchingNextPage: query.isFetchingNextPage,
+    isError: query.isError,
     hasNextPage: query.hasNextPage ?? false,
     fetchNextPage: query.fetchNextPage,
     refetch: query.refetch,

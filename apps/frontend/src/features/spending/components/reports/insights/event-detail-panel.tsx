@@ -40,6 +40,7 @@ export interface EventDetailPanelProps {
   currency: string;
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
+  dailySpendByDate?: Map<string, number>;
   onSelect: (id: string) => void;
 }
 
@@ -50,11 +51,18 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
   currency,
   heatmapActivities,
   accountTypeById,
+  dailySpendByDate,
   onSelect,
 }) => {
   const { isBalanceHidden } = useBalancePrivacy();
   const isPhone = useIsMobileViewport();
-  const chart = useEventChartData(event, heatmapActivities, accountTypeById, taxonomyCategories);
+  const chart = useEventChartData(
+    event,
+    heatmapActivities,
+    accountTypeById,
+    taxonomyCategories,
+    dailySpendByDate,
+  );
   const {
     startDate,
     endDate,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   Badge,
@@ -23,13 +23,18 @@ interface AmountRangeFilterProps {
 }
 
 export function AmountRangeFilter({ value, onChange }: AmountRangeFilterProps) {
+  return (
+    <AmountRangeFilterInner
+      key={`${value.min ?? ""}:${value.max ?? ""}`}
+      value={value}
+      onChange={onChange}
+    />
+  );
+}
+
+function AmountRangeFilterInner({ value, onChange }: AmountRangeFilterProps) {
   const [minStr, setMinStr] = useState(value.min == null ? "" : String(value.min));
   const [maxStr, setMaxStr] = useState(value.max == null ? "" : String(value.max));
-
-  useEffect(() => {
-    setMinStr(value.min == null ? "" : String(value.min));
-    setMaxStr(value.max == null ? "" : String(value.max));
-  }, [value.min, value.max]);
 
   const isActive = value.min != null || value.max != null;
 

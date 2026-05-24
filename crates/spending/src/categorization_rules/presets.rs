@@ -62,6 +62,8 @@ pub struct ImportPresetResult {
     pub preset_id: String,
     pub preset_version: String,
     pub added: usize,
+    /// Existing unmodified preset rules upgraded to this preset version.
+    pub updated: usize,
     /// Already-installed rules (matched by `preset_id` + `preset_rule_key`).
     pub skipped_existing: usize,
     /// Rules whose `categoryKey` could not be resolved to a seeded category.

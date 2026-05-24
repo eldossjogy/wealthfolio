@@ -94,8 +94,9 @@ export function useImportRulePreset() {
       qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES, "presets"] });
       const skipped = result.skippedExisting + result.skippedUnknownCategory;
       const skippedSuffix = skipped > 0 ? `, ${skipped} skipped` : "";
+      const updatedSuffix = result.updated > 0 ? `, ${result.updated} updated` : "";
       toast.success(
-        `Imported ${result.added} rule${result.added === 1 ? "" : "s"}${skippedSuffix}.`,
+        `Imported ${result.added} rule${result.added === 1 ? "" : "s"}${updatedSuffix}${skippedSuffix}.`,
       );
     },
     onError: () => toast.error("Failed to import preset."),

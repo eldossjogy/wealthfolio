@@ -114,7 +114,11 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
     async fn list(&self) -> Result<Vec<CategorizationRule>> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
         let rows = spending_categorization_rules::table
-            .order(spending_categorization_rules::priority.desc())
+            .order((
+                spending_categorization_rules::priority.desc(),
+                spending_categorization_rules::created_at.asc(),
+                spending_categorization_rules::id.asc(),
+            ))
             .load::<CategorizationRuleDB>(&mut conn)
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -225,6 +229,63 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         spending_categorization_rules::is_global.eq(existing.is_global),
                         spending_categorization_rules::account_id.eq(&existing.account_id),
                         spending_categorization_rules::preset_modified.eq(existing.preset_modified),
+                        spending_categorization_rules::updated_at.eq(&existing.updated_at),
+                    ))
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                tx.update(&existing)?;
+                Ok(existing)
+            })
+            .await
+            .map(CategorizationRule::from)
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn replace_preset_rule(
+        &self,
+        id: &str,
+        rule: NewCategorizationRule,
+    ) -> Result<CategorizationRule> {
+        let id = id.to_string();
+        self.writer
+            .exec_tx(move |tx| {
+                let mut existing: CategorizationRuleDB = spending_categorization_rules::table
+                    .find(&id)
+                    .first::<CategorizationRuleDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                existing.name = rule.name;
+                existing.pattern = rule.pattern;
+                existing.match_type = rule.match_type.as_str().to_string();
+                existing.taxonomy_id = rule.taxonomy_id;
+                existing.category_id = rule.category_id;
+                existing.activity_type = rule.activity_type;
+                existing.priority = rule.priority;
+                existing.is_global = if rule.is_global { 1 } else { 0 };
+                existing.account_id = rule.account_id;
+                existing.preset_id = rule.preset_id;
+                existing.preset_rule_key = rule.preset_rule_key;
+                existing.preset_version = rule.preset_version;
+                existing.preset_modified = 0;
+                existing.updated_at = chrono::Utc::now().to_rfc3339();
+
+                diesel::update(spending_categorization_rules::table.find(&id))
+                    .set((
+                        spending_categorization_rules::name.eq(&existing.name),
+                        spending_categorization_rules::pattern.eq(&existing.pattern),
+                        spending_categorization_rules::match_type.eq(&existing.match_type),
+                        spending_categorization_rules::taxonomy_id.eq(&existing.taxonomy_id),
+                        spending_categorization_rules::category_id.eq(&existing.category_id),
+                        spending_categorization_rules::activity_type.eq(&existing.activity_type),
+                        spending_categorization_rules::priority.eq(existing.priority),
+                        spending_categorization_rules::is_global.eq(existing.is_global),
+                        spending_categorization_rules::account_id.eq(&existing.account_id),
+                        spending_categorization_rules::preset_id.eq(&existing.preset_id),
+                        spending_categorization_rules::preset_rule_key
+                            .eq(&existing.preset_rule_key),
+                        spending_categorization_rules::preset_version.eq(&existing.preset_version),
+                        spending_categorization_rules::preset_modified.eq(0),
                         spending_categorization_rules::updated_at.eq(&existing.updated_at),
                     ))
                     .execute(tx.conn())

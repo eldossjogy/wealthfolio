@@ -1201,6 +1201,7 @@ mod tests {
     /// build_summary / summarize be exercised without a real FxService + DB.
     /// Same pattern as the insight service's PassthroughFx.
     pub(super) struct PassthroughFx;
+    struct DoubleEurFx;
 
     type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
 
@@ -1263,6 +1264,74 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl FxServiceTrait for DoubleEurFx {
+        fn initialize(&self) -> CoreResult<()> {
+            Ok(())
+        }
+        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(Decimal::from(2))
+        }
+        fn get_exchange_rate_for_date(
+            &self,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(Decimal::from(2))
+        }
+        fn convert_currency(&self, amount: Decimal, from: &str, to: &str) -> CoreResult<Decimal> {
+            self.convert_currency_for_date(
+                amount,
+                from,
+                to,
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            )
+        }
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            from: &str,
+            to: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(if from == "EUR" && to == "USD" {
+                amount * Decimal::from(2)
+            } else {
+                amount
+            })
+        }
+        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
+            unimplemented!("DoubleEurFx is read-only")
+        }
+        async fn update_exchange_rate(
+            &self,
+            _: &str,
+            _: &str,
+            _: Decimal,
+        ) -> CoreResult<ExchangeRate> {
+            unimplemented!("DoubleEurFx is read-only")
+        }
+        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
     fn spending_activity(
         id: &str,
         activity_type: &str,
@@ -1304,6 +1373,13 @@ mod tests {
     }
 
     fn build_credit_card_summary(activities: &[Activity]) -> SpendingSummary {
+        build_credit_card_summary_in_timezone(activities, "")
+    }
+
+    fn build_credit_card_summary_in_timezone(
+        activities: &[Activity],
+        timezone: &str,
+    ) -> SpendingSummary {
         let activity_refs: Vec<&Activity> = activities.iter().collect();
         let account_types = HashMap::from([(
             "card-account".to_string(),
@@ -1340,7 +1416,7 @@ mod tests {
             "USD",
             &PassthroughFx,
             NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
-            "",
+            timezone,
         )
     }
 
@@ -1396,5 +1472,47 @@ mod tests {
             Some(&start),
             Some(&end)
         ));
+    }
+
+    #[test]
+    fn build_summary_converts_activity_amounts_to_report_currency() {
+        let (mut charge, _) = spending_activity("charge", "WITHDRAWAL", 100, "groceries", 1);
+        charge.currency = "EUR".to_string();
+        let activity_refs = vec![&charge];
+        let account_types = HashMap::from([(
+            "card-account".to_string(),
+            account_types::CREDIT_CARD.to_string(),
+        )]);
+        let cat_meta = HashMap::from([(
+            "groceries".to_string(),
+            ("Groceries".to_string(), Some("#1".to_string()), None),
+        )]);
+        let assignments = HashMap::from([("charge".to_string(), Some("groceries".to_string()))]);
+
+        let summary = build_summary(
+            "TOTAL",
+            &activity_refs,
+            &assignments,
+            &cat_meta,
+            &account_types,
+            "USD",
+            &DoubleEurFx,
+            NaiveDate::from_ymd_opt(2024, 1, 31).unwrap(),
+            "",
+        );
+
+        assert_eq!(summary.total_spending, 200.0);
+        assert_eq!(summary.by_category["groceries"].amount, 200.0);
+    }
+
+    #[test]
+    fn build_summary_buckets_by_user_timezone() {
+        let (mut charge, _) = spending_activity("charge", "WITHDRAWAL", 100, "groceries", 3);
+        charge.activity_date = Utc.with_ymd_and_hms(2024, 3, 1, 2, 30, 0).unwrap();
+
+        let summary = build_credit_card_summary_in_timezone(&[charge], "America/Toronto");
+
+        assert_eq!(summary.by_month.get("2024-02"), Some(&100.0));
+        assert!(!summary.by_month.contains_key("2024-03"));
     }
 }

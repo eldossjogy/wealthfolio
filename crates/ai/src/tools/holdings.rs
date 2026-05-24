@@ -4,6 +4,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 
 use super::constants::MAX_HOLDINGS;
 use crate::env::AiEnvironment;
@@ -127,18 +128,33 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
         let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
 
         let holdings = if let Some(account_id) = account_id {
-            self.env
-                .holdings_service()
-                .get_holdings(account_id, &self.base_currency)
-                .await
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+                Vec::new()
+            } else {
+                self.env
+                    .holdings_service()
+                    .get_holdings(account_id, &self.base_currency)
+                    .await
+                    .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            }
         } else {
             let accounts = self
                 .env
                 .account_service()
                 .get_active_non_archived_accounts()
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-            let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+            let account_ids: Vec<String> = accounts
+                .into_iter()
+                .filter(|account| {
+                    account_supports_purpose(&account.account_type, AccountPurpose::Holdings)
+                })
+                .map(|account| account.id)
+                .collect();
             self.env
                 .holdings_service()
                 .get_holdings_for_accounts(&account_ids, &self.base_currency, "all")

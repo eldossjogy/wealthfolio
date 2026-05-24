@@ -29,6 +29,8 @@ use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, Upd
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
 use wealthfolio_spending::settings::{SpendingSettings, SpendingSettingsUpdate};
 
+const MAX_BULK_CATEGORY_ASSIGNMENTS: usize = 1_000;
+
 async fn get_spending_settings(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<SpendingSettings>> {
@@ -113,6 +115,9 @@ async fn list_cash_activities(
     State(state): State<Arc<AppState>>,
     RawQuery(raw_query): RawQuery,
 ) -> ApiResult<Json<Vec<CashActivity>>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(Vec::new()));
+    }
     let filter = parse_cash_activity_filter(raw_query)?;
     let activities = state.cash_activity_service.list(filter).await?;
     Ok(Json(activities))
@@ -151,6 +156,12 @@ async fn search_cash_activities(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CashActivitySearchRequest>,
 ) -> ApiResult<Json<CashActivitySearchResponse>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(CashActivitySearchResponse {
+            items: Vec::new(),
+            total_count: 0,
+        }));
+    }
     let response = state.cash_activity_service.search(request).await?;
     Ok(Json(response))
 }
@@ -218,6 +229,11 @@ async fn bulk_assign_categories(
     State(state): State<Arc<AppState>>,
     Json(items): Json<Vec<wealthfolio_spending::activity_assignments::BulkCategoryAssignment>>,
 ) -> ApiResult<Json<Vec<ActivityTaxonomyAssignment>>> {
+    if items.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
+        return Err(ApiError::BadRequest(format!(
+            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} category assignments can be submitted at once"
+        )));
+    }
     let result = state
         .activity_taxonomy_assignment_service
         .assign_many_single_select(&items)

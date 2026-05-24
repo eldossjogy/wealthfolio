@@ -24,7 +24,6 @@ import { insightToLegacy, UNCATEGORIZED_CATEGORY_ID } from "../lib/insight-proje
 import {
   DEFAULT_REPORTS_PERIOD,
   REPORTS_PERIODS,
-  comparisonRange,
   periodToReportsRange,
   rangeToReportRequest,
   type ReportsPeriod,
@@ -164,15 +163,6 @@ export default function SpendingInsightsPage() {
     isError: currentErrored,
     refetch: refetchCurrent,
   } = useSpendingReport(currentRequest, stage === "changed");
-  const priorRange = useMemo(() => comparisonRange(range, "prior"), [range]);
-  const priorRequest = useMemo(
-    () => (priorRange ? rangeToReportRequest(priorRange) : currentRequest),
-    [priorRange, currentRequest],
-  );
-  const { data: priorReport, isLoading: isPriorLoading } = useSpendingReport(
-    priorRequest,
-    stage === "changed",
-  );
   const {
     months,
     isLoading: isHistoryLoading,
@@ -219,6 +209,14 @@ export default function SpendingInsightsPage() {
     return { startDate: start.toISOString(), endDate: end.toISOString() };
   }, []);
   const { data: heatmapActivities = [] } = useCashActivities(heatmapRequest);
+  const { data: heatmapReport } = useSpendingReport(heatmapRequest, stage === "when");
+  const heatmapDailySpendByDate = useMemo(
+    () =>
+      heatmapReport
+        ? new Map(heatmapReport.byDay.map((day) => [day.date, day.outflow] as const))
+        : undefined,
+    [heatmapReport?.byDay],
+  );
 
   const eventsRequest = useMemo(
     () => ({
@@ -346,13 +344,14 @@ export default function SpendingInsightsPage() {
         {stage === "changed" && (
           <WhatChangedStage
             range={range}
-            currentReport={currentReport}
-            priorReport={priorReport}
+            currentReport={legacyForWhereIAm?.currentReport}
+            priorReport={legacyForWhereIAm?.priorReport}
+            trendReport={currentReport}
             months={months}
             taxonomyCategories={taxonomyCategories}
-            currency={baseCurrency}
+            currency={insight?.currency ?? baseCurrency}
             isLoading={
-              isCurrentLoading || isPriorLoading || (!useDailyForHistory && isHistoryLoading)
+              isInsightLoading || (useDailyForHistory ? isCurrentLoading : isHistoryLoading)
             }
             onCategoryClick={handleCategoryClick}
           />
@@ -362,6 +361,7 @@ export default function SpendingInsightsPage() {
           <WhenWhereStage
             heatmapActivities={heatmapActivities}
             accountTypeById={accountTypeById}
+            dailySpendByDate={heatmapDailySpendByDate}
             events={events}
             eventsErrored={eventsErrored}
             onRetryEvents={() => refetchEvents()}

@@ -23,6 +23,7 @@ DROP INDEX IF EXISTS idx_budget_groups_sort;
 DROP TABLE IF EXISTS budget_groups;
 
 -- Drop spending_categorization_rules
+DROP TRIGGER IF EXISTS trg_spending_rules_account_delete_promote;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_preset_unique;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_activity_type;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_is_global;

@@ -53,13 +53,20 @@ export interface ClassifyPeriodInput {
 }
 
 export function classifyPeriod({
+  currentTotal,
+  priorTotal,
   currentTransactionCount,
   priorTransactionCount,
 }: ClassifyPeriodInput): PeriodState {
-  if (currentTransactionCount === 0 && priorTransactionCount === 0) {
+  if (
+    currentTransactionCount === 0 &&
+    priorTransactionCount === 0 &&
+    currentTotal === 0 &&
+    priorTotal === 0
+  ) {
     return { kind: "no_activity_either_side" };
   }
-  if (priorTransactionCount === 0) {
+  if (priorTransactionCount === 0 && priorTotal === 0) {
     return { kind: "no_prior_period" };
   }
   return { kind: "valid_comparison" };

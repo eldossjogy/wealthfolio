@@ -6,6 +6,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -192,6 +193,12 @@ fn rollover_target_type_from_str(value: &str) -> BudgetRolloverTargetType {
     }
 }
 
+fn sum_amount_strings(left: &str, right: &str) -> String {
+    let left = left.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    let right = right.parse::<Decimal>().unwrap_or(Decimal::ZERO);
+    (left + right).normalize().to_string()
+}
+
 impl From<BudgetGroupDB> for BudgetGroup {
     fn from(db: BudgetGroupDB) -> Self {
         Self {
@@ -337,6 +344,102 @@ impl BudgetRepositoryTrait for BudgetRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
+                let affected = diesel::delete(budget_groups::table.find(&id))
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+                if affected > 0 {
+                    tx.delete::<BudgetGroupDB>(id.clone());
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn delete_group_and_reassign(
+        &self,
+        id: &str,
+        reassign_to_group_id: &str,
+        reassignments: Vec<NewBudgetGroupAssignment>,
+    ) -> Result<()> {
+        let id = id.to_string();
+        let reassign_to_group_id = reassign_to_group_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.writer
+            .exec_tx(move |tx| {
+                for assignment in reassignments {
+                    let row = NewBudgetGroupAssignmentDB {
+                        id: assignment.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        group_id: assignment.group_id,
+                        taxonomy_id: assignment.taxonomy_id,
+                        category_id: assignment.category_id,
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    };
+                    let inserted = diesel::insert_into(budget_group_assignments::table)
+                        .values(&row)
+                        .on_conflict((
+                            budget_group_assignments::taxonomy_id,
+                            budget_group_assignments::category_id,
+                        ))
+                        .do_update()
+                        .set((
+                            budget_group_assignments::group_id.eq(&row.group_id),
+                            budget_group_assignments::updated_at.eq(&row.updated_at),
+                        ))
+                        .returning(BudgetGroupAssignmentDB::as_returning())
+                        .get_result(tx.conn())
+                        .map_err(StorageError::from)?;
+                    tx.update(&inserted)?;
+                }
+
+                let source_buffers = budget_targets::table
+                    .filter(budget_targets::target_type.eq("group_buffer"))
+                    .filter(budget_targets::group_id.eq(&id))
+                    .load::<BudgetTargetDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                for source in source_buffers {
+                    let destination = budget_targets::table
+                        .filter(budget_targets::target_type.eq("group_buffer"))
+                        .filter(budget_targets::period_key.eq(&source.period_key))
+                        .filter(budget_targets::group_id.eq(&reassign_to_group_id))
+                        .first::<BudgetTargetDB>(tx.conn())
+                        .optional()
+                        .map_err(StorageError::from)?;
+
+                    if let Some(mut destination) = destination {
+                        destination.amount =
+                            sum_amount_strings(&destination.amount, &source.amount);
+                        destination.updated_at = now.clone();
+                        diesel::update(budget_targets::table.find(&destination.id))
+                            .set((
+                                budget_targets::amount.eq(&destination.amount),
+                                budget_targets::updated_at.eq(&destination.updated_at),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&destination)?;
+
+                        diesel::delete(budget_targets::table.find(&source.id))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.delete::<BudgetTargetDB>(source.id);
+                    } else {
+                        let mut moved = source;
+                        moved.group_id = Some(reassign_to_group_id.clone());
+                        moved.updated_at = now.clone();
+                        diesel::update(budget_targets::table.find(&moved.id))
+                            .set((
+                                budget_targets::group_id.eq(&moved.group_id),
+                                budget_targets::updated_at.eq(&moved.updated_at),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&moved)?;
+                    }
+                }
+
                 let affected = diesel::delete(budget_groups::table.find(&id))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;

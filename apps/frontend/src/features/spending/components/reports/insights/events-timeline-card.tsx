@@ -33,6 +33,7 @@ export interface EventsTimelineCardProps {
   /** Last 12 weeks of cash activities; used for daily series + normal pace. */
   heatmapActivities: Activity[];
   accountTypeById?: Map<string, string>;
+  dailySpendByDate?: Map<string, number>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** 0 = current window, 1+ = N windows back. */
@@ -48,6 +49,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   rangeEnd,
   heatmapActivities,
   accountTypeById,
+  dailySpendByDate,
   selectedId,
   onSelect,
   windowOffset,
@@ -69,7 +71,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  const computed = useEventsAggregate(events, heatmapActivities, accountTypeById);
+  const computed = useEventsAggregate(events, heatmapActivities, accountTypeById, dailySpendByDate);
 
   const dailySeries = useMemo(
     () => buildDailySeries(heatmapActivities, events, accountTypeById, rangeStart, rangeEnd),

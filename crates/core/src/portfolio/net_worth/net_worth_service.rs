@@ -634,7 +634,7 @@ impl NetWorthServiceTrait for NetWorthService {
             }
         }
         let first_portfolio_date = portfolio_by_date.keys().next().copied();
-        let history_start_date = first_portfolio_date.unwrap_or(start_date);
+        let credit_card_seed_date = first_portfolio_date.unwrap_or(start_date);
 
         // =====================================================================
         // 2. Load alternative assets and organize by type
@@ -708,7 +708,7 @@ impl NetWorthServiceTrait for NetWorthService {
 
         for asset in &alternative_assets {
             if let Some((price, quote_currency, _)) =
-                self.get_latest_quote_as_of(&asset.id, history_start_date)
+                self.get_latest_quote_as_of(&asset.id, start_date)
             {
                 let (normalized_price, normalized_currency) =
                     normalize_amount(price, &quote_currency);
@@ -720,7 +720,7 @@ impl NetWorthServiceTrait for NetWorthService {
                             normalized_price,
                             normalized_currency,
                             &base_currency,
-                            history_start_date,
+                            start_date,
                         )
                         .unwrap_or(normalized_price)
                 };
@@ -748,7 +748,7 @@ impl NetWorthServiceTrait for NetWorthService {
         for account_id in &credit_card_account_ids {
             if let Some(initial_valuation) = self
                 .valuation_repository
-                .get_historical_valuations(account_id, None, Some(history_start_date))?
+                .get_historical_valuations(account_id, None, Some(credit_card_seed_date))?
                 .into_iter()
                 .max_by_key(|valuation| valuation.valuation_date)
             {

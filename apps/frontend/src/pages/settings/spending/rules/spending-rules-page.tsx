@@ -53,8 +53,13 @@ const INCOME_TAXONOMY = "income_sources";
 
 export default function SpendingRulesPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
-  const { data: rules = [], isLoading: rulesLoading } = useCategorizationRules();
-  const { data: presets = [] } = useRulePresets();
+  const {
+    data: rules = [],
+    isLoading: rulesLoading,
+    isError: rulesErrored,
+    error: rulesError,
+  } = useCategorizationRules();
+  const { data: presets = [], isError: presetsErrored, error: presetsError } = useRulePresets();
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
   const { create, update, remove, rerun } = useCategorizationRuleMutations();
@@ -67,6 +72,13 @@ export default function SpendingRulesPage() {
   const [confirmRerunAllOpen, setConfirmRerunAllOpen] = useState(false);
 
   const isLoading = rulesLoading || spending.isLoading || income.isLoading;
+  const hasLoadError = rulesErrored || presetsErrored || spending.isError || income.isError;
+  const loadError =
+    rulesError?.message ??
+    presetsError?.message ??
+    spending.error?.message ??
+    income.error?.message ??
+    "Rules could not load.";
 
   const { categoryOptions, categoryMeta } = useMemo(() => {
     const buildOptions = (taxonomyId: string, cats: TaxonomyCategory[]) => {
@@ -257,6 +269,12 @@ export default function SpendingRulesPage() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
+        ) : hasLoadError ? (
+          <EmptyPlaceholder>
+            <EmptyPlaceholder.Icon name="AlertTriangle" />
+            <EmptyPlaceholder.Title>Rules could not load</EmptyPlaceholder.Title>
+            <EmptyPlaceholder.Description>{loadError}</EmptyPlaceholder.Description>
+          </EmptyPlaceholder>
         ) : totalRulesCount === 0 ? (
           <div className="space-y-6">
             <div className="bg-muted/30 rounded-lg border p-4">

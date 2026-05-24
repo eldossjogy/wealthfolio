@@ -90,6 +90,20 @@ fn account_tracking_modes(
         .collect())
 }
 
+fn holdings_account_ids(
+    state: &ServiceContext,
+    account_ids: &[String],
+) -> Result<Vec<String>, String> {
+    Ok(state
+        .account_service()
+        .get_accounts_by_ids(account_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, AccountPurpose::Holdings))
+        .map(|account| account.id)
+        .collect())
+}
+
 // ============================================================================
 // Snapshot Info Types
 // ============================================================================
@@ -156,16 +170,20 @@ pub async fn get_holdings(
     let base_currency = state.get_base_currency();
     let filter = filter.into_account_filter()?;
     let resolved = resolve_scope(&filter, &state).await?;
-    if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    if account_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if account_ids.len() == 1 {
         state
             .holdings_service()
-            .get_holdings(&resolved.account_ids[0], &base_currency)
+            .get_holdings(&account_ids[0], &base_currency)
             .await
             .map_err(|e| e.to_string())
     } else {
         state
             .holdings_service()
-            .get_holdings_for_accounts(&resolved.account_ids, &base_currency, &resolved.scope_id)
+            .get_holdings_for_accounts(&account_ids, &base_currency, &resolved.scope_id)
             .await
             .map_err(|e| e.to_string())
     }
@@ -203,6 +221,9 @@ pub async fn get_asset_holdings(
 
     let mut result = Vec::new();
     for account in accounts {
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+            continue;
+        }
         if let Ok(Some(holding)) = state
             .holdings_service()
             .get_holding(&account.id, &asset_id, &base_currency)
@@ -236,17 +257,18 @@ pub async fn get_portfolio_allocations(
     let base_currency = state.get_base_currency();
     let filter = filter.into_account_filter()?;
     let resolved = resolve_scope(&filter, &state).await?;
-    if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    if account_ids.len() == 1 {
         state
             .allocation_service()
-            .get_portfolio_allocations(&resolved.account_ids[0], &base_currency)
+            .get_portfolio_allocations(&account_ids[0], &base_currency)
             .await
             .map_err(|e| e.to_string())
     } else {
         state
             .allocation_service()
             .get_portfolio_allocations_for_accounts(
-                &resolved.account_ids,
+                &account_ids,
                 &base_currency,
                 &resolved.scope_id,
             )
@@ -265,22 +287,18 @@ pub async fn get_holdings_by_allocation(
     let base_currency = state.get_base_currency();
     let filter = filter.into_account_filter()?;
     let resolved = resolve_scope(&filter, &state).await?;
-    if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    if account_ids.len() == 1 {
         state
             .allocation_service()
-            .get_holdings_by_allocation(
-                &resolved.account_ids[0],
-                &base_currency,
-                &taxonomy_id,
-                &category_id,
-            )
+            .get_holdings_by_allocation(&account_ids[0], &base_currency, &taxonomy_id, &category_id)
             .await
             .map_err(|e| e.to_string())
     } else {
         state
             .allocation_service()
             .get_holdings_by_allocation_for_accounts(
-                &resolved.account_ids,
+                &account_ids,
                 &base_currency,
                 &taxonomy_id,
                 &category_id,

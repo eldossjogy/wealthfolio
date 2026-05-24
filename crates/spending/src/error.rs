@@ -22,4 +22,8 @@ pub enum SpendingError {
     /// User-provided spending input failed validation before persistence.
     #[error("Invalid input: {message}")]
     InvalidInput { message: String },
+
+    /// Requested spending entity does not exist.
+    #[error("{entity} not found: {id}")]
+    NotFound { entity: &'static str, id: String },
 }

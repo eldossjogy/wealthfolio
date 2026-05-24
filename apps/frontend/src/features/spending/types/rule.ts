@@ -64,6 +64,7 @@ export interface ImportPresetResult {
   presetId: string;
   presetVersion: string;
   added: number;
+  updated: number;
   skippedExisting: number;
   skippedUnknownCategory: number;
   total: number;
