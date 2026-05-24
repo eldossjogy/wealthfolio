@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rust_decimal::prelude::ToPrimitive;
 use wealthfolio_core::accounts::{
-    account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
+    account_supports_purpose, account_types, AccountPurpose, AccountRepositoryTrait,
 };
 use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 
@@ -215,7 +215,10 @@ impl CashActivityService {
 
             activities.retain(|a| {
                 let asgs = by_activity.get(a.id.as_str());
-                let has_category = asgs.map(|v| !v.is_empty()).unwrap_or(false);
+                let is_neutral = account_types
+                    .get(&a.account_id)
+                    .is_some_and(|account_type| is_neutral_visible_cash_activity(a, account_type));
+                let has_category = is_neutral || asgs.map(|v| !v.is_empty()).unwrap_or(false);
 
                 match req.status {
                     CashActivityStatusFilter::All => {}
@@ -319,6 +322,51 @@ impl CashActivityService {
         Ok(CashActivitySearchResponse { items, total_count })
     }
 
+    /// Fetch explicit activity ids without applying the normal status/date/limit
+    /// search filters. Still respects the user's spending account opt-in.
+    pub async fn get_by_activity_ids(&self, activity_ids: &[String]) -> Result<Vec<CashActivity>> {
+        if activity_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let s = self.settings.get().await?;
+        if !s.enabled || s.account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let (target_accounts, account_types) =
+            self.resolve_target_accounts(None, &s.account_ids)?;
+        if target_accounts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let requested: HashSet<&str> = activity_ids.iter().map(String::as_str).collect();
+        let mut activities = self
+            .activity_repo
+            .get_activities_by_account_ids(&target_accounts)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .into_iter()
+            .filter(|activity| requested.contains(activity.id.as_str()))
+            .collect::<Vec<_>>();
+        retain_classified_cash_activities(&mut activities, &account_types);
+
+        let ids: Vec<String> = activities.iter().map(|a| a.id.clone()).collect();
+        let asgs = self.assignments.list_for_activities(&ids).await?;
+        let mut by_activity = group_assignments_owned(asgs);
+        let mut tag_map = self.activity_events.list_for_activities(&ids).await?;
+        Ok(activities
+            .into_iter()
+            .map(|activity| {
+                let assignments = by_activity.remove(&activity.id).unwrap_or_default();
+                let event_id = tag_map.remove(&activity.id);
+                CashActivity {
+                    activity,
+                    assignments,
+                    event_id,
+                }
+            })
+            .collect())
+    }
+
     /// Set or clear the spending-event tag on an activity. Pass `None` to clear.
     ///
     /// **Return contract**: returns the underlying `Activity` row, which does
@@ -378,16 +426,23 @@ fn retain_classified_cash_activities(
     activities.retain(|activity| {
         account_types
             .get(&activity.account_id)
-            .map(|account_type| classify_activity(activity, account_type))
-            .is_some_and(|classification| {
-                matches!(
-                    classification,
-                    SpendingClassification::Income
-                        | SpendingClassification::Expense
-                        | SpendingClassification::ExpenseRefund
-                )
-            })
+            .is_some_and(|account_type| is_visible_cash_activity(activity, account_type))
     });
+}
+
+fn is_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
+    matches!(
+        classify_activity(activity, account_type),
+        SpendingClassification::Income
+            | SpendingClassification::Expense
+            | SpendingClassification::ExpenseRefund
+    ) || is_neutral_visible_cash_activity(activity, account_type)
+}
+
+fn is_neutral_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
+    account_type == account_types::CREDIT_CARD
+        && activity.effective_type() == "TRANSFER_IN"
+        && activity.source_group_id.is_some()
 }
 
 fn group_assignments(
@@ -443,7 +498,42 @@ fn activity_date_in_range(
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::Decimal;
+    use wealthfolio_core::activities::ActivityStatus;
+
     use super::*;
+
+    fn activity(activity_type: &str) -> Activity {
+        Activity {
+            id: "activity-1".to_string(),
+            account_id: "account-1".to_string(),
+            asset_id: None,
+            activity_type: activity_type.to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: None,
+            status: ActivityStatus::Posted,
+            activity_date: Utc::now(),
+            settlement_date: None,
+            quantity: None,
+            unit_price: None,
+            amount: Some(Decimal::new(100, 0)),
+            fee: None,
+            currency: "USD".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+            is_user_modified: false,
+            needs_review: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
 
     #[test]
     fn activity_date_filter_compares_instants_not_rfc3339_strings() {
@@ -466,5 +556,24 @@ mod tests {
             Some(&same_end)
         ));
         assert!(!activity_date_in_range(&after_end, None, Some(&same_end)));
+    }
+
+    #[test]
+    fn credit_card_payment_is_visible_as_neutral_cash_activity() {
+        let mut linked_payment = activity("TRANSFER_IN");
+        linked_payment.source_group_id = Some("payment-group".to_string());
+
+        assert!(is_visible_cash_activity(
+            &linked_payment,
+            account_types::CREDIT_CARD
+        ));
+        assert!(!is_visible_cash_activity(
+            &activity("TRANSFER_IN"),
+            account_types::CREDIT_CARD
+        ));
+        assert!(!is_visible_cash_activity(
+            &activity("DEPOSIT"),
+            account_types::CREDIT_CARD
+        ));
     }
 }

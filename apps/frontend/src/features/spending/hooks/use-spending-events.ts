@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { QueryKeys } from "@/lib/query-keys";
 
+import { invalidateSpendingCaches } from "../lib/invalidation";
 import {
   createEvent,
   createEventType,
@@ -52,7 +53,10 @@ export function useEventSpendingSummaries(request: { startDate: string; endDate:
 
 export function useEventTypeMutations() {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENT_TYPES] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENT_TYPES] });
+    invalidateSpendingCaches(qc);
+  };
 
   const create = useMutation({
     mutationFn: (t: NewEventType) => createEventType(t),
@@ -84,7 +88,7 @@ export function useEventTypeMutations() {
 
 export function useSpendingEventMutations() {
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_EVENTS] });
+  const invalidate = () => invalidateSpendingCaches(qc);
 
   const create = useMutation({
     mutationFn: (e: NewSpendingEvent) => createEvent(e),

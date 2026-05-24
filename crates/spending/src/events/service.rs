@@ -110,10 +110,10 @@ impl EventsService {
             .unwrap_or_else(|| existing.end_date.clone());
         validate_event_range(&new_start, &new_end)?;
 
-        let old_start_dt = parse_event_bound(&existing.start_date)?;
-        let old_end_dt = parse_event_bound(&existing.end_date)?;
-        let new_start_dt = parse_event_bound(&new_start)?;
-        let new_end_dt = parse_event_bound(&new_end)?;
+        let old_start_dt = parse_event_start_bound(&existing.start_date)?;
+        let old_end_dt = parse_event_end_bound(&existing.end_date)?;
+        let new_start_dt = parse_event_start_bound(&new_start)?;
+        let new_end_dt = parse_event_end_bound(&new_end)?;
 
         let narrowed_start = new_start_dt > old_start_dt;
         let narrowed_end = new_end_dt < old_end_dt;
@@ -198,7 +198,7 @@ fn validate_event_range(start: &str, end: &str) -> Result<()> {
     // Prefer a parsed comparison when possible — falls back to lexicographic
     // for `YYYY-MM-DD` strings (which the model documents as the on-disk shape
     // even though the type calls itself "RFC3339").
-    let parsed = (parse_event_bound(start), parse_event_bound(end));
+    let parsed = (parse_event_start_bound(start), parse_event_end_bound(end));
     let bad = match parsed {
         (Ok(s), Ok(e)) => s > e,
         _ => start > end,
@@ -209,14 +209,30 @@ fn validate_event_range(start: &str, end: &str) -> Result<()> {
     Ok(())
 }
 
-/// Parse an event boundary (`start_date` / `end_date`). Tries RFC3339 first,
-/// then `YYYY-MM-DD` (interpreted as midnight UTC).
-fn parse_event_bound(s: &str) -> Result<DateTime<Utc>> {
+/// Parse an event start boundary. Tries RFC3339 first, then `YYYY-MM-DD`
+/// (interpreted as the start of that UTC day).
+fn parse_event_start_bound(s: &str) -> Result<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.with_timezone(&Utc));
     }
     if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         let naive = date.and_hms_opt(0, 0, 0).unwrap();
+        return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
+    }
+    Err(SpendingError::InvalidInput {
+        message: format!("Unparseable event date: {s}"),
+    }
+    .into())
+}
+
+/// Parse an event end boundary. Date-only end dates are inclusive for the full
+/// day so narrowing an event to `YYYY-MM-DD` does not untag same-day activity.
+fn parse_event_end_bound(s: &str) -> Result<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let naive = date.and_hms_nano_opt(23, 59, 59, 999_999_999).unwrap();
         return Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
     }
     Err(SpendingError::InvalidInput {
@@ -786,5 +802,25 @@ mod tests {
         assert_eq!(tags.get("a1"), Some(&"ev1".to_string()));
         assert_eq!(tags.get("a2"), Some(&"ev1".to_string()));
         assert_eq!(tags.get("a3"), None);
+    }
+
+    #[tokio::test]
+    async fn date_only_end_date_keeps_same_day_activities() {
+        let same_day = Utc.with_ymd_and_hms(2024, 6, 8, 14, 0, 0).unwrap();
+        let next_day = Utc.with_ymd_and_hms(2024, 6, 9, 1, 0, 0).unwrap();
+        let (svc, _, _, _, tags) = make_service(
+            vec![ev("ev1", &ymd(2024, 6, 1), &ymd(2024, 6, 10))],
+            vec![mk_activity("a1", same_day), mk_activity("a2", next_day)],
+            vec![("a1", "ev1"), ("a2", "ev1")],
+        );
+        let patch = UpdateEvent {
+            end_date: Some(ymd(2024, 6, 8)),
+            ..Default::default()
+        };
+        svc.update_event("ev1", patch).await.unwrap();
+
+        let tags = tags.lock().unwrap();
+        assert_eq!(tags.get("a1"), Some(&"ev1".to_string()));
+        assert_eq!(tags.get("a2"), None);
     }
 }

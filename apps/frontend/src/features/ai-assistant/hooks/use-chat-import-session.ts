@@ -557,6 +557,7 @@ export function useChatImportSession({
 
   const mappingRef = useRef(mapping);
   mappingRef.current = mapping;
+  const effectiveMappingRef = useRef<ImportMappingData | null>(null);
 
   // On mount (once per mapping), bootstrap drafts + preview items.
   const initializedRef = useRef(false);
@@ -651,6 +652,16 @@ export function useChatImportSession({
                 importProfile,
               )
             : computeFieldMappings(parsed.headers, undefined, importProfile);
+        const effectiveParseConfig = {
+          ...parseConfig,
+          dateFormat: parsed.detectedConfig.dateFormat ?? parseConfig.dateFormat ?? "auto",
+          decimalSeparator:
+            parsed.detectedConfig.decimalSeparator ?? parseConfig.decimalSeparator ?? "auto",
+          thousandsSeparator:
+            parsed.detectedConfig.thousandsSeparator ?? parseConfig.thousandsSeparator ?? "auto",
+          defaultCurrency:
+            parsed.detectedConfig.defaultCurrency ?? parseConfig.defaultCurrency ?? "USD",
+        };
         const effectiveMapping = sanitizeImportMappingForProfile(
           {
             ...applied,
@@ -662,9 +673,11 @@ export function useChatImportSession({
             symbolMappings: applied.symbolMappings ?? {},
             accountMappings,
             symbolMappingMeta: applied.symbolMappingMeta ?? {},
+            parseConfig: effectiveParseConfig,
           },
           importProfile,
         );
+        effectiveMappingRef.current = effectiveMapping;
 
         const drafts = createDraftActivities(
           parsed.rows,
@@ -676,15 +689,7 @@ export function useChatImportSession({
             accountMappings: effectiveMapping.accountMappings ?? {},
             symbolMappingMeta: effectiveMapping.symbolMappingMeta ?? {},
           },
-          {
-            dateFormat: parsed.detectedConfig.dateFormat ?? parseConfig.dateFormat ?? "auto",
-            decimalSeparator:
-              parsed.detectedConfig.decimalSeparator ?? parseConfig.decimalSeparator ?? "auto",
-            thousandsSeparator:
-              parsed.detectedConfig.thousandsSeparator ?? parseConfig.thousandsSeparator ?? "auto",
-            defaultCurrency:
-              parsed.detectedConfig.defaultCurrency ?? parseConfig.defaultCurrency ?? "USD",
-          },
+          effectiveParseConfig,
           accountId,
           validAccountIds,
           accountTypeById,
@@ -890,31 +895,48 @@ export function useChatImportSession({
 
           if (nextProfile !== importProfile && current.csvContent) {
             const applied = current.appliedMapping;
-            const parseConfig = normalizeParseConfig(current.parseConfig);
+            const sourceMapping = effectiveMappingRef.current ?? applied;
+            const parseConfig = normalizeParseConfig(
+              sourceMapping.parseConfig ?? current.parseConfig,
+            );
             const parsed = await parseCsv(csvStringAsFile(current.csvContent), parseConfig);
             const accountMappings = normalizeAccountMappings(
-              applied.accountMappings ?? {},
+              sourceMapping.accountMappings ?? {},
               current.availableAccounts,
             );
             const fieldMappings = computeFieldMappings(
               parsed.headers,
-              applied.fieldMappings as Record<string, string | string[]>,
+              sourceMapping.fieldMappings as Record<string, string | string[]>,
               nextProfile,
             );
+            const effectiveParseConfig = {
+              ...parseConfig,
+              dateFormat: parsed.detectedConfig.dateFormat ?? parseConfig.dateFormat ?? "auto",
+              decimalSeparator:
+                parsed.detectedConfig.decimalSeparator ?? parseConfig.decimalSeparator ?? "auto",
+              thousandsSeparator:
+                parsed.detectedConfig.thousandsSeparator ??
+                parseConfig.thousandsSeparator ??
+                "auto",
+              defaultCurrency:
+                parsed.detectedConfig.defaultCurrency ?? parseConfig.defaultCurrency ?? "USD",
+            };
             const effectiveMapping = sanitizeImportMappingForProfile(
               {
-                ...applied,
+                ...sourceMapping,
                 fieldMappings,
                 activityMappings: mergeActivityMappingsForImportProfile(
-                  applied.activityMappings ?? {},
+                  sourceMapping.activityMappings ?? {},
                   nextProfile,
                 ),
-                symbolMappings: applied.symbolMappings ?? {},
+                symbolMappings: sourceMapping.symbolMappings ?? {},
                 accountMappings,
-                symbolMappingMeta: applied.symbolMappingMeta ?? {},
+                symbolMappingMeta: sourceMapping.symbolMappingMeta ?? {},
+                parseConfig: effectiveParseConfig,
               },
               nextProfile,
             );
+            effectiveMappingRef.current = effectiveMapping;
 
             nextDrafts = createDraftActivities(
               parsed.rows,
@@ -926,17 +948,7 @@ export function useChatImportSession({
                 accountMappings: effectiveMapping.accountMappings ?? {},
                 symbolMappingMeta: effectiveMapping.symbolMappingMeta ?? {},
               },
-              {
-                dateFormat: parsed.detectedConfig.dateFormat ?? parseConfig.dateFormat ?? "auto",
-                decimalSeparator:
-                  parsed.detectedConfig.decimalSeparator ?? parseConfig.decimalSeparator ?? "auto",
-                thousandsSeparator:
-                  parsed.detectedConfig.thousandsSeparator ??
-                  parseConfig.thousandsSeparator ??
-                  "auto",
-                defaultCurrency:
-                  parsed.detectedConfig.defaultCurrency ?? parseConfig.defaultCurrency ?? "USD",
-              },
+              effectiveParseConfig,
               accountId,
               validAccountIds,
               state.accountTypeById,
@@ -1101,22 +1113,25 @@ export function useChatImportSession({
         try {
           const accountName =
             current.availableAccounts.find((a) => a.id === state.accountId)?.name ?? "";
+          const sourceMapping = effectiveMappingRef.current ?? current.appliedMapping;
+          const accountMappingsToSave = current.appliedMapping.accountMappings ?? {};
           const mappingToSave: ImportMappingData = sanitizeImportMappingForProfile(
             {
-              ...current.appliedMapping,
+              ...sourceMapping,
               activityMappings: mergeActivityMappingsForImportProfile(
-                current.appliedMapping.activityMappings ?? {},
+                sourceMapping.activityMappings ?? {},
                 importProfile,
               ),
-              symbolMappings: current.appliedMapping.symbolMappings ?? {},
-              symbolMappingMeta: current.appliedMapping.symbolMappingMeta ?? {},
+              symbolMappings: sourceMapping.symbolMappings ?? {},
+              accountMappings: accountMappingsToSave,
+              symbolMappingMeta: sourceMapping.symbolMappingMeta ?? {},
             },
             importProfile,
           );
           await saveAccountImportMapping({
             ...mappingToSave,
             accountId: state.accountId,
-            name: current.appliedMapping.name || `AI Import — ${accountName}`.trim(),
+            name: sourceMapping.name || `AI Import — ${accountName}`.trim(),
           });
         } catch (err) {
           logger.error("Failed to save import template:", err);

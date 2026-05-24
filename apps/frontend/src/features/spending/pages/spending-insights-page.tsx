@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAccounts } from "@/hooks/use-accounts";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useSettingsContext } from "@/lib/settings-provider";
 
@@ -26,6 +27,7 @@ import {
   type ReportsPeriod,
   type ReportsRange,
 } from "../lib/reports-period";
+import { createZonedDayHourFormatter } from "../lib/timezone";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const PERIOD_STORAGE_KEY = "spending-insights-period";
@@ -52,6 +54,7 @@ export default function SpendingInsightsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
+  const appTimezone = settings?.timezone ?? undefined;
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
 
   const [period, setPeriod] = usePersistentState<ReportsPeriod>(
@@ -238,19 +241,30 @@ export default function SpendingInsightsPage() {
   );
 
   // Click-through sheet for heatmap cells (weekday × hour)
-  const [heatmapCell, setHeatmapCell] = useState<{ weekday: number; hour: number } | null>(null);
-  const handleHeatmapCellClick = useCallback((weekday: number, hour: number) => {
-    setHeatmapCell({ weekday, hour });
-  }, []);
+  const [heatmapCell, setHeatmapCell] = useState<{
+    weekday: number;
+    startHour: number;
+    endHour: number;
+  } | null>(null);
+  const handleHeatmapCellClick = useCallback(
+    (weekday: number, startHour: number, endHour: number) => {
+      setHeatmapCell({ weekday, startHour, endHour });
+    },
+    [],
+  );
+  const getHeatmapDayHour = useMemo(() => createZonedDayHourFormatter(appTimezone), [appTimezone]);
   const heatmapCellActivities = useMemo(() => {
     if (!heatmapCell) return [];
     return heatmapActivities.filter((a) => {
       const d = new Date(a.activityDate);
-      if (isNaN(d.getTime())) return false;
-      const weekday = (d.getDay() + 6) % 7;
-      return weekday === heatmapCell.weekday && d.getHours() === heatmapCell.hour;
+      const zoned = getHeatmapDayHour(d);
+      return (
+        zoned?.weekday === heatmapCell.weekday &&
+        zoned.hour >= heatmapCell.startHour &&
+        zoned.hour < heatmapCell.endHour
+      );
     });
-  }, [heatmapActivities, heatmapCell]);
+  }, [getHeatmapDayHour, heatmapActivities, heatmapCell]);
 
   const taxonomyCategories = taxonomy.data?.categories ?? EMPTY_TAXONOMY;
   const accountTypeById = useMemo(
@@ -346,6 +360,7 @@ export default function SpendingInsightsPage() {
             onRetryEvents={() => refetchEvents()}
             taxonomyCategories={taxonomyCategories}
             currency={heatmapInsight?.currency ?? baseCurrency}
+            timezone={appTimezone}
             rangeStart={eventsRange.start}
             rangeEnd={eventsRange.end}
             windowOffset={eventsWindowOffset}
@@ -375,7 +390,9 @@ export default function SpendingInsightsPage() {
         }}
         activities={heatmapCellActivities}
         dayLabel={heatmapCell ? HEATMAP_DAY_NAMES[heatmapCell.weekday] : null}
-        hour={heatmapCell?.hour ?? null}
+        hour={heatmapCell?.startHour ?? null}
+        endHour={heatmapCell?.endHour ?? null}
+        timezone={appTimezone}
         currency={baseCurrency}
       />
     </Page>
@@ -418,7 +435,9 @@ function ForeignCurrencyBanner({
   nativeTotals: Record<string, number>;
   asOf: string; // RFC3339
 }) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const fmtNative = (ccy: string) => {
+    if (isBalanceHidden) return "••••";
     const v = nativeTotals[ccy];
     if (v == null) return ccy;
     try {

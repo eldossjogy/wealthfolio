@@ -16,6 +16,7 @@
 //!
 //! Same pattern as `import_csv`: the agent's tool-call IS the structured output.
 
+use chrono::{DateTime, Utc};
 use log::{debug, warn};
 use rig::{completion::ToolDefinition, tool::Tool};
 use rust_decimal::prelude::ToPrimitive;
@@ -25,7 +26,10 @@ use std::sync::Arc;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
-use wealthfolio_spending::cash_activities::{CashActivitySearchRequest, CashActivityStatusFilter};
+use wealthfolio_core::accounts::account_types;
+use wealthfolio_spending::cash_activities::{
+    CashActivity, CashActivitySearchRequest, CashActivityStatusFilter,
+};
 
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 100;
@@ -68,7 +72,7 @@ pub struct AiProposal {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProposeCategoriesArgs {
-    /// Explicit set of activity ids to propose for. Overrides filters when set.
+    /// Explicit set of activity ids to propose for. Intersected with filters when set.
     pub activity_ids: Option<Vec<String>>,
     pub account_ids: Option<Vec<String>>,
     /// "uncategorized" (default) | "all" | "needs_review"
@@ -232,7 +236,7 @@ impl<E: AiEnvironment + 'static> Tool for ProposeCategoriesTool<E> {
                     "activityIds": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Optional explicit set of activity IDs to propose for. Overrides filters."
+                        "description": "Optional explicit set of activity IDs to propose for. Intersected with the other filters."
                     },
                     "accountIds": {
                         "type": "array",
@@ -406,24 +410,30 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
     };
 
     let cash = env.cash_activity_service();
-    let target_request = CashActivitySearchRequest {
-        account_ids: filters.account_ids.clone(),
-        status,
-        start_date: filters.start_date.clone(),
-        end_date: filters.end_date.clone(),
-        limit,
-        ..Default::default()
+    let targets = if let Some(ids) = filters.activity_ids.as_ref() {
+        validate_explicit_activity_ids(ids)?;
+        let mut targets = cash
+            .get_by_activity_ids(ids)
+            .await
+            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+        let account_type_by_id = account_types_for_targets(env, &targets)?;
+        retain_explicit_targets(&mut targets, &filters, status, &account_type_by_id)?;
+        targets.truncate(limit);
+        targets
+    } else {
+        let target_request = CashActivitySearchRequest {
+            account_ids: filters.account_ids.clone(),
+            status,
+            start_date: filters.start_date.clone(),
+            end_date: filters.end_date.clone(),
+            limit,
+            ..Default::default()
+        };
+        cash.search(target_request)
+            .await
+            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            .items
     };
-    let target_response = cash
-        .search(target_request)
-        .await
-        .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-
-    let mut targets: Vec<_> = target_response.items;
-    if let Some(ids) = filters.activity_ids.as_ref() {
-        let id_set: HashSet<&str> = ids.iter().map(String::as_str).collect();
-        targets.retain(|t| id_set.contains(t.activity.id.as_str()));
-    }
     if targets.is_empty() {
         return Ok(CategorizationState {
             is_empty: true,
@@ -499,15 +509,16 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
         .await
         .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
 
-    let mut payee_map: HashMap<String, HashMap<(String, String), usize>> = HashMap::new();
+    let mut payee_map: HashMap<(String, String), HashMap<(String, String), usize>> = HashMap::new();
     for item in &history_response.items {
         let Some(notes) = item.activity.notes.as_deref() else {
             continue;
         };
-        let key = normalize_payee(notes);
-        if key.is_empty() {
+        let payee_key = normalize_payee(notes);
+        if payee_key.is_empty() {
             continue;
         }
+        let key = (payee_key, item.activity.effective_type().to_string());
         for asg in &item.assignments {
             payee_map
                 .entry(key.clone())
@@ -596,7 +607,11 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
             .as_deref()
             .map(normalize_payee)
             .filter(|k| !k.is_empty())
-            .and_then(|key| payee_map.get(&key).cloned())
+            .and_then(|key| {
+                payee_map
+                    .get(&(key, act.effective_type().to_string()))
+                    .cloned()
+            })
             .and_then(|by_cat| {
                 by_cat
                     .into_iter()
@@ -702,6 +717,105 @@ pub(crate) fn merge_ai_proposals(
     (proposals, remaining)
 }
 
+fn validate_explicit_activity_ids(ids: &[String]) -> Result<(), AiError> {
+    if ids.len() > MAX_LIMIT {
+        return Err(AiError::invalid_input(format!(
+            "activityIds supports at most {MAX_LIMIT} ids"
+        )));
+    }
+    Ok(())
+}
+
+fn retain_explicit_targets(
+    targets: &mut Vec<CashActivity>,
+    filters: &CategorizationFilters,
+    status: CashActivityStatusFilter,
+    account_type_by_id: &HashMap<String, String>,
+) -> Result<(), AiError> {
+    let allowed_accounts: Option<HashSet<String>> = filters
+        .account_ids
+        .as_ref()
+        .filter(|ids| !ids.is_empty())
+        .map(|ids| ids.iter().cloned().collect());
+    let start = parse_filter_datetime("startDate", filters.start_date.as_deref())?;
+    let end = parse_filter_datetime("endDate", filters.end_date.as_deref())?;
+
+    targets.retain(|item| {
+        if let Some(account_ids) = &allowed_accounts {
+            if !account_ids.contains(&item.activity.account_id) {
+                return false;
+            }
+        }
+        if let Some(start) = start.as_ref() {
+            if &item.activity.activity_date < start {
+                return false;
+            }
+        }
+        if let Some(end) = end.as_ref() {
+            if &item.activity.activity_date > end {
+                return false;
+            }
+        }
+
+        let has_category =
+            is_neutral_visible_target(item, account_type_by_id) || !item.assignments.is_empty();
+        match status {
+            CashActivityStatusFilter::All => true,
+            CashActivityStatusFilter::NeedsReview => item.activity.needs_review,
+            CashActivityStatusFilter::Uncategorized => !has_category,
+            CashActivityStatusFilter::Categorized => has_category,
+        }
+    });
+
+    Ok(())
+}
+
+fn account_types_for_targets<E: AiEnvironment>(
+    env: &Arc<E>,
+    targets: &[CashActivity],
+) -> Result<HashMap<String, String>, AiError> {
+    let account_ids = targets
+        .iter()
+        .map(|item| item.activity.account_id.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if account_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let accounts = env
+        .account_service()
+        .get_accounts_by_ids(&account_ids)
+        .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+    Ok(accounts
+        .into_iter()
+        .map(|account| (account.id, account.account_type))
+        .collect())
+}
+
+fn is_neutral_visible_target(
+    item: &CashActivity,
+    account_type_by_id: &HashMap<String, String>,
+) -> bool {
+    account_type_by_id
+        .get(&item.activity.account_id)
+        .is_some_and(|account_type| {
+            account_type == account_types::CREDIT_CARD
+                && item.activity.effective_type() == "TRANSFER_IN"
+                && item.activity.source_group_id.is_some()
+        })
+}
+
+fn parse_filter_datetime(
+    field: &str,
+    value: Option<&str>,
+) -> Result<Option<DateTime<Utc>>, AiError> {
+    value
+        .map(|value| DateTime::parse_from_rfc3339(value).map(|date| date.with_timezone(&Utc)))
+        .transpose()
+        .map_err(|e| AiError::invalid_input(format!("Invalid {field}: {e}")))
+}
+
 fn build_category_path(
     cat: &wealthfolio_core::taxonomies::Category,
     cats_by_id: &HashMap<&str, &wealthfolio_core::taxonomies::Category>,
@@ -729,6 +843,8 @@ fn build_category_path(
 mod tests {
     use super::*;
     use chrono::NaiveDateTime;
+    use rust_decimal::Decimal;
+    use wealthfolio_core::activities::{Activity, ActivityStatus};
     use wealthfolio_core::taxonomies::Category;
 
     // ----- normalize_payee -------------------------------------------------
@@ -821,6 +937,195 @@ mod tests {
             updated_at: now,
             icon: None,
         }
+    }
+
+    fn make_cash_activity(
+        id: &str,
+        account_id: &str,
+        activity_date: &str,
+        needs_review: bool,
+        assigned: bool,
+    ) -> CashActivity {
+        let now = DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let activity_date = DateTime::parse_from_rfc3339(activity_date)
+            .unwrap()
+            .with_timezone(&Utc);
+        let assignments = if assigned {
+            vec![
+                wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment {
+                    id: format!("{id}-asg"),
+                    activity_id: id.to_string(),
+                    taxonomy_id: "spending_categories".to_string(),
+                    category_id: "cat-1".to_string(),
+                    weight: 10_000,
+                    source: "manual".to_string(),
+                    created_at: now.naive_utc(),
+                    updated_at: now.naive_utc(),
+                },
+            ]
+        } else {
+            Vec::new()
+        };
+        CashActivity {
+            activity: Activity {
+                id: id.to_string(),
+                account_id: account_id.to_string(),
+                asset_id: None,
+                activity_type: "WITHDRAWAL".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(Decimal::new(1000, 2)),
+                fee: None,
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: Some("test".to_string()),
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: None,
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review,
+                created_at: now,
+                updated_at: now,
+            },
+            assignments,
+            event_id: None,
+        }
+    }
+
+    #[test]
+    fn explicit_activity_ids_reject_over_max_limit() {
+        let ids = (0..150)
+            .map(|i| format!("activity-{i}"))
+            .collect::<Vec<_>>();
+
+        let err = validate_explicit_activity_ids(&ids).unwrap_err();
+
+        assert!(matches!(err, AiError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn explicit_activity_ids_accept_max_limit() {
+        let ids = (0..MAX_LIMIT)
+            .map(|i| format!("activity-{i}"))
+            .collect::<Vec<_>>();
+
+        validate_explicit_activity_ids(&ids).unwrap();
+    }
+
+    #[test]
+    fn explicit_targets_intersect_account_status_and_date_filters() {
+        let mut targets = vec![
+            make_cash_activity("keep", "acct-1", "2024-06-15T00:00:00Z", true, false),
+            make_cash_activity(
+                "wrong-account",
+                "acct-2",
+                "2024-06-15T00:00:00Z",
+                true,
+                false,
+            ),
+            make_cash_activity(
+                "wrong-status",
+                "acct-1",
+                "2024-06-15T00:00:00Z",
+                false,
+                false,
+            ),
+            make_cash_activity("too-early", "acct-1", "2024-05-31T23:59:59Z", true, false),
+            make_cash_activity("too-late", "acct-1", "2024-07-01T00:00:01Z", true, false),
+        ];
+        let filters = CategorizationFilters {
+            account_ids: Some(vec!["acct-1".to_string()]),
+            start_date: Some("2024-06-01T00:00:00Z".to_string()),
+            end_date: Some("2024-07-01T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+
+        retain_explicit_targets(
+            &mut targets,
+            &filters,
+            CashActivityStatusFilter::NeedsReview,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].activity.id, "keep");
+    }
+
+    #[test]
+    fn explicit_targets_apply_categorized_status_filter() {
+        let mut targets = vec![
+            make_cash_activity("assigned", "acct-1", "2024-06-15T00:00:00Z", false, true),
+            make_cash_activity("unassigned", "acct-1", "2024-06-15T00:00:00Z", false, false),
+        ];
+
+        retain_explicit_targets(
+            &mut targets,
+            &CategorizationFilters::default(),
+            CashActivityStatusFilter::Categorized,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].activity.id, "assigned");
+    }
+
+    #[test]
+    fn explicit_targets_treat_credit_card_payments_as_categorized() {
+        let mut payment =
+            make_cash_activity("payment", "card-1", "2024-06-15T00:00:00Z", false, false);
+        payment.activity.activity_type = "TRANSFER_IN".to_string();
+        payment.activity.source_group_id = Some("payment-group".to_string());
+        let mut targets = vec![payment];
+        let account_type_by_id = HashMap::from([(
+            "card-1".to_string(),
+            wealthfolio_core::accounts::account_types::CREDIT_CARD.to_string(),
+        )]);
+
+        retain_explicit_targets(
+            &mut targets,
+            &CategorizationFilters::default(),
+            CashActivityStatusFilter::Uncategorized,
+            &account_type_by_id,
+        )
+        .unwrap();
+
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn explicit_targets_do_not_treat_unlinked_credit_card_transfer_as_categorized() {
+        let mut payment =
+            make_cash_activity("payment", "card-1", "2024-06-15T00:00:00Z", false, false);
+        payment.activity.activity_type = "TRANSFER_IN".to_string();
+        let mut targets = vec![payment];
+        let account_type_by_id = HashMap::from([(
+            "card-1".to_string(),
+            wealthfolio_core::accounts::account_types::CREDIT_CARD.to_string(),
+        )]);
+
+        retain_explicit_targets(
+            &mut targets,
+            &CategorizationFilters::default(),
+            CashActivityStatusFilter::Uncategorized,
+            &account_type_by_id,
+        )
+        .unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].activity.id, "payment");
     }
 
     #[test]

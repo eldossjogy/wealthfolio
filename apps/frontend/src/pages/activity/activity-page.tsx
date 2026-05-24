@@ -156,6 +156,26 @@ const ActivityPage = () => {
     [investmentAccounts],
   );
 
+  const activityFormAccounts = useMemo(() => {
+    const source = isSpendingEnabled ? investmentAccounts : accounts;
+    const selectedAccount = selectedActivity?.accountId
+      ? accounts.find((account) => account.id === selectedActivity.accountId)
+      : undefined;
+    const list =
+      selectedAccount && !source.some((account) => account.id === selectedAccount.id)
+        ? [...source, selectedAccount]
+        : source;
+
+    return list
+      .filter((acc: Account) => !acc.isArchived)
+      .map((account: Account) => ({
+        value: account.id,
+        label: account.name,
+        currency: account.currency,
+        restrictionLevel: getActivityRestrictionLevel(account),
+      }));
+  }, [accounts, investmentAccounts, isSpendingEnabled, selectedActivity?.accountId]);
+
   // Intersect main's scope-resolved IDs with the spending-excluded set so the
   // Investments tab respects both the typed AccountScope (main's
   // portfolio-filters work) AND the spending opt-in partitioning (this
@@ -478,32 +498,14 @@ const ActivityPage = () => {
       {isMobileViewport ? (
         <MobileActivityForm
           key={selectedActivity?.id ?? "new"}
-          accounts={
-            accounts
-              ?.filter((acc: Account) => !acc.isArchived)
-              .map((account: Account) => ({
-                value: account.id,
-                label: account.name,
-                currency: account.currency,
-                restrictionLevel: getActivityRestrictionLevel(account),
-              })) ?? []
-          }
+          accounts={activityFormAccounts}
           activity={selectedActivity}
           open={showForm}
           onClose={handleFormClose}
         />
       ) : (
         <ActivityForm
-          accounts={
-            accounts
-              ?.filter((acc: Account) => !acc.isArchived)
-              .map((account: Account) => ({
-                value: account.id,
-                label: account.name,
-                currency: account.currency,
-                restrictionLevel: getActivityRestrictionLevel(account),
-              })) || []
-          }
+          accounts={activityFormAccounts}
           activity={selectedActivity}
           open={showForm}
           onClose={handleFormClose}

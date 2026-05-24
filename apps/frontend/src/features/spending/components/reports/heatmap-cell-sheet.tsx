@@ -13,9 +13,10 @@ import {
 import { useAccounts } from "@/hooks/use-accounts";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Account, Activity } from "@/lib/types";
-import { cn, formatDate, formatTime } from "@/lib/utils";
+import { cn, formatDateISO, resolveDisplayTimezone } from "@/lib/utils";
 
 import { isCashActivityOutflow } from "../../lib/constants";
+import { createZonedDayHourFormatter } from "../../lib/timezone";
 
 interface HeatmapCellSheetProps {
   open: boolean;
@@ -26,6 +27,9 @@ interface HeatmapCellSheetProps {
   dayLabel: string | null;
   /** Hour-of-day 0..23 of the bucket. Null while closed. */
   hour: number | null;
+  /** Exclusive hour-of-day upper bound. Null while closed. */
+  endHour: number | null;
+  timezone?: string | null;
   currency: string;
 }
 
@@ -40,6 +44,8 @@ export function HeatmapCellSheet({
   activities,
   dayLabel,
   hour,
+  endHour,
+  timezone,
   currency,
 }: HeatmapCellSheetProps) {
   const { isBalanceHidden } = useBalancePrivacy();
@@ -80,9 +86,9 @@ export function HeatmapCellSheet({
   }, [activities, accountById]);
 
   // Group by ISO week (Mon-start) so the dense list breaks into legible chunks.
-  const grouped = useMemo(() => groupByWeek(activities), [activities]);
+  const grouped = useMemo(() => groupByWeek(activities, timezone), [activities, timezone]);
 
-  const hourLabel = hour == null ? "" : formatHourRange(hour);
+  const hourLabel = hour == null ? "" : formatHourRange(hour, endHour);
 
   // The transactions page filters can't pin to a specific weekday+hour, but we
   // can deep-link to the same 12-week window so the user keeps context.
@@ -92,8 +98,8 @@ export function HeatmapCellSheet({
     start.setDate(end.getDate() - 12 * 7);
     const params = new URLSearchParams();
     params.set("tab", "spending");
-    params.set("from", start.toISOString().slice(0, 10));
-    params.set("to", end.toISOString().slice(0, 10));
+    params.set("from", formatDateISO(start));
+    params.set("to", formatDateISO(end));
     return `/activities?${params.toString()}`;
   }, []);
 
@@ -217,9 +223,11 @@ export function HeatmapCellSheet({
                               )}
                             </div>
                             <div className="text-muted-foreground/80 mt-0.5 flex items-center gap-1 text-[10px] leading-tight">
-                              <span className="tabular-nums">{formatTime(it.activityDate)}</span>
+                              <span className="tabular-nums">
+                                {formatZonedTime(it.activityDate, timezone)}
+                              </span>
                               <span aria-hidden>·</span>
-                              <span>{formatDate(it.activityDate)}</span>
+                              <span>{formatZonedDate(it.activityDate, timezone)}</span>
                               <span aria-hidden>·</span>
                               <span className="truncate">{account?.name ?? it.accountId}</span>
                             </div>
@@ -296,14 +304,16 @@ interface WeekGroup {
 }
 
 /** Bucket activities into Monday-anchored ISO weeks, newest first. */
-function groupByWeek(activities: Activity[]): WeekGroup[] {
-  const byKey = new Map<string, { date: Date; items: Activity[] }>();
+function groupByWeek(activities: Activity[], timezone?: string | null): WeekGroup[] {
+  const byKey = new Map<string, { label: string; items: Activity[] }>();
+  const getZonedDayHour = createZonedDayHourFormatter(timezone);
   for (const it of activities) {
     const d = new Date(it.activityDate);
     if (isNaN(d.getTime())) continue;
-    const monday = mondayOf(d);
-    const key = monday.toISOString().slice(0, 10);
-    const entry = byKey.get(key) ?? { date: monday, items: [] };
+    const zoned = getZonedDayHour(d);
+    if (!zoned) continue;
+    const key = mondayKeyForDayKey(zoned.dayKey);
+    const entry = byKey.get(key) ?? { label: `Week of ${formatDateKeyLabel(key)}`, items: [] };
     entry.items.push(it);
     byKey.set(key, entry);
   }
@@ -313,7 +323,7 @@ function groupByWeek(activities: Activity[]): WeekGroup[] {
     const total = entry.items.reduce((s, a) => s + (parseFloat(a.amount ?? "0") || 0), 0);
     groups.push({
       key,
-      label: `Week of ${formatDate(entry.date)}`,
+      label: entry.label,
       items: entry.items,
       total,
     });
@@ -322,22 +332,59 @@ function groupByWeek(activities: Activity[]): WeekGroup[] {
   return groups;
 }
 
-function mondayOf(d: Date): Date {
-  const out = new Date(d);
-  const day = (out.getDay() + 6) % 7; // Mon=0..Sun=6
-  out.setDate(out.getDate() - day);
-  out.setHours(0, 0, 0, 0);
-  return out;
+function mondayKeyForDayKey(dayKey: string): string {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const weekday = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  date.setUTCDate(date.getUTCDate() - weekday);
+  return formatUtcDateKey(date);
 }
 
-function formatHourRange(hour: number): string {
+function formatUtcDateKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
+function formatDateKeyLabel(dayKey: string): string {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day, 12));
+}
+
+function formatZonedTime(value: string, timezone?: string | null): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: resolveDisplayTimezone(timezone),
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatZonedDate(value: string, timezone?: string | null): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: resolveDisplayTimezone(timezone),
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatHourRange(hour: number, endHour: number | null): string {
   const start = formatHour(hour);
-  const end = formatHour((hour + 1) % 24);
+  const end = formatHour(endHour ?? hour + 1);
   return `${start} – ${end}`;
 }
 
 function formatHour(h: number): string {
   if (h === 0) return "12am";
   if (h === 12) return "12pm";
+  if (h === 24) return "12am";
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import type { Activity, TaxonomyCategory } from "@/lib/types";
+import { parseLocalDate } from "@/lib/utils";
 
 import { getActivitySpendingAmount } from "../lib/constants";
 import { inclusiveDays } from "../lib/date-utils";
@@ -45,7 +46,7 @@ export interface EventChartData {
 }
 
 function buildEventDailySeries(event: EventSpendingSummary, days: number): number[] {
-  const start = new Date(event.startDate);
+  const start = parseLocalDate(event.startDate);
   const series = new Array(days).fill(0);
   for (const [dateKey, amount] of Object.entries(event.dailySpending ?? {})) {
     const d = new Date(`${dateKey}T12:00:00`);
@@ -176,8 +177,8 @@ export function useEventChartData(
   taxonomyCategories: TaxonomyCategory[],
   dailySpendByDate?: Map<string, number>,
 ): EventChartData {
-  const startDate = useMemo(() => new Date(event.startDate), [event.startDate]);
-  const endDate = useMemo(() => new Date(event.endDate), [event.endDate]);
+  const startDate = useMemo(() => parseLocalDate(event.startDate), [event.startDate]);
+  const endDate = useMemo(() => parseLocalDate(event.endDate), [event.endDate]);
   // `inclusiveDays` is ≥ 1, and we floor at 1 anyway, so days > 0 always.
   const days = Math.max(1, inclusiveDays(startDate, endDate));
   const dailyDuring = event.totalSpending / days;

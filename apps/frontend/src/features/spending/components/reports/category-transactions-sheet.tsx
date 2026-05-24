@@ -14,7 +14,7 @@ import {
 import { useAccounts } from "@/hooks/use-accounts";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Account, TaxonomyCategory } from "@/lib/types";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, formatDateISO } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
 import { useCashActivitySearch } from "../../hooks/use-cash-activity-search";
@@ -187,8 +187,8 @@ export function CategoryTransactionsSheet({
     } else {
       params.set("category", category.id);
     }
-    params.set("from", rangeStart.toISOString().slice(0, 10));
-    params.set("to", rangeEnd.toISOString().slice(0, 10));
+    params.set("from", formatDateISO(rangeStart));
+    params.set("to", formatDateISO(rangeEnd));
     return `/activities?${params.toString()}`;
   }, [category, rangeStart, rangeEnd]);
 

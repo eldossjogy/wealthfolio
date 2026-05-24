@@ -49,6 +49,7 @@ import {
   isSpendingAccountType,
 } from "../lib/constants";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
+import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
 
@@ -91,14 +92,17 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
   const isEditing = !!activity?.id;
   const qc = useQueryClient();
   const { accounts } = useAccounts({ filterActive: false });
-  const spendingAccounts = useMemo(
-    () =>
-      (accounts ?? []).filter(
-        (a: Account) =>
-          isSpendingAccountType(a.accountType) && (a.isActive || a.id === activity?.accountId),
-      ),
-    [accounts, activity?.accountId],
-  );
+  const { settings } = useSpendingSettings();
+  const trackedAccountIds = settings?.accountIds;
+  const spendingAccounts = useMemo(() => {
+    const tracked = new Set(trackedAccountIds ?? []);
+    return (accounts ?? []).filter(
+      (a: Account) =>
+        isSpendingAccountType(a.accountType) &&
+        (tracked.has(a.id) || a.id === activity?.accountId) &&
+        (a.isActive || a.id === activity?.accountId),
+    );
+  }, [accounts, activity?.accountId, trackedAccountIds]);
 
   // Used only to look up the selected category's name/color for the trigger label.
   // QuickCategorizePopover loads its own data internally.
@@ -240,6 +244,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
     onSuccess: () => {
       invalidateSpendingCaches(qc);
       qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
+      qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
       toast.success(isEditing ? "Activity updated." : "Activity created.");
       onOpenChange(false);
     },

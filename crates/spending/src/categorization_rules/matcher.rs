@@ -24,6 +24,7 @@ const REGEX_SIZE_LIMIT_BYTES: usize = 64 * 1024;
 
 pub fn compile_regex_pattern(pattern: &str) -> Result<Regex, regex::Error> {
     RegexBuilder::new(pattern)
+        .case_insensitive(true)
         .size_limit(REGEX_SIZE_LIMIT_BYTES)
         .build()
 }
@@ -40,12 +41,7 @@ pub fn compile_rules(rules: &[CategorizationRule]) -> Vec<CompiledRule<'_>> {
                 match compile_regex_pattern(&rule.pattern) {
                     Ok(re) => Some(re),
                     Err(err) => {
-                        log::debug!(
-                            "Categorization rule {} has invalid regex {:?}: {}",
-                            rule.id,
-                            rule.pattern,
-                            err
-                        );
+                        log::debug!("Categorization rule {} has invalid regex: {}", rule.id, err);
                         None
                     }
                 }

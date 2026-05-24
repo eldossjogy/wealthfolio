@@ -19,9 +19,9 @@ import { cn, formatDate } from "@/lib/utils";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
 import {
+  getActivitySpendingAmount,
   getCashActivityLabel,
   isCashActivityIncome,
-  isCashActivityOutflow,
 } from "../lib/constants";
 import type { TransactionRowVM } from "../lib/transactions-helpers";
 
@@ -55,8 +55,15 @@ function TransactionRowImpl({
   onDelete,
 }: TransactionRowProps) {
   const a = row.activity;
-  const isOutflow = isCashActivityOutflow(a.activityType, account?.accountType);
-  const sign = isOutflow ? "-" : "+";
+  const spendingAmount = getActivitySpendingAmount(a, account?.accountType);
+  const isOutflow = spendingAmount > 0;
+  const isInternalTransfer =
+    !!a.sourceGroupId && (a.activityType === "TRANSFER_IN" || a.activityType === "TRANSFER_OUT");
+  const isIncome =
+    !isInternalTransfer && isCashActivityIncome(a.activityType, account?.accountType, a.subtype);
+  const isRefund = spendingAmount < 0;
+  const isNeutral = !isOutflow && !isIncome && !isRefund;
+  const sign = isOutflow ? "-" : isIncome || isRefund ? "+" : "";
   const amount = parseFloat(a.amount ?? "0");
   const safeAmount = Number.isFinite(amount) ? amount : 0;
   const accountName = account?.name ?? a.accountId;
@@ -102,43 +109,43 @@ function TransactionRowImpl({
         </div>
       </TableCell>
       <TableCell className="hidden md:table-cell">
-        <QuickCategorizePopover
-          scope={
-            isCashActivityIncome(a.activityType, account?.accountType, a.subtype)
-              ? "income"
-              : "expense"
-          }
-          selectedCategoryId={row.category?.id ?? null}
-          onSelect={(taxonomyId, categoryId) => onAssignCategory(a.id, taxonomyId, categoryId)}
-          onClear={() => row.category && onClearCategory(a.id, row.category.taxonomyId)}
-          trigger={
-            <button
-              type="button"
-              aria-label={
-                row.category ? `Change category (${row.category.name})` : "Assign category"
-              }
-              className="hover:bg-muted/60 -mx-1 inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors"
-            >
-              {row.category ? (
-                <>
-                  {row.category.color && (
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: row.category.color }}
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="truncate text-sm">{row.category.name}</span>
-                </>
-              ) : (
-                <span className="text-muted-foreground inline-flex items-center gap-1 text-xs italic">
-                  <Icons.Plus className="h-3 w-3" aria-hidden="true" />
-                  Categorize
-                </span>
-              )}
-            </button>
-          }
-        />
+        {isNeutral ? (
+          <span className="text-muted-foreground text-xs">Neutral</span>
+        ) : (
+          <QuickCategorizePopover
+            scope={isIncome ? "income" : "expense"}
+            selectedCategoryId={row.category?.id ?? null}
+            onSelect={(taxonomyId, categoryId) => onAssignCategory(a.id, taxonomyId, categoryId)}
+            onClear={() => row.category && onClearCategory(a.id, row.category.taxonomyId)}
+            trigger={
+              <button
+                type="button"
+                aria-label={
+                  row.category ? `Change category (${row.category.name})` : "Assign category"
+                }
+                className="hover:bg-muted/60 -mx-1 inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left transition-colors"
+              >
+                {row.category ? (
+                  <>
+                    {row.category.color && (
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: row.category.color }}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="truncate text-sm">{row.category.name}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground inline-flex items-center gap-1 text-xs italic">
+                    <Icons.Plus className="h-3 w-3" aria-hidden="true" />
+                    Categorize
+                  </span>
+                )}
+              </button>
+            }
+          />
+        )}
       </TableCell>
       <TableCell className="hidden text-sm lg:table-cell">
         <QuickEventPopover
@@ -175,7 +182,7 @@ function TransactionRowImpl({
       <TableCell
         className={cn(
           "text-right text-sm font-medium tabular-nums",
-          isOutflow ? "text-destructive" : "text-success",
+          isOutflow ? "text-destructive" : isNeutral ? "text-muted-foreground" : "text-success",
         )}
       >
         {sign}

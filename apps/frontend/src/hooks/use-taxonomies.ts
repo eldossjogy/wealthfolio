@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidateSpendingCaches } from "@/features/spending/lib/invalidation";
 import {
   getTaxonomies,
   getTaxonomy,
@@ -30,6 +31,14 @@ import type {
   TaxonomyScope,
   TaxonomyWithCategories,
 } from "@/lib/types";
+
+const ACTIVITY_TAXONOMY_IDS = new Set(["spending_categories", "income_sources"]);
+
+function invalidateActivityTaxonomyCaches(queryClient: QueryClient, taxonomyId: string) {
+  if (ACTIVITY_TAXONOMY_IDS.has(taxonomyId)) {
+    invalidateSpendingCaches(queryClient);
+  }
+}
 
 // ============================================================================
 // Taxonomy Queries
@@ -120,6 +129,7 @@ export function useCreateCategory() {
     mutationFn: (category: NewTaxonomyCategory) => createCategory(category),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
+      invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -131,6 +141,7 @@ export function useUpdateCategory() {
     mutationFn: (category: TaxonomyCategory) => updateCategory(category),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
+      invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -143,6 +154,7 @@ export function useDeleteCategory() {
       deleteCategory(taxonomyId, categoryId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
+      invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -164,6 +176,7 @@ export function useMoveCategory() {
     }) => moveCategory(taxonomyId, categoryId, newParentId, position),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
+      invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
     },
   });
 }

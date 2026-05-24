@@ -33,6 +33,7 @@ export function useSpendingSettingsMutation() {
       // Account opt-in changes the universe of cash activities — invalidate every
       // spending-scoped cache so each view refetches with the new account_ids.
       invalidateSpendingCaches(queryClient);
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
       toast.success("Spending settings updated.");
     },
     onError: () => toast.error("Failed to update spending settings."),

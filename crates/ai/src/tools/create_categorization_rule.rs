@@ -127,8 +127,9 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         debug!(
-            "create_categorization_rule called: pattern={}, categoryKey={}",
-            args.pattern, args.category_key
+            "create_categorization_rule called: pattern_len={}, categoryKey={}",
+            args.pattern.chars().count(),
+            args.category_key
         );
 
         if args.pattern.trim().is_empty() {

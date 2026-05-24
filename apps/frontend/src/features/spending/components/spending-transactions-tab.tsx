@@ -1,4 +1,12 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useSearchParams } from "react-router-dom";
@@ -69,6 +77,53 @@ function parseLocalDate(value: string): Date | undefined {
   if (!y || !m || !d) return undefined;
   return new Date(y, m - 1, d);
 }
+
+function parseSetParam(value: string | null): Set<string> {
+  return new Set(value ? value.split(",").filter(Boolean) : []);
+}
+
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+function parseStatusParam(value: CashActivityStatusFilter | null): CashActivityStatusFilter {
+  return value === "needs_review" || value === "uncategorized" || value === "categorized"
+    ? value
+    : "all";
+}
+
+function parseAmountRange(minParam: string | null, maxParam: string | null): AmountRange {
+  const min = minParam != null ? Number(minParam) : null;
+  const max = maxParam != null ? Number(maxParam) : null;
+  return {
+    min: min != null && Number.isFinite(min) ? min : null,
+    max: max != null && Number.isFinite(max) ? max : null,
+  };
+}
+
+function sameAmountRange(a: AmountRange, b: AmountRange): boolean {
+  return a.min === b.min && a.max === b.max;
+}
+
+function parseDateRangeParams(start: string | null, end: string | null): DateRange | undefined {
+  if (!start && !end) return undefined;
+  return {
+    from: start ? parseLocalDate(start) : undefined,
+    to: end ? parseLocalDate(end) : undefined,
+  };
+}
+
+function sameDateRange(a: DateRange | undefined, b: DateRange | undefined): boolean {
+  return (
+    (a?.from ? formatDateISO(a.from) : undefined) ===
+      (b?.from ? formatDateISO(b.from) : undefined) &&
+    (a?.to ? formatDateISO(a.to) : undefined) === (b?.to ? formatDateISO(b.to) : undefined)
+  );
+}
 const SEARCH_DEBOUNCE_MS = 300;
 
 export interface SpendingTransactionsTabHandle {
@@ -91,6 +146,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const urlAmountMax = searchParams.get("amountMax");
 
     const qc = useQueryClient();
+    const applyingUrlParamsRef = useRef(false);
 
     const [editingActivity, setEditingActivity] = useState<TransactionRowVM | undefined>();
     const [showForm, setShowForm] = useState(false);
@@ -98,55 +154,94 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const [deletePreview, setDeletePreview] = useState<DeletePreview | undefined>();
 
     const [searchInput, setSearchInput] = useState(urlSearchQuery ?? "");
+    const searchInputRef = useRef(searchInput.trim());
+    searchInputRef.current = searchInput.trim();
     const debouncedSearch = useDebouncedValue(searchInput.trim(), SEARCH_DEBOUNCE_MS);
 
     const [statusFilter, setStatusFilter] = useState<CashActivityStatusFilter>(
-      urlStatus &&
-        (urlStatus === "all" ||
-          urlStatus === "needs_review" ||
-          urlStatus === "uncategorized" ||
-          urlStatus === "categorized")
-        ? urlStatus
-        : "all",
+      parseStatusParam(urlStatus),
     );
-    const [selectedTypes, setSelectedTypes] = useState<Set<string>>(
-      () => new Set(urlTypes ? urlTypes.split(",").filter(Boolean) : []),
+    const [selectedTypes, setSelectedTypes] = useState<Set<string>>(() => parseSetParam(urlTypes));
+    const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(() =>
+      parseSetParam(urlAccounts),
     );
-    const [selectedAccounts, setSelectedAccounts] = useState<Set<string>>(
-      () => new Set(urlAccounts ? urlAccounts.split(",").filter(Boolean) : []),
+    const [selectedCategories, setSelectedCategories] = useState<Set<string>>(() =>
+      parseSetParam(urlCategoryId),
     );
-    const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
-      () => new Set(urlCategoryId ? urlCategoryId.split(",").filter(Boolean) : []),
+    const [selectedSubcategories, setSelectedSubcategories] = useState<Set<string>>(() =>
+      parseSetParam(urlSubcategoryId),
     );
-    const [selectedSubcategories, setSelectedSubcategories] = useState<Set<string>>(
-      () => new Set(urlSubcategoryId ? urlSubcategoryId.split(",").filter(Boolean) : []),
+    const [selectedEvents, setSelectedEvents] = useState<Set<string>>(() =>
+      parseSetParam(urlEvents),
     );
-    const [selectedEvents, setSelectedEvents] = useState<Set<string>>(
-      () => new Set(urlEvents ? urlEvents.split(",").filter(Boolean) : []),
+    const [amountRange, setAmountRange] = useState<AmountRange>(() =>
+      parseAmountRange(urlAmountMin, urlAmountMax),
     );
-    const [amountRange, setAmountRange] = useState<AmountRange>(() => {
-      const min = urlAmountMin != null ? Number(urlAmountMin) : null;
-      const max = urlAmountMax != null ? Number(urlAmountMax) : null;
-      return {
-        min: min != null && Number.isFinite(min) ? min : null,
-        max: max != null && Number.isFinite(max) ? max : null,
-      };
-    });
-    const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
-      if (urlStartDate || urlEndDate) {
-        return {
-          from: urlStartDate ? parseLocalDate(urlStartDate) : undefined,
-          to: urlEndDate ? parseLocalDate(urlEndDate) : undefined,
-        };
-      }
-      return undefined;
-    });
+    const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
+      parseDateRangeParams(urlStartDate, urlEndDate),
+    );
 
-    // Sync filter state → URL params (one-way, debounced search included via
+    useEffect(() => {
+      applyingUrlParamsRef.current = true;
+      setSearchInput((prev) => {
+        const next = urlSearchQuery ?? "";
+        return prev === next ? prev : next;
+      });
+      setStatusFilter((prev) => {
+        const next = parseStatusParam(urlStatus);
+        return prev === next ? prev : next;
+      });
+      setSelectedTypes((prev) => {
+        const next = parseSetParam(urlTypes);
+        return setsEqual(prev, next) ? prev : next;
+      });
+      setSelectedAccounts((prev) => {
+        const next = parseSetParam(urlAccounts);
+        return setsEqual(prev, next) ? prev : next;
+      });
+      setSelectedCategories((prev) => {
+        const next = parseSetParam(urlCategoryId);
+        return setsEqual(prev, next) ? prev : next;
+      });
+      setSelectedSubcategories((prev) => {
+        const next = parseSetParam(urlSubcategoryId);
+        return setsEqual(prev, next) ? prev : next;
+      });
+      setSelectedEvents((prev) => {
+        const next = parseSetParam(urlEvents);
+        return setsEqual(prev, next) ? prev : next;
+      });
+      setAmountRange((prev) => {
+        const next = parseAmountRange(urlAmountMin, urlAmountMax);
+        return sameAmountRange(prev, next) ? prev : next;
+      });
+      setDateRange((prev) => {
+        const next = parseDateRangeParams(urlStartDate, urlEndDate);
+        return sameDateRange(prev, next) ? prev : next;
+      });
+    }, [
+      urlAccounts,
+      urlAmountMax,
+      urlAmountMin,
+      urlCategoryId,
+      urlEndDate,
+      urlEvents,
+      urlSearchQuery,
+      urlStartDate,
+      urlStatus,
+      urlSubcategoryId,
+      urlTypes,
+    ]);
+
+    // Sync filter state → URL params (debounced search included via
     // debouncedSearch). `replace: true` so each keystroke doesn't pollute
     // history. Empty/default values are removed from the URL so a "clean"
     // state reflects in the address bar.
     useEffect(() => {
+      if (applyingUrlParamsRef.current) {
+        applyingUrlParamsRef.current = false;
+        return;
+      }
       const next = new URLSearchParams(searchParams);
       const setOrDelete = (key: string, value: string | null | undefined) => {
         if (value && value.length > 0) next.set(key, value);
@@ -160,7 +255,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       setSet("category", selectedCategories);
       setSet("subcategory", selectedSubcategories);
       setSet("events", selectedEvents);
-      setOrDelete("q", debouncedSearch || null);
+      setOrDelete("q", searchInputRef.current || null);
       setOrDelete("amountMin", amountRange.min != null ? String(amountRange.min) : null);
       setOrDelete("amountMax", amountRange.max != null ? String(amountRange.max) : null);
       setOrDelete("from", dateRange?.from ? formatDateISO(dateRange.from) : null);
@@ -343,6 +438,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       onSuccess: () => {
         invalidateSpendingCaches(qc);
         qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
+        qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
         toast.success("Transaction duplicated.");
       },
       onError: () => toast.error("Failed to duplicate transaction."),
@@ -361,6 +457,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       onSuccess: (results) => {
         invalidateSpendingCaches(qc);
         qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
+        qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
         const ok = results.filter((r) => r.status === "fulfilled").length;
         const failed = results.length - ok;
         if (ok > 0) toast.success(`Deleted ${ok} ${pluralizeActivity(ok)}.`);

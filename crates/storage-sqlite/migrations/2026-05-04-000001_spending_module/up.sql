@@ -117,7 +117,7 @@ CREATE TABLE spending_categorization_rules (
     activity_type TEXT,                            -- optional: BUY | WITHDRAWAL | DEPOSIT | ...
     priority INTEGER NOT NULL DEFAULT 0,
     is_global INTEGER NOT NULL DEFAULT 1,
-    account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
     -- Preset provenance (NULL for user-created rules):
     --   preset_id        — short slug of the source preset, e.g. "ca", "us"
     --   preset_rule_key  — stable per-rule key used for diff/update across versions

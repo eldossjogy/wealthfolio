@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
+import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { cn } from "@/lib/utils";
 
 import { comparisonLabel, type ComparisonMode } from "../../lib/reports-period";
@@ -81,6 +82,7 @@ export function PeriodComparisonCard({
 }
 
 function ComparisonMetric({ row, currency }: { row: MetricRow; currency: string }) {
+  const { isBalanceHidden } = useBalancePrivacy();
   const { currentValue, priorValue, goodOnIncrease, label } = row;
   const isRate = label === "Savings rate";
   const delta = currentValue - priorValue;
@@ -99,9 +101,9 @@ function ComparisonMetric({ row, currency }: { row: MetricRow; currency: string 
     <div className="flex flex-col">
       <span className="text-muted-foreground text-[11px] font-light tracking-wide">{label}</span>
       <span className="text-foreground text-base font-semibold tabular-nums">
-        {formatMetric(currentValue, currency, isRate)}
+        {isBalanceHidden ? "••••" : formatMetric(currentValue, currency, isRate)}
       </span>
-      {pct != null && (
+      {!isBalanceHidden && pct != null && (
         <span className={cn("mt-0.5 text-[11px] tabular-nums", toneClass)}>
           {trendingUp ? "↑" : delta < 0 ? "↓" : "→"} {Math.abs(pct * 100).toFixed(1)}%
           <span className="text-muted-foreground/70 ml-1 font-normal">

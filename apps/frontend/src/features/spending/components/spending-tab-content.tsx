@@ -48,9 +48,13 @@ const INTERVAL_STORAGE_KEY = "spending-interval";
 function rangeToReportRequest(range: DateRange | undefined) {
   const from = range?.from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const to = range?.to ?? new Date();
+  const start = new Date(from);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(23, 59, 59, 999);
   return {
-    startDate: new Date(formatDateISO(from)).toISOString(),
-    endDate: new Date(`${formatDateISO(to)}T23:59:59.999Z`).toISOString(),
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
   };
 }
 

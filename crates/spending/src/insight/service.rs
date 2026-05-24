@@ -551,7 +551,7 @@ fn aggregate_spend(
             continue;
         }
 
-        let assignments = assignments_by_activity
+        let mut assignments = assignments_by_activity
             .get(&a.id)
             .into_iter()
             .flatten()
@@ -567,15 +567,20 @@ fn aggregate_spend(
         // Spending taxonomies are single-select: the activity_taxonomy_assignments
         // service deletes any prior (activity_id, taxonomy_id) row before insert,
         // and the unique index on (activity_id, taxonomy_id, category_id) enforces
-        // it at the DB layer. Treat extra rows as a data-integrity issue —
-        // attribute the full amount to the first assignment so we stay reconciled
-        // with budget actuals (which use the same convention).
+        // it at the DB layer. Treat extra rows as a data-integrity issue, but
+        // keep the release fallback deterministic instead of depending on repo
+        // row order.
         debug_assert!(
             assignments.len() == 1,
             "single-select invariant violated for activity {} in spending_categories: {} assignments",
             a.id,
             assignments.len(),
         );
+        assignments.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         let primary = assignments[0];
         let top_id = top_category_id(&primary.category_id, spending_meta);
         let entry = agg.spending_by_top.entry(top_id).or_insert((0.0, 0));

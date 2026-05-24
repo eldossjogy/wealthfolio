@@ -15,7 +15,7 @@ import {
 } from "@wealthfolio/ui";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { Activity } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, parseLocalDate } from "@/lib/utils";
 
 import { useEventDialog } from "../../event-dialog-provider";
 import { useEventsAggregate } from "../../../hooks/use-events-aggregate";
@@ -111,8 +111,8 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
     const result: Record<string, number> = {};
     const wide = events
       .map((e) => {
-        const start = new Date(e.startDate);
-        const end = new Date(e.endDate);
+        const start = parseLocalDate(e.startDate);
+        const end = parseLocalDate(e.endDate);
         const a = Math.max(0, Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000));
         const b = Math.min(
           periodDays - 1,
@@ -175,8 +175,8 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
     const result: Record<string, number> = {};
     const rowEnds: number[] = [];
     const indexed = events.map((e) => {
-      const start = new Date(e.startDate);
-      const end = new Date(e.endDate);
+      const start = parseLocalDate(e.startDate);
+      const end = parseLocalDate(e.endDate);
       const a = Math.max(0, Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000));
       const b = Math.min(
         periodDays - 1,
@@ -367,8 +367,8 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
 
           {/* Highlight event regions on the daily chart */}
           {events.map((ev) => {
-            const start = new Date(ev.startDate);
-            const end = new Date(ev.endDate);
+            const start = parseLocalDate(ev.startDate);
+            const end = parseLocalDate(ev.endDate);
             const a = Math.max(
               0,
               Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000),
@@ -406,8 +406,8 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
 
           {/* Event bands */}
           {events.map((ev) => {
-            const start = new Date(ev.startDate);
-            const end = new Date(ev.endDate);
+            const start = parseLocalDate(ev.startDate);
+            const end = parseLocalDate(ev.endDate);
             const a = Math.max(
               0,
               Math.round((start.getTime() - rangeStart.getTime()) / 86_400_000),
@@ -606,8 +606,12 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
               </span>
             </div>
             <div className="text-muted-foreground/80 mt-0.5 text-[10px] tabular-nums">
-              {formatSelectedRange(new Date(selected.startDate), new Date(selected.endDate))} ·{" "}
-              {inclusiveDays(new Date(selected.startDate), new Date(selected.endDate))}D
+              {formatSelectedRange(
+                parseLocalDate(selected.startDate),
+                parseLocalDate(selected.endDate),
+              )}{" "}
+              ·{" "}
+              {inclusiveDays(parseLocalDate(selected.startDate), parseLocalDate(selected.endDate))}D
             </div>
           </SummaryCell>
         )}

@@ -31,6 +31,7 @@ export interface WhenWhereStageProps {
   onRetryEvents?: () => void;
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
+  timezone?: string | null;
   /** Period start/end for the events strip. */
   rangeStart: Date;
   rangeEnd: Date;
@@ -38,8 +39,8 @@ export interface WhenWhereStageProps {
   windowOffset: number;
   onPrevWindow: () => void;
   onNextWindow: () => void;
-  /** Fired when a heatmap cell is clicked. Weekday is Mon=0..Sun=6, hour is 0..23. */
-  onHeatmapCellClick?: (weekday: number, hour: number) => void;
+  /** Fired when a heatmap cell is clicked. Weekday is Mon=0..Sun=6, hours are [start, end). */
+  onHeatmapCellClick?: (weekday: number, startHour: number, endHour: number) => void;
 }
 
 export function WhenWhereStage({
@@ -51,6 +52,7 @@ export function WhenWhereStage({
   onRetryEvents,
   taxonomyCategories,
   currency,
+  timezone,
   rangeStart,
   rangeEnd,
   windowOffset,
@@ -82,6 +84,7 @@ export function WhenWhereStage({
         accountTypeById={accountTypeById}
         dailySpendByDate={dailySpendByDate}
         currency={currency}
+        timezone={timezone}
         onCellClick={onHeatmapCellClick}
       />
       <div className="flex flex-col gap-4">

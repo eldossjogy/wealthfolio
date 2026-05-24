@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { parseLocalDate } from "@/lib/utils";
+
 import type { EventSpendingSummary } from "../types/event";
 
 export interface WeekBar {
@@ -79,8 +81,8 @@ function computeWeekBars(events: EventSpendingSummary[], week: Date[]): WeekBar[
   const weekEnd = week[6];
   const visible = events
     .map((e) => {
-      const s = stripTime(new Date(e.startDate));
-      const ee = stripTime(new Date(e.endDate));
+      const s = stripTime(parseLocalDate(e.startDate));
+      const ee = stripTime(parseLocalDate(e.endDate));
       if (ee < weekStart || s > weekEnd) return null;
       const startCol = s >= weekStart ? diffDays(s, weekStart) : 0;
       const endCol = ee <= weekEnd ? diffDays(ee, weekStart) : 6;
@@ -119,8 +121,8 @@ export function useMonthCalendar(events: EventSpendingSummary[], cursor: Date): 
   const monthEvents = useMemo(
     () =>
       events.filter((e) => {
-        const s = stripTime(new Date(e.startDate));
-        const ee = stripTime(new Date(e.endDate));
+        const s = stripTime(parseLocalDate(e.startDate));
+        const ee = stripTime(parseLocalDate(e.endDate));
         return s <= monthEnd && ee >= monthStart;
       }),
     [events, monthStart, monthEnd],

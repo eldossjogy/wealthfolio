@@ -12,6 +12,7 @@ import type { Activity } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { getActivitySpendingAmount } from "../../../lib/constants";
+import { createZonedDayHourFormatter, type ZonedDayHour } from "../../../lib/timezone";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS = "text-muted-foreground/70 text-[10px] font-normal uppercase tracking-[0.12em]";
@@ -24,7 +25,8 @@ export interface WhenYouSpendCardProps {
   accountTypeById?: Map<string, string>;
   dailySpendByDate?: Map<string, number>;
   currency: string;
-  onCellClick?: (weekday: number, hour: number) => void;
+  timezone?: string | null;
+  onCellClick?: (weekday: number, startHour: number, endHour: number) => void;
 }
 
 export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
@@ -32,14 +34,15 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   accountTypeById,
   dailySpendByDate,
   currency,
+  timezone,
   onCellClick,
 }) => {
   const { isBalanceHidden } = useBalancePrivacy();
   const isPhone = useIsMobileViewport();
   const cols = isPhone ? 8 : 24;
   const grid = useMemo(
-    () => buildWeekdayHourGrid(activities, accountTypeById, dailySpendByDate, cols),
-    [accountTypeById, activities, dailySpendByDate, cols],
+    () => buildWeekdayHourGrid(activities, accountTypeById, dailySpendByDate, cols, timezone),
+    [accountTypeById, activities, dailySpendByDate, cols, timezone],
   );
 
   if (activities.length === 0) {
@@ -135,7 +138,7 @@ function Row({
   currency: string;
   isPhone: boolean;
   isBalanceHidden: boolean;
-  onCellClick?: (weekday: number, hour: number) => void;
+  onCellClick?: (weekday: number, startHour: number, endHour: number) => void;
 }) {
   const cols = cells.length;
   const hoursPerCell = Math.max(1, Math.round(24 / cols));
@@ -175,7 +178,7 @@ function Row({
             <button
               key={i}
               type="button"
-              onClick={() => onCellClick(weekdayIndex, startHour)}
+              onClick={() => onCellClick(weekdayIndex, startHour, Math.min(24, endHour + 1))}
               className="aspect-square rounded-[3px] transition-all hover:scale-110 hover:ring-1 hover:ring-[var(--ring)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)]"
               style={{ backgroundColor: "var(--heatmap-accent)", opacity }}
               title={label}
@@ -218,6 +221,7 @@ function Legend() {
 function formatHour(h: number): string {
   if (h === 0) return "12am";
   if (h === 12) return "12pm";
+  if (h === 24) return "12am";
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
@@ -234,30 +238,32 @@ function buildWeekdayHourGrid(
   accountTypeById?: Map<string, string>,
   dailySpendByDate?: Map<string, number>,
   cols = 24,
+  timezone?: string | null,
 ): WeekdayHourGrid {
   const safeCols = cols > 0 && cols <= 24 ? cols : 24;
   const hoursPerCell = Math.max(1, Math.round(24 / safeCols));
   const cells: number[][] = Array.from({ length: 7 }, () => new Array(safeCols).fill(0));
   // Per (weekday, dayKey) → daily total. Used to compute the median per weekday.
   const dayTotals = new Map<string, number>();
+  const getZonedDayHour = createZonedDayHourFormatter(timezone);
   const rawSpendByDate = dailySpendByDate
-    ? buildRawSpendByDate(activities, accountTypeById)
+    ? buildRawSpendByDate(activities, accountTypeById, getZonedDayHour)
     : undefined;
 
   for (const a of activities) {
     const rawAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
     if (rawAmount === 0) continue;
     const date = new Date(a.activityDate);
-    if (isNaN(date.getTime())) continue;
-    const dayKey = date.toISOString().slice(0, 10);
+    const zoned = getZonedDayHour(date);
+    if (!zoned) continue;
+    const dayKey = zoned.dayKey;
     const convertedDayTotal = dailySpendByDate?.get(dayKey);
     const rawDayTotal = rawSpendByDate?.get(dayKey) ?? 0;
     const amt =
       convertedDayTotal != null && rawDayTotal > 0
         ? rawAmount * (convertedDayTotal / rawDayTotal)
         : rawAmount;
-    const weekday = (date.getDay() + 6) % 7; // Mon=0..Sun=6
-    const hour = date.getHours();
+    const { weekday, hour } = zoned;
     const bucket = Math.min(safeCols - 1, Math.floor(hour / hoursPerCell));
     cells[weekday][bucket] += amt;
     const key = `${weekday}|${dayKey}`;
@@ -291,14 +297,16 @@ function buildWeekdayHourGrid(
 function buildRawSpendByDate(
   activities: Activity[],
   accountTypeById?: Map<string, string>,
+  getZonedDayHour: (date: Date) => ZonedDayHour | null = createZonedDayHourFormatter(),
 ): Map<string, number> {
   const totals = new Map<string, number>();
   for (const a of activities) {
     const amount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
     if (amount === 0) continue;
     const date = new Date(a.activityDate);
-    if (isNaN(date.getTime())) continue;
-    const dayKey = date.toISOString().slice(0, 10);
+    const zoned = getZonedDayHour(date);
+    if (!zoned) continue;
+    const dayKey = zoned.dayKey;
     totals.set(dayKey, (totals.get(dayKey) ?? 0) + amount);
   }
   return totals;

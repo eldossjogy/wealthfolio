@@ -22,7 +22,7 @@ import {
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import type { Activity, TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn, formatAmount, parseLocalDate } from "@/lib/utils";
 
 import { useEventDialog } from "../../event-dialog-provider";
 import { useEventChartData } from "../../../hooks/use-event-chart-data";
@@ -432,7 +432,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
               />
               {ev.eventName}
               <span className="text-muted-foreground/80 ml-1">
-                · {formatChipDate(new Date(ev.startDate))}
+                · {formatChipDate(parseLocalDate(ev.startDate))}
               </span>
             </button>
           );

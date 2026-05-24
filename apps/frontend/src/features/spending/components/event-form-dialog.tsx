@@ -35,6 +35,7 @@ import {
 } from "@wealthfolio/ui";
 
 import type { Activity } from "@/lib/types";
+import { formatDateISO, parseLocalDate } from "@/lib/utils";
 
 import { useCashActivities, useSetActivityEvent } from "../hooks/use-cash-activities";
 import {
@@ -131,8 +132,8 @@ export function EventFormDialog({
         name: event.name,
         description: event.description ?? "",
         eventTypeId: event.eventTypeId,
-        startDate: new Date(event.startDate),
-        endDate: new Date(event.endDate),
+        startDate: parseLocalDate(event.startDate),
+        endDate: parseLocalDate(event.endDate),
       });
     } else {
       form.reset({
@@ -238,8 +239,8 @@ export function EventFormDialog({
   const handleSubmit = async (values: EventFormValues) => {
     setIsSubmitting(true);
     try {
-      const startDateStr = values.startDate.toISOString().split("T")[0];
-      const endDateStr = values.endDate.toISOString().split("T")[0];
+      const startDateStr = formatDateISO(values.startDate);
+      const endDateStr = formatDateISO(values.endDate);
 
       if (isEditing && event) {
         const updated = await update.mutateAsync({

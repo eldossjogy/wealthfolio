@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::context::ServiceContext;
 use log::{debug, info, warn};
+use serde::Deserialize;
 use tauri::State;
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::{
@@ -398,8 +399,15 @@ pub async fn create_event_type(
 pub struct UpdateEventType {
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_color")]
     pub color: Option<Option<String>>,
+}
+
+fn deserialize_optional_color<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 #[tauri::command]

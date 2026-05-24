@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import type { Activity } from "@/lib/types";
+import { parseLocalDate } from "@/lib/utils";
 
 import { inclusiveDays } from "../lib/date-utils";
 import type { EventSpendingSummary } from "../types/event";
@@ -25,7 +26,10 @@ export function computeEventsAggregate(
   let topEvent: EventSpendingSummary | null = null;
   for (const ev of events) {
     totalSpent += ev.totalSpending;
-    const days = Math.max(1, inclusiveDays(new Date(ev.startDate), new Date(ev.endDate)));
+    const days = Math.max(
+      1,
+      inclusiveDays(parseLocalDate(ev.startDate), parseLocalDate(ev.endDate)),
+    );
     totalEventDays += days;
     if (!topEvent || ev.totalSpending > topEvent.totalSpending) topEvent = ev;
   }
