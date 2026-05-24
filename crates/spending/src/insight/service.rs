@@ -13,11 +13,13 @@ use wealthfolio_core::fx::FxServiceTrait;
 use wealthfolio_core::taxonomies::TaxonomyServiceTrait;
 
 use super::model::{
-    AmountBlock, AmountSource, CategoryInsight, CompareMode, DayBucket, GroupInsight, Headline,
-    HealthStatus, MonthBucket, MonthlyAmount, PaceState, PeriodMeta, SpendingInsight,
-    SpendingInsightRequest, UncategorizedBucket,
+    AmountBlock, AmountSource, CategoryInsight, CompareMode, DayBucket, DayCategoryBucket,
+    GroupInsight, Headline, HealthStatus, MonthBucket, MonthlyAmount, PaceState, PeriodMeta,
+    SpendingInsight, SpendingInsightRequest, UncategorizedBucket,
 };
-use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
+use crate::activity_assignments::{
+    ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentRepositoryTrait,
+};
 use crate::activity_classification::{activity_abs_amount, classify_activity};
 use crate::budget::service::{
     category_meta, resolve_group_for_category, top_category_id, top_level_categories, TargetIndex,
@@ -26,6 +28,7 @@ use crate::budget::BudgetRepositoryTrait;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
+const UNCATEGORIZED_CATEGORY_ID: &str = "__uncategorized__";
 const OTHER_GROUP_KEY: &str = "other";
 const TRAILING_WINDOW_DAYS: i64 = 7;
 /// Pace status flips to `Approaching` when projected spend reaches 90% of budget.
@@ -378,6 +381,15 @@ impl InsightService {
             currency,
             fx_as_of,
         );
+        let by_day_by_category = compute_by_day_by_category(
+            &current_acts,
+            &account_types,
+            &assignments_by_activity,
+            timezone,
+            self.fx_service.as_ref(),
+            currency,
+            fx_as_of,
+        );
         let by_month = compute_by_month(
             &current_acts,
             &account_types,
@@ -431,6 +443,7 @@ impl InsightService {
             groups: group_insights,
             uncategorized,
             by_day,
+            by_day_by_category,
             by_month,
         };
 
@@ -616,6 +629,82 @@ fn compute_by_day(
         })
         .collect();
     out.sort_by(|a, b| a.date.cmp(&b.date));
+    out
+}
+
+fn compute_by_day_by_category(
+    acts: &[&Activity],
+    account_types: &HashMap<String, String>,
+    assignments_by_activity: &HashMap<String, Vec<ActivityTaxonomyAssignment>>,
+    timezone: &str,
+    fx: &dyn FxServiceTrait,
+    target_currency: &str,
+    fx_as_of: NaiveDate,
+) -> Vec<DayCategoryBucket> {
+    let mut map: HashMap<(String, String, String), (f64, u32)> = HashMap::new();
+    for a in acts {
+        let Some(account_type) = account_types.get(&a.account_id) else {
+            continue;
+        };
+        let classification = classify_activity(a, account_type);
+        let spending_native = classification.spending_amount(activity_abs_amount(a));
+        if spending_native == 0.0 {
+            continue;
+        }
+        let amount = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        if amount == 0.0 {
+            continue;
+        }
+
+        let date = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
+            a.activity_date,
+            timezone,
+        );
+        let date = format_date(date);
+        let assignments = assignments_by_activity
+            .get(&a.id)
+            .into_iter()
+            .flatten()
+            .filter(|asg| asg.taxonomy_id == SPENDING_TAXONOMY)
+            .collect::<Vec<_>>();
+        let category_id = match assignments.as_slice() {
+            [] => UNCATEGORIZED_CATEGORY_ID,
+            [primary, ..] => {
+                debug_assert!(
+                    assignments.len() == 1,
+                    "single-select invariant violated for activity {} in spending_categories: {} assignments",
+                    a.id,
+                    assignments.len(),
+                );
+                primary.category_id.as_str()
+            }
+        };
+
+        let entry = map
+            .entry((date, SPENDING_TAXONOMY.to_string(), category_id.to_string()))
+            .or_insert((0.0, 0));
+        entry.0 += amount;
+        entry.1 += 1;
+    }
+
+    let mut out: Vec<DayCategoryBucket> = map
+        .into_iter()
+        .map(
+            |((date, taxonomy_id, category_id), (amount, count))| DayCategoryBucket {
+                date,
+                taxonomy_id,
+                category_id,
+                amount,
+                count,
+            },
+        )
+        .collect();
+    out.sort_by(|a, b| {
+        a.date
+            .cmp(&b.date)
+            .then(a.taxonomy_id.cmp(&b.taxonomy_id))
+            .then(a.category_id.cmp(&b.category_id))
+    });
     out
 }
 
@@ -1045,6 +1134,14 @@ fn debug_assert_reconciliation(insight: &SpendingInsight) {
         assert_within(g.spent, sum);
     }
 
+    let by_day_category_spent: f64 = insight
+        .by_day_by_category
+        .iter()
+        .filter(|b| b.taxonomy_id == SPENDING_TAXONOMY)
+        .map(|b| b.amount)
+        .sum();
+    assert_within(insight.headline.spent, by_day_category_spent);
+
     // 4) per group: budget == Σ categories.budget
     for g in &insight.groups {
         let sum: f64 = g.categories.iter().map(|c| c.budget.total).sum();
@@ -1118,6 +1215,7 @@ fn empty_insight(period: PeriodMeta, prior: PeriodMeta, currency: &str) -> Spend
         groups: vec![],
         uncategorized: UncategorizedBucket::default(),
         by_day: vec![],
+        by_day_by_category: vec![],
         by_month: vec![],
     }
 }
@@ -1599,5 +1697,22 @@ mod tests {
         assert_eq!(agg.uncategorized_count, 1);
         assert_eq!(agg.spending_by_top.get("cat_food").unwrap().0, 100.0);
         assert_eq!(agg.spending_by_top.get("cat_food").unwrap().1, 1);
+
+        let day_categories = compute_by_day_by_category(
+            &acts,
+            &account_types,
+            &assignments,
+            "UTC",
+            &fx(),
+            "USD",
+            NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
+        );
+        let by_category: HashMap<String, f64> = day_categories
+            .iter()
+            .map(|bucket| (bucket.category_id.clone(), bucket.amount))
+            .collect();
+        assert_eq!(day_categories.len(), 2);
+        assert_eq!(by_category.get("cat_food"), Some(&100.0));
+        assert_eq!(by_category.get(UNCATEGORIZED_CATEGORY_ID), Some(&50.0));
     }
 }

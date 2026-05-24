@@ -14,7 +14,7 @@ import {
 import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 
-import type { MonthBucket } from "../../hooks/use-monthly-history";
+import type { MonthBucket } from "../../types/report";
 
 interface CashflowAreaChartProps {
   months: MonthBucket[];

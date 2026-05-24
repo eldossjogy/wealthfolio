@@ -15,17 +15,14 @@ import { WhatChangedStage } from "../components/reports/insights/what-changed-st
 import { WhenWhereStage } from "../components/reports/insights/when-where-stage";
 import { WhereIAmStage } from "../components/reports/insights/where-i-am-stage";
 import { useCashActivities } from "../hooks/use-cash-activities";
-import { useMonthlyHistory } from "../hooks/use-monthly-history";
 import { useEventSpendingSummaries } from "../hooks/use-spending-events";
 import { useSpendingInsight } from "../hooks/use-spending-insight";
-import { useSpendingReport } from "../hooks/use-spending-report";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
-import { insightToLegacy, UNCATEGORIZED_CATEGORY_ID } from "../lib/insight-projection";
+import { insightToReportProjection, UNCATEGORIZED_CATEGORY_ID } from "../lib/insight-projection";
 import {
   DEFAULT_REPORTS_PERIOD,
   REPORTS_PERIODS,
   periodToReportsRange,
-  rangeToReportRequest,
   type ReportsPeriod,
   type ReportsRange,
 } from "../lib/reports-period";
@@ -36,7 +33,6 @@ const STAGE_STORAGE_KEY = "spending-insights-stage";
 const EMPTY_TAXONOMY: never[] = [];
 /** Heatmap window — last 12 weeks regardless of selected period. */
 const HEATMAP_WEEKS = 12;
-const DAILY_GRANULARITY_THRESHOLD_DAYS = 35;
 const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 /**
@@ -153,28 +149,12 @@ export default function SpendingInsightsPage() {
     refetch: refetchInsight,
   } = useSpendingInsight(insightRequest);
 
-  // Legacy hooks remain for the "What changed" + sparkline stages (they
-  // produce richer per-day / per-leaf-category shapes that the insight
-  // payload doesn't carry yet). Disabled when their stage isn't visible.
-  const currentRequest = useMemo(() => rangeToReportRequest(range), [range]);
-  const {
-    data: currentReport,
-    isLoading: isCurrentLoading,
-    isError: currentErrored,
-    refetch: refetchCurrent,
-  } = useSpendingReport(currentRequest, stage === "changed");
-  const {
-    months,
-    isLoading: isHistoryLoading,
-    isError: historyErrored,
-    refetch: refetchHistory,
-  } = useMonthlyHistory(range, stage === "changed");
-
-  // Project insight back into the legacy MonthlyReport + BudgetSnapshot
-  // shapes that WhereIAmStage's child cards/table consume. Same numbers,
-  // same field names — but every number now flows from one server query
-  // so header / breakdown / Δ-vs-prior agree by construction.
-  const legacyForWhereIAm = useMemo(() => (insight ? insightToLegacy(insight) : null), [insight]);
+  // Project the reconciled insight into the presentation shapes used by the
+  // existing child cards. Every number still flows from one server query.
+  const insightProjection = useMemo(
+    () => (insight ? insightToReportProjection(insight) : null),
+    [insight],
+  );
   const taxonomyCategoriesForWhereIAm = useMemo(() => {
     const base = taxonomy.data?.categories ?? [];
     if (!insight || insight.uncategorized.txnCount === 0) return base;
@@ -209,13 +189,17 @@ export default function SpendingInsightsPage() {
     return { startDate: start.toISOString(), endDate: end.toISOString() };
   }, []);
   const { data: heatmapActivities = [] } = useCashActivities(heatmapRequest);
-  const { data: heatmapReport } = useSpendingReport(heatmapRequest, stage === "when");
+  const {
+    data: heatmapInsight,
+    isError: heatmapInsightErrored,
+    refetch: refetchHeatmapInsight,
+  } = useSpendingInsight(heatmapRequest, stage === "when");
   const heatmapDailySpendByDate = useMemo(
     () =>
-      heatmapReport
-        ? new Map(heatmapReport.byDay.map((day) => [day.date, day.outflow] as const))
+      heatmapInsight
+        ? new Map(heatmapInsight.byDay.map((day) => [day.date, day.spent] as const))
         : undefined,
-    [heatmapReport?.byDay],
+    [heatmapInsight?.byDay],
   );
 
   const eventsRequest = useMemo(
@@ -268,7 +252,6 @@ export default function SpendingInsightsPage() {
     });
   }, [heatmapActivities, heatmapCell]);
 
-  const useDailyForHistory = range.days <= DAILY_GRANULARITY_THRESHOLD_DAYS;
   const taxonomyCategories = taxonomy.data?.categories ?? EMPTY_TAXONOMY;
   const accountTypeById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account.accountType])),
@@ -306,7 +289,7 @@ export default function SpendingInsightsPage() {
           />
         )}
 
-        {(insightErrored || (stage === "changed" && (currentErrored || historyErrored))) && (
+        {(insightErrored || (stage === "when" && heatmapInsightErrored)) && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             <span>
               <span className="font-semibold">Couldn't load insights.</span> Showing zeros below.
@@ -315,8 +298,7 @@ export default function SpendingInsightsPage() {
               type="button"
               onClick={() => {
                 if (insightErrored) void refetchInsight();
-                if (currentErrored) void refetchCurrent();
-                if (historyErrored) refetchHistory();
+                if (heatmapInsightErrored) void refetchHeatmapInsight();
               }}
               className="text-foreground hover:underline"
             >
@@ -328,11 +310,11 @@ export default function SpendingInsightsPage() {
         {stage === "where" && (
           <WhereIAmStage
             range={range}
-            currentReport={legacyForWhereIAm?.currentReport}
-            priorReport={legacyForWhereIAm?.priorReport}
-            months={legacyForWhereIAm?.months ?? []}
+            currentReport={insightProjection?.currentReport}
+            priorReport={insightProjection?.priorReport}
+            months={insightProjection?.months ?? []}
             taxonomyCategories={taxonomyCategoriesForWhereIAm}
-            budget={legacyForWhereIAm?.budget}
+            budget={insightProjection?.budget}
             currency={insight?.currency ?? baseCurrency}
             isLoading={isInsightLoading}
             reconciledPace={insight?.headline.pace}
@@ -344,15 +326,12 @@ export default function SpendingInsightsPage() {
         {stage === "changed" && (
           <WhatChangedStage
             range={range}
-            currentReport={legacyForWhereIAm?.currentReport}
-            priorReport={legacyForWhereIAm?.priorReport}
-            trendReport={currentReport}
-            months={months}
-            taxonomyCategories={taxonomyCategories}
+            currentReport={insightProjection?.currentReport}
+            priorReport={insightProjection?.priorReport}
+            months={insightProjection?.months ?? []}
+            taxonomyCategories={taxonomyCategoriesForWhereIAm}
             currency={insight?.currency ?? baseCurrency}
-            isLoading={
-              isInsightLoading || (useDailyForHistory ? isCurrentLoading : isHistoryLoading)
-            }
+            isLoading={isInsightLoading}
             onCategoryClick={handleCategoryClick}
           />
         )}
@@ -366,7 +345,7 @@ export default function SpendingInsightsPage() {
             eventsErrored={eventsErrored}
             onRetryEvents={() => refetchEvents()}
             taxonomyCategories={taxonomyCategories}
-            currency={baseCurrency}
+            currency={heatmapInsight?.currency ?? baseCurrency}
             rangeStart={eventsRange.start}
             rangeEnd={eventsRange.end}
             windowOffset={eventsWindowOffset}

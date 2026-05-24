@@ -169,6 +169,17 @@ pub struct DayBucket {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DayCategoryBucket {
+    /// `YYYY-MM-DD`
+    pub date: String,
+    pub taxonomy_id: String,
+    pub category_id: String,
+    pub amount: f64,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MonthBucket {
     /// `YYYY-MM`
     pub month: String,
@@ -200,5 +211,6 @@ pub struct SpendingInsight {
     pub groups: Vec<GroupInsight>,
     pub uncategorized: UncategorizedBucket,
     pub by_day: Vec<DayBucket>,
+    pub by_day_by_category: Vec<DayCategoryBucket>,
     pub by_month: Vec<MonthBucket>,
 }

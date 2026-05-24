@@ -5,9 +5,8 @@ import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
-import type { MonthBucket } from "../../hooks/use-monthly-history";
 import type { BudgetSnapshot } from "../../types/budget";
-import type { CategoryBreakdownRow } from "../../types/report";
+import type { CategoryBreakdownRow, MonthBucket } from "../../types/report";
 
 // ─── shared chrome ────────────────────────────────────────────────────────
 

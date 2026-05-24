@@ -15,12 +15,11 @@ import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
-import type { MonthBucket } from "../../../hooks/use-monthly-history";
 import { rollUpToTopLevel, topCategoryId } from "../../../lib/category-rollup";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { BudgetCategoryRow, BudgetSnapshot } from "../../../types/budget";
 import type { PaceState } from "../../../types/insight";
-import type { CategoryBreakdownRow, MonthlyReport } from "../../../types/report";
+import type { CategoryBreakdownRow, MonthBucket, MonthlyReport } from "../../../types/report";
 import { CategoryHierarchyTable, type CategorySort } from "../category-hierarchy-table";
 import { formatMonthName, formatPercentValue } from "./format";
 
@@ -256,7 +255,7 @@ function computePace(
   // Prefer reconciled values from the backend insight payload so this card
   // agrees with headline.spent / status / pace by construction. Fall back to
   // a local derivation only when the caller didn't pass a reconciled pace
-  // (e.g. legacy paths still being wired up).
+  // (e.g. older callers still being wired up).
   const daysElapsed = reconciledPace
     ? Math.max(0, reconciledPace.daysElapsed)
     : isLive

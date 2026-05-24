@@ -36,6 +36,16 @@ export interface MonthlyReport {
   byDayByCategory: DayCategoryBucket[];
 }
 
+export interface MonthBucket {
+  /** ISO YYYY-MM-01, anchors the month for charting. */
+  iso: string;
+  /** Short month label, e.g. "May". */
+  label: string;
+  /** Resolved monthly report (undefined while in flight). */
+  report: MonthlyReport | undefined;
+  isLoading: boolean;
+}
+
 export interface ReportRequest {
   startDate: string;
   endDate: string;

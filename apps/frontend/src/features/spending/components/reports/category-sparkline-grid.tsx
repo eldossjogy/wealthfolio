@@ -7,8 +7,7 @@ import type { TaxonomyCategory } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
-import type { MonthBucket } from "../../hooks/use-monthly-history";
-import type { CategoryBreakdownRow, DayCategoryBucket } from "../../types/report";
+import type { CategoryBreakdownRow, DayCategoryBucket, MonthBucket } from "../../types/report";
 
 export type SparklineGranularity = "day" | "month";
 

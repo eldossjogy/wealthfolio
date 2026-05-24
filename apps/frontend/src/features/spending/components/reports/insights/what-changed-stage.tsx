@@ -7,10 +7,14 @@ import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
 import { CategoryIcon } from "../../category-chips";
-import type { MonthBucket } from "../../../hooks/use-monthly-history";
 import { topCategoryId } from "../../../lib/category-rollup";
 import type { ReportsRange } from "../../../lib/reports-period";
-import type { CategoryBreakdownRow, DayCategoryBucket, MonthlyReport } from "../../../types/report";
+import type {
+  CategoryBreakdownRow,
+  DayCategoryBucket,
+  MonthBucket,
+  MonthlyReport,
+} from "../../../types/report";
 import {
   MIN_PRIOR_FOR_PCT,
   classifyPeriod,
@@ -32,7 +36,6 @@ export interface WhatChangedStageProps {
   range: ReportsRange;
   currentReport: MonthlyReport | undefined;
   priorReport: MonthlyReport | undefined;
-  trendReport?: MonthlyReport;
   months: MonthBucket[];
   taxonomyCategories: TaxonomyCategory[];
   currency: string;
@@ -51,7 +54,6 @@ export function WhatChangedStage({
   range,
   currentReport,
   priorReport,
-  trendReport,
   months,
   taxonomyCategories,
   currency,
@@ -106,7 +108,7 @@ export function WhatChangedStage({
       <HeadlineCard headline={headline} currency={currency} isLoading={isLoading} />
       <CategoryTrendsSection
         months={months}
-        currentReport={trendReport ?? currentReport}
+        currentReport={currentReport}
         taxonomyCategories={taxonomyCategories}
         movers={movers}
         periodState={periodState}
@@ -372,9 +374,12 @@ const CategoryTrendsSection: FC<CategoryTrendsSectionProps> = ({
     () =>
       buildSparklineRows({
         months,
-        byDayByCategory: useDaily ? currentReport?.byDayByCategory : undefined,
+        byDayByCategory:
+          useDaily && currentReport?.byDayByCategory.length
+            ? currentReport.byDayByCategory
+            : undefined,
         taxonomyCategories,
-        useDaily,
+        useDaily: useDaily && !!currentReport?.byDayByCategory.length,
         movers,
       }),
     [months, currentReport?.byDayByCategory, taxonomyCategories, useDaily, movers],

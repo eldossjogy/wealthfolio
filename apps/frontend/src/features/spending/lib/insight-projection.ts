@@ -1,9 +1,9 @@
 /**
- * Project a SpendingInsight payload into the legacy MonthlyReport + BudgetSnapshot
+ * Project a SpendingInsight payload into MonthlyReport + BudgetSnapshot
  * shapes consumed by the WhereIAmStage children (PaceCard, SpentThisPeriodCard,
  * NetCashflowCard, BreakdownCanvas + CategoryHierarchyTable).
  *
- * Why: the legacy components stitched two server payloads together client-side
+ * Why: the older components stitched two server payloads together client-side
  * (budget rows × range.months + a separate spending report), which is the
  * source of the math drift bugs. This adapter funnels every number through the
  * single insight payload — same field names, reconciled magnitudes.
@@ -14,26 +14,26 @@
  * been updated accordingly.
  */
 
-import type { MonthBucket } from "../hooks/use-monthly-history";
 import type { BudgetCategoryRow, BudgetGroupRow, BudgetSnapshot } from "../types/budget";
 import type { SpendingInsight } from "../types/insight";
-import type { CategoryBreakdownRow, MonthlyReport } from "../types/report";
+import type { CategoryBreakdownRow, MonthBucket, MonthlyReport } from "../types/report";
 
 const SPENDING_TAXONOMY = "spending_categories";
 
 /** Synthetic category id used to surface uncategorized spend as a breakdown row. */
 export const UNCATEGORIZED_CATEGORY_ID = "__uncategorized__";
 
-export interface LegacyProjection {
+export interface InsightReportProjection {
   currentReport: MonthlyReport;
   priorReport: MonthlyReport;
   budget: BudgetSnapshot;
   months: MonthBucket[];
 }
 
-export function insightToLegacy(insight: SpendingInsight): LegacyProjection {
+export function insightToReportProjection(insight: SpendingInsight): InsightReportProjection {
   const currentSpendingBreakdown = projectSpendingBreakdown(insight, "current");
   const priorSpendingBreakdown = projectSpendingBreakdown(insight, "prior");
+  const dayCategoryBuckets = insight.byDayByCategory ?? [];
 
   const currentReport: MonthlyReport = {
     current: {
@@ -55,11 +55,17 @@ export function insightToLegacy(insight: SpendingInsight): LegacyProjection {
       income: b.income,
       outflow: b.spent,
     })),
-    byDayByCategory: [],
+    byDayByCategory: dayCategoryBuckets.map((b) => ({
+      date: b.date,
+      taxonomyId: b.taxonomyId,
+      categoryId: b.categoryId,
+      amount: b.amount,
+      count: b.count,
+    })),
   };
 
   // Convention: `priorReport.current` is the prior window's totals/breakdown
-  // viewed AS IF it were the current window — this matches what the legacy
+  // viewed AS IF it were the current window — this matches what the report
   // SpentThisPeriodCard / WhatChangedStage callers expect when they pass
   // `priorReport={priorReport}` and then read `priorReport.current.outflow`.
   // `priorReport.prior` is intentionally zero; no consumer reads it today,
@@ -195,6 +201,24 @@ function projectBudget(insight: SpendingInsight): BudgetSnapshot {
 }
 
 function projectMonths(insight: SpendingInsight): MonthBucket[] {
+  const dayCategoryBuckets = insight.byDayByCategory ?? [];
+  const breakdownByMonth = new Map<string, Map<string, CategoryBreakdownRow>>();
+  for (const b of dayCategoryBuckets) {
+    const month = b.date.slice(0, 7);
+    const key = `${b.taxonomyId}\u0000${b.categoryId}`;
+    const rows = breakdownByMonth.get(month) ?? new Map<string, CategoryBreakdownRow>();
+    const row = rows.get(key) ?? {
+      taxonomyId: b.taxonomyId,
+      categoryId: b.categoryId,
+      amount: 0,
+      count: 0,
+    };
+    row.amount += b.amount;
+    row.count += b.count;
+    rows.set(key, row);
+    breakdownByMonth.set(month, rows);
+  }
+
   return insight.byMonth.map((m) => ({
     iso: `${m.month}-01`,
     label: monthShortLabel(m.month),
@@ -206,7 +230,7 @@ function projectMonths(insight: SpendingInsight): MonthBucket[] {
         count: 0,
       },
       prior: { income: 0, outflow: 0, net: 0, count: 0 },
-      spendingBreakdown: [],
+      spendingBreakdown: Array.from(breakdownByMonth.get(m.month)?.values() ?? []),
       incomeBreakdown: [],
       byDay: [],
       byDayByCategory: [],

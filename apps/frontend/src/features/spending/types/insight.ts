@@ -104,6 +104,14 @@ export interface DayBucket {
   income: number;
 }
 
+export interface DayCategoryBucket {
+  date: string; // YYYY-MM-DD
+  taxonomyId: string;
+  categoryId: string;
+  amount: number;
+  count: number;
+}
+
 export interface MonthBucket {
   month: string; // YYYY-MM
   spent: number;
@@ -137,5 +145,6 @@ export interface SpendingInsight {
   groups: GroupInsight[];
   uncategorized: UncategorizedBucket;
   byDay: DayBucket[];
+  byDayByCategory: DayCategoryBucket[];
   byMonth: MonthBucket[];
 }

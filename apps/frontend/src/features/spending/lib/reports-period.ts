@@ -93,17 +93,6 @@ export function comparisonRange(range: ReportsRange, mode: ComparisonMode): Repo
   };
 }
 
-/** Build the ISO request payload consumed by `useSpendingReport`. */
-export function rangeToReportRequest(range: ReportsRange): {
-  startDate: string;
-  endDate: string;
-} {
-  return {
-    startDate: range.start.toISOString(),
-    endDate: range.end.toISOString(),
-  };
-}
-
 /** Used by `react-router-dom` Link-typed APIs that expect a DateRange. */
 export function toDateRange(range: ReportsRange): DateRange {
   return { from: range.start, to: range.end };
@@ -143,19 +132,4 @@ function daysBetweenInclusive(a: Date, b: Date): number {
 
 function monthsBetweenInclusive(a: Date, b: Date): number {
   return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) + 1;
-}
-
-/** Enumerate first-of-month dates between two ranges (inclusive). Used for sparkline buckets. */
-export function monthsInRange(range: ReportsRange): { start: Date; end: Date; label: string }[] {
-  const out: { start: Date; end: Date; label: string }[] = [];
-  const cursor = new Date(range.start.getFullYear(), range.start.getMonth(), 1);
-  const last = new Date(range.end.getFullYear(), range.end.getMonth(), 1);
-  const fmt = new Intl.DateTimeFormat(undefined, { month: "short" });
-  while (cursor <= last) {
-    const start = new Date(cursor);
-    const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999);
-    out.push({ start, end, label: fmt.format(start) });
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  return out;
 }
