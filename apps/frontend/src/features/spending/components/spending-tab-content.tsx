@@ -64,10 +64,32 @@ function priorRange(range: DateRange | undefined): DateRange | undefined {
   };
 }
 
+/**
+ * Map a spending-chart bar `key` to the [from, to] date range it covers, so a
+ * bar click can deep-link into the Transactions list for that period. The key
+ * shape depends on granularity (see the barData builder): `YYYY-MM-DD` for the
+ * day/week start, `YYYY-MM` for a month.
+ */
+function barKeyToRange(
+  key: string,
+  granularity: "day" | "week" | "month",
+): { from: string; to: string } {
+  if (granularity === "day") return { from: key, to: key };
+  if (granularity === "week") {
+    const [y, m, d] = key.split("-").map(Number);
+    return { from: key, to: formatDateISO(new Date(y, m - 1, d + 6)) };
+  }
+  const [y, m] = key.split("-").map(Number);
+  // Day 0 of the next month resolves to the last day of this month.
+  const lastDay = new Date(y, m, 0).getDate();
+  return { from: `${key}-01`, to: `${key}-${String(lastDay).padStart(2, "0")}` };
+}
+
 export default function SpendingTabContent() {
   const { isBalanceHidden } = useBalancePrivacy();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
+  const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
   // URL-driven so `/dashboard?tab=spending&spendingInterval=3M` is shareable
@@ -381,7 +403,7 @@ export default function SpendingTabContent() {
         const dPct = priorAmt > 0 ? (d / priorAmt) * 100 : null;
         return {
           id,
-          name: meta?.name ?? id,
+          name: id === "__uncategorized__" ? "Uncategorized" : (meta?.name ?? id),
           color: meta?.color ?? null,
           icon: meta?.icon ?? null,
           amount: e.amount,
@@ -557,12 +579,20 @@ export default function SpendingTabContent() {
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                   isAnimationActive={false}
+                  onClick={(data: unknown) => {
+                    const entry = ((data as { payload?: (typeof barData)[number] })?.payload ??
+                      data) as (typeof barData)[number];
+                    if (!entry || entry.future || entry.value <= 0) return;
+                    const { from, to } = barKeyToRange(entry.key, granularity);
+                    navigate(`/activities?tab=spending&from=${from}&to=${to}`);
+                  }}
                 >
                   {barData.map((entry, i) => (
                     <Cell
                       key={`cell-${i}`}
                       fill={entry.future ? FUTURE_BAR : "url(#spending-bar)"}
                       opacity={entry.future ? 0.7 : 1}
+                      style={{ cursor: entry.future || entry.value <= 0 ? "default" : "pointer" }}
                     />
                   ))}
                 </Bar>
@@ -750,6 +780,17 @@ type CategoryRow = {
   amount: number;
 };
 
+/**
+ * Deep-link for a "Where it went" node. The synthetic uncategorized bucket has
+ * no real category id, so it routes to the status filter — the category filter
+ * would match nothing and render an empty list.
+ */
+function spendingActivityHref(id: string): string {
+  return id === "__uncategorized__"
+    ? "/activities?tab=spending&status=uncategorized"
+    : `/activities?tab=spending&category=${id}`;
+}
+
 interface CategoryTreemapNodeProps {
   depth?: number;
   x?: number;
@@ -833,7 +874,7 @@ function CategoryTreemapMono({
                   currency={currency}
                   onActivate={(id) => {
                     if (id && id !== "__other__") {
-                      navigate(`/activities?tab=spending&category=${id}`);
+                      navigate(spendingActivityHref(id));
                     }
                   }}
                 />
@@ -843,7 +884,7 @@ function CategoryTreemapMono({
             onClick={(node: unknown) => {
               const id = (node as { id?: string } | null)?.id;
               if (id && id !== "__other__") {
-                navigate(`/activities?tab=spending&category=${id}`);
+                navigate(spendingActivityHref(id));
               }
             }}
           >
@@ -1159,7 +1200,7 @@ function CategoryRankedBar({
           return (
             <Link
               key={r.id}
-              to={`/activities?tab=spending&category=${r.id}`}
+              to={spendingActivityHref(r.id)}
               className="hover:bg-muted/40 group flex items-center gap-2.5 rounded-md px-1 py-1 transition-colors"
             >
               <span

@@ -10,6 +10,7 @@ import { useAccounts } from "@/hooks/use-accounts";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { QueryKeys } from "@/lib/query-keys";
+import { formatDateISO } from "@/lib/utils";
 import type { Account, TaxonomyCategory } from "@/lib/types";
 
 import {
@@ -56,6 +57,18 @@ import type { CashActivitySearchRequest, CashActivityStatusFilter } from "../typ
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+
+/**
+ * Parse a `YYYY-MM-DD` URL param as LOCAL midnight. `new Date("YYYY-MM-DD")`
+ * interprets the string as UTC, which skews the day boundary in non-UTC
+ * timezones and drops activities stored at local midnight. Mirrors how the
+ * date picker (and `formatDateISO`) treat dates as local.
+ */
+function parseLocalDate(value: string): Date | undefined {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return undefined;
+  return new Date(y, m - 1, d);
+}
 const SEARCH_DEBOUNCE_MS = 300;
 
 export interface SpendingTransactionsTabHandle {
@@ -122,8 +135,8 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
       if (urlStartDate || urlEndDate) {
         return {
-          from: urlStartDate ? new Date(urlStartDate) : undefined,
-          to: urlEndDate ? new Date(urlEndDate) : undefined,
+          from: urlStartDate ? parseLocalDate(urlStartDate) : undefined,
+          to: urlEndDate ? parseLocalDate(urlEndDate) : undefined,
         };
       }
       return undefined;
@@ -150,8 +163,8 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       setOrDelete("q", debouncedSearch || null);
       setOrDelete("amountMin", amountRange.min != null ? String(amountRange.min) : null);
       setOrDelete("amountMax", amountRange.max != null ? String(amountRange.max) : null);
-      setOrDelete("from", dateRange?.from ? dateRange.from.toISOString().slice(0, 10) : null);
-      setOrDelete("to", dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : null);
+      setOrDelete("from", dateRange?.from ? formatDateISO(dateRange.from) : null);
+      setOrDelete("to", dateRange?.to ? formatDateISO(dateRange.to) : null);
       // Only call setSearchParams when the serialized form actually changed,
       // otherwise React Router still bumps history.
       if (next.toString() !== searchParams.toString()) {

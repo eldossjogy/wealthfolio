@@ -37,7 +37,7 @@ export function RecentActivityCard({
         );
       })
       .sort((a, b) => b.activityDate.localeCompare(a.activityDate))
-      .slice(0, 6);
+      .slice(0, 10);
   }, [activities, accountTypeById]);
 
   const assignmentQueries = useQueries({
