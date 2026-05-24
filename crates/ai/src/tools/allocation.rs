@@ -157,7 +157,18 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
         let group_by = args.group_by.to_lowercase();
-        let scoped_account_ids = if account_id.is_none() {
+        let scoped_account_ids = if let Some(account_id) = account_id {
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+                Some(Vec::new())
+            } else {
+                None
+            }
+        } else {
             Some(
                 self.env
                     .account_service()
@@ -170,17 +181,6 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
                     .map(|account| account.id)
                     .collect::<Vec<_>>(),
             )
-        } else {
-            let account = self
-                .env
-                .account_service()
-                .get_account(account_id.expect("checked is_some"))
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-            if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
-                Some(Vec::new())
-            } else {
-                None
-            }
         };
 
         // Drill-down mode: return holdings for a specific category

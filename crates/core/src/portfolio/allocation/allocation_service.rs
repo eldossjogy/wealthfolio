@@ -889,6 +889,7 @@ mod tests {
             sort_order: 0,
             created_at: now(),
             updated_at: now(),
+            icon: None,
         }
     }
 

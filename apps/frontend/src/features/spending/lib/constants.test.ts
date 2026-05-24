@@ -80,8 +80,9 @@ describe("spending constants", () => {
     });
 
     it("counts cash tax as spending", () => {
-      expect(getActivitySpendingAmount({ activityType: "TAX", amount: "58.22" }, AccountType.CASH))
-        .toBe(58.22);
+      expect(
+        getActivitySpendingAmount({ activityType: "TAX", amount: "58.22" }, AccountType.CASH),
+      ).toBe(58.22);
     });
 
     it("ignores linked cash transfers", () => {

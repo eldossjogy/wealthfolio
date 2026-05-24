@@ -376,9 +376,9 @@ mod tests {
         async fn create(&self, n: NewCategorizationRule) -> Result<CategorizationRule> {
             let now = Utc::now().naive_utc();
             let rule = CategorizationRule {
-                id: n
-                    .id
-                    .unwrap_or_else(|| format!("rule-{}", now.timestamp_nanos_opt().unwrap())),
+                id: n.id.unwrap_or_else(|| {
+                    format!("rule-{}", now.and_utc().timestamp_nanos_opt().unwrap())
+                }),
                 name: n.name,
                 pattern: n.pattern,
                 match_type: n.match_type,
