@@ -18,4 +18,8 @@ pub enum SpendingError {
     /// A rule was marked global and account-scoped simultaneously.
     #[error("Invalid rule: a global rule cannot also have an account_id")]
     GlobalRuleHasAccount,
+
+    /// User-provided spending input failed validation before persistence.
+    #[error("Invalid input: {message}")]
+    InvalidInput { message: String },
 }

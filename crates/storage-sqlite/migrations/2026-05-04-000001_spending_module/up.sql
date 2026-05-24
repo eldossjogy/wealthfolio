@@ -438,4 +438,6 @@ INSERT INTO spending_event_types (id, key, name, color) VALUES
 -- 9. SEED: ENABLE SPENDING MODULE BY DEFAULT
 -- ============================================================================
 
-INSERT INTO app_settings (setting_key, setting_value) VALUES ('spending.enabled', 'true');
+INSERT INTO app_settings (setting_key, setting_value)
+VALUES ('spending.enabled', 'true')
+ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value;

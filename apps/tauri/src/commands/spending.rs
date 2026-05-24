@@ -70,6 +70,15 @@ async fn spawn_auto_categorize_for_opted_in_accounts(state: &State<'_, Arc<Servi
     spawn_auto_categorize(state.categorization_rules_service(), settings.account_ids);
 }
 
+async fn spending_enabled(state: &State<'_, Arc<ServiceContext>>) -> Result<bool, String> {
+    state
+        .spending_settings_service()
+        .get()
+        .await
+        .map(|settings| settings.enabled)
+        .map_err(|e| format!("Failed to load spending settings: {}", e))
+}
+
 #[tauri::command]
 pub async fn get_spending_settings(
     state: State<'_, Arc<ServiceContext>>,
@@ -216,6 +225,9 @@ pub async fn bulk_assign_categories(
 pub async fn list_categorization_rules(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<CategorizationRule>, String> {
+    if !spending_enabled(&state).await? {
+        return Ok(Vec::new());
+    }
     state
         .categorization_rules_service()
         .list()
@@ -274,6 +286,9 @@ pub async fn rerun_categorization_rules(
         .get()
         .await
         .map_err(|e| format!("Failed to load spending settings: {}", e))?;
+    if !s.enabled {
+        return Ok(0);
+    }
     state
         .categorization_rules_service()
         .rerun_all(&s.account_ids, only_uncategorized)
@@ -285,6 +300,9 @@ pub async fn rerun_categorization_rules(
 pub async fn list_rule_presets(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<RulePresetSummary>, String> {
+    if !spending_enabled(&state).await? {
+        return Ok(Vec::new());
+    }
     state
         .categorization_rules_service()
         .list_presets()
@@ -337,6 +355,9 @@ pub async fn remove_rule_preset(
 pub async fn list_event_types(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<EventType>, String> {
+    if !spending_enabled(&state).await? {
+        return Ok(Vec::new());
+    }
     state
         .events_service()
         .list_types()
@@ -392,6 +413,9 @@ pub async fn delete_event_type(
 
 #[tauri::command]
 pub async fn list_events(state: State<'_, Arc<ServiceContext>>) -> Result<Vec<Event>, String> {
+    if !spending_enabled(&state).await? {
+        return Ok(Vec::new());
+    }
     state
         .events_service()
         .list_events()

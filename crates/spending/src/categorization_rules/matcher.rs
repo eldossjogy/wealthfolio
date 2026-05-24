@@ -1,6 +1,6 @@
 //! Rule-matching algorithm. Ported semantics from PR #494's category_rules matcher.
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 use super::model::{CategorizationRule, RuleMatchType};
 
@@ -19,6 +19,15 @@ pub struct CompiledRule<'r> {
     regex: Option<Regex>,
 }
 
+pub const MAX_REGEX_PATTERN_LEN: usize = 512;
+const REGEX_SIZE_LIMIT_BYTES: usize = 64 * 1024;
+
+pub fn compile_regex_pattern(pattern: &str) -> Result<Regex, regex::Error> {
+    RegexBuilder::new(pattern)
+        .size_limit(REGEX_SIZE_LIMIT_BYTES)
+        .build()
+}
+
 /// Precompile a slice of rules: uppercase their patterns and compile regex
 /// patterns. Rules whose regex fails to compile are kept with `regex = None`
 /// so they will simply never match (matches the previous
@@ -28,7 +37,7 @@ pub fn compile_rules(rules: &[CategorizationRule]) -> Vec<CompiledRule<'_>> {
         .iter()
         .map(|rule| {
             let regex = if matches!(rule.match_type, RuleMatchType::Regex) {
-                match Regex::new(&rule.pattern) {
+                match compile_regex_pattern(&rule.pattern) {
                     Ok(re) => Some(re),
                     Err(err) => {
                         log::debug!(

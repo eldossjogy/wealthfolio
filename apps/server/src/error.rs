@@ -64,6 +64,7 @@ impl IntoResponse for ApiError {
                         SpendingError::EventTypeInUse { .. } => StatusCode::CONFLICT,
                         SpendingError::InvalidEventRange => StatusCode::BAD_REQUEST,
                         SpendingError::GlobalRuleHasAccount => StatusCode::BAD_REQUEST,
+                        SpendingError::InvalidInput { .. } => StatusCode::BAD_REQUEST,
                     };
                     (status, spending_err.to_string())
                 } else {

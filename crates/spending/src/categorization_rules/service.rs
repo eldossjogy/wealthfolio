@@ -5,7 +5,7 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 use wealthfolio_core::activities::ActivityRepositoryTrait;
 
-use super::matcher::{compile_rules, match_compiled};
+use super::matcher::{compile_regex_pattern, compile_rules, match_compiled, MAX_REGEX_PATTERN_LEN};
 use super::model::{
     CategorizationRule, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
 };
@@ -55,6 +55,7 @@ impl CategorizationRulesService {
         if new_rule.is_global && new_rule.account_id.is_some() {
             return Err(SpendingError::GlobalRuleHasAccount.into());
         }
+        validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
         self.repo.create(new_rule).await
     }
     pub async fn update(
@@ -76,6 +77,12 @@ impl CategorizationRulesService {
         if new_global && new_account.is_some() {
             return Err(SpendingError::GlobalRuleHasAccount.into());
         }
+        let new_match_type = patch.match_type.unwrap_or(existing.match_type);
+        let new_pattern = patch
+            .pattern
+            .as_deref()
+            .unwrap_or(existing.pattern.as_str());
+        validate_rule_pattern(&new_match_type, new_pattern)?;
         self.repo.update(id, patch).await
     }
     pub async fn delete(&self, id: &str) -> Result<()> {
@@ -284,6 +291,22 @@ impl CategorizationRulesService {
     }
 }
 
+fn validate_rule_pattern(match_type: &RuleMatchType, pattern: &str) -> Result<()> {
+    if !matches!(match_type, RuleMatchType::Regex) {
+        return Ok(());
+    }
+    if pattern.len() > MAX_REGEX_PATTERN_LEN {
+        return Err(SpendingError::InvalidInput {
+            message: format!("Regex pattern must be {MAX_REGEX_PATTERN_LEN} characters or fewer"),
+        }
+        .into());
+    }
+    compile_regex_pattern(pattern).map_err(|err| SpendingError::InvalidInput {
+        message: format!("Invalid regex pattern: {err}"),
+    })?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,8 +332,14 @@ mod tests {
         async fn list(&self) -> Result<Vec<CategorizationRule>> {
             Ok(self.rules.lock().unwrap().clone())
         }
-        async fn get(&self, _id: &str) -> Result<Option<CategorizationRule>> {
-            Ok(None)
+        async fn get(&self, id: &str) -> Result<Option<CategorizationRule>> {
+            Ok(self
+                .rules
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|rule| rule.id == id)
+                .cloned())
         }
         async fn create(&self, _n: NewCategorizationRule) -> Result<CategorizationRule> {
             unimplemented!()
@@ -864,5 +893,78 @@ mod tests {
         assert!(err
             .to_string()
             .contains("global rule cannot also have an account_id"));
+    }
+
+    #[tokio::test]
+    async fn create_rejects_invalid_regex_pattern() {
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(vec![]),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo::default());
+        let assignment_service = Arc::new(ActivityTaxonomyAssignmentService::new(
+            assignment_repo as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+        ));
+        let activity_repo = Arc::new(MockActivityRepo { activities: vec![] });
+        let svc = CategorizationRulesService::new(
+            rules_repo as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn ActivityRepositoryTrait>,
+            assignment_service,
+        );
+
+        let err = svc
+            .create(NewCategorizationRule {
+                id: None,
+                name: "bad regex".to_string(),
+                pattern: "(unclosed".to_string(),
+                match_type: RuleMatchType::Regex,
+                taxonomy_id: Some("spending_categories".to_string()),
+                category_id: Some("cat_food".to_string()),
+                activity_type: None,
+                priority: 1,
+                is_global: true,
+                account_id: None,
+                preset_id: None,
+                preset_rule_key: None,
+                preset_version: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid regex pattern"));
+    }
+
+    #[tokio::test]
+    async fn update_rejects_invalid_regex_pattern() {
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(vec![mk_rule(
+                "rule-1",
+                "AMAZON",
+                "spending_categories",
+                "cat_food",
+                1,
+            )]),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo::default());
+        let assignment_service = Arc::new(ActivityTaxonomyAssignmentService::new(
+            assignment_repo as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+        ));
+        let activity_repo = Arc::new(MockActivityRepo { activities: vec![] });
+        let svc = CategorizationRulesService::new(
+            rules_repo as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn ActivityRepositoryTrait>,
+            assignment_service,
+        );
+
+        let err = svc
+            .update(
+                "rule-1",
+                UpdateCategorizationRule {
+                    pattern: Some("(unclosed".to_string()),
+                    match_type: Some(RuleMatchType::Regex),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid regex pattern"));
     }
 }

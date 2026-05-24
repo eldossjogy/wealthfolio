@@ -1245,6 +1245,36 @@ async fn test_credit_card_positive_balance_is_cash() {
 }
 
 #[tokio::test]
+async fn test_credit_card_multi_currency_nets_before_liability_split() {
+    let account = create_test_account("card1", "CREDIT_CARD", "USD");
+    let mut cash = HashMap::new();
+    cash.insert("USD".to_string(), dec!(-500));
+    cash.insert("EUR".to_string(), dec!(200));
+    let snapshot = create_test_snapshot("card1", vec![], cash);
+    let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+
+    let service = create_net_worth_service_with_valuations(
+        vec![account],
+        vec![],
+        vec![snapshot],
+        vec![],
+        vec![create_account_valuation("card1", date, dec!(-300))],
+    );
+
+    let result = service.get_net_worth(date).await.unwrap();
+    assert_eq!(result.assets.total, Decimal::ZERO);
+    assert_eq!(result.liabilities.total, dec!(300));
+    assert_eq!(result.net_worth, dec!(-300));
+    assert_eq!(get_category_value(&result, "cash"), Decimal::ZERO);
+
+    let history = service.get_net_worth_history(date, date).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].total_assets, Decimal::ZERO);
+    assert_eq!(history[0].total_liabilities, dec!(300));
+    assert_eq!(history[0].net_worth, dec!(-300));
+}
+
+#[tokio::test]
 async fn test_staleness_detection() {
     let account = create_test_account("acc1", "SECURITIES", "USD");
     let asset = create_test_asset("AAPL", AssetKind::Investment, "USD");

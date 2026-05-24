@@ -223,6 +223,27 @@ pub struct BudgetSnapshot {
     pub computed: BudgetSnapshotComputed,
 }
 
+impl BudgetSnapshot {
+    pub fn empty(period_key: String, currency: String) -> Self {
+        Self {
+            state: BudgetSnapshotState {
+                groups: Vec::new(),
+                group_assignments: Vec::new(),
+                targets: Vec::new(),
+                rollover_settings: Vec::new(),
+            },
+            computed: BudgetSnapshotComputed {
+                currency,
+                period_key,
+                group_rows: Vec::new(),
+                ungrouped_rows: Vec::new(),
+                income_rows: Vec::new(),
+                totals: BudgetTotals::default(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyMonthRequest {

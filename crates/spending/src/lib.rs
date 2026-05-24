@@ -6,13 +6,12 @@
 //!
 //! # Isolation contract
 //!
-//! - This crate **does not edit** anything in `wealthfolio-core::portfolio`
-//!   (snapshot / valuation / income / holdings / allocations).
-//! - Spending accounts participate in net worth via the existing snapshot pipeline.
-//!   Spending categorization, rules, events, and budget live entirely here.
+//! - Spending categorization, rules, events, and budget live in this crate.
+//!   Credit-card net-worth treatment lives in `wealthfolio-core::portfolio`
+//!   because it shares the snapshot / valuation pipeline.
 //! - Spending is gated by a runtime toggle in `app_settings`. When the toggle is OFF,
-//!   command handlers should early-return / no-op so the investment experience is
-//!   byte-identical to a pre-spending build.
+//!   spending read paths return empty/default payloads and background categorization
+//!   no-ops; settings remains available so the user can re-enable the module.
 //!
 //! # Module map
 //!

@@ -127,6 +127,32 @@ impl NetWorthService {
         Ok(converted.round_dp(DECIMAL_PRECISION))
     }
 
+    fn convert_cash_balance_to_base(
+        &self,
+        amount: Decimal,
+        currency: &str,
+        base_currency: &str,
+        date: NaiveDate,
+    ) -> Decimal {
+        if currency == base_currency {
+            return amount;
+        }
+
+        match self
+            .fx_service
+            .convert_currency_for_date(amount, currency, base_currency, date)
+        {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(
+                    "Failed to convert cash {} {} to {}: {}. Using unconverted.",
+                    amount, currency, base_currency, error
+                );
+                amount
+            }
+        }
+    }
+
     /// Get display name for asset category.
     fn category_display_name(category: AssetCategory) -> &'static str {
         match category {
@@ -308,32 +334,43 @@ impl NetWorthServiceTrait for NetWorthService {
             };
 
             let account_category = Self::categorize_by_account_type(&account.account_type);
+            let is_liability_account = is_liability_account_type(&account.account_type);
 
             // Process positions (securities, alternative assets)
-            for (asset_id, position) in &snapshot.positions {
-                if position.quantity.is_zero() {
-                    continue;
+            if is_liability_account {
+                if !snapshot.positions.is_empty() {
+                    warn!(
+                        "Ignoring {} position(s) on liability account {} while calculating net worth",
+                        snapshot.positions.len(),
+                        account.id
+                    );
                 }
+            } else {
+                for (asset_id, position) in &snapshot.positions {
+                    if position.quantity.is_zero() {
+                        continue;
+                    }
 
-                // Get asset info to determine category more precisely
-                let asset = asset_map.get(asset_id);
-                let asset_name = asset.and_then(|a| {
-                    a.name
-                        .clone()
-                        .filter(|n| !n.is_empty())
-                        .or_else(|| a.display_code.clone())
-                });
+                    // Get asset info to determine category more precisely
+                    let asset = asset_map.get(asset_id);
+                    let asset_name = asset.and_then(|a| {
+                        a.name
+                            .clone()
+                            .filter(|n| !n.is_empty())
+                            .or_else(|| a.display_code.clone())
+                    });
 
-                // Determine category: prefer asset kind if available, fallback to account type
-                let category = if let Some(asset) = asset {
-                    Self::categorize_by_asset_kind(&asset.kind)
-                } else {
-                    account_category
-                };
+                    // Determine category: prefer asset kind if available, fallback to account type
+                    let category = if let Some(asset) = asset {
+                        Self::categorize_by_asset_kind(&asset.kind)
+                    } else {
+                        account_category
+                    };
 
-                // Get the latest quote for this asset as of the date
-                let (price, quote_currency, valuation_date) =
-                    match self.get_latest_quote_as_of(asset_id, date) {
+                    // Get the latest quote for this asset as of the date
+                    let (price, quote_currency, valuation_date) = match self
+                        .get_latest_quote_as_of(asset_id, date)
+                    {
                         Some((p, c, d)) => (p, c, d),
                         None => {
                             // No quote found, use cost basis as fallback
@@ -355,37 +392,77 @@ impl NetWorthServiceTrait for NetWorthService {
                         }
                     };
 
-                // Normalize minor-currency quotes (e.g. GBp → GBP, ZAc → ZAR) before valuation.
-                let (normalized_price, normalized_currency) =
-                    normalize_amount(price, &quote_currency);
+                    // Normalize minor-currency quotes (e.g. GBp → GBP, ZAc → ZAR) before valuation.
+                    let (normalized_price, normalized_currency) =
+                        normalize_amount(price, &quote_currency);
 
-                // Calculate market value in base currency
-                let market_value_base = match self.calculate_market_value(
-                    position.quantity,
-                    normalized_price,
-                    position.contract_multiplier,
-                    normalized_currency,
-                    &base_currency,
-                    date,
-                ) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(
-                            "Failed to calculate market value for {}: {}. Using local value.",
-                            asset_id, e
-                        );
-                        position.quantity * price * position.contract_multiplier
-                    }
-                };
+                    // Calculate market value in base currency
+                    let market_value_base = match self.calculate_market_value(
+                        position.quantity,
+                        normalized_price,
+                        position.contract_multiplier,
+                        normalized_currency,
+                        &base_currency,
+                        date,
+                    ) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            warn!(
+                                "Failed to calculate market value for {}: {}. Using local value.",
+                                asset_id, e
+                            );
+                            position.quantity * price * position.contract_multiplier
+                        }
+                    };
 
-                valuations.push(ValuationInfo {
-                    asset_id: asset_id.clone(),
-                    name: asset_name,
-                    market_value_base,
-                    valuation_date,
-                    category,
-                    is_cash_like: false,
-                });
+                    valuations.push(ValuationInfo {
+                        asset_id: asset_id.clone(),
+                        name: asset_name,
+                        market_value_base,
+                        valuation_date,
+                        category,
+                        is_cash_like: false,
+                    });
+                }
+            }
+
+            if is_liability_account {
+                let cash_base_total = snapshot.cash_balances.iter().fold(
+                    Decimal::ZERO,
+                    |acc, (currency, &amount)| {
+                        if amount.is_zero() {
+                            acc
+                        } else {
+                            acc + self.convert_cash_balance_to_base(
+                                amount,
+                                currency,
+                                &base_currency,
+                                date,
+                            )
+                        }
+                    },
+                );
+
+                if cash_base_total < Decimal::ZERO {
+                    valuations.push(ValuationInfo {
+                        asset_id: format!("CREDIT_CARD:{}", account.id),
+                        name: Some(account.name.clone()),
+                        market_value_base: cash_base_total.abs().round_dp(DECIMAL_PRECISION),
+                        valuation_date: snapshot.snapshot_date,
+                        category: AssetCategory::Liability,
+                        is_cash_like: true,
+                    });
+                } else if cash_base_total > Decimal::ZERO {
+                    valuations.push(ValuationInfo {
+                        asset_id: format!("CASH:{}", account.id),
+                        name: Some(account.name.clone()),
+                        market_value_base: cash_base_total.round_dp(DECIMAL_PRECISION),
+                        valuation_date: snapshot.snapshot_date,
+                        category: AssetCategory::Cash,
+                        is_cash_like: true,
+                    });
+                }
+                continue;
             }
 
             // Process cash balances
@@ -394,46 +471,15 @@ impl NetWorthServiceTrait for NetWorthService {
                     continue;
                 }
 
-                // Convert cash to base currency
-                let cash_base = if currency == &base_currency {
-                    amount
-                } else {
-                    match self.fx_service.convert_currency_for_date(
-                        amount,
-                        currency,
-                        &base_currency,
-                        date,
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            warn!(
-                                "Failed to convert cash {} {} to {}: {}. Using unconverted.",
-                                amount, currency, base_currency, e
-                            );
-                            amount
-                        }
-                    }
-                };
+                let cash_base =
+                    self.convert_cash_balance_to_base(amount, currency, &base_currency, date);
 
-                let (asset_id, name, market_value_base, category) = if is_liability_account_type(
-                    &account.account_type,
-                ) && cash_base
-                    < Decimal::ZERO
-                {
-                    (
-                        format!("CREDIT_CARD:{}:{}", account.id, currency),
-                        Some(format!("{} ({})", account.name, currency)),
-                        cash_base.abs().round_dp(DECIMAL_PRECISION),
-                        AssetCategory::Liability,
-                    )
-                } else {
-                    (
-                        format!("CASH:{}:{}", account.id, currency),
-                        Some(format!("Cash ({})", currency)),
-                        cash_base.round_dp(DECIMAL_PRECISION),
-                        AssetCategory::Cash,
-                    )
-                };
+                let (asset_id, name, market_value_base, category) = (
+                    format!("CASH:{}:{}", account.id, currency),
+                    Some(format!("Cash ({})", currency)),
+                    cash_base.round_dp(DECIMAL_PRECISION),
+                    AssetCategory::Cash,
+                );
 
                 valuations.push(ValuationInfo {
                     asset_id,

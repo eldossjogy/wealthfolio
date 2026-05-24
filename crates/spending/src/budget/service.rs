@@ -143,8 +143,13 @@ impl BudgetService {
         currency: &str,
         timezone: &str,
     ) -> Result<BudgetSnapshot> {
-        self.ensure_system_groups().await?;
         let period_key = normalize_period_key(period_key)?;
+        let settings = self.spending_settings.get().await?;
+        if !settings.enabled {
+            return Ok(BudgetSnapshot::empty(period_key, currency.to_string()));
+        }
+
+        self.ensure_system_groups().await?;
         let groups = self.repo.list_groups().await?;
         let assignments = self.repo.list_group_assignments().await?;
         let targets = self.repo.list_targets().await?;

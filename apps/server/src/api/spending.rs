@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::Deserialize;
 
-use crate::{error::ApiResult, main_lib::AppState};
+use crate::{
+    error::{ApiError, ApiResult},
+    main_lib::AppState,
+};
 use wealthfolio_core::activities::Activity;
 use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignment;
 use wealthfolio_spending::analytics::{
@@ -102,12 +105,46 @@ async fn spawn_auto_categorize_for_opted_in_accounts(state: &Arc<AppState>) {
     );
 }
 
+async fn spending_enabled(state: &Arc<AppState>) -> ApiResult<bool> {
+    Ok(state.spending_settings_service.get().await?.enabled)
+}
+
 async fn list_cash_activities(
     State(state): State<Arc<AppState>>,
-    Query(filter): Query<CashActivityFilter>,
+    RawQuery(raw_query): RawQuery,
 ) -> ApiResult<Json<Vec<CashActivity>>> {
+    let filter = parse_cash_activity_filter(raw_query)?;
     let activities = state.cash_activity_service.list(filter).await?;
     Ok(Json(activities))
+}
+
+fn parse_cash_activity_filter(raw_query: Option<String>) -> ApiResult<CashActivityFilter> {
+    let Some(qs) = raw_query else {
+        return Ok(CashActivityFilter::default());
+    };
+
+    let mut filter = CashActivityFilter::default();
+    let pairs = serde_urlencoded::from_str::<Vec<(String, String)>>(&qs)
+        .map_err(|e| ApiError::BadRequest(format!("Invalid cash activity query: {e}")))?;
+
+    let mut account_ids = Vec::new();
+    let mut activity_types = Vec::new();
+    for (key, value) in pairs {
+        match key.as_str() {
+            "accountIds" | "accountIds[]" => account_ids.push(value),
+            "activityTypes" | "activityTypes[]" => activity_types.push(value),
+            "startDate" => filter.start_date = Some(value),
+            "endDate" => filter.end_date = Some(value),
+            _ => {}
+        }
+    }
+    if !account_ids.is_empty() {
+        filter.account_ids = Some(account_ids);
+    }
+    if !activity_types.is_empty() {
+        filter.activity_types = Some(activity_types);
+    }
+    Ok(filter)
 }
 
 async fn search_cash_activities(
@@ -191,6 +228,9 @@ async fn bulk_assign_categories(
 async fn list_categorization_rules(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<CategorizationRule>>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(state.categorization_rules_service.list().await?))
 }
 
@@ -236,6 +276,9 @@ async fn rerun_categorization_rules(
     Json(body): Json<RerunRulesBody>,
 ) -> ApiResult<Json<usize>> {
     let s = state.spending_settings_service.get().await?;
+    if !s.enabled {
+        return Ok(Json(0));
+    }
     Ok(Json(
         state
             .categorization_rules_service
@@ -247,6 +290,9 @@ async fn rerun_categorization_rules(
 async fn list_rule_presets(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<wealthfolio_spending::categorization_rules::RulePresetSummary>>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(
         state.categorization_rules_service.list_presets().await?,
     ))
@@ -285,6 +331,9 @@ async fn import_rule_preset(
 }
 
 async fn list_event_types(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<EventType>>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(state.events_service.list_types().await?))
 }
 
@@ -335,6 +384,9 @@ async fn delete_event_type(
 }
 
 async fn list_events(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<Event>>> {
+    if !spending_enabled(&state).await? {
+        return Ok(Json(Vec::new()));
+    }
     Ok(Json(state.events_service.list_events().await?))
 }
 
@@ -701,4 +753,43 @@ pub fn router() -> Router<Arc<AppState>> {
             "/spending/event-spending-summaries",
             post(get_event_spending_summaries),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cash_activity_array_query_filters() {
+        let filter = parse_cash_activity_filter(Some(
+            "accountIds[]=acc1&accountIds[]=acc2&activityTypes[]=WITHDRAWAL&activityTypes[]=TAX&startDate=2026-01-01T00%3A00%3A00Z&endDate=2026-01-31T23%3A59%3A59Z"
+                .to_string(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            filter.account_ids,
+            Some(vec!["acc1".to_string(), "acc2".to_string()])
+        );
+        assert_eq!(
+            filter.activity_types,
+            Some(vec!["WITHDRAWAL".to_string(), "TAX".to_string()])
+        );
+        assert_eq!(filter.start_date.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(filter.end_date.as_deref(), Some("2026-01-31T23:59:59Z"));
+    }
+
+    #[test]
+    fn parses_cash_activity_repeated_query_filters() {
+        let filter = parse_cash_activity_filter(Some(
+            "accountIds=acc1&accountIds=acc2&activityTypes=DEPOSIT".to_string(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            filter.account_ids,
+            Some(vec!["acc1".to_string(), "acc2".to_string()])
+        );
+        assert_eq!(filter.activity_types, Some(vec!["DEPOSIT".to_string()]));
+    }
 }
