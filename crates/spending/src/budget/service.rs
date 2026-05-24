@@ -461,7 +461,7 @@ impl BudgetService {
         let group = groups
             .iter()
             .find(|g| g.id == id)
-            .ok_or_else(|| anyhow!("Budget group not found"))?;
+            .ok_or_else(|| invalid_budget_input("Budget group not found"))?;
         if group.is_system {
             return Err(SpendingError::InvalidInput {
                 message: "System budget groups cannot be deleted".to_string(),
@@ -469,12 +469,26 @@ impl BudgetService {
             .into());
         }
         if reassign_to_group_id == id {
-            return Err(anyhow!(
-                "Cannot reassign categories to the group being deleted"
+            return Err(invalid_budget_input(
+                "Cannot reassign categories to the group being deleted",
             ));
         }
         if !groups.iter().any(|g| g.id == reassign_to_group_id) {
-            return Err(anyhow!("Reassignment budget group not found"));
+            return Err(invalid_budget_input("Reassignment budget group not found"));
+        }
+        if self
+            .repo
+            .list_rollover_settings()
+            .await?
+            .into_iter()
+            .any(|r| {
+                matches!(r.target_type, BudgetRolloverTargetType::Group)
+                    && r.group_id.as_deref() == Some(id)
+            })
+        {
+            return Err(invalid_budget_input(
+                "Delete the group's rollover setting before deleting the group",
+            ));
         }
         let assignments = self.repo.list_group_assignments().await?;
         let reassignments = assignments
@@ -568,7 +582,7 @@ impl BudgetService {
                 let group_id = setting
                     .group_id
                     .as_ref()
-                    .ok_or_else(|| anyhow!("Group rollover requires groupId"))?;
+                    .ok_or_else(|| invalid_budget_input("Group rollover requires groupId"))?;
                 let categories = self.categories_for_group(group_id).await?;
                 self.repo
                     .disable_category_rollovers(SPENDING_TAXONOMY, &categories)
@@ -578,7 +592,7 @@ impl BudgetService {
                 let category_id = setting
                     .category_id
                     .as_ref()
-                    .ok_or_else(|| anyhow!("Category rollover requires categoryId"))?;
+                    .ok_or_else(|| invalid_budget_input("Category rollover requires categoryId"))?;
                 let group_id = self.group_id_for_category(category_id).await?;
                 let group_rollover_enabled = self
                     .repo
@@ -591,8 +605,8 @@ impl BudgetService {
                             && r.group_id.as_deref() == Some(group_id.as_str())
                     });
                 if group_rollover_enabled {
-                    return Err(anyhow!(
-                        "Disable group rollover before enabling category rollover"
+                    return Err(invalid_budget_input(
+                        "Disable group rollover before enabling category rollover",
                     ));
                 }
             }
@@ -624,7 +638,7 @@ impl BudgetService {
         validate_period_key(source_period_key)?;
         validate_month_key(target_period_key)?;
         if source_period_key == target_period_key {
-            return Err(anyhow!("Source and target months must differ"));
+            return Err(invalid_budget_input("Source and target months must differ"));
         }
         self.repo
             .copy_period_targets(source_period_key, target_period_key, overwrite)
@@ -1155,14 +1169,22 @@ fn invalid_budget_input(message: &str) -> anyhow::Error {
 
 fn validate_month_key(period_key: &str) -> Result<()> {
     if period_key.len() != 7 {
-        return Err(anyhow!("Invalid budget period key"));
+        return Err(invalid_budget_input("Invalid budget period key"));
     }
-    let year = period_key[0..4].parse::<i32>()?;
-    let month = period_key[5..7].parse::<u32>()?;
-    if &period_key[4..5] != "-" || !(1..=12).contains(&month) {
-        return Err(anyhow!("Invalid budget period key"));
+    if &period_key[4..5] != "-" {
+        return Err(invalid_budget_input("Invalid budget period key"));
     }
-    NaiveDate::from_ymd_opt(year, month, 1).ok_or_else(|| anyhow!("Invalid budget period key"))?;
+    let year = period_key[0..4]
+        .parse::<i32>()
+        .map_err(|_| invalid_budget_input("Invalid budget period key"))?;
+    let month = period_key[5..7]
+        .parse::<u32>()
+        .map_err(|_| invalid_budget_input("Invalid budget period key"))?;
+    if !(1..=12).contains(&month) {
+        return Err(invalid_budget_input("Invalid budget period key"));
+    }
+    NaiveDate::from_ymd_opt(year, month, 1)
+        .ok_or_else(|| invalid_budget_input("Invalid budget period key"))?;
     Ok(())
 }
 
@@ -1213,7 +1235,7 @@ fn month_start(period_key: &str) -> Result<DateTime<Utc>> {
     let (year, month) = parse_month(period_key)?;
     Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0)
         .single()
-        .ok_or_else(|| anyhow!("Invalid budget period key"))
+        .ok_or_else(|| invalid_budget_input("Invalid budget period key"))
 }
 
 fn month_end(period_key: &str) -> Result<DateTime<Utc>> {
@@ -1226,7 +1248,7 @@ fn month_end(period_key: &str) -> Result<DateTime<Utc>> {
     Ok(Utc
         .with_ymd_and_hms(next_year, next_month, 1, 0, 0, 0)
         .single()
-        .ok_or_else(|| anyhow!("Invalid budget period key"))?
+        .ok_or_else(|| invalid_budget_input("Invalid budget period key"))?
         - chrono::Duration::milliseconds(1))
 }
 
@@ -1252,7 +1274,13 @@ fn month_keys_between(start: &str, end: &str) -> Vec<String> {
 
 fn parse_month(period_key: &str) -> Result<(i32, u32)> {
     validate_month_key(period_key)?;
-    Ok((period_key[0..4].parse()?, period_key[5..7].parse()?))
+    let year = period_key[0..4]
+        .parse()
+        .map_err(|_| invalid_budget_input("Invalid budget period key"))?;
+    let month = period_key[5..7]
+        .parse()
+        .map_err(|_| invalid_budget_input("Invalid budget period key"))?;
+    Ok((year, month))
 }
 
 #[cfg(test)]

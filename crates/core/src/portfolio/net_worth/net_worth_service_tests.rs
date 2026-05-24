@@ -1730,7 +1730,7 @@ fn test_history_mixed_securities_cash_and_credit_card() {
 }
 
 #[test]
-fn test_history_alt_asset_quote_after_range_start_before_first_portfolio_date_is_not_seeded() {
+fn test_history_alt_asset_quote_after_range_start_before_first_portfolio_date_seeds_first_point() {
     let start = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
     let quote_date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
     let first_portfolio_date = NaiveDate::from_ymd_opt(2024, 2, 1).unwrap();
@@ -1763,8 +1763,8 @@ fn test_history_alt_asset_quote_after_range_start_before_first_portfolio_date_is
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].date, first_portfolio_date);
     assert_eq!(history[0].portfolio_value, dec!(100000));
-    assert_eq!(history[0].alternative_assets_value, Decimal::ZERO);
-    assert_eq!(history[0].net_worth, dec!(100000));
+    assert_eq!(history[0].alternative_assets_value, dec!(450000));
+    assert_eq!(history[0].net_worth, dec!(550000));
 }
 
 #[test]

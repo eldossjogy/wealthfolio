@@ -25,6 +25,7 @@ use crate::budget::service::{
     category_meta, resolve_group_for_category, top_category_id, top_level_categories, TargetIndex,
 };
 use crate::budget::BudgetRepositoryTrait;
+use crate::error::SpendingError;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
@@ -75,7 +76,10 @@ impl InsightService {
         let start = parse_rfc3339(&req.start_date)?;
         let end = parse_rfc3339(&req.end_date)?;
         if end < start {
-            return Err(anyhow!("end_date must be >= start_date"));
+            return Err(SpendingError::InvalidInput {
+                message: "end_date must be >= start_date".to_string(),
+            }
+            .into());
         }
         let compare = req.compare.unwrap_or_default();
         let prior_window = compute_prior_window(start, end, compare);
@@ -1103,7 +1107,12 @@ fn pct_share(part: f64, total: f64) -> Option<f64> {
 fn parse_rfc3339(value: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| anyhow!("Invalid RFC3339 timestamp `{value}`: {e}"))
+        .map_err(|e| {
+            SpendingError::InvalidInput {
+                message: format!("Invalid RFC3339 timestamp `{value}`: {e}"),
+            }
+            .into()
+        })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

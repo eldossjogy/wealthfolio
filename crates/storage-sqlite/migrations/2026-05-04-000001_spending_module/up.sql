@@ -136,17 +136,6 @@ CREATE TABLE spending_categorization_rules (
     CHECK ((is_global = 1 AND account_id IS NULL) OR (is_global = 0 AND account_id IS NOT NULL))
 );
 
-CREATE TRIGGER trg_spending_rules_account_delete_promote
-BEFORE DELETE ON accounts
-FOR EACH ROW
-BEGIN
-  UPDATE spending_categorization_rules
-     SET is_global = 1,
-         account_id = NULL,
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-   WHERE account_id = OLD.id;
-END;
-
 CREATE INDEX idx_spending_categorization_rules_priority ON spending_categorization_rules(priority DESC, created_at ASC, id ASC);
 CREATE INDEX idx_spending_categorization_rules_category ON spending_categorization_rules(taxonomy_id, category_id);
 CREATE INDEX idx_spending_categorization_rules_account ON spending_categorization_rules(account_id);

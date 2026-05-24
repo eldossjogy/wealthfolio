@@ -22,6 +22,7 @@ const HOUR_LABELS = ["12a", "3a", "6a", "9a", "12p", "3p", "6p", "9p"];
 export interface WhenYouSpendCardProps {
   activities: Activity[];
   accountTypeById?: Map<string, string>;
+  dailySpendByDate?: Map<string, number>;
   currency: string;
   onCellClick?: (weekday: number, hour: number) => void;
 }
@@ -29,6 +30,7 @@ export interface WhenYouSpendCardProps {
 export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   activities,
   accountTypeById,
+  dailySpendByDate,
   currency,
   onCellClick,
 }) => {
@@ -36,8 +38,8 @@ export const WhenYouSpendCard: FC<WhenYouSpendCardProps> = ({
   const isPhone = useIsMobileViewport();
   const cols = isPhone ? 8 : 24;
   const grid = useMemo(
-    () => buildWeekdayHourGrid(activities, accountTypeById, cols),
-    [accountTypeById, activities, cols],
+    () => buildWeekdayHourGrid(activities, accountTypeById, dailySpendByDate, cols),
+    [accountTypeById, activities, dailySpendByDate, cols],
   );
 
   if (activities.length === 0) {
@@ -230,6 +232,7 @@ interface WeekdayHourGrid {
 function buildWeekdayHourGrid(
   activities: Activity[],
   accountTypeById?: Map<string, string>,
+  dailySpendByDate?: Map<string, number>,
   cols = 24,
 ): WeekdayHourGrid {
   const safeCols = cols > 0 && cols <= 24 ? cols : 24;
@@ -237,17 +240,27 @@ function buildWeekdayHourGrid(
   const cells: number[][] = Array.from({ length: 7 }, () => new Array(safeCols).fill(0));
   // Per (weekday, dayKey) → daily total. Used to compute the median per weekday.
   const dayTotals = new Map<string, number>();
+  const rawSpendByDate = dailySpendByDate
+    ? buildRawSpendByDate(activities, accountTypeById)
+    : undefined;
 
   for (const a of activities) {
-    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (amt === 0) continue;
+    const rawAmount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (rawAmount === 0) continue;
     const date = new Date(a.activityDate);
     if (isNaN(date.getTime())) continue;
+    const dayKey = date.toISOString().slice(0, 10);
+    const convertedDayTotal = dailySpendByDate?.get(dayKey);
+    const rawDayTotal = rawSpendByDate?.get(dayKey) ?? 0;
+    const amt =
+      convertedDayTotal != null && rawDayTotal > 0
+        ? rawAmount * (convertedDayTotal / rawDayTotal)
+        : rawAmount;
     const weekday = (date.getDay() + 6) % 7; // Mon=0..Sun=6
     const hour = date.getHours();
     const bucket = Math.min(safeCols - 1, Math.floor(hour / hoursPerCell));
     cells[weekday][bucket] += amt;
-    const key = `${weekday}|${date.toISOString().slice(0, 10)}`;
+    const key = `${weekday}|${dayKey}`;
     dayTotals.set(key, (dayTotals.get(key) ?? 0) + amt);
   }
 
@@ -273,6 +286,22 @@ function buildWeekdayHourGrid(
   }
 
   return { cells, max, medians };
+}
+
+function buildRawSpendByDate(
+  activities: Activity[],
+  accountTypeById?: Map<string, string>,
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const a of activities) {
+    const amount = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+    if (amount === 0) continue;
+    const date = new Date(a.activityDate);
+    if (isNaN(date.getTime())) continue;
+    const dayKey = date.toISOString().slice(0, 10);
+    totals.set(dayKey, (totals.get(dayKey) ?? 0) + amount);
+  }
+  return totals;
 }
 
 function median(values: number[]): number {

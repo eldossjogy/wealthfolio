@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::{spending_event_types, spending_events};
+use crate::schema::{spending_activity_events, spending_event_types, spending_events};
+use crate::spending::activity_events::ActivityEventDB;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::events::{
     Event, EventType, EventTypesRepositoryTrait, EventsRepositoryTrait, NewEvent, NewEventType,
@@ -332,6 +333,24 @@ impl EventsRepositoryTrait for EventsRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
+                let affected_activity_event_ids: Vec<String> = spending_activity_events::table
+                    .filter(spending_activity_events::event_id.eq(&id))
+                    .select(spending_activity_events::activity_id)
+                    .load::<String>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                let removed_activity_events = diesel::delete(
+                    spending_activity_events::table
+                        .filter(spending_activity_events::event_id.eq(&id)),
+                )
+                .execute(tx.conn())
+                .map_err(StorageError::from)?;
+                if removed_activity_events > 0 {
+                    for activity_id in affected_activity_event_ids {
+                        tx.delete::<ActivityEventDB>(activity_id);
+                    }
+                }
+
                 let affected = diesel::delete(spending_events::table.find(&id))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;

@@ -74,8 +74,16 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   const computed = useEventsAggregate(events, heatmapActivities, accountTypeById, dailySpendByDate);
 
   const dailySeries = useMemo(
-    () => buildDailySeries(heatmapActivities, events, accountTypeById, rangeStart, rangeEnd),
-    [heatmapActivities, events, accountTypeById, rangeStart, rangeEnd],
+    () =>
+      buildDailySeries(
+        heatmapActivities,
+        events,
+        accountTypeById,
+        dailySpendByDate,
+        rangeStart,
+        rangeEnd,
+      ),
+    [heatmapActivities, events, accountTypeById, dailySpendByDate, rangeStart, rangeEnd],
   );
 
   const periodDays = Math.max(1, inclusiveDays(rangeStart, rangeEnd));
@@ -630,6 +638,7 @@ function buildDailySeries(
   activities: Activity[],
   events: EventSpendingSummary[],
   accountTypeById: Map<string, string> | undefined,
+  dailySpendByDate: Map<string, number> | undefined,
   rangeStart: Date,
   rangeEnd: Date,
 ): number[] {
@@ -637,11 +646,19 @@ function buildDailySeries(
   const series = new Array(periodDays).fill(0);
   const startMs = rangeStart.getTime();
 
-  for (const a of activities) {
-    const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
-    if (amt <= 0) continue;
-    const idx = Math.round((new Date(a.activityDate).getTime() - startMs) / 86_400_000);
-    if (idx >= 0 && idx < periodDays) series[idx] += amt;
+  if (dailySpendByDate) {
+    for (const [dateKey, amount] of dailySpendByDate) {
+      if (amount <= 0) continue;
+      const idx = Math.round((new Date(`${dateKey}T12:00:00`).getTime() - startMs) / 86_400_000);
+      if (idx >= 0 && idx < periodDays) series[idx] += amount;
+    }
+  } else {
+    for (const a of activities) {
+      const amt = getActivitySpendingAmount(a, accountTypeById?.get(a.accountId));
+      if (amt <= 0) continue;
+      const idx = Math.round((new Date(a.activityDate).getTime() - startMs) / 86_400_000);
+      if (idx >= 0 && idx < periodDays) series[idx] += amt;
+    }
   }
 
   // Overlay event-level dailySpending (covers periods outside the 12-week window).

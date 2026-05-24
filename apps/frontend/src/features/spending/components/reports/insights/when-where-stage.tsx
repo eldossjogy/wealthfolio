@@ -80,6 +80,7 @@ export function WhenWhereStage({
       <WhenYouSpendCard
         activities={heatmapActivities}
         accountTypeById={accountTypeById}
+        dailySpendByDate={dailySpendByDate}
         currency={currency}
         onCellClick={onHeatmapCellClick}
       />
