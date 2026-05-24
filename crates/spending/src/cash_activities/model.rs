@@ -29,7 +29,6 @@ pub enum CashActivityStatusFilter {
     Categorized,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -39,7 +38,6 @@ pub enum CashActivitySortField {
     Amount,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -48,7 +46,6 @@ pub enum SortDirection {
     #[default]
     Desc,
 }
-
 
 /// Search request for cash activities. Powers the spending Transactions page.
 /// All filters optional. Server-side: filters → sort → paginate → join assignments.

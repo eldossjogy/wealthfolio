@@ -8,7 +8,6 @@ pub struct SpendingSettings {
     pub account_ids: Vec<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendingSettingsUpdate {
