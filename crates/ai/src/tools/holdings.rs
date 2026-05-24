@@ -237,7 +237,9 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env::test_env::MockEnvironment;
+    use crate::env::test_env::{MockAccountService, MockEnvironment};
+    use chrono::Utc;
+    use wealthfolio_core::accounts::{Account, TrackingMode};
 
     #[tokio::test]
     async fn test_get_holdings_tool() {
@@ -260,7 +262,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_holdings_with_account_id() {
-        let env = Arc::new(MockEnvironment::new());
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("acc-123", "SECURITIES")],
+        });
+        let env = Arc::new(env);
         let tool = GetHoldingsTool::new(env, "USD".to_string());
 
         let result = tool
@@ -274,5 +280,27 @@ mod tests {
         let output = result.unwrap();
         assert_eq!(output.account_scope, "acc-123");
         assert_eq!(output.view_mode, "table");
+    }
+
+    fn test_account(id: &str, account_type: &str) -> Account {
+        let now = Utc::now().naive_utc();
+        Account {
+            id: id.to_string(),
+            name: id.to_string(),
+            account_type: account_type.to_string(),
+            group: None,
+            currency: "USD".to_string(),
+            is_default: false,
+            created_at: now,
+            updated_at: now,
+            platform_id: None,
+            account_number: None,
+            meta: None,
+            is_active: true,
+            provider: None,
+            provider_account_id: None,
+            is_archived: false,
+            tracking_mode: TrackingMode::Transactions,
+        }
     }
 }
