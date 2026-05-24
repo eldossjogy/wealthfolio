@@ -17,8 +17,7 @@ use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
 use wealthfolio_spending::cash_activities::{
-    CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-    CashActivity,
+    CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, NewCategorizationRule, UpdateCategorizationRule,
@@ -620,92 +619,86 @@ async fn get_event_spending_summaries(
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/v1/spending/settings", get(get_spending_settings))
-        .route("/v1/spending/settings", put(update_spending_settings))
-        .route("/v1/spending/cash-activities", get(list_cash_activities))
+        .route("/spending/settings", get(get_spending_settings))
+        .route("/spending/settings", put(update_spending_settings))
+        .route("/spending/cash-activities", get(list_cash_activities))
         .route(
-            "/v1/spending/cash-activities/search",
+            "/spending/cash-activities/search",
             post(search_cash_activities),
         )
         .route(
-            "/v1/spending/cash-activities/{activity_id}/event",
+            "/spending/cash-activities/{activity_id}/event",
             put(set_activity_event),
         )
         .route(
-            "/v1/spending/activities/{activity_id}/assignments",
+            "/spending/activities/{activity_id}/assignments",
             get(get_activity_assignments).put(assign_activity_category),
         )
         .route(
-            "/v1/spending/activities/{activity_id}/assignments/{taxonomy_id}",
+            "/spending/activities/{activity_id}/assignments/{taxonomy_id}",
             delete(unassign_activity_category),
         )
+        .route("/spending/assignments/bulk", post(bulk_assign_categories))
         .route(
-            "/v1/spending/assignments/bulk",
-            post(bulk_assign_categories),
-        )
-        .route(
-            "/v1/spending/rules",
+            "/spending/rules",
             get(list_categorization_rules).post(create_categorization_rule),
         )
         .route(
-            "/v1/spending/rules/{id}",
+            "/spending/rules/{id}",
             put(update_categorization_rule).delete(delete_categorization_rule),
         )
-        .route("/v1/spending/rules/rerun", post(rerun_categorization_rules))
-        .route("/v1/spending/rule-presets", get(list_rule_presets))
+        .route("/spending/rules/rerun", post(rerun_categorization_rules))
+        .route("/spending/rule-presets", get(list_rule_presets))
         .route(
-            "/v1/spending/rule-presets/{preset_id}/import",
+            "/spending/rule-presets/{preset_id}/import",
             post(import_rule_preset),
         )
         .route(
-            "/v1/spending/rule-presets/{preset_id}",
+            "/spending/rule-presets/{preset_id}",
             delete(remove_rule_preset),
         )
         .route(
-            "/v1/spending/event-types",
+            "/spending/event-types",
             get(list_event_types).post(create_event_type),
         )
         .route(
-            "/v1/spending/event-types/{id}",
+            "/spending/event-types/{id}",
             put(update_event_type).delete(delete_event_type),
         )
-        .route("/v1/spending/events", get(list_events).post(create_event))
+        .route("/spending/events", get(list_events).post(create_event))
         .route(
-            "/v1/spending/events/{id}",
+            "/spending/events/{id}",
             put(update_event).delete(delete_event),
         )
-        .route("/v1/spending/budget", get(get_budget))
-        .route("/v1/spending/budget/targets", post(upsert_budget_target))
+        .route("/spending/budget", get(get_budget))
+        .route("/spending/budget/targets", post(upsert_budget_target))
         .route(
-            "/v1/spending/budget/targets/{id}",
+            "/spending/budget/targets/{id}",
             delete(delete_budget_target),
         )
         .route(
-            "/v1/spending/budget/rollovers",
+            "/spending/budget/rollovers",
             post(upsert_budget_rollover_setting),
         )
         .route(
-            "/v1/spending/budget/rollovers/{id}",
+            "/spending/budget/rollovers/{id}",
             delete(delete_budget_rollover_setting),
         )
-        .route("/v1/spending/budget/groups", post(create_budget_group))
+        .route("/spending/budget/groups", post(create_budget_group))
+        .route("/spending/budget/groups/reset", post(reset_budget_groups))
         .route(
-            "/v1/spending/budget/groups/reset",
-            post(reset_budget_groups),
-        )
-        .route(
-            "/v1/spending/budget/groups/{id}",
+            "/spending/budget/groups/{id}",
             put(update_budget_group).delete(delete_budget_group),
         )
         .route(
-            "/v1/spending/budget/group-assignments",
+            "/spending/budget/group-assignments",
             post(assign_category_to_group),
         )
-        .route("/v1/spending/budget/copy", post(copy_budget_targets))
-        .route("/v1/spending/report", post(get_spending_report))
-        .route("/v1/spending/insight", post(get_spending_insight))
+        .route("/spending/budget/copy", post(copy_budget_targets))
+        .route("/spending/report", post(get_spending_report))
+        .route("/spending/insight", post(get_spending_insight))
         .route(
-            "/v1/spending/event-spending-summaries",
+            "/spending/event-spending-summaries",
             post(get_event_spending_summaries),
         )
 }
