@@ -203,10 +203,7 @@ function useStepValidation(
             });
 
             for (const value of uniqueValues) {
-              const mappedType = findMappedActivityType(
-                value,
-                activityMappings,
-              ) as string | null;
+              const mappedType = findMappedActivityType(value, activityMappings) as string | null;
               if (
                 !mappedType ||
                 (mappedType !== ACTIVITY_SKIP &&

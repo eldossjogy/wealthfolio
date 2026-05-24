@@ -1,9 +1,4 @@
-import {
-  ACTIVITY_SUBTYPES,
-  AccountType,
-  ActivityType,
-  ImportFormat,
-} from "@/lib/constants";
+import { ACTIVITY_SUBTYPES, AccountType, ActivityType, ImportFormat } from "@/lib/constants";
 import type { ActivityImport } from "@/lib/types";
 import { tryParseDate } from "@/lib/utils";
 import { isValid, parse, parseISO } from "date-fns";
@@ -431,9 +426,7 @@ export function createDraftActivities(
       options?.importProfile && isTransactionImportProfile(options.importProfile);
     const rawSymbol = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.SYMBOL);
     const rawIsin = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.ISIN);
-    const rawQuantity = ignoresAssetFields
-      ? undefined
-      : getColumnValue(row, ImportFormat.QUANTITY);
+    const rawQuantity = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.QUANTITY);
     const rawUnitPrice = ignoresAssetFields
       ? undefined
       : getColumnValue(row, ImportFormat.UNIT_PRICE);

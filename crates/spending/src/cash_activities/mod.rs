@@ -6,8 +6,8 @@ pub mod model;
 pub mod service;
 
 pub use model::{
-    CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-    CashActivitySortField, CashActivityStatusFilter, CashActivity, SortDirection,
+    CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
+    CashActivitySortField, CashActivityStatusFilter, SortDirection,
 };
 pub use service::CashActivityService;
 

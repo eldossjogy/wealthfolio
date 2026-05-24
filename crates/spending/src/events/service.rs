@@ -734,8 +734,10 @@ mod tests {
             vec![],
             vec![],
         );
-        let mut patch = UpdateEvent::default();
-        patch.start_date = Some(ymd(2024, 6, 20));
+        let patch = UpdateEvent {
+            start_date: Some(ymd(2024, 6, 20)),
+            ..Default::default()
+        };
         let err = svc.update_event("ev1", patch).await.unwrap_err();
         assert!(err.to_string().contains("Invalid date range"));
     }
@@ -776,8 +778,10 @@ mod tests {
             ],
             vec![("a1", "ev1"), ("a2", "ev1"), ("a3", "ev1")],
         );
-        let mut patch = UpdateEvent::default();
-        patch.end_date = Some(ymd(2024, 6, 8));
+        let patch = UpdateEvent {
+            end_date: Some(ymd(2024, 6, 8)),
+            ..Default::default()
+        };
         svc.update_event("ev1", patch).await.unwrap();
 
         let tags = tags.lock().unwrap();

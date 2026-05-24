@@ -564,7 +564,7 @@ export interface ImportCsvAccountOption {
   id: string;
   name: string;
   currency: string;
-  accountType?: import("@/lib/types").AccountType | string;
+  accountType?: string;
 }
 
 /**
@@ -639,12 +639,12 @@ export interface ProposeCategoriesArgs {
   startDate?: string;
   endDate?: string;
   limit?: number;
-  aiProposals?: Array<{
+  aiProposals?: {
     activityId: string;
     categoryKey: string;
     confidence?: number;
     reason?: string;
-  }>;
+  }[];
 }
 
 export interface ListCategorizationContextArgs {

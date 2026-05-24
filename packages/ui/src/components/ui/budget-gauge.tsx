@@ -13,7 +13,7 @@ interface BudgetProgressRingProps {
   varianceTolerance?: number;
 }
 
-const getProgressColor = (percentUsed: number, varianceTolerance: number = 10): string => {
+const getProgressColor = (percentUsed: number, varianceTolerance = 10): string => {
   const underBudgetThreshold = 100 - varianceTolerance;
   const onTrackUpperBound = 100 + varianceTolerance;
   if (percentUsed >= 120) return "var(--destructive)";

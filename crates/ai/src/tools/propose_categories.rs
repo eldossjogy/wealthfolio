@@ -13,6 +13,7 @@
 //!    context, then calls this tool a second time with `aiProposals` — its
 //!    inferred categories as structured tool arguments. The tool merges those
 //!    with the deterministic results.
+//!
 //! Same pattern as `import_csv`: the agent's tool-call IS the structured output.
 
 use log::{debug, warn};

@@ -542,10 +542,7 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
   draftRevisionRef.current = state.draftRevision;
 
   const validateDrafts = useCallback(
-    async (
-      drafts: DraftActivity[],
-      options?: { revision?: number },
-    ): Promise<ValidationResult> => {
+    async (drafts: DraftActivity[], options?: { revision?: number }): Promise<ValidationResult> => {
       const run = ++validationRunRef.current;
       const requestedRevision = options?.revision ?? draftRevisionRef.current;
       dispatch({ type: "SET_IS_VALIDATING", payload: true });

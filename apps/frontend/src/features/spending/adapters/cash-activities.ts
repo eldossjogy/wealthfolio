@@ -9,9 +9,7 @@ import type {
   CashActivity,
 } from "../types/cash-activity";
 
-export const listCashActivities = async (
-  filter?: CashActivityFilter,
-): Promise<CashActivity[]> => {
+export const listCashActivities = async (filter?: CashActivityFilter): Promise<CashActivity[]> => {
   try {
     return await invoke<CashActivity[]>("list_cash_activities", { filter });
   } catch (error) {

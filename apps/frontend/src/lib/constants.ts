@@ -79,16 +79,8 @@ const ACCOUNT_PURPOSE_TYPES = {
     AccountType.CASH,
     AccountType.CRYPTOCURRENCY,
   ],
-  [AccountPurpose.HOLDINGS]: [
-    AccountType.SECURITIES,
-    AccountType.CASH,
-    AccountType.CRYPTOCURRENCY,
-  ],
-  [AccountPurpose.INCOME]: [
-    AccountType.SECURITIES,
-    AccountType.CASH,
-    AccountType.CRYPTOCURRENCY,
-  ],
+  [AccountPurpose.HOLDINGS]: [AccountType.SECURITIES, AccountType.CASH, AccountType.CRYPTOCURRENCY],
+  [AccountPurpose.INCOME]: [AccountType.SECURITIES, AccountType.CASH, AccountType.CRYPTOCURRENCY],
   [AccountPurpose.GOAL_FUNDING]: [
     AccountType.SECURITIES,
     AccountType.CASH,
@@ -139,10 +131,7 @@ export function accountCapabilities(
     holdings: accountSupportsPurpose(accountOrType, AccountPurpose.HOLDINGS),
     income: accountSupportsPurpose(accountOrType, AccountPurpose.INCOME),
     goalFunding: accountSupportsPurpose(accountOrType, AccountPurpose.GOAL_FUNDING),
-    contributionLimits: accountSupportsPurpose(
-      accountOrType,
-      AccountPurpose.CONTRIBUTION_LIMITS,
-    ),
+    contributionLimits: accountSupportsPurpose(accountOrType, AccountPurpose.CONTRIBUTION_LIMITS),
     netWorth: accountSupportsPurpose(accountOrType, AccountPurpose.NET_WORTH),
     liability: isLiabilityAccountType(
       typeof accountOrType === "string" ? accountOrType : accountOrType?.accountType,

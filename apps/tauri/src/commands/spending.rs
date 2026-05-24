@@ -14,8 +14,7 @@ use wealthfolio_spending::budget::{
     BudgetSnapshot, NewBudgetGroup, NewBudgetRolloverSetting, NewBudgetTarget, UpdateBudgetGroup,
 };
 use wealthfolio_spending::cash_activities::{
-    CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-    CashActivity,
+    CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesService, ImportPresetResult, NewCategorizationRule,

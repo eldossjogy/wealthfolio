@@ -41,6 +41,7 @@ pub struct AnalyticsService {
 }
 
 impl AnalyticsService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         activity_repo: Arc<dyn ActivityRepositoryTrait>,
         account_repo: Arc<dyn AccountRepositoryTrait>,
@@ -731,219 +732,6 @@ fn activity_date_in_window(
     start.is_none_or(|start| activity_date >= start) && end.is_none_or(|end| activity_date <= end)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use chrono::TimeZone;
-    use rust_decimal::Decimal;
-    use serde_json::Value;
-    use wealthfolio_core::accounts::account_types;
-    use wealthfolio_core::activities::ActivityStatus;
-    use wealthfolio_core::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
-
-    /// Identity FX stub for tests — returns the input amount unchanged. Lets
-    /// build_summary / summarize be exercised without a real FxService + DB.
-    /// Same pattern as the insight service's PassthroughFx.
-    pub(super) struct PassthroughFx;
-
-    type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
-
-    #[async_trait]
-    impl FxServiceTrait for PassthroughFx {
-        fn initialize(&self) -> CoreResult<()> {
-            Ok(())
-        }
-        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
-            Ok(vec![])
-        }
-        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
-            Ok(Decimal::ONE)
-        }
-        fn get_exchange_rate_for_date(
-            &self,
-            _: &str,
-            _: &str,
-            _: NaiveDate,
-        ) -> CoreResult<Decimal> {
-            Ok(Decimal::ONE)
-        }
-        fn convert_currency(&self, amount: Decimal, _: &str, _: &str) -> CoreResult<Decimal> {
-            Ok(amount)
-        }
-        fn convert_currency_for_date(
-            &self,
-            amount: Decimal,
-            _: &str,
-            _: &str,
-            _: NaiveDate,
-        ) -> CoreResult<Decimal> {
-            Ok(amount)
-        }
-        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
-            Ok(vec![])
-        }
-        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
-            unimplemented!("PassthroughFx is read-only")
-        }
-        async fn update_exchange_rate(
-            &self,
-            _: &str,
-            _: &str,
-            _: Decimal,
-        ) -> CoreResult<ExchangeRate> {
-            unimplemented!("PassthroughFx is read-only")
-        }
-        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
-            Ok(())
-        }
-        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
-            Ok(())
-        }
-        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
-            Ok(())
-        }
-        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
-            Ok(())
-        }
-    }
-
-    fn spending_activity(
-        id: &str,
-        activity_type: &str,
-        amount: i64,
-        category_id: &str,
-        month: u32,
-    ) -> (Activity, (String, Option<String>)) {
-        let activity = Activity {
-            id: id.to_string(),
-            account_id: "card-account".to_string(),
-            asset_id: None,
-            activity_type: activity_type.to_string(),
-            activity_type_override: None,
-            source_type: None,
-            subtype: None,
-            status: ActivityStatus::Posted,
-            activity_date: Utc.with_ymd_and_hms(2024, month, 10, 12, 0, 0).unwrap(),
-            settlement_date: None,
-            quantity: None,
-            unit_price: None,
-            amount: Some(Decimal::new(amount, 0)),
-            fee: None,
-            currency: "USD".to_string(),
-            fx_rate: None,
-            notes: None,
-            metadata: None::<Value>,
-            source_system: None,
-            source_record_id: None,
-            source_group_id: None,
-            idempotency_key: None,
-            import_run_id: None,
-            is_user_modified: false,
-            needs_review: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-
-        (activity, (id.to_string(), Some(category_id.to_string())))
-    }
-
-    fn build_credit_card_summary(activities: &[Activity]) -> SpendingSummary {
-        let activity_refs: Vec<&Activity> = activities.iter().collect();
-        let account_types = HashMap::from([(
-            "card-account".to_string(),
-            account_types::CREDIT_CARD.to_string(),
-        )]);
-        let cat_meta = HashMap::from([
-            (
-                "groceries".to_string(),
-                ("Groceries".to_string(), Some("#1".to_string()), None),
-            ),
-            (
-                "travel".to_string(),
-                ("Travel".to_string(), Some("#2".to_string()), None),
-            ),
-        ]);
-        let assign_by_act = activities
-            .iter()
-            .map(|activity| {
-                let category = if activity.id == "charge" {
-                    "groceries"
-                } else {
-                    "travel"
-                };
-                (activity.id.clone(), Some(category.to_string()))
-            })
-            .collect();
-
-        build_summary(
-            "TOTAL",
-            &activity_refs,
-            &assign_by_act,
-            &cat_meta,
-            &account_types,
-            "USD",
-            &PassthroughFx,
-            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
-            "",
-        )
-    }
-
-    #[test]
-    fn build_summary_preserves_refund_buckets_when_period_stays_positive() {
-        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 200, "groceries", 1);
-        let (refund, _) = spending_activity("refund", "CREDIT", 50, "travel", 2);
-
-        let summary = build_credit_card_summary(&[charge, refund]);
-
-        assert_eq!(summary.total_spending, 150.0);
-        assert_eq!(summary.by_month.get("2024-01"), Some(&200.0));
-        assert_eq!(summary.by_month.get("2024-02"), Some(&-50.0));
-        assert_eq!(summary.by_category["groceries"].amount, 200.0);
-        assert_eq!(summary.by_category["travel"].amount, -50.0);
-        assert_eq!(summary.transaction_count, 1);
-    }
-
-    #[test]
-    fn build_summary_clears_buckets_when_refunds_exceed_charges() {
-        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 100, "groceries", 1);
-        let (refund, _) = spending_activity("refund", "CREDIT", 150, "travel", 2);
-
-        let summary = build_credit_card_summary(&[charge, refund]);
-
-        assert_eq!(summary.total_spending, 0.0);
-        assert!(summary.by_month.is_empty());
-        assert!(summary.by_category.is_empty());
-        assert!(summary.by_account.is_empty());
-        assert_eq!(summary.transaction_count, 0);
-    }
-
-    #[test]
-    fn event_summary_window_filters_activity_dates() {
-        let start = Utc.with_ymd_and_hms(2024, 2, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2024, 2, 29, 23, 59, 59).unwrap();
-        let in_window = Utc.with_ymd_and_hms(2024, 2, 10, 12, 0, 0).unwrap();
-        let before_window = Utc.with_ymd_and_hms(2024, 1, 31, 23, 59, 59).unwrap();
-        let after_window = Utc.with_ymd_and_hms(2024, 3, 1, 0, 0, 0).unwrap();
-
-        assert!(activity_date_in_window(
-            &in_window,
-            Some(&start),
-            Some(&end)
-        ));
-        assert!(!activity_date_in_window(
-            &before_window,
-            Some(&start),
-            Some(&end)
-        ));
-        assert!(!activity_date_in_window(
-            &after_window,
-            Some(&start),
-            Some(&end)
-        ));
-    }
-}
-
 fn empty_summary(period: &str) -> SpendingSummary {
     SpendingSummary {
         period: period.to_string(),
@@ -1395,5 +1183,218 @@ impl AnalyticsService {
         }
 
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use chrono::TimeZone;
+    use rust_decimal::Decimal;
+    use serde_json::Value;
+    use wealthfolio_core::accounts::account_types;
+    use wealthfolio_core::activities::ActivityStatus;
+    use wealthfolio_core::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
+
+    /// Identity FX stub for tests — returns the input amount unchanged. Lets
+    /// build_summary / summarize be exercised without a real FxService + DB.
+    /// Same pattern as the insight service's PassthroughFx.
+    pub(super) struct PassthroughFx;
+
+    type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
+
+    #[async_trait]
+    impl FxServiceTrait for PassthroughFx {
+        fn initialize(&self) -> CoreResult<()> {
+            Ok(())
+        }
+        fn get_historical_rates(&self, _: &str, _: &str, _: i64) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        fn get_latest_exchange_rate(&self, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn get_exchange_rate_for_date(
+            &self,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(Decimal::ONE)
+        }
+        fn convert_currency(&self, amount: Decimal, _: &str, _: &str) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            _: &str,
+            _: &str,
+            _: NaiveDate,
+        ) -> CoreResult<Decimal> {
+            Ok(amount)
+        }
+        fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
+            Ok(vec![])
+        }
+        async fn add_exchange_rate(&self, _: NewExchangeRate) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn update_exchange_rate(
+            &self,
+            _: &str,
+            _: &str,
+            _: Decimal,
+        ) -> CoreResult<ExchangeRate> {
+            unimplemented!("PassthroughFx is read-only")
+        }
+        async fn delete_exchange_rate(&self, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn register_currency_pair_manual(&self, _: &str, _: &str) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn ensure_fx_pairs(&self, _: Vec<(String, String)>) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
+    fn spending_activity(
+        id: &str,
+        activity_type: &str,
+        amount: i64,
+        category_id: &str,
+        month: u32,
+    ) -> (Activity, (String, Option<String>)) {
+        let activity = Activity {
+            id: id.to_string(),
+            account_id: "card-account".to_string(),
+            asset_id: None,
+            activity_type: activity_type.to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: None,
+            status: ActivityStatus::Posted,
+            activity_date: Utc.with_ymd_and_hms(2024, month, 10, 12, 0, 0).unwrap(),
+            settlement_date: None,
+            quantity: None,
+            unit_price: None,
+            amount: Some(Decimal::new(amount, 0)),
+            fee: None,
+            currency: "USD".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None::<Value>,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+            is_user_modified: false,
+            needs_review: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        (activity, (id.to_string(), Some(category_id.to_string())))
+    }
+
+    fn build_credit_card_summary(activities: &[Activity]) -> SpendingSummary {
+        let activity_refs: Vec<&Activity> = activities.iter().collect();
+        let account_types = HashMap::from([(
+            "card-account".to_string(),
+            account_types::CREDIT_CARD.to_string(),
+        )]);
+        let cat_meta = HashMap::from([
+            (
+                "groceries".to_string(),
+                ("Groceries".to_string(), Some("#1".to_string()), None),
+            ),
+            (
+                "travel".to_string(),
+                ("Travel".to_string(), Some("#2".to_string()), None),
+            ),
+        ]);
+        let assign_by_act = activities
+            .iter()
+            .map(|activity| {
+                let category = if activity.id == "charge" {
+                    "groceries"
+                } else {
+                    "travel"
+                };
+                (activity.id.clone(), Some(category.to_string()))
+            })
+            .collect();
+
+        build_summary(
+            "TOTAL",
+            &activity_refs,
+            &assign_by_act,
+            &cat_meta,
+            &account_types,
+            "USD",
+            &PassthroughFx,
+            NaiveDate::from_ymd_opt(2024, 12, 31).unwrap(),
+            "",
+        )
+    }
+
+    #[test]
+    fn build_summary_preserves_refund_buckets_when_period_stays_positive() {
+        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 200, "groceries", 1);
+        let (refund, _) = spending_activity("refund", "CREDIT", 50, "travel", 2);
+
+        let summary = build_credit_card_summary(&[charge, refund]);
+
+        assert_eq!(summary.total_spending, 150.0);
+        assert_eq!(summary.by_month.get("2024-01"), Some(&200.0));
+        assert_eq!(summary.by_month.get("2024-02"), Some(&-50.0));
+        assert_eq!(summary.by_category["groceries"].amount, 200.0);
+        assert_eq!(summary.by_category["travel"].amount, -50.0);
+        assert_eq!(summary.transaction_count, 1);
+    }
+
+    #[test]
+    fn build_summary_clears_buckets_when_refunds_exceed_charges() {
+        let (charge, _) = spending_activity("charge", "WITHDRAWAL", 100, "groceries", 1);
+        let (refund, _) = spending_activity("refund", "CREDIT", 150, "travel", 2);
+
+        let summary = build_credit_card_summary(&[charge, refund]);
+
+        assert_eq!(summary.total_spending, 0.0);
+        assert!(summary.by_month.is_empty());
+        assert!(summary.by_category.is_empty());
+        assert!(summary.by_account.is_empty());
+        assert_eq!(summary.transaction_count, 0);
+    }
+
+    #[test]
+    fn event_summary_window_filters_activity_dates() {
+        let start = Utc.with_ymd_and_hms(2024, 2, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 2, 29, 23, 59, 59).unwrap();
+        let in_window = Utc.with_ymd_and_hms(2024, 2, 10, 12, 0, 0).unwrap();
+        let before_window = Utc.with_ymd_and_hms(2024, 1, 31, 23, 59, 59).unwrap();
+        let after_window = Utc.with_ymd_and_hms(2024, 3, 1, 0, 0, 0).unwrap();
+
+        assert!(activity_date_in_window(
+            &in_window,
+            Some(&start),
+            Some(&end)
+        ));
+        assert!(!activity_date_in_window(
+            &before_window,
+            Some(&start),
+            Some(&end)
+        ));
+        assert!(!activity_date_in_window(
+            &after_window,
+            Some(&start),
+            Some(&end)
+        ));
     }
 }

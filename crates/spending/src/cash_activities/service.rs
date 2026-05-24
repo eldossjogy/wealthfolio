@@ -88,7 +88,7 @@ impl CashActivityService {
             filter.end_date.as_deref(),
         )?;
 
-        activities.sort_by(|a, b| b.activity_date.cmp(&a.activity_date));
+        activities.sort_by_key(|a| std::cmp::Reverse(a.activity_date));
 
         // Batch-enrich with assignments + event tags. Mirrors the tail of
         // `search()`. The ids list is the *retained* rows, so we never fetch
@@ -271,11 +271,9 @@ impl CashActivityService {
         match req.sort_by {
             CashActivitySortField::Date => match req.sort_dir {
                 SortDirection::Desc => {
-                    activities.sort_by(|a, b| b.activity_date.cmp(&a.activity_date))
+                    activities.sort_by_key(|a| std::cmp::Reverse(a.activity_date))
                 }
-                SortDirection::Asc => {
-                    activities.sort_by(|a, b| a.activity_date.cmp(&b.activity_date))
-                }
+                SortDirection::Asc => activities.sort_by_key(|a| a.activity_date),
             },
             CashActivitySortField::Amount => {
                 activities.sort_by(|a, b| {
@@ -390,9 +388,9 @@ fn retain_classified_cash_activities(
     });
 }
 
-fn group_assignments<'a>(
-    assignments: &'a [ActivityTaxonomyAssignment],
-) -> HashMap<&'a str, Vec<&'a ActivityTaxonomyAssignment>> {
+fn group_assignments(
+    assignments: &[ActivityTaxonomyAssignment],
+) -> HashMap<&str, Vec<&ActivityTaxonomyAssignment>> {
     let mut map: HashMap<&str, Vec<&ActivityTaxonomyAssignment>> = HashMap::new();
     for a in assignments {
         map.entry(a.activity_id.as_str()).or_default().push(a);

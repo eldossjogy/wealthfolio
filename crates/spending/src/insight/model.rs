@@ -17,16 +17,13 @@ pub struct SpendingInsightRequest {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CompareMode {
+    #[default]
     Prior,
     YearOverYear,
 }
 
-impl Default for CompareMode {
-    fn default() -> Self {
-        Self::Prior
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

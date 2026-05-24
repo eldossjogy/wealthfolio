@@ -1128,10 +1128,10 @@ fn fx_to_target(
 
 fn month_start(period_key: &str) -> Result<DateTime<Utc>> {
     let (year, month) = parse_month(period_key)?;
-    Ok(Utc
+    Utc
         .with_ymd_and_hms(year, month, 1, 0, 0, 0)
         .single()
-        .ok_or_else(|| anyhow!("Invalid budget period key"))?)
+        .ok_or_else(|| anyhow!("Invalid budget period key"))
 }
 
 fn month_end(period_key: &str) -> Result<DateTime<Utc>> {

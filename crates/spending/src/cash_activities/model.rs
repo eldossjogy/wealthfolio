@@ -20,44 +20,35 @@ pub struct CashActivityFilter {
 /// Status filter for cash-activity search.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CashActivityStatusFilter {
+    #[default]
     All,
     NeedsReview,
     Uncategorized,
     Categorized,
 }
 
-impl Default for CashActivityStatusFilter {
-    fn default() -> Self {
-        Self::All
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CashActivitySortField {
+    #[default]
     Date,
     Amount,
 }
 
-impl Default for CashActivitySortField {
-    fn default() -> Self {
-        Self::Date
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SortDirection {
     Asc,
+    #[default]
     Desc,
 }
 
-impl Default for SortDirection {
-    fn default() -> Self {
-        Self::Desc
-    }
-}
 
 /// Search request for cash activities. Powers the spending Transactions page.
 /// All filters optional. Server-side: filters → sort → paginate → join assignments.

@@ -296,11 +296,11 @@ export function MappingStepUnified() {
         row: d.row,
         count: d.count,
         appType: (() => {
-          const mapped = findMappedActivityType(
-            type,
-            effectiveActivityMappings || {},
-          ) as string | null;
-          return mapped === ACTIVITY_SKIP || activityTypeAllowedForImportProfile(mapped, importProfile)
+          const mapped = findMappedActivityType(type, effectiveActivityMappings || {}) as
+            | string
+            | null;
+          return mapped === ACTIVITY_SKIP ||
+            activityTypeAllowedForImportProfile(mapped, importProfile)
             ? mapped
             : null;
         })(),
@@ -843,7 +843,9 @@ export function MappingStepUnified() {
                   className="data-[state=active]:bg-primary data-[state=active]:text-primary data-[state=active]:hover:bg-primary/90 h-8 rounded-full px-2 text-sm"
                   value="preview"
                 >
-                  {importProfile.kind === "transaction" ? "Transaction Preview" : "Activity Preview"}
+                  {importProfile.kind === "transaction"
+                    ? "Transaction Preview"
+                    : "Activity Preview"}
                 </TabsTrigger>
                 <TabsTrigger
                   className="data-[state=active]:bg-primary data-[state=active]:text-primary data-[state=active]:hover:bg-primary/90 h-8 rounded-full px-2 text-sm"

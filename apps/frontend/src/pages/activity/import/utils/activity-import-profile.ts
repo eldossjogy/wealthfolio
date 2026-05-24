@@ -1,9 +1,4 @@
-import {
-  AccountType,
-  ActivityType,
-  IMPORT_REQUIRED_FIELDS,
-  ImportFormat,
-} from "@/lib/constants";
+import { AccountType, ActivityType, IMPORT_REQUIRED_FIELDS, ImportFormat } from "@/lib/constants";
 import type { Account, ImportMappingData } from "@/lib/types";
 
 const ACTIVITY_SKIP = "_SKIP_";
@@ -362,16 +357,12 @@ export function mergeActivityMappingsForImportProfile(
   return merged;
 }
 
-export function sanitizeImportMappingForProfile<T extends Pick<
-  ImportMappingData,
-  | "fieldMappings"
-  | "activityMappings"
-  | "symbolMappings"
-  | "symbolMappingMeta"
->>(
-  mapping: T,
-  profile = DEFAULT_ACTIVITY_IMPORT_PROFILE,
-): T {
+export function sanitizeImportMappingForProfile<
+  T extends Pick<
+    ImportMappingData,
+    "fieldMappings" | "activityMappings" | "symbolMappings" | "symbolMappingMeta"
+  >,
+>(mapping: T, profile = DEFAULT_ACTIVITY_IMPORT_PROFILE): T {
   return {
     ...mapping,
     fieldMappings: sanitizeFieldMappingsForImportProfile(mapping.fieldMappings, profile),

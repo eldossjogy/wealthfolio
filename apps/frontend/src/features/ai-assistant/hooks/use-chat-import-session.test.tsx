@@ -250,9 +250,7 @@ describe("useChatImportSession", () => {
       ],
     };
 
-    const { result } = renderHook(() =>
-      useChatImportSession({ mapping: ambiguousCardStatement }),
-    );
+    const { result } = renderHook(() => useChatImportSession({ mapping: ambiguousCardStatement }));
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.importProfile.kind).toBe("investment");

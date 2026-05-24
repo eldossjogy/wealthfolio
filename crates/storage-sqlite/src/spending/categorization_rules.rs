@@ -273,8 +273,10 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         diesel::update(spending_categorization_rules::table.find(&row.id))
                             .set((
                                 spending_categorization_rules::preset_id.eq::<Option<String>>(None),
-                                spending_categorization_rules::preset_rule_key.eq::<Option<String>>(None),
-                                spending_categorization_rules::preset_version.eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_rule_key
+                                    .eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_version
+                                    .eq::<Option<String>>(None),
                                 spending_categorization_rules::preset_modified.eq(0),
                                 spending_categorization_rules::updated_at.eq(&now),
                             ))

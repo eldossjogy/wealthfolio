@@ -1,9 +1,6 @@
 import type { Activity, TaxonomyCategory } from "@/lib/types";
 
-import type {
-  ActivityTaxonomyAssignment,
-  CashActivity,
-} from "../types/cash-activity";
+import type { ActivityTaxonomyAssignment, CashActivity } from "../types/cash-activity";
 
 /** Stable sorted Set→array used in React Query keys (insertion order is unstable). */
 export function stableArr(s: Set<string>): string[] | undefined {
