@@ -162,7 +162,7 @@ const ActivityPage = () => {
     if (!effectiveAccountIds || effectiveAccountIds.length === 0) return investmentAccountIds;
     const allowed = new Set(investmentAccountIds);
     return effectiveAccountIds.filter((id) => allowed.has(id));
-  }, [effectiveAccountIds, investmentAccountIds, isSpendingEnabled, spendingAccountIds.length]);
+  }, [effectiveAccountIds, investmentAccountIds, isSpendingEnabled, spendingAccountIds]);
 
   // Infinite scroll search for table view
   const infiniteSearch = useActivitySearch({
