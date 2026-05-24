@@ -9,9 +9,6 @@ use super::model::ActivityEvent;
 ///
 /// Reads (`list_for_activities`, `list_for_event`) feed analytics / cash-activity
 /// services that need to know which activities are tagged to which events.
-/// Writes are routed via `ActivityRepositoryTrait::set_activity_event_id` so
-/// the activity row's `updated_at` bumps in the same transaction and device
-/// sync picks both changes up atomically.
 #[async_trait]
 pub trait ActivityEventsRepositoryTrait: Send + Sync {
     /// Returns activity_id → event_id for the requested activity ids.
@@ -20,6 +17,18 @@ pub trait ActivityEventsRepositoryTrait: Send + Sync {
 
     /// Activity ids currently tagged to a given event.
     async fn list_for_event(&self, event_id: &str) -> Result<Vec<String>>;
+
+    /// Tag or untag an activity with a spending event.
+    ///
+    /// The tag lives in the `activity_events` join table, not on the core
+    /// activity row. Implementations should bump the activity's `updated_at`
+    /// in the same transaction so device sync sees both the surrounding
+    /// activity edit and the join-row change atomically.
+    async fn set_activity_event_tag(
+        &self,
+        activity_id: &str,
+        event_id: Option<String>,
+    ) -> Result<()>;
 
     /// Bulk delete by event id. Used when an event is deleted to untag all
     /// its activities atomically. Returns the number of rows removed.

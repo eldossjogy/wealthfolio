@@ -440,77 +440,6 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .await
     }
 
-    /// Tag/untag via the `activity_events` join table. The relationship no
-    /// longer lives as a column on `activities`, so this writes to the
-    /// sidecar table instead. We still bump `activities.updated_at` so device
-    /// sync sees the surrounding edit, and we push a per-join-row outbox
-    /// entry (`SyncEntity::SpendingActivityEvent`) so the tag itself replicates.
-    async fn set_activity_event_id(
-        &self,
-        activity_id: &str,
-        event_id: Option<String>,
-    ) -> Result<Activity> {
-        use crate::schema::spending_activity_events;
-        use crate::spending::activity_events::ActivityEventDB;
-        let activity_id = activity_id.to_string();
-        self.writer
-            .exec_tx(move |tx| -> Result<Activity> {
-                let now = chrono::Utc::now().to_rfc3339();
-                // 1) Upsert / delete in activity_events.
-                match &event_id {
-                    Some(eid) => {
-                        diesel::insert_into(spending_activity_events::table)
-                            .values((
-                                spending_activity_events::activity_id.eq(&activity_id),
-                                spending_activity_events::event_id.eq(eid),
-                                spending_activity_events::created_at.eq(&now),
-                                spending_activity_events::updated_at.eq(&now),
-                            ))
-                            .on_conflict(spending_activity_events::activity_id)
-                            .do_update()
-                            .set((
-                                spending_activity_events::event_id.eq(eid),
-                                spending_activity_events::updated_at.eq(&now),
-                            ))
-                            .execute(tx.conn())
-                            .map_err(StorageError::from)?;
-                        tx.update(&ActivityEventDB {
-                            activity_id: activity_id.clone(),
-                            event_id: eid.clone(),
-                            created_at: now.clone(),
-                            updated_at: now.clone(),
-                        })?;
-                    }
-                    None => {
-                        // Only emit the sync tombstone when an actual row
-                        // was removed. Calling tx.delete unconditionally on
-                        // a no-op DELETE writes `last_op = Delete` in the
-                        // sync metadata for an entity the network never saw
-                        // — and a subsequent Create from another device
-                        // would then get rejected by LWW as resurrection.
-                        let removed = diesel::delete(
-                            spending_activity_events::table
-                                .filter(spending_activity_events::activity_id.eq(&activity_id)),
-                        )
-                        .execute(tx.conn())
-                        .map_err(StorageError::from)?;
-                        if removed > 0 {
-                            tx.delete::<ActivityEventDB>(activity_id.clone());
-                        }
-                    }
-                }
-                // 2) Bump activities.updated_at + load fresh row.
-                let updated = diesel::update(activities::table.find(&activity_id))
-                    .set(activities::updated_at.eq(&now))
-                    .get_result::<ActivityDB>(tx.conn())
-                    .map_err(StorageError::from)?;
-                let activity = Activity::from(updated.clone());
-                tx.update(&updated)?;
-                Ok(activity)
-            })
-            .await
-    }
-
     async fn link_transfer_activities(
         &self,
         activity_a_id: String,
@@ -2145,7 +2074,7 @@ mod tests {
         diesel::sql_query(format!(
             "INSERT INTO accounts (id, name, account_type, `group`, currency, is_default, is_active, \
              created_at, updated_at, platform_id, account_number, meta, provider, provider_account_id, \
-             is_archived, tracking_mode) VALUES ('{}', 'Test', 'cash', NULL, 'USD', 1, 1, \
+             is_archived, tracking_mode) VALUES ('{}', 'Test', 'CASH', NULL, 'USD', 1, 1, \
              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL, {}, 'portfolio')",
             account_id,
             if archived { 1 } else { 0 }

@@ -605,13 +605,6 @@ mod tests {
         async fn update_activity(&self, _: ActivityUpdate) -> wealthfolio_core::Result<Activity> {
             unimplemented!()
         }
-        async fn set_activity_event_id(
-            &self,
-            _: &str,
-            _: Option<String>,
-        ) -> wealthfolio_core::Result<Activity> {
-            unimplemented!()
-        }
         async fn delete_activity(&self, _: String) -> wealthfolio_core::Result<Activity> {
             unimplemented!()
         }

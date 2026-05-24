@@ -329,9 +329,11 @@ impl CashActivityService {
     /// caller (`useCashActivities`) discards this return value and refetches
     /// via the spending caches, which is the intended pattern.
     pub async fn set_event(&self, activity_id: &str, event_id: Option<String>) -> Result<Activity> {
+        self.activity_events
+            .set_activity_event_tag(activity_id, event_id)
+            .await?;
         self.activity_repo
-            .set_activity_event_id(activity_id, event_id)
-            .await
+            .get_activity(activity_id)
             .map_err(|e| anyhow::anyhow!(e.to_string()))
     }
 

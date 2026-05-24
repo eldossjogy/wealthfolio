@@ -1089,14 +1089,6 @@ mod tests {
             Ok(existing.clone())
         }
 
-        async fn set_activity_event_id(
-            &self,
-            _activity_id: &str,
-            _event_id: Option<String>,
-        ) -> Result<Activity> {
-            unimplemented!()
-        }
-
         async fn delete_activity(&self, _activity_id: String) -> Result<Activity> {
             unimplemented!()
         }

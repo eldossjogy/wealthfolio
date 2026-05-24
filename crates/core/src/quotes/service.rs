@@ -3164,14 +3164,6 @@ mod tests {
             unimplemented!("unused in this test")
         }
 
-        async fn set_activity_event_id(
-            &self,
-            _activity_id: &str,
-            _event_id: Option<String>,
-        ) -> Result<Activity> {
-            unimplemented!("unused in this test")
-        }
-
         async fn delete_activity(&self, _activity_id: String) -> Result<Activity> {
             unimplemented!("unused in this test")
         }

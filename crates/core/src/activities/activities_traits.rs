@@ -51,16 +51,6 @@ pub trait ActivityRepositoryTrait: Send + Sync {
     ) -> Result<ActivitySearchResponse>;
     async fn create_activity(&self, new_activity: NewActivity) -> Result<Activity>;
     async fn update_activity(&self, activity_update: ActivityUpdate) -> Result<Activity>;
-    /// Tag (or untag) an activity with a spending event. Backed by the
-    /// `activity_events` join table — the link does not live on the
-    /// `activities` row itself, so the returned `Activity` carries no
-    /// event-id field. Callers that need the current tag should read it
-    /// from the spending-side repository.
-    async fn set_activity_event_id(
-        &self,
-        activity_id: &str,
-        event_id: Option<String>,
-    ) -> Result<Activity>;
     async fn delete_activity(&self, activity_id: String) -> Result<Activity>;
     /// Pairs two existing transfer activities by writing a shared `source_group_id`
     /// and clearing `metadata.flow.is_external` on both. Order of `activity_a_id` /

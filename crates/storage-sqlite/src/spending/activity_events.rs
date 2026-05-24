@@ -1,10 +1,8 @@
 //! Storage adapter for spending::activity_events — Diesel impl over the
 //! `activity_events` join table.
 //!
-//! Writes for `set_activity_event_id` go through
-//! `ActivityRepositoryTrait::set_activity_event_id` (so the activity's
-//! `updated_at` bumps in the same transaction). This repository owns the
-//! read paths and bulk delete-by-event.
+//! This repository owns both read paths and tag writes so the core activity
+//! repository does not need to know about spending events.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,9 +12,10 @@ use async_trait::async_trait;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::activities::ActivityDB;
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::spending_activity_events;
+use crate::schema::{activities, spending_activity_events};
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::activity_events::{ActivityEvent, ActivityEventsRepositoryTrait};
 
@@ -95,6 +94,69 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
             .map_err(StorageError::from)
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(rows)
+    }
+
+    async fn set_activity_event_tag(
+        &self,
+        activity_id: &str,
+        event_id: Option<String>,
+    ) -> Result<()> {
+        let activity_id = activity_id.to_string();
+        self.writer
+            .exec_tx(move |tx| {
+                let now = chrono::Utc::now().to_rfc3339();
+                match &event_id {
+                    Some(eid) => {
+                        diesel::insert_into(spending_activity_events::table)
+                            .values((
+                                spending_activity_events::activity_id.eq(&activity_id),
+                                spending_activity_events::event_id.eq(eid),
+                                spending_activity_events::created_at.eq(&now),
+                                spending_activity_events::updated_at.eq(&now),
+                            ))
+                            .on_conflict(spending_activity_events::activity_id)
+                            .do_update()
+                            .set((
+                                spending_activity_events::event_id.eq(eid),
+                                spending_activity_events::updated_at.eq(&now),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&ActivityEventDB {
+                            activity_id: activity_id.clone(),
+                            event_id: eid.clone(),
+                            created_at: now.clone(),
+                            updated_at: now.clone(),
+                        })?;
+                    }
+                    None => {
+                        // Only emit the sync tombstone when an actual row
+                        // was removed. Calling tx.delete unconditionally on
+                        // a no-op DELETE writes `last_op = Delete` in the
+                        // sync metadata for an entity the network never saw
+                        // — and a subsequent Create from another device
+                        // would then get rejected by LWW as resurrection.
+                        let removed = diesel::delete(
+                            spending_activity_events::table
+                                .filter(spending_activity_events::activity_id.eq(&activity_id)),
+                        )
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
+                        if removed > 0 {
+                            tx.delete::<ActivityEventDB>(activity_id.clone());
+                        }
+                    }
+                }
+
+                let updated = diesel::update(activities::table.find(&activity_id))
+                    .set(activities::updated_at.eq(&now))
+                    .get_result::<ActivityDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+                tx.update(&updated)?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     async fn delete_by_event(&self, event_id: &str) -> Result<usize> {

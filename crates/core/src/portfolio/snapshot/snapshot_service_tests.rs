@@ -386,13 +386,6 @@ mod tests {
         async fn update_activity(&self, _activity_update: ActivityUpdate) -> AppResult<Activity> {
             unimplemented!()
         }
-        async fn set_activity_event_id(
-            &self,
-            _activity_id: &str,
-            _event_id: Option<String>,
-        ) -> AppResult<Activity> {
-            unimplemented!()
-        }
         async fn delete_activity(&self, _activity_id: String) -> AppResult<Activity> {
             unimplemented!()
         }
@@ -621,13 +614,6 @@ mod tests {
             unimplemented!()
         }
         async fn update_activity(&self, _u: ActivityUpdate) -> AppResult<Activity> {
-            unimplemented!()
-        }
-        async fn set_activity_event_id(
-            &self,
-            _id: &str,
-            _event_id: Option<String>,
-        ) -> AppResult<Activity> {
             unimplemented!()
         }
         async fn delete_activity(&self, _id: String) -> AppResult<Activity> {

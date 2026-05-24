@@ -134,10 +134,9 @@ impl EventsService {
                     .get_activity(activity_id)
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 if a.activity_date < new_start_dt || a.activity_date > new_end_dt {
-                    self.activity_repo
-                        .set_activity_event_id(&a.id, None)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                    self.activity_events
+                        .set_activity_event_tag(&a.id, None)
+                        .await?;
                 }
             }
         }
@@ -341,15 +340,12 @@ mod tests {
 
     // --------------- Mock activity repo ---------------
 
-    // Tag storage lives in a shared map so both the `set_activity_event_id`
-    // (ActivityRepo) and `list_for_activities` (ActivityEventsRepo) sides of
-    // the mock agree, mirroring how the real `activity_events` join table
-    // backs both call paths.
+    // Tag storage lives in a shared map, mirroring how the real
+    // `activity_events` join table backs both read and write paths.
     type TagStore = Arc<Mutex<std::collections::HashMap<String, String>>>;
 
     struct MockActivityRepo {
         activities: Mutex<Vec<Activity>>,
-        tags: TagStore,
     }
 
     fn mk_activity(id: &str, date: DateTime<Utc>) -> Activity {
@@ -415,6 +411,22 @@ mod tests {
             let before = tags.len();
             tags.retain(|_, eid| eid.as_str() != event_id);
             Ok(before - tags.len())
+        }
+        async fn set_activity_event_tag(
+            &self,
+            activity_id: &str,
+            event_id: Option<String>,
+        ) -> Result<()> {
+            let mut tags = self.tags.lock().unwrap();
+            match event_id {
+                Some(eid) => {
+                    tags.insert(activity_id.to_string(), eid);
+                }
+                None => {
+                    tags.remove(activity_id);
+                }
+            }
+            Ok(())
         }
         async fn list_all(&self) -> Result<Vec<crate::activity_events::ActivityEvent>> {
             let tags = self.tags.lock().unwrap();
@@ -493,32 +505,6 @@ mod tests {
         }
         async fn update_activity(&self, _: ActivityUpdate) -> wealthfolio_core::Result<Activity> {
             unimplemented!()
-        }
-        async fn set_activity_event_id(
-            &self,
-            activity_id: &str,
-            event_id: Option<String>,
-        ) -> wealthfolio_core::Result<Activity> {
-            let acts = self.activities.lock().unwrap();
-            let a = acts.iter().find(|a| a.id == activity_id).ok_or_else(|| {
-                wealthfolio_core::errors::Error::Validation(
-                    wealthfolio_core::errors::ValidationError::InvalidInput(
-                        "not found".to_string(),
-                    ),
-                )
-            })?;
-            // Tag storage now lives in the shared TagStore (mirrors the
-            // `activity_events` join table). None == untag.
-            let mut tags = self.tags.lock().unwrap();
-            match event_id {
-                Some(eid) => {
-                    tags.insert(activity_id.to_string(), eid);
-                }
-                None => {
-                    tags.remove(activity_id);
-                }
-            }
-            Ok(a.clone())
         }
         async fn delete_activity(&self, _: String) -> wealthfolio_core::Result<Activity> {
             unimplemented!()
@@ -690,7 +676,6 @@ mod tests {
         ));
         let activity_repo = Arc::new(MockActivityRepo {
             activities: Mutex::new(activities),
-            tags: tags.clone(),
         });
         let activity_events_repo: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait> =
             Arc::new(MockActivityEventsRepo { tags: tags.clone() });
