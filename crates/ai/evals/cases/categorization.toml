@@ -2,7 +2,7 @@
 #
 # Validates the two-tool dance documented in `system_prompt.txt`:
 #   list_categorization_context  →  propose_transaction_categories(aiProposals)
-# Plus the rule-promotion flow when the user gives a hint like "T&T is groceries".
+# Plus the rule-draft flow when the user gives a hint like "T&T is groceries".
 
 name = "categorization"
 description = "Agent flows for the spending categorization feature."
@@ -32,8 +32,8 @@ propose_transaction_categories = 1
 # ----------------------------------------------------------------------------
 
 [[case]]
-id = "hint_promotes_to_rule_then_recategorizes"
-description = "User hint 'X is Y' → save rule first, then re-run categorization"
+id = "hint_drafts_rule_for_confirmation"
+description = "User hint 'X is Y' → draft a rule for confirmation"
 prompt = "T&T is groceries"
 severity = "P0"
 tags = ["regression", "spending", "hint-flow"]
@@ -41,14 +41,9 @@ tags = ["regression", "spending", "hint-flow"]
 [[case.expected_tools]]
 name = "create_categorization_rule"
 [case.expected_tools.args]
+taxonomyId = "spending_categories"
 categoryKey = "groceries"
 pattern = { contains = "T&T" }
-
-[[case.expected_tools]]
-name = "list_categorization_context"
-
-[[case.expected_tools]]
-name = "propose_transaction_categories"
 
 [case.max_tool_calls]
 create_categorization_rule = 1

@@ -59,6 +59,8 @@ fn truncate_notes(s: &str) -> String {
 pub struct AiProposal {
     /// Activity ID from the unproposed list returned in the first call.
     pub activity_id: String,
+    /// Taxonomy ID containing `category_key`. Category keys are taxonomy-scoped.
+    pub taxonomy_id: String,
     /// Category key from the taxonomies returned in the first call (e.g. "groceries").
     pub category_key: String,
     /// 0.0–1.0; agent's stated confidence. Defaults to 0.7 if missing.
@@ -258,16 +260,17 @@ impl<E: AiEnvironment + 'static> Tool for ProposeCategoriesTool<E> {
                     },
                     "aiProposals": {
                         "type": "array",
-                        "description": "Your inferred categories for the rows returned as `unproposed` from `list_categorization_context`. Each entry: { activityId, categoryKey, confidence (0–1), reason }.",
+                        "description": "Your inferred categories for the rows returned as `unproposed` from `list_categorization_context`. Each entry: { activityId, taxonomyId, categoryKey, confidence (0–1), reason }.",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "activityId": { "type": "string" },
+                                "taxonomyId": { "type": "string" },
                                 "categoryKey": { "type": "string" },
                                 "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
                                 "reason": { "type": "string" }
                             },
-                            "required": ["activityId", "categoryKey"]
+                            "required": ["activityId", "taxonomyId", "categoryKey"]
                         }
                     }
                 }
@@ -384,9 +387,9 @@ pub(crate) struct CategorizationState {
     pub unproposed: Vec<UnproposedActivity>,
     pub taxonomies: Vec<TaxonomySummary>,
     pub examples: Vec<CategoryExample>,
-    /// category_key -> (taxonomy_id, category_id, path). Used to resolve
-    /// agent-supplied category keys back to live IDs.
-    pub key_lookup: HashMap<String, (String, String, String)>,
+    /// (taxonomy_id, category_key) -> (taxonomy_id, category_id, path). Used to
+    /// resolve agent-supplied category keys back to live IDs.
+    pub key_lookup: HashMap<(String, String), (String, String, String)>,
 }
 
 /// Shared deterministic pass — fetches activities + taxonomies + history, runs
@@ -458,7 +461,7 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
     // category_id -> (taxonomy_id, taxonomy_name, category_name, path, color)
     let mut category_lookup: HashMap<String, (String, String, String, String, String)> =
         HashMap::new();
-    let mut key_lookup: HashMap<String, (String, String, String)> = HashMap::new();
+    let mut key_lookup: HashMap<(String, String), (String, String, String)> = HashMap::new();
     let mut taxonomy_summaries = Vec::with_capacity(activity_taxonomies.len());
     for entry in &activity_taxonomies {
         let cats_by_id: HashMap<&str, &_> = entry
@@ -480,7 +483,7 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
                 ),
             );
             key_lookup.insert(
-                cat.key.clone(),
+                (entry.taxonomy.id.clone(), cat.key.clone()),
                 (entry.taxonomy.id.clone(), cat.id.clone(), path.clone()),
             );
             options.push(CategoryOption {
@@ -674,7 +677,7 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
 pub(crate) fn merge_ai_proposals(
     unproposed: Vec<UnproposedActivity>,
     mut proposals: Vec<Proposal>,
-    key_lookup: &HashMap<String, (String, String, String)>,
+    key_lookup: &HashMap<(String, String), (String, String, String)>,
     ai_props: Vec<AiProposal>,
 ) -> (Vec<Proposal>, Vec<UnproposedActivity>) {
     let target_index: HashMap<&str, &UnproposedActivity> = unproposed
@@ -686,7 +689,9 @@ pub(crate) fn merge_ai_proposals(
         let Some(row) = target_index.get(ai.activity_id.as_str()) else {
             continue;
         };
-        let Some((tax_id, cat_id, path)) = key_lookup.get(&ai.category_key) else {
+        let Some((tax_id, cat_id, path)) =
+            key_lookup.get(&(ai.taxonomy_id.clone(), ai.category_key.clone()))
+        else {
             continue;
         };
         let confidence = ai.confidence.unwrap_or(0.7).clamp(0.5, 0.95);
@@ -1182,10 +1187,10 @@ mod tests {
         }
     }
 
-    fn make_key_lookup() -> HashMap<String, (String, String, String)> {
+    fn make_key_lookup() -> HashMap<(String, String), (String, String, String)> {
         let mut m = HashMap::new();
         m.insert(
-            "groceries".to_string(),
+            ("tax1".to_string(), "groceries".to_string()),
             (
                 "tax1".to_string(),
                 "cat-g".to_string(),
@@ -1193,7 +1198,7 @@ mod tests {
             ),
         );
         m.insert(
-            "coffee".to_string(),
+            ("tax1".to_string(), "coffee".to_string()),
             (
                 "tax1".to_string(),
                 "cat-c".to_string(),
@@ -1209,6 +1214,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: Some(0.8),
             reason: Some("looks like food".to_string()),
@@ -1236,6 +1242,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "nonexistent".to_string(),
             confidence: Some(0.8),
             reason: None,
@@ -1255,6 +1262,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: Some(0.8),
             reason: None,
@@ -1273,6 +1281,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: Some(2.0),
             reason: None,
@@ -1288,6 +1297,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: Some(0.1),
             reason: None,
@@ -1303,6 +1313,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: None,
             reason: None,
@@ -1318,6 +1329,7 @@ mod tests {
         let key_lookup = make_key_lookup();
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "groceries".to_string(),
             confidence: Some(0.7),
             reason: None,
@@ -1348,12 +1360,14 @@ mod tests {
         let ai = vec![
             AiProposal {
                 activity_id: "a1".to_string(),
+                taxonomy_id: "tax1".to_string(),
                 category_key: "groceries".to_string(),
                 confidence: Some(0.6),
                 reason: Some("first".to_string()),
             },
             AiProposal {
                 activity_id: "a1".to_string(),
+                taxonomy_id: "tax1".to_string(),
                 category_key: "coffee".to_string(),
                 confidence: Some(0.9),
                 reason: Some("second".to_string()),
@@ -1387,6 +1401,7 @@ mod tests {
         }];
         let ai = vec![AiProposal {
             activity_id: "a1".to_string(),
+            taxonomy_id: "tax1".to_string(),
             category_key: "coffee".to_string(),
             confidence: Some(0.8),
             reason: None,

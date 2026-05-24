@@ -73,16 +73,18 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
             return Ok(HashMap::new());
         }
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let rows: Vec<ActivityEventDB> = spending_activity_events::table
-            .filter(spending_activity_events::activity_id.eq_any(ids))
-            .select(ActivityEventDB::as_select())
-            .load(&mut conn)
-            .map_err(StorageError::from)
-            .map_err(|e| anyhow::anyhow!(e))?;
-        Ok(rows
-            .into_iter()
-            .map(|r| (r.activity_id, r.event_id))
-            .collect())
+        const CHUNK: usize = 500;
+        let mut out = HashMap::new();
+        for chunk in ids.chunks(CHUNK) {
+            let rows: Vec<ActivityEventDB> = spending_activity_events::table
+                .filter(spending_activity_events::activity_id.eq_any(chunk))
+                .select(ActivityEventDB::as_select())
+                .load(&mut conn)
+                .map_err(StorageError::from)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            out.extend(rows.into_iter().map(|r| (r.activity_id, r.event_id)));
+        }
+        Ok(out)
     }
 
     async fn list_for_event(&self, event_id: &str) -> Result<Vec<String>> {

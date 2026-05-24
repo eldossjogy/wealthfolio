@@ -74,6 +74,7 @@ name = "propose_transaction_categories"
 [case.expected_tools.args]
 aiProposals = "not_empty"            # sentinel
 accountIds  = "absent_or_empty"      # sentinel
+taxonomyId  = "spending_categories"  # exact string match
 categoryKey = "groceries"            # sentinel = exact string match
 quantity    = { exact = 20 }         # exact value
 pattern     = { contains = "T&T" }   # JSON-stringified contains

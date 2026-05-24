@@ -1,20 +1,16 @@
 //! Create Categorization Rule tool.
 //!
 //! When a user gives a "save this for next time" hint (e.g. "T&T is groceries",
-//! "treat coffee shops as food/coffee"), the agent calls this to create a real
-//! `categorization_rule` row. The rule applies to all future categorization
-//! passes AND can be re-run against past uncategorized activities — same
-//! mechanism the user already uses from the Spending Settings page.
-//!
-//! No widget. Returns a one-line summary. The agent typically calls this
-//! BEFORE re-running `list_categorization_context` + `propose_transaction_categories`
-//! so the new rule shows up in the deterministic pass.
+//! "treat coffee shops as food/coffee"), the agent calls this to draft a
+//! `categorization_rule` row for user review. The frontend persists the rule
+//! only after the user confirms the draft widget.
 
 use log::debug;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
@@ -37,20 +33,30 @@ pub struct CreateCategorizationRuleArgs {
     /// Stable category key from the activity-scope taxonomy (e.g. "groceries",
     /// "food_dining_restaurants"). Get this from `list_categorization_context.taxonomies`.
     pub category_key: String,
+    /// Taxonomy ID containing `categoryKey`. Required because keys are only unique
+    /// within a taxonomy.
+    pub taxonomy_id: String,
     /// Optional: restrict to one activity type (e.g. "WITHDRAWAL"). Usually omit.
     #[serde(default)]
     pub activity_type: Option<String>,
+    /// Optional: restrict the rule to one account. Omit for a global rule.
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCategorizationRuleOutput {
-    pub rule_id: String,
-    pub rule_name: String,
-    pub pattern: String,
-    pub match_type: String,
+    pub draft_status: String,
+    pub rule_id: Option<String>,
+    pub rule: NewCategorizationRule,
     pub category_path: String,
+    pub account_name: Option<String>,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submitted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submitted_at: Option<String>,
 }
 
 pub struct CreateCategorizationRuleTool<E: AiEnvironment> {
@@ -82,18 +88,15 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description:
-                "Create a persistent categorization rule. Call this when the user gives a \
+                "Draft a persistent categorization rule for user confirmation. Call this when the user gives a \
                  generalizable hint like 'T&T is groceries', 'treat coffee shops as food', \
-                 'gym charges are health'. The rule auto-categorizes all matching transactions \
-                 (past and future) on the next deterministic pass. \
+                 'gym charges are health'. The rule is not saved until the user confirms the widget. \
                  \n\nWORKFLOW: when the user supplies such a hint while reviewing a draft, \
-                 (1) call `create_categorization_rule` to persist the rule, then \
-                 (2) re-run `list_categorization_context` + `propose_transaction_categories` \
-                 — the new rule will show up as `source: \"rule\"` in the result, and you only \
-                 need `aiProposals` for whatever's still unmatched. \
+                 call `create_categorization_rule` to render the confirmation widget, then stop. \
                  \n\nUse `pattern: \"T&T\"` with default `matchType: \"contains\"` for typical \
-                 merchant-name hints. Get the `categoryKey` from the `taxonomies` list returned \
-                 by `list_categorization_context`."
+                 merchant-name hints. Get both `taxonomyId` and `categoryKey` from the `taxonomies` \
+                 list returned by `list_categorization_context`. If the user scopes the hint to an \
+                 account, pass that account's ID as `accountId`."
                     .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -115,12 +118,20 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
                         "type": "string",
                         "description": "Category key from the activity-scope taxonomies (e.g. \"groceries\")."
                     },
+                    "taxonomyId": {
+                        "type": "string",
+                        "description": "Taxonomy ID containing categoryKey. Required because category keys are taxonomy-scoped."
+                    },
                     "activityType": {
                         "type": "string",
                         "description": "Optional activity-type narrowing (e.g. WITHDRAWAL). Usually omit."
+                    },
+                    "accountId": {
+                        "type": "string",
+                        "description": "Optional account ID when the user explicitly scopes the rule to one account."
                     }
                 },
-                "required": ["pattern", "categoryKey"]
+                "required": ["pattern", "taxonomyId", "categoryKey"]
             }),
         }
     }
@@ -142,14 +153,19 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
                 "categoryKey is required and cannot be empty".to_string(),
             ));
         }
+        if args.taxonomy_id.trim().is_empty() {
+            return Err(AiError::ToolExecutionFailed(
+                "taxonomyId is required and cannot be empty".to_string(),
+            ));
+        }
 
-        // Resolve category_key → (taxonomy_id, category_id, path) using the live taxonomy.
+        // Resolve (taxonomy_id, category_key) → (category_id, path) using the live taxonomy.
         let tax_service = self.env.taxonomy_service();
         let taxonomies = tax_service
             .get_taxonomies_with_categories()
             .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
 
-        let mut key_lookup: HashMap<String, (String, String, Vec<String>)> = HashMap::new();
+        let mut key_lookup: HashMap<(String, String), (String, Vec<String>)> = HashMap::new();
         for entry in &taxonomies {
             if entry.taxonomy.scope != "activity" {
                 continue;
@@ -177,17 +193,20 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
                 }
                 parts.reverse();
                 key_lookup.insert(
-                    cat.key.clone(),
-                    (entry.taxonomy.id.clone(), cat.id.clone(), parts),
+                    (entry.taxonomy.id.clone(), cat.key.clone()),
+                    (cat.id.clone(), parts),
                 );
             }
         }
 
-        let Some((taxonomy_id, category_id, path_parts)) = key_lookup.get(&args.category_key)
+        let taxonomy_id = args.taxonomy_id.trim().to_string();
+        let category_key = args.category_key.trim().to_string();
+        let Some((category_id, path_parts)) =
+            key_lookup.get(&(taxonomy_id.clone(), category_key.clone()))
         else {
             return Err(AiError::ToolExecutionFailed(format!(
-                "Unknown categoryKey \"{}\". Pick one from `list_categorization_context.taxonomies`.",
-                args.category_key
+                "Unknown taxonomyId/categoryKey \"{}\" / \"{}\". Pick both from `list_categorization_context.taxonomies`.",
+                taxonomy_id, category_key
             )));
         };
 
@@ -207,40 +226,53 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
             .map(str::to_string)
             .unwrap_or_else(|| format!("{} → {}", args.pattern.trim(), category_path));
 
+        let account_id = args
+            .account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        let account_name = if let Some(account_id) = account_id.as_deref() {
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            Some(account.name)
+        } else {
+            None
+        };
+
         let new_rule = NewCategorizationRule {
-            id: None,
+            id: Some(Uuid::now_v7().to_string()),
             name,
             pattern: args.pattern.trim().to_string(),
             match_type,
-            taxonomy_id: Some(taxonomy_id.clone()),
+            taxonomy_id: Some(taxonomy_id),
             category_id: Some(category_id.clone()),
             activity_type: args.activity_type,
             priority: 0,
-            is_global: true,
-            account_id: None,
+            is_global: account_id.is_none(),
+            account_id,
             preset_id: None,
             preset_rule_key: None,
             preset_version: None,
         };
 
-        let rules = self.env.categorization_rules_service();
-        let created = rules
-            .create(new_rule)
-            .await
-            .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-
         let message = format!(
-            "Saved rule: anything matching \"{}\" is now {}.",
-            created.pattern, category_path
+            "Drafted rule: anything matching \"{}\" will be {}.",
+            new_rule.pattern, category_path
         );
 
         Ok(CreateCategorizationRuleOutput {
-            rule_id: created.id,
-            rule_name: created.name,
-            pattern: created.pattern,
-            match_type: created.match_type.as_str().to_string(),
+            draft_status: "draft".to_string(),
+            rule_id: None,
+            rule: new_rule,
             category_path,
+            account_name,
             message,
+            submitted: None,
+            submitted_at: None,
         })
     }
 }
@@ -261,6 +293,7 @@ mod tests {
             .map(|v| v.as_str().unwrap().to_string())
             .collect::<Vec<_>>();
         assert!(required.contains(&"pattern".to_string()));
+        assert!(required.contains(&"taxonomyId".to_string()));
         assert!(required.contains(&"categoryKey".to_string()));
         // `name` was made optional intentionally — agent should be able to omit it
         // and let the tool generate "{pattern} → {category_path}".
@@ -294,13 +327,16 @@ mod tests {
         let json = serde_json::json!({
             "name": "T&T → Groceries",
             "pattern": "T&T",
+            "taxonomyId": "spending_categories",
             "categoryKey": "groceries",
         });
         let args: CreateCategorizationRuleArgs = serde_json::from_value(json).unwrap();
         assert_eq!(args.pattern, "T&T");
+        assert_eq!(args.taxonomy_id, "spending_categories");
         assert_eq!(args.category_key, "groceries");
         assert_eq!(args.match_type, None);
         assert_eq!(args.activity_type, None);
+        assert_eq!(args.account_id, None);
     }
 
     #[test]
@@ -309,12 +345,15 @@ mod tests {
             "name": "Cobs → Groceries",
             "pattern": "COBS BREAD",
             "matchType": "starts_with",
+            "taxonomyId": "spending_categories",
             "categoryKey": "groceries",
             "activityType": "WITHDRAWAL",
+            "accountId": "account-1",
         });
         let args: CreateCategorizationRuleArgs = serde_json::from_value(json).unwrap();
         assert_eq!(args.match_type.as_deref(), Some("starts_with"));
         assert_eq!(args.activity_type.as_deref(), Some("WITHDRAWAL"));
+        assert_eq!(args.account_id.as_deref(), Some("account-1"));
     }
 
     /// Helper that mirrors what `Tool::definition` returns. Kept duplicated here
@@ -330,10 +369,12 @@ mod tests {
                     "type": "string",
                     "enum": ["contains", "starts_with", "exact", "regex"],
                 },
+                "taxonomyId": { "type": "string" },
                 "categoryKey": { "type": "string" },
-                "activityType": { "type": "string" }
+                "activityType": { "type": "string" },
+                "accountId": { "type": "string" }
             },
-            "required": ["pattern", "categoryKey"]
+            "required": ["pattern", "taxonomyId", "categoryKey"]
         })
     }
 
@@ -342,6 +383,7 @@ mod tests {
         // The agent must be able to omit `name` per schema.
         let json = serde_json::json!({
             "pattern": "T&T",
+            "taxonomyId": "spending_categories",
             "categoryKey": "groceries",
         });
         let args: CreateCategorizationRuleArgs = serde_json::from_value(json).unwrap();

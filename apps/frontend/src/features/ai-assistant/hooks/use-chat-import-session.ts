@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
   checkActivitiesImport,
@@ -35,6 +36,8 @@ import {
   sanitizeImportMappingForProfile,
   type ActivityImportProfile,
 } from "@/pages/activity/import/utils/activity-import-profile";
+import { invalidateSpendingCaches } from "@/features/spending/lib/invalidation";
+import { QueryKeys } from "@/lib/query-keys";
 
 import type { ImportCsvMappingOutput } from "../types";
 
@@ -553,6 +556,7 @@ export function useChatImportSession({
   submittedFromResult,
   submittedCountFromResult,
 }: UseChatImportSessionOptions): UseChatImportSessionResult {
+  const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
 
   const mappingRef = useRef(mapping);
@@ -1108,6 +1112,13 @@ export function useChatImportSession({
         return;
       }
 
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] }),
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] }),
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.IMPORT_RUNS] }),
+      ]);
+      invalidateSpendingCaches(queryClient);
+
       // Step 4: success path — save template + persist tool result.
       if (state.accountId) {
         try {
@@ -1174,6 +1185,7 @@ export function useChatImportSession({
     importProfile,
     threadId,
     toolCallId,
+    queryClient,
   ]);
 
   const stats = useMemo(() => computeStats(state.drafts), [state.drafts]);

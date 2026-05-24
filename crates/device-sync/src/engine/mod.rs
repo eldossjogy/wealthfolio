@@ -73,6 +73,7 @@ fn sync_entity_name(entity: &SyncEntity) -> &'static str {
         SyncEntity::ImportRun => "import_run",
         SyncEntity::Portfolio => "portfolio",
         SyncEntity::PortfolioAccount => "portfolio_account",
+        SyncEntity::SpendingSetting => "spending_setting",
         SyncEntity::ActivityTaxonomyAssignment => "activity_taxonomy_assignment",
         SyncEntity::SpendingActivityEvent => "spending_activity_event",
         SyncEntity::SpendingCategorizationRule => "spending_categorization_rule",

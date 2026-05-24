@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical list of local tables that participate in app-side device sync.
 /// Order matters: parent tables before children (FK dependencies).
-pub const APP_SYNC_TABLES: [&str; 31] = [
+pub const APP_SYNC_TABLES: [&str; 32] = [
     // Base tables (no FK deps)
     "platforms",
     "assets",
@@ -24,6 +24,8 @@ pub const APP_SYNC_TABLES: [&str; 31] = [
     "activities",
     // No FK deps
     "import_templates",
+    // Spending settings only; storage filters to spending.* keys.
+    "app_settings",
     // Spending budget groups have no FK deps.
     "budget_groups",
     // Spending event types — no FK deps.
@@ -91,6 +93,7 @@ pub enum SyncEntity {
     // because the bare names (`Event`, `EventType`, `CategorizationRule`)
     // would clash with the codebase's existing event-system vocabulary
     // (DomainEvent, EventBus, sync_applied_events, etc.).
+    SpendingSetting,
     ActivityTaxonomyAssignment,
     SpendingActivityEvent,
     SpendingCategorizationRule,
@@ -324,6 +327,7 @@ mod tests {
             SyncEntity::ImportRun,
             SyncEntity::Portfolio,
             SyncEntity::PortfolioAccount,
+            SyncEntity::SpendingSetting,
             SyncEntity::ActivityTaxonomyAssignment,
             SyncEntity::SpendingActivityEvent,
             SyncEntity::SpendingCategorizationRule,
@@ -359,6 +363,7 @@ mod tests {
             "\"import_run\"",
             "\"portfolio\"",
             "\"portfolio_account\"",
+            "\"spending_setting\"",
             "\"activity_taxonomy_assignment\"",
             "\"spending_activity_event\"",
             "\"spending_categorization_rule\"",

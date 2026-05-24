@@ -9,6 +9,7 @@ import { AccountsToolUI } from "./accounts-tool-ui";
 import { ActivitiesToolUI } from "./activities-tool-ui";
 import { AllocationToolUI } from "./allocation-tool-ui";
 import { CategorizationProposalsToolUI } from "./categorization-proposals-tool-ui";
+import { CreateCategorizationRuleToolUI } from "./create-categorization-rule-tool-ui";
 import { GoalsToolUI } from "./goals-tool-ui";
 import { HoldingsToolUI } from "./holdings-tool-ui";
 import { ImportCsvToolUI } from "./import-csv-tool-ui";
@@ -32,6 +33,7 @@ export const toolUIs = {
   get_performance: PerformanceToolUI,
   get_valuation_history: ValuationToolUI,
   import_csv: ImportCsvToolUI,
+  create_categorization_rule: CreateCategorizationRuleToolUI,
   list_categorization_context: ListCategorizationContextToolUI,
   propose_transaction_categories: CategorizationProposalsToolUI,
   record_activity: RecordActivityToolUI,
@@ -47,6 +49,7 @@ export {
   ActivitiesToolUI,
   AllocationToolUI,
   CategorizationProposalsToolUI,
+  CreateCategorizationRuleToolUI,
   GoalsToolUI,
   HoldingsToolUI,
   ImportCsvToolUI,

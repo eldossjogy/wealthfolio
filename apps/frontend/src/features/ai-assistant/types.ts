@@ -1,5 +1,6 @@
 // AI Assistant Feature Types
 
+import type { NewCategorizationRule } from "@/features/spending/types/rule";
 import type { MergedProvider } from "@/lib/types";
 
 // Re-export API types for convenience
@@ -641,6 +642,7 @@ export interface ProposeCategoriesArgs {
   limit?: number;
   aiProposals?: {
     activityId: string;
+    taxonomyId: string;
     categoryKey: string;
     confidence?: number;
     reason?: string;
@@ -729,4 +731,32 @@ export interface ProposeCategoriesOutput {
   submitted?: boolean;
   appliedCount?: number;
   submittedAt?: string;
+}
+
+// ============================================================================
+// Create Categorization Rule tool
+// ============================================================================
+
+export interface CreateCategorizationRuleArgs {
+  name?: string;
+  pattern: string;
+  matchType?: "contains" | "starts_with" | "exact" | "regex";
+  taxonomyId: string;
+  categoryKey: string;
+  activityType?: string;
+  accountId?: string;
+}
+
+export interface CreateCategorizationRuleOutput {
+  draftStatus?: "draft" | "created";
+  ruleId?: string | null;
+  rule?: NewCategorizationRule;
+  categoryPath?: string;
+  accountName?: string | null;
+  message?: string;
+  submitted?: boolean;
+  submittedAt?: string;
+  ruleName?: string;
+  pattern?: string;
+  matchType?: string;
 }

@@ -44,11 +44,13 @@ impl SpendingSettingsRepositoryTrait for SpendingSettingsRepository {
             setting_value: value.to_string(),
         };
         self.writer
-            .exec(move |conn| {
+            .exec_tx(move |tx| {
+                let conn = tx.conn();
                 diesel::replace_into(app_settings)
                     .values(&row)
                     .execute(conn)
                     .map_err(StorageError::from)?;
+                tx.update(&row)?;
                 Ok(())
             })
             .await

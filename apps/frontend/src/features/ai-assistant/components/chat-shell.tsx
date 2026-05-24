@@ -21,8 +21,9 @@ import {
   AccountsToolUI,
   ActivitiesToolUI,
   AllocationToolUI,
-  GoalsToolUI,
   CategorizationProposalsToolUI,
+  CreateCategorizationRuleToolUI,
+  GoalsToolUI,
   HoldingsToolUI,
   ImportCsvToolUI,
   IncomeToolUI,
@@ -224,6 +225,7 @@ function ChatShellInner({ className }: ChatShellProps) {
         <RecordActivityToolUI />
         <RecordActivitiesToolUI />
         <ImportCsvToolUI />
+        <CreateCategorizationRuleToolUI />
         <ListCategorizationContextToolUI />
         <CategorizationProposalsToolUI />
 

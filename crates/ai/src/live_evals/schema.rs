@@ -7,6 +7,7 @@
 
 use serde::Deserialize;
 use std::collections::HashMap;
+#[cfg(feature = "eval")]
 use std::path::Path;
 
 /// A single eval suite (one TOML file = one suite).
@@ -228,6 +229,7 @@ mod tests {
             [[case.expected_tools]]
             name = "create_categorization_rule"
             [case.expected_tools.args]
+            taxonomyId = "spending_categories"
             categoryKey = "groceries"
             pattern = { contains = "T&T" }
         "#;
@@ -236,6 +238,10 @@ mod tests {
         match args.get("pattern").unwrap() {
             ArgAssertion::Predicate(ArgPredicate::Contains(s)) => assert_eq!(s, "T&T"),
             other => panic!("unexpected predicate: {:?}", other),
+        }
+        match args.get("taxonomyId").unwrap() {
+            ArgAssertion::Sentinel(s) => assert_eq!(s, "spending_categories"),
+            other => panic!("unexpected: {:?}", other),
         }
         match args.get("categoryKey").unwrap() {
             ArgAssertion::Sentinel(s) => assert_eq!(s, "groceries"),

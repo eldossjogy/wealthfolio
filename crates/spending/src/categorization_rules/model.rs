@@ -88,10 +88,53 @@ pub struct UpdateCategorizationRule {
     pub name: Option<String>,
     pub pattern: Option<String>,
     pub match_type: Option<RuleMatchType>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub taxonomy_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub category_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub activity_type: Option<Option<String>>,
     pub priority: Option<i32>,
     pub is_global: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub account_id: Option<Option<String>>,
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_rule_preserves_explicit_null_nullable_fields() {
+        let patch: UpdateCategorizationRule = serde_json::from_value(serde_json::json!({
+            "taxonomyId": null,
+            "categoryId": null,
+            "activityType": null,
+            "accountId": null
+        }))
+        .expect("deserialize patch");
+
+        assert_eq!(patch.taxonomy_id, Some(None));
+        assert_eq!(patch.category_id, Some(None));
+        assert_eq!(patch.activity_type, Some(None));
+        assert_eq!(patch.account_id, Some(None));
+    }
+
+    #[test]
+    fn update_rule_keeps_omitted_nullable_fields_as_none() {
+        let patch: UpdateCategorizationRule =
+            serde_json::from_value(serde_json::json!({})).expect("deserialize patch");
+
+        assert_eq!(patch.taxonomy_id, None);
+        assert_eq!(patch.category_id, None);
+        assert_eq!(patch.activity_type, None);
+        assert_eq!(patch.account_id, None);
+    }
 }

@@ -36,19 +36,16 @@ impl ActivityTaxonomyAssignmentService {
         taxonomy_id: &str,
         category_id: &str,
     ) -> Result<ActivityTaxonomyAssignment> {
-        self.repo
-            .clear_for_taxonomy(activity_id, taxonomy_id)
-            .await?;
-        self.repo
-            .upsert(NewActivityTaxonomyAssignment {
-                id: None,
+        let mut assigned = self
+            .assign_many_single_select(&[BulkCategoryAssignment {
                 activity_id: activity_id.to_string(),
                 taxonomy_id: taxonomy_id.to_string(),
                 category_id: category_id.to_string(),
-                weight: 10_000,
-                source: "manual".to_string(),
-            })
-            .await
+            }])
+            .await?;
+        assigned
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("assignment write returned no row"))
     }
 
     pub async fn unassign(&self, activity_id: &str, taxonomy_id: &str) -> Result<()> {

@@ -6,6 +6,9 @@ expression: snapshot
   "name": "create_categorization_rule",
   "parameters": {
     "properties": {
+      "accountId": {
+        "type": "string"
+      },
       "activityType": {
         "type": "string"
       },
@@ -26,10 +29,14 @@ expression: snapshot
       },
       "pattern": {
         "type": "string"
+      },
+      "taxonomyId": {
+        "type": "string"
       }
     },
     "required": [
       "pattern",
+      "taxonomyId",
       "categoryKey"
     ],
     "type": "object"

@@ -32,9 +32,44 @@ pub struct NewBudgetGroup {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateBudgetGroup {
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub icon: Option<Option<String>>,
     pub sort_order: Option<i32>,
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_budget_group_preserves_explicit_null_nullable_fields() {
+        let patch: UpdateBudgetGroup = serde_json::from_value(serde_json::json!({
+            "color": null,
+            "icon": null
+        }))
+        .expect("deserialize patch");
+
+        assert_eq!(patch.color, Some(None));
+        assert_eq!(patch.icon, Some(None));
+    }
+
+    #[test]
+    fn update_budget_group_keeps_omitted_nullable_fields_as_none() {
+        let patch: UpdateBudgetGroup =
+            serde_json::from_value(serde_json::json!({})).expect("deserialize patch");
+
+        assert_eq!(patch.color, None);
+        assert_eq!(patch.icon, None);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

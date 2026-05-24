@@ -86,9 +86,10 @@ impl<E: AiEnvironment + 'static> Tool for ListCategorizationContextTool<E> {
                  taxonomies, recent few-shot examples, and the list of cash transactions that \
                  need AI categorization (rows already covered by rules or same-payee history \
                  are excluded). After receiving this result, reason about each row in \
-                 `unproposed`, infer the best `categoryKey` from `taxonomies` using `examples` \
-                 + merchant-name knowledge, then call `propose_transaction_categories` with \
-                 `aiProposals` filled in (and the SAME filters) to render the review widget. \
+                 `unproposed`, infer the best `taxonomyId` + `categoryKey` pair from \
+                 `taxonomies` using `examples` + merchant-name knowledge, then call \
+                 `propose_transaction_categories` with `aiProposals` filled in (and the SAME \
+                 filters) to render the review widget. \
                  Do NOT pass `accountIds` for generic mentions like 'credit card' — the \
                  spending settings already restrict to opted-in accounts."
                     .to_string(),

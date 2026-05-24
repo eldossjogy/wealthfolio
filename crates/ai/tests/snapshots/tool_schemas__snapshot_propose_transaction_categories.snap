@@ -34,10 +34,14 @@ expression: snapshot
             },
             "reason": {
               "type": "string"
+            },
+            "taxonomyId": {
+              "type": "string"
             }
           },
           "required": [
             "activityId",
+            "taxonomyId",
             "categoryKey"
           ],
           "type": "object"

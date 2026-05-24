@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccountType, ActivityType } from "@/lib/constants";
@@ -19,7 +21,25 @@ const adapterMocks = vi.hoisted(() => ({
   },
 }));
 
+const spendingInvalidationMocks = vi.hoisted(() => ({
+  invalidateSpendingCaches: vi.fn(),
+}));
+
 vi.mock("@/adapters", () => adapterMocks);
+vi.mock("@/features/spending/lib/invalidation", () => spendingInvalidationMocks);
+
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  };
+}
 
 const mapping = {
   csvContent: "Date,Symbol,Quantity,Price,Type\n2024-01-15,NEWCO,2,10,Buy",
@@ -101,7 +121,9 @@ describe("useChatImportSession", () => {
   });
 
   it("creates auto-resolved pending assets before importing chat CSV drafts", async () => {
-    const { result } = renderHook(() => useChatImportSession({ mapping }));
+    const { result } = renderHook(() => useChatImportSession({ mapping }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -124,6 +146,7 @@ describe("useChatImportSession", () => {
         }),
       ],
     });
+    expect(spendingInvalidationMocks.invalidateSpendingCaches).toHaveBeenCalledTimes(1);
   });
 
   it("saves the repaired mapping used for a successful chat import", async () => {
@@ -173,7 +196,9 @@ describe("useChatImportSession", () => {
       },
     };
 
-    const { result } = renderHook(() => useChatImportSession({ mapping: staleMapping }));
+    const { result } = renderHook(() => useChatImportSession({ mapping: staleMapping }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -224,7 +249,9 @@ describe("useChatImportSession", () => {
         },
       ]);
 
-    const { result } = renderHook(() => useChatImportSession({ mapping: mappingWithTwoAccounts }));
+    const { result } = renderHook(() => useChatImportSession({ mapping: mappingWithTwoAccounts }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.stats.errors).toBe(1));
 
@@ -267,7 +294,9 @@ describe("useChatImportSession", () => {
       ],
     };
 
-    const { result } = renderHook(() => useChatImportSession({ mapping: mappingWithRowAccount }));
+    const { result } = renderHook(() => useChatImportSession({ mapping: mappingWithRowAccount }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -323,7 +352,9 @@ describe("useChatImportSession", () => {
       ],
     };
 
-    const { result } = renderHook(() => useChatImportSession({ mapping: ambiguousCardStatement }));
+    const { result } = renderHook(() => useChatImportSession({ mapping: ambiguousCardStatement }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.importProfile.kind).toBe("investment");
@@ -413,7 +444,10 @@ describe("useChatImportSession", () => {
       ],
     };
 
-    const { result } = renderHook(() => useChatImportSession({ mapping: staleAmbiguousStatement }));
+    const { result } = renderHook(
+      () => useChatImportSession({ mapping: staleAmbiguousStatement }),
+      { wrapper: createWrapper() },
+    );
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -426,6 +460,7 @@ describe("useChatImportSession", () => {
       expect.any(File),
       expect.objectContaining({ skipTopRows: 0 }),
     );
+    await waitFor(() => expect(result.current.canConfirm).toBe(true));
 
     await act(async () => {
       await result.current.confirm();

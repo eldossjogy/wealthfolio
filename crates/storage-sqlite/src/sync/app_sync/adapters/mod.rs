@@ -99,5 +99,9 @@ pub fn default_adapter_descriptors() -> Vec<EntityAdapterDescriptor> {
             entity: SyncEntity::PortfolioAccount,
             table_name: "portfolio_accounts",
         },
+        EntityAdapterDescriptor {
+            entity: SyncEntity::SpendingSetting,
+            table_name: "app_settings",
+        },
     ]
 }
