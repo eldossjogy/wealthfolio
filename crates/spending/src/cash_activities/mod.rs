@@ -18,6 +18,7 @@ pub const CASH_ACTIVITY_TYPES: &[&str] = &[
     "TRANSFER_IN",
     "TRANSFER_OUT",
     "FEE",
+    "TAX",
     "INTEREST",
     "CREDIT",
 ];

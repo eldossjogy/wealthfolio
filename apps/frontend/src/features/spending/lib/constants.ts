@@ -7,6 +7,7 @@ export const CASH_ACTIVITY_TYPES = [
   "TRANSFER_IN",
   "TRANSFER_OUT",
   "FEE",
+  "TAX",
   "INTEREST",
   "CREDIT",
 ] as const;
@@ -27,6 +28,7 @@ export const CASH_ACTIVITY_TYPE_LABELS: Record<CashActivityType, string> = {
   TRANSFER_IN: "Transfer In",
   TRANSFER_OUT: "Transfer Out",
   FEE: "Fee",
+  TAX: "Tax",
   INTEREST: "Interest",
   CREDIT: "Credit",
 };
@@ -40,7 +42,7 @@ const CREDIT_CARD_ACTIVITY_TYPE_LABELS: Partial<Record<CashActivityType, string>
 };
 
 /** Activity types that count as outflow (red, negative direction). */
-export const OUTFLOW_TYPES: CashActivityType[] = ["WITHDRAWAL", "TRANSFER_OUT", "FEE"];
+export const OUTFLOW_TYPES: CashActivityType[] = ["WITHDRAWAL", "TRANSFER_OUT", "FEE", "TAX"];
 
 /** Activity types that count as income (green, positive direction). */
 export const INCOME_TYPES: CashActivityType[] = ["DEPOSIT", "TRANSFER_IN", "INTEREST"];

@@ -64,6 +64,7 @@ const formSchema = z.object({
     "TRANSFER_IN",
     "TRANSFER_OUT",
     "FEE",
+    "TAX",
     "INTEREST",
     "CREDIT",
   ]),

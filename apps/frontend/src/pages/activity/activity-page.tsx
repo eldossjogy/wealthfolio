@@ -82,17 +82,21 @@ const ActivityPage = () => {
   const isMobileViewport = useIsMobileViewport();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isEnabled: isSpendingEnabled, accountIds: spendingAccountIds } = useSpendingSettings();
+  const {
+    isEnabled: isSpendingEnabled,
+    accountIds: spendingAccountIds,
+    isLoading: isSpendingSettingsLoading,
+  } = useSpendingSettings();
 
   // Coerce "spending" URL state back to investments when the module is disabled.
   const urlTab = searchParams.get("tab");
   useEffect(() => {
-    if (urlTab === "spending" && !isSpendingEnabled) {
+    if (urlTab === "spending" && !isSpendingSettingsLoading && !isSpendingEnabled) {
       const next = new URLSearchParams(searchParams);
       next.delete("tab");
       setSearchParams(next, { replace: true });
     }
-  }, [urlTab, isSpendingEnabled, searchParams, setSearchParams]);
+  }, [urlTab, isSpendingSettingsLoading, isSpendingEnabled, searchParams, setSearchParams]);
 
   const spendingTabRef = useRef<SpendingTransactionsTabHandle | null>(null);
 

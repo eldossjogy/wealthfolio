@@ -21,6 +21,10 @@ describe("spending constants", () => {
     it("does not offer generic cash credits on cash accounts", () => {
       expect(getActivityTypesForAccount(AccountType.CASH)).not.toContain("CREDIT");
     });
+
+    it("offers tax for cash accounts", () => {
+      expect(getActivityTypesForAccount(AccountType.CASH)).toContain("TAX");
+    });
   });
 
   describe("getActivitySpendingAmount", () => {
@@ -73,6 +77,11 @@ describe("spending constants", () => {
           AccountType.CASH,
         ),
       ).toBe(0);
+    });
+
+    it("counts cash tax as spending", () => {
+      expect(getActivitySpendingAmount({ activityType: "TAX", amount: "58.22" }, AccountType.CASH))
+        .toBe(58.22);
     });
 
     it("ignores linked cash transfers", () => {

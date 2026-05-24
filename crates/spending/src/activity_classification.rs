@@ -39,7 +39,7 @@ pub(crate) fn classify_activity(activity: &Activity, account_type: &str) -> Spen
     match account_type {
         account_types::CASH => match activity_type {
             "DEPOSIT" | "TRANSFER_IN" | "INTEREST" => SpendingClassification::Income,
-            "WITHDRAWAL" | "TRANSFER_OUT" | "FEE" => SpendingClassification::Expense,
+            "WITHDRAWAL" | "TRANSFER_OUT" | "FEE" | "TAX" => SpendingClassification::Expense,
             "CREDIT" if activity.subtype.as_deref() == Some("BONUS") => {
                 SpendingClassification::Income
             }
@@ -170,6 +170,14 @@ mod tests {
             )
             .income_amount(100.0),
             100.0
+        );
+    }
+
+    #[test]
+    fn cash_tax_counts_as_expense() {
+        assert_eq!(
+            classify_activity(&activity("TAX", None), account_types::CASH),
+            SpendingClassification::Expense
         );
     }
 
