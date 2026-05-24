@@ -339,11 +339,15 @@ export default function PerformancePage() {
       return;
     }
     const reportAccountIds = new Set(accounts.map((account) => account.id));
+    // User-created portfolios resolve to account ids at calc time, so we keep
+    // them regardless of `reportAccountIds`; the backend filter handles it.
+    const isPortfolioItem = (item: TrackedItem) => item.accountScope?.type === "portfolio";
     setSelectedItems((current) => {
       const next = current.filter(
         (item) =>
           item.type !== "account" ||
           item.id === PORTFOLIO_SCOPE_ID ||
+          isPortfolioItem(item) ||
           reportAccountIds.has(item.id),
       );
       if (next.length === current.length) {
@@ -358,6 +362,7 @@ export default function PerformancePage() {
           item.id === selectedItemId &&
           (item.type !== "account" ||
             item.id === PORTFOLIO_SCOPE_ID ||
+            isPortfolioItem(item) ||
             reportAccountIds.has(item.id)),
       );
     if (!selectedItemStillPresent) {
@@ -468,6 +473,35 @@ export default function PerformancePage() {
 
     setSelectedItems(sortComparisonItems([...selectedItems, newItem]));
     setSelectedItemId(accountId);
+  };
+
+  const handlePortfolioSelect = (portfolio: { id: string; name: string }) => {
+    const portfolioId = String(portfolio.id);
+    const exists = selectedItems.some((item) => item.id === portfolioId);
+
+    if (exists) {
+      const nextItems = sortComparisonItems(
+        selectedItems.filter((item) => item.id !== portfolioId),
+      );
+      setSelectedItems(nextItems);
+      if (selectedItemId === portfolioId) {
+        setSelectedItemId(null);
+      }
+      return;
+    }
+
+    // Tracked as an "account" so it lands in the chart's account-series path,
+    // but the scope filter expands it to the portfolio's member account ids
+    // at calc time (handled by the Rust `calculate_performance_history` cmd).
+    const newItem: TrackedItem = {
+      id: portfolioId,
+      type: "account",
+      name: portfolio.name,
+      accountScope: { type: "portfolio", portfolioId },
+    };
+
+    setSelectedItems(sortComparisonItems([...selectedItems, newItem]));
+    setSelectedItemId(portfolioId);
   };
 
   const handleSymbolSelect = (symbol: { id: string; name: string }) => {
@@ -608,6 +642,7 @@ export default function PerformancePage() {
               buttonText="Add account"
               includePortfolio={true}
               accountPurpose={AccountPurpose.PERFORMANCE}
+              onPortfolioSelect={handlePortfolioSelect}
             />
             <BenchmarkSymbolSelector onSelect={handleSymbolSelect} />
           </div>
@@ -624,6 +659,10 @@ export default function PerformancePage() {
           open={accountSheetOpen}
           onOpenChange={setAccountSheetOpen}
           className="hidden"
+          onPortfolioSelect={(portfolio) => {
+            handlePortfolioSelect(portfolio);
+            setAccountSheetOpen(false);
+          }}
         />
         <BenchmarkSymbolSelectorMobile
           onSelect={(symbol) => {

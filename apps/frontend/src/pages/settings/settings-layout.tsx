@@ -23,7 +23,7 @@ const settingsSections = [
     ],
   },
   {
-    title: "Portfolio",
+    title: "Finance",
     items: [
       {
         title: "Accounts",

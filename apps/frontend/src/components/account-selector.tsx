@@ -11,10 +11,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@wealthfolio/ui/compone
 import { Account, TrackingMode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Icons, type Icon } from "@wealthfolio/ui";
-import { forwardRef, useState } from "react";
+import { Fragment, forwardRef, useState } from "react";
 
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useAccounts } from "@/hooks/use-accounts";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { useSettings } from "@/hooks/use-settings";
 import {
   AccountPurpose,
@@ -54,6 +55,12 @@ interface AccountSelectorProps {
   accountTypes?: readonly AccountType[];
   /** Filter accounts by product purpose. Prefer this over accountTypes for app-owned account policy. */
   accountPurpose?: AccountPurpose;
+  /**
+   * When provided, the dropdown also lists user-created portfolios (groupings of
+   * accounts from settings → Portfolios) under a "Portfolios" section, and the
+   * callback fires when one is picked instead of `setSelectedAccount`.
+   */
+  onPortfolioSelect?: (portfolio: { id: string; name: string }) => void;
 }
 
 // Extended Account type for UI that can have the PORTFOLIO type
@@ -133,6 +140,7 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
       trackingModes,
       accountTypes,
       accountPurpose,
+      onPortfolioSelect,
     },
     ref,
   ) => {
@@ -142,6 +150,9 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
       includeArchived: false,
     });
     const { data: settings, isLoading: isLoadingSettings } = useSettings();
+    // Only load user-created portfolios when the caller knows how to handle them.
+    const { data: portfolios = [] } = usePortfolios();
+    const showPortfolios = !!onPortfolioSelect && portfolios.length > 0;
 
     const isLoading = isLoadingAccounts || isLoadingSettings;
 
@@ -445,39 +456,79 @@ export const AccountSelector = forwardRef<HTMLButtonElement, AccountSelectorProp
               ) : (
                 <>
                   <CommandEmpty>No accounts found.</CommandEmpty>
-                  {sortedGroups.map(([type, typeAccounts]) => (
-                    <CommandGroup key={type} heading={type}>
-                      {typeAccounts.map((account) => {
-                        const IconComponent =
-                          accountTypeIcons[account.accountType] ?? Icons.CreditCard;
-                        return (
+                  {(() => {
+                    // Insert the Portfolios group after the synthetic "PORTFOLIO" entry
+                    // so user-created portfolios sit next to "All Portfolio" rather than
+                    // between two SECURITIES groups. If no synthetic group exists, render
+                    // Portfolios at the top.
+                    const hasPortfolioGroup = sortedGroups.some(
+                      ([t]) => t === PORTFOLIO_ACCOUNT_TYPE,
+                    );
+                    const portfoliosGroup = showPortfolios ? (
+                      <CommandGroup key="__portfolios__" heading="Portfolios">
+                        {portfolios.map((p) => (
                           <CommandItem
-                            key={account.id}
-                            value={account.id}
-                            keywords={[account.name, account.currency, account.accountType]}
+                            key={p.id}
+                            value={p.id}
+                            keywords={[p.name]}
                             onSelect={() => {
-                              setSelectedAccount(account);
+                              onPortfolioSelect?.({ id: p.id, name: p.name });
                               setOpen(false);
                             }}
                             className="flex items-center py-1.5"
                           >
                             <div className="flex flex-1 items-center">
-                              <IconComponent className="mr-2 h-4 w-4" />
-                              <span>
-                                {account.name} ({account.currency})
-                              </span>
+                              <Icons.Folder className="mr-2 h-4 w-4" />
+                              <span>{p.name}</span>
                             </div>
-                            <Icons.Check
-                              className={cn(
-                                "ml-auto h-4 w-4",
-                                selectedAccount?.id === account.id ? "opacity-100" : "opacity-0",
-                              )}
-                            />
                           </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  ))}
+                        ))}
+                      </CommandGroup>
+                    ) : null;
+                    return (
+                      <>
+                        {showPortfolios && !hasPortfolioGroup && portfoliosGroup}
+                        {sortedGroups.map(([type, typeAccounts]) => (
+                          <Fragment key={type}>
+                            <CommandGroup heading={type}>
+                              {typeAccounts.map((account) => {
+                                const IconComponent =
+                                  accountTypeIcons[account.accountType] ?? Icons.CreditCard;
+                                return (
+                                  <CommandItem
+                                    key={account.id}
+                                    value={account.id}
+                                    keywords={[account.name, account.currency, account.accountType]}
+                                    onSelect={() => {
+                                      setSelectedAccount(account);
+                                      setOpen(false);
+                                    }}
+                                    className="flex items-center py-1.5"
+                                  >
+                                    <div className="flex flex-1 items-center">
+                                      <IconComponent className="mr-2 h-4 w-4" />
+                                      <span>
+                                        {account.name} ({account.currency})
+                                      </span>
+                                    </div>
+                                    <Icons.Check
+                                      className={cn(
+                                        "ml-auto h-4 w-4",
+                                        selectedAccount?.id === account.id
+                                          ? "opacity-100"
+                                          : "opacity-0",
+                                      )}
+                                    />
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                            {type === PORTFOLIO_ACCOUNT_TYPE && portfoliosGroup}
+                          </Fragment>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </>
               )}
             </CommandList>

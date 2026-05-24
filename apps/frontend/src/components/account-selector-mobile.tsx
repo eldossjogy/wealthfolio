@@ -10,6 +10,7 @@ import {
 } from "@wealthfolio/ui/components/ui/sheet";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { useAccounts } from "@/hooks/use-accounts";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { useSettings } from "@/hooks/use-settings";
 import {
   AccountPurpose,
@@ -44,6 +45,11 @@ interface AccountSelectorMobileProps {
   iconOnly?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * When provided, the sheet also lists user-created portfolios from
+   * settings → Portfolios and the callback fires when one is picked.
+   */
+  onPortfolioSelect?: (portfolio: { id: string; name: string }) => void;
 }
 
 // Extended Account type for UI that can have the PORTFOLIO type
@@ -80,6 +86,7 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
       iconOnly = false,
       open: controlledOpen,
       onOpenChange,
+      onPortfolioSelect,
     },
     ref,
   ) => {
@@ -92,6 +99,8 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
       includeArchived: false,
     });
     const { data: settings, isLoading: isLoadingSettings } = useSettings();
+    const { data: portfolios = [] } = usePortfolios();
+    const showPortfolios = !!onPortfolioSelect && portfolios.length > 0;
 
     const isLoading = isLoadingAccounts || isLoadingSettings;
 
@@ -178,6 +187,31 @@ export const AccountSelectorMobile = forwardRef<HTMLButtonElement, AccountSelect
           </SheetHeader>
           <ScrollArea className="h-[calc(80vh-5rem)] px-6 py-4">
             <div className="space-y-6">
+              {showPortfolios && (
+                <div>
+                  <h3 className="text-muted-foreground mb-3 text-sm font-medium">Portfolios</h3>
+                  <div className="space-y-2">
+                    {portfolios.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => {
+                          onPortfolioSelect?.({ id: p.id, name: p.name });
+                          setOpen(false);
+                        }}
+                        className="hover:bg-accent active:bg-accent/80 focus:border-primary flex w-full items-center gap-3 rounded-lg border border-transparent p-3 text-left transition-colors focus:outline-none"
+                      >
+                        <div className="bg-primary/10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full">
+                          <Icons.Folder className="text-primary h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-foreground truncate font-medium">{p.name}</div>
+                        </div>
+                        <Icons.ChevronRight className="text-muted-foreground h-5 w-5 flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {Object.entries(groupedAccounts).map(([type, accountsInGroup]) => (
                 <div key={type}>
                   <h3 className="text-muted-foreground mb-3 text-sm font-medium">
