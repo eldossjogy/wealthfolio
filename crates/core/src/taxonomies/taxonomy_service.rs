@@ -173,6 +173,16 @@ impl TaxonomyServiceTrait for TaxonomyService {
             ))
             .into());
         }
+        let spending_references = self
+            .repository
+            .get_category_spending_reference_count(taxonomy_id, category_id)?;
+        if spending_references > 0 {
+            return Err(ValidationError::InvalidInput(format!(
+                "Cannot delete category with {} spending references",
+                spending_references
+            ))
+            .into());
+        }
 
         self.repository
             .delete_category(taxonomy_id, category_id)

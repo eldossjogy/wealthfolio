@@ -1,4 +1,5 @@
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use wealthfolio_core::accounts::account_types;
 use wealthfolio_core::activities::Activity;
 
@@ -12,18 +13,18 @@ pub(crate) enum SpendingClassification {
 }
 
 impl SpendingClassification {
-    pub(crate) fn income_amount(self, amount: f64) -> f64 {
+    pub(crate) fn income_amount(self, amount: Decimal) -> Decimal {
         match self {
             Self::Income => amount,
-            _ => 0.0,
+            _ => Decimal::ZERO,
         }
     }
 
-    pub(crate) fn spending_amount(self, amount: f64) -> f64 {
+    pub(crate) fn spending_amount(self, amount: Decimal) -> Decimal {
         match self {
             Self::Expense => amount,
             Self::ExpenseRefund => -amount,
-            _ => 0.0,
+            _ => Decimal::ZERO,
         }
     }
 }
@@ -58,11 +59,12 @@ pub(crate) fn classify_activity(activity: &Activity, account_type: &str) -> Spen
     }
 }
 
-pub(crate) fn activity_abs_amount(activity: &Activity) -> f64 {
-    activity
-        .amount
-        .and_then(|d| d.abs().to_f64())
-        .unwrap_or(0.0)
+pub(crate) fn activity_abs_amount(activity: &Activity) -> Decimal {
+    activity.amount.map(|d| d.abs()).unwrap_or(Decimal::ZERO)
+}
+
+pub(crate) fn decimal_to_f64(amount: Decimal) -> f64 {
+    amount.to_f64().unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -138,7 +140,10 @@ mod tests {
     fn credit_card_credit_reduces_spending() {
         let card_refund = classify_activity(&activity("CREDIT", None), account_types::CREDIT_CARD);
 
-        assert_eq!(card_refund.spending_amount(100.0), -100.0);
+        assert_eq!(
+            card_refund.spending_amount(Decimal::new(100, 0)),
+            Decimal::new(-100, 0)
+        );
     }
 
     #[test]
@@ -152,24 +157,24 @@ mod tests {
                 &activity_with_subtype("CREDIT", Some("REFUND"), None),
                 account_types::CASH
             )
-            .spending_amount(100.0),
-            -100.0
+            .spending_amount(Decimal::new(100, 0)),
+            Decimal::new(-100, 0)
         );
         assert_eq!(
             classify_activity(
                 &activity_with_subtype("CREDIT", Some("REBATE"), None),
                 account_types::CASH
             )
-            .spending_amount(100.0),
-            -100.0
+            .spending_amount(Decimal::new(100, 0)),
+            Decimal::new(-100, 0)
         );
         assert_eq!(
             classify_activity(
                 &activity_with_subtype("CREDIT", Some("BONUS"), None),
                 account_types::CASH
             )
-            .income_amount(100.0),
-            100.0
+            .income_amount(Decimal::new(100, 0)),
+            Decimal::new(100, 0)
         );
     }
 

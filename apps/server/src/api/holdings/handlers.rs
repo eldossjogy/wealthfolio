@@ -277,6 +277,7 @@ pub async fn get_latest_valuations(
             .map(|a| a.id)
             .collect();
     }
+    ids = holdings_account_ids(&state, &ids)?;
     if ids.is_empty() {
         return Ok(Json(vec![]));
     }

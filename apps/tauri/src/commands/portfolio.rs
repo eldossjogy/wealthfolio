@@ -435,15 +435,16 @@ pub async fn get_latest_valuations(
 
     let ids_to_process: Vec<String> = if account_ids.is_empty() {
         debug!("Input account_ids is empty, fetching active accounts for latest valuations.");
-        state
+        let active_ids = state
             .account_service()
             .get_active_accounts()
             .map_err(|e| format!("Failed to fetch active accounts: {}", e))?
             .into_iter()
             .map(|acc| acc.id)
-            .collect()
+            .collect::<Vec<_>>();
+        holdings_account_ids(state.inner().as_ref(), &active_ids)?
     } else {
-        account_ids
+        holdings_account_ids(state.inner().as_ref(), &account_ids)?
     };
 
     if ids_to_process.is_empty() {

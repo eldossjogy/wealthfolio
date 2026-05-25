@@ -558,9 +558,7 @@ fn is_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
 }
 
 fn is_neutral_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
-    account_type == account_types::CREDIT_CARD
-        && activity.effective_type() == "TRANSFER_IN"
-        && activity.source_group_id.is_some()
+    account_type == account_types::CREDIT_CARD && activity.effective_type() == "TRANSFER_IN"
 }
 
 fn group_assignments(
@@ -685,7 +683,7 @@ mod tests {
             &linked_payment,
             account_types::CREDIT_CARD
         ));
-        assert!(!is_visible_cash_activity(
+        assert!(is_visible_cash_activity(
             &activity("TRANSFER_IN"),
             account_types::CREDIT_CARD
         ));

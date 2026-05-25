@@ -70,6 +70,35 @@ use super::record_activity::AccountOption;
 use crate::env::AiEnvironment;
 use crate::error::AiError;
 
+fn merge_parse_config(
+    mut base: ParseConfig,
+    overrides: &ParseConfig,
+    override_default_currency: bool,
+) -> ParseConfig {
+    if overrides.delimiter.is_some() {
+        base.delimiter = overrides.delimiter.clone();
+    }
+    if overrides.skip_top_rows.is_some() {
+        base.skip_top_rows = overrides.skip_top_rows;
+    }
+    if overrides.skip_bottom_rows.is_some() {
+        base.skip_bottom_rows = overrides.skip_bottom_rows;
+    }
+    if overrides.date_format.is_some() {
+        base.date_format = overrides.date_format.clone();
+    }
+    if overrides.decimal_separator.is_some() {
+        base.decimal_separator = overrides.decimal_separator.clone();
+    }
+    if overrides.thousands_separator.is_some() {
+        base.thousands_separator = overrides.thousands_separator.clone();
+    }
+    if override_default_currency && overrides.default_currency.is_some() {
+        base.default_currency = overrides.default_currency.clone();
+    }
+    base
+}
+
 // ============================================================================
 // Tool Arguments
 // ============================================================================
@@ -998,10 +1027,13 @@ impl<E: AiEnvironment + 'static> Tool for ImportCsvTool<E> {
 
         // Parse CSV to get headers + sample rows for the UI preview.
         let effective_parse_config = match &mapping {
-            Some(m) => m
-                .parse_config
-                .clone()
-                .unwrap_or_else(|| llm_parse_config.clone()),
+            Some(m) => merge_parse_config(
+                m.parse_config
+                    .clone()
+                    .unwrap_or_else(|| llm_parse_config.clone()),
+                &llm_parse_config,
+                args.default_currency.is_some(),
+            ),
             None => llm_parse_config.clone(),
         };
         let parsed_csv = self
@@ -1096,6 +1128,30 @@ mod tests {
             account_type: account_type.to_string(),
             ..account(id, name, currency)
         }
+    }
+
+    #[test]
+    fn test_parse_config_overrides_saved_profile_without_clobbering_currency() {
+        let saved = ParseConfig {
+            delimiter: Some(",".to_string()),
+            date_format: Some("%m/%d/%Y".to_string()),
+            default_currency: Some("CAD".to_string()),
+            ..Default::default()
+        };
+        let overrides = ParseConfig {
+            delimiter: Some(";".to_string()),
+            date_format: None,
+            default_currency: Some("USD".to_string()),
+            ..Default::default()
+        };
+
+        let merged = merge_parse_config(saved.clone(), &overrides, false);
+        assert_eq!(merged.delimiter.as_deref(), Some(";"));
+        assert_eq!(merged.date_format.as_deref(), Some("%m/%d/%Y"));
+        assert_eq!(merged.default_currency.as_deref(), Some("CAD"));
+
+        let merged = merge_parse_config(saved, &overrides, true);
+        assert_eq!(merged.default_currency.as_deref(), Some("USD"));
     }
 
     #[test]

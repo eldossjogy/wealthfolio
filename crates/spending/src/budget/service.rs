@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
+use rust_decimal::Decimal;
+use std::str::FromStr;
 use uuid::Uuid;
 use wealthfolio_core::accounts::{
     account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
@@ -18,7 +20,7 @@ use super::model::{
 };
 use super::traits::BudgetRepositoryTrait;
 use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
-use crate::activity_classification::{activity_abs_amount, classify_activity};
+use crate::activity_classification::{activity_abs_amount, classify_activity, decimal_to_f64};
 use crate::error::SpendingError;
 use crate::settings::SpendingSettingsService;
 
@@ -179,7 +181,7 @@ const DEFAULT_ASSIGNMENTS: [DefaultAssignment; 15] = [
     },
 ];
 
-type MonthActuals = HashMap<(String, String), f64>;
+type MonthActuals = HashMap<(String, String), Decimal>;
 
 pub struct BudgetService {
     repo: Arc<dyn BudgetRepositoryTrait>,
@@ -291,9 +293,12 @@ impl BudgetService {
             let actual = current_actuals
                 .get(&(SPENDING_TAXONOMY.to_string(), category.id.clone()))
                 .copied()
-                .unwrap_or(0.0);
-            let target =
-                target_index.effective_category(&period_key, SPENDING_TAXONOMY, &category.id);
+                .unwrap_or(Decimal::ZERO);
+            let target = target_index.effective_category_decimal(
+                &period_key,
+                SPENDING_TAXONOMY,
+                &category.id,
+            );
             let rollover = is_month_view
                 .then(|| rollover_index.category(SPENDING_TAXONOMY, &category.id))
                 .flatten();
@@ -301,7 +306,13 @@ impl BudgetService {
                 compute_rollover_for_month(
                     setting,
                     &period_key,
-                    |month| target_index.effective_category(month, SPENDING_TAXONOMY, &category.id),
+                    |month| {
+                        target_index.effective_category_decimal(
+                            month,
+                            SPENDING_TAXONOMY,
+                            &category.id,
+                        )
+                    },
                     |month| {
                         actuals_by_month
                             .get(month)
@@ -309,11 +320,11 @@ impl BudgetService {
                                 m.get(&(SPENDING_TAXONOMY.to_string(), category.id.clone()))
                             })
                             .copied()
-                            .unwrap_or(0.0)
+                            .unwrap_or(Decimal::ZERO)
                     },
                 )
             } else {
-                (0.0, 0.0, target - actual)
+                (Decimal::ZERO, Decimal::ZERO, target - actual)
             };
             rows_by_group
                 .entry(group_id.clone())
@@ -326,12 +337,12 @@ impl BudgetService {
                     name: category.name.clone(),
                     color: Some(category.color.clone()),
                     icon: category.icon.clone(),
-                    target,
-                    actual,
-                    rollover_in,
-                    rollover_out,
-                    remaining,
-                    overspent: remaining < 0.0,
+                    target: decimal_to_f64(target),
+                    actual: decimal_to_f64(actual),
+                    rollover_in: decimal_to_f64(rollover_in),
+                    rollover_out: decimal_to_f64(rollover_out),
+                    remaining: decimal_to_f64(remaining),
+                    overspent: remaining < Decimal::ZERO,
                     has_default_target: target_index
                         .has_default_category(SPENDING_TAXONOMY, &category.id),
                     has_month_override: target_index.has_month_category(
@@ -347,10 +358,36 @@ impl BudgetService {
         for group in &groups {
             let mut categories = rows_by_group.remove(&group.id).unwrap_or_default();
             categories.sort_by(|a, b| a.name.cmp(&b.name));
-            let category_target_total = categories.iter().map(|c| c.target).sum::<f64>();
-            let actual = categories.iter().map(|c| c.actual).sum::<f64>();
-            let buffer = target_index.effective_group_buffer(&period_key, &group.id);
-            let planned_total = category_target_total + buffer;
+            let category_ids = categories
+                .iter()
+                .map(|category| category.category_id.clone())
+                .collect::<Vec<_>>();
+            let category_target_total_decimal = category_ids
+                .iter()
+                .map(|category_id| {
+                    target_index.effective_category_decimal(
+                        &period_key,
+                        SPENDING_TAXONOMY,
+                        category_id,
+                    )
+                })
+                .sum::<Decimal>();
+            let actual_decimal = category_ids
+                .iter()
+                .map(|category_id| {
+                    current_actuals
+                        .get(&(SPENDING_TAXONOMY.to_string(), category_id.clone()))
+                        .copied()
+                        .unwrap_or(Decimal::ZERO)
+                })
+                .sum::<Decimal>();
+            let buffer_decimal =
+                target_index.effective_group_buffer_decimal(&period_key, &group.id);
+            let planned_total_decimal = category_target_total_decimal + buffer_decimal;
+            let category_target_total = decimal_to_f64(category_target_total_decimal);
+            let actual = decimal_to_f64(actual_decimal);
+            let buffer = decimal_to_f64(buffer_decimal);
+            let planned_total = decimal_to_f64(planned_total_decimal);
             let rollover = is_month_view
                 .then(|| rollover_index.group(&group.id))
                 .flatten();
@@ -359,38 +396,39 @@ impl BudgetService {
                     setting,
                     &period_key,
                     |month| {
-                        let child_total = categories
+                        let child_total = category_ids
                             .iter()
-                            .map(|c| {
-                                target_index.effective_category(
+                            .map(|category_id| {
+                                target_index.effective_category_decimal(
                                     month,
                                     SPENDING_TAXONOMY,
-                                    &c.category_id,
+                                    category_id,
                                 )
                             })
-                            .sum::<f64>();
-                        child_total + target_index.effective_group_buffer(month, &group.id)
+                            .sum::<Decimal>();
+                        child_total + target_index.effective_group_buffer_decimal(month, &group.id)
                     },
                     |month| {
-                        categories
+                        category_ids
                             .iter()
-                            .map(|c| {
+                            .map(|category_id| {
                                 actuals_by_month
                                     .get(month)
                                     .and_then(|m| {
-                                        m.get(&(
-                                            SPENDING_TAXONOMY.to_string(),
-                                            c.category_id.clone(),
-                                        ))
+                                        m.get(&(SPENDING_TAXONOMY.to_string(), category_id.clone()))
                                     })
                                     .copied()
-                                    .unwrap_or(0.0)
+                                    .unwrap_or(Decimal::ZERO)
                             })
-                            .sum::<f64>()
+                            .sum::<Decimal>()
                     },
                 )
             } else {
-                (0.0, 0.0, planned_total - actual)
+                (
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                    planned_total_decimal - actual_decimal,
+                )
             };
             group_rows.push(BudgetGroupRow {
                 group: group.clone(),
@@ -398,10 +436,10 @@ impl BudgetService {
                 buffer,
                 planned_total,
                 actual,
-                rollover_in,
-                rollover_out,
-                remaining,
-                overspent: remaining < 0.0,
+                rollover_in: decimal_to_f64(rollover_in),
+                rollover_out: decimal_to_f64(rollover_out),
+                remaining: decimal_to_f64(remaining),
+                overspent: remaining < Decimal::ZERO,
                 rollover_enabled: rollover.is_some(),
                 categories,
             });
@@ -418,9 +456,9 @@ impl BudgetService {
             let actual = current_actuals
                 .get(&(INCOME_TAXONOMY.to_string(), category.id.clone()))
                 .copied()
-                .unwrap_or(0.0);
+                .unwrap_or(Decimal::ZERO);
             let target =
-                target_index.effective_category(&period_key, INCOME_TAXONOMY, &category.id);
+                target_index.effective_category_decimal(&period_key, INCOME_TAXONOMY, &category.id);
             income_rows.push(BudgetCategoryRow {
                 taxonomy_id: INCOME_TAXONOMY.to_string(),
                 category_id: category.id.clone(),
@@ -429,11 +467,11 @@ impl BudgetService {
                 name: category.name.clone(),
                 color: Some(category.color.clone()),
                 icon: category.icon.clone(),
-                target,
-                actual,
+                target: decimal_to_f64(target),
+                actual: decimal_to_f64(actual),
                 rollover_in: 0.0,
                 rollover_out: 0.0,
-                remaining: target - actual,
+                remaining: decimal_to_f64(target - actual),
                 overspent: false,
                 has_default_target: target_index
                     .has_default_category(INCOME_TAXONOMY, &category.id),
@@ -871,15 +909,17 @@ impl BudgetService {
             let amount = activity_abs_amount(&activity);
             let spending_native = classification.spending_amount(amount);
             let income_native = classification.income_amount(amount);
-            if spending_native == 0.0 && income_native == 0.0 {
+            if spending_native == Decimal::ZERO && income_native == Decimal::ZERO {
                 continue;
             }
             // Convert to the budget's target currency. Mirrors
             // insight::aggregate_spend so headline.spent and
             // BudgetSnapshot.spending_actual agree by construction.
             let spending =
-                fx_to_target(fx, spending_native, &activity.currency, currency, fx_as_of);
-            let income = fx_to_target(fx, income_native, &activity.currency, currency, fx_as_of);
+                fx_to_target(fx, spending_native, &activity.currency, currency, fx_as_of)
+                    .unwrap_or(Decimal::ZERO);
+            let income = fx_to_target(fx, income_native, &activity.currency, currency, fx_as_of)
+                .unwrap_or(Decimal::ZERO);
             // Bucket by user-local month so a midnight-local activity on
             // month boundaries lands in the month the user perceives,
             // mirroring insight::compute_by_month.
@@ -907,16 +947,16 @@ impl BudgetService {
                     );
                     continue;
                 }
-                if assignment.taxonomy_id == SPENDING_TAXONOMY && spending != 0.0 {
+                if assignment.taxonomy_id == SPENDING_TAXONOMY && spending != Decimal::ZERO {
                     let top_id = top_category_id(&assignment.category_id, spending_meta);
                     *month_actuals
                         .entry((SPENDING_TAXONOMY.to_string(), top_id))
-                        .or_insert(0.0) += spending;
-                } else if assignment.taxonomy_id == INCOME_TAXONOMY && income != 0.0 {
+                        .or_insert(Decimal::ZERO) += spending;
+                } else if assignment.taxonomy_id == INCOME_TAXONOMY && income != Decimal::ZERO {
                     let top_id = top_category_id(&assignment.category_id, income_meta);
                     *month_actuals
                         .entry((INCOME_TAXONOMY.to_string(), top_id))
-                        .or_insert(0.0) += income;
+                        .or_insert(Decimal::ZERO) += income;
                 }
             }
         }
@@ -933,23 +973,23 @@ impl<'a> TargetIndex<'a> {
         Self { targets }
     }
 
-    pub(crate) fn effective_category(
+    pub(crate) fn effective_category_decimal(
         &self,
         period: &str,
         taxonomy_id: &str,
         category_id: &str,
-    ) -> f64 {
+    ) -> Decimal {
         self.month_category(period, taxonomy_id, category_id)
             .or_else(|| self.default_category(taxonomy_id, category_id))
             .map(parse_amount)
-            .unwrap_or(0.0)
+            .unwrap_or(Decimal::ZERO)
     }
 
-    pub(crate) fn effective_group_buffer(&self, period: &str, group_id: &str) -> f64 {
+    pub(crate) fn effective_group_buffer_decimal(&self, period: &str, group_id: &str) -> Decimal {
         self.month_group_buffer(period, group_id)
             .or_else(|| self.default_group_buffer(group_id))
             .map(parse_amount)
-            .unwrap_or(0.0)
+            .unwrap_or(Decimal::ZERO)
     }
 
     pub(crate) fn has_default_category(&self, taxonomy_id: &str, category_id: &str) -> bool {
@@ -1032,13 +1072,13 @@ impl<'a> RolloverIndex<'a> {
 fn compute_rollover_for_month(
     setting: &BudgetRolloverSetting,
     period_key: &str,
-    target_for_month: impl Fn(&str) -> f64,
-    actual_for_month: impl Fn(&str) -> f64,
-) -> (f64, f64, f64) {
+    target_for_month: impl Fn(&str) -> Decimal,
+    actual_for_month: impl Fn(&str) -> Decimal,
+) -> (Decimal, Decimal, Decimal) {
     if setting.start_month.as_str() > period_key {
         let target = target_for_month(period_key);
         let actual = actual_for_month(period_key);
-        return (0.0, 0.0, target - actual);
+        return (Decimal::ZERO, Decimal::ZERO, target - actual);
     }
     let mut carry = parse_amount(&setting.starting_balance);
     for month in month_keys_between(&setting.start_month, period_key) {
@@ -1052,8 +1092,8 @@ fn compute_rollover_for_month(
         carry = rollover_out;
     }
     (
-        0.0,
-        0.0,
+        Decimal::ZERO,
+        Decimal::ZERO,
         target_for_month(period_key) - actual_for_month(period_key),
     )
 }
@@ -1145,18 +1185,18 @@ pub(crate) fn top_category_id(category_id: &str, meta: &HashMap<String, Category
     current
 }
 
-/// Parse a string-encoded decimal amount into f64. Garbage input degrades to
+/// Parse a string-encoded decimal amount. Garbage input degrades to
 /// 0.0 (callers treat that as "no budget set"), but log a warning so a
 /// corrupted row is at least visible in operator logs.
-fn parse_amount(value: &str) -> f64 {
-    match value.parse::<f64>() {
+fn parse_amount(value: &str) -> Decimal {
+    match Decimal::from_str(value) {
         Ok(n) => n,
         Err(_) => {
             log::warn!(
                 "budget parse_amount: ignoring non-numeric amount {:?} (treating as 0.0)",
                 value
             );
-            0.0
+            Decimal::ZERO
         }
     }
 }
@@ -1270,33 +1310,30 @@ fn period_key_for_date_in_tz(date: DateTime<Utc>, timezone: &str) -> String {
 /// Convert a native amount to the budget's target currency at `as_of`.
 /// Mirrors `insight::service::fx_to_target` and `analytics::service::fx_to_target`
 /// — same convention (one rate per report, snapshot-date style) so all three
-/// services agree. Same-currency short-circuit; on FxService error, passes
-/// through the native amount with a warn-log (matches investments' posture).
+/// services agree. Same-currency short-circuit; on FxService error, returns
+/// None so callers exclude the native amount instead of mixing currencies into
+/// the target total.
 fn fx_to_target(
     fx: &dyn wealthfolio_core::fx::FxServiceTrait,
-    amount: f64,
+    amount: Decimal,
     from: &str,
     to: &str,
     as_of: NaiveDate,
-) -> f64 {
-    if amount == 0.0 || from == to || from.is_empty() {
-        return amount;
+) -> Option<Decimal> {
+    if amount == Decimal::ZERO || from == to || from.is_empty() {
+        return Some(amount);
     }
-    let dec = rust_decimal::Decimal::from_f64_retain(amount).unwrap_or(rust_decimal::Decimal::ZERO);
-    match fx.convert_currency_for_date(dec, from, to, as_of) {
-        Ok(converted) => {
-            use rust_decimal::prelude::ToPrimitive;
-            converted.to_f64().unwrap_or(amount)
-        }
+    match fx.convert_currency_for_date(amount, from, to, as_of) {
+        Ok(converted) => Some(converted),
         Err(e) => {
             log::warn!(
-                "spending budget FX conversion {}→{} on {} failed ({}); passing through native amount",
+                "spending budget FX conversion {}→{} on {} failed ({}); excluding native amount",
                 from,
                 to,
                 as_of,
                 e,
             );
-            amount
+            None
         }
     }
 }
@@ -1479,20 +1516,20 @@ mod tests {
         let index = TargetIndex::new(&targets);
 
         assert_eq!(
-            index.effective_category("2026-03", SPENDING_TAXONOMY, "cat_groceries"),
-            300.0
+            index.effective_category_decimal("2026-03", SPENDING_TAXONOMY, "cat_groceries"),
+            Decimal::new(300, 0)
         );
         assert_eq!(
-            index.effective_category("2026-04", SPENDING_TAXONOMY, "cat_groceries"),
-            200.0
+            index.effective_category_decimal("2026-04", SPENDING_TAXONOMY, "cat_groceries"),
+            Decimal::new(200, 0)
         );
         assert_eq!(
-            index.effective_category("2026-04", SPENDING_TAXONOMY, "cat_travel"),
-            0.0
+            index.effective_category_decimal("2026-04", SPENDING_TAXONOMY, "cat_travel"),
+            Decimal::ZERO
         );
         assert_eq!(
-            index.effective_group_buffer("2026-04", BUDGET_GROUP_NEEDS_ID),
-            500.0
+            index.effective_group_buffer_decimal("2026-04", BUDGET_GROUP_NEEDS_ID),
+            Decimal::new(500, 0)
         );
         assert!(index.has_default_category(SPENDING_TAXONOMY, "cat_groceries"));
         assert!(index.has_month_category("2026-03", SPENDING_TAXONOMY, "cat_groceries"));
@@ -1502,12 +1539,16 @@ mod tests {
     fn rollover_ignores_months_before_future_start_month() {
         let setting = rollover_setting("2026-06", "25");
 
-        let (rollover_in, rollover_out, remaining) =
-            compute_rollover_for_month(&setting, "2026-05", |_| 100.0, |_| 40.0);
+        let (rollover_in, rollover_out, remaining) = compute_rollover_for_month(
+            &setting,
+            "2026-05",
+            |_| Decimal::new(100, 0),
+            |_| Decimal::new(40, 0),
+        );
 
-        assert_eq!(rollover_in, 0.0);
-        assert_eq!(rollover_out, 0.0);
-        assert_eq!(remaining, 60.0);
+        assert_eq!(rollover_in, Decimal::ZERO);
+        assert_eq!(rollover_out, Decimal::ZERO);
+        assert_eq!(remaining, Decimal::new(60, 0));
     }
 
     #[test]
@@ -1517,41 +1558,49 @@ mod tests {
         let (rollover_in, rollover_out, remaining) = compute_rollover_for_month(
             &setting,
             "2026-05",
-            |_| 100.0,
+            |_| Decimal::new(100, 0),
             |month| match month {
-                "2025-01" => 25.0,
-                "2026-05" => 40.0,
-                _ => 0.0,
+                "2025-01" => Decimal::new(25, 0),
+                "2026-05" => Decimal::new(40, 0),
+                _ => Decimal::ZERO,
             },
         );
 
-        assert_eq!(rollover_in, 1585.0);
-        assert_eq!(rollover_out, 1645.0);
-        assert_eq!(remaining, 1645.0);
+        assert_eq!(rollover_in, Decimal::new(1585, 0));
+        assert_eq!(rollover_out, Decimal::new(1645, 0));
+        assert_eq!(remaining, Decimal::new(1645, 0));
     }
 
     #[test]
     fn missing_target_with_spending_creates_negative_remaining() {
         let setting = rollover_setting("2026-05", "0");
 
-        let (rollover_in, rollover_out, remaining) =
-            compute_rollover_for_month(&setting, "2026-05", |_| 0.0, |_| 30.0);
+        let (rollover_in, rollover_out, remaining) = compute_rollover_for_month(
+            &setting,
+            "2026-05",
+            |_| Decimal::ZERO,
+            |_| Decimal::new(30, 0),
+        );
 
-        assert_eq!(rollover_in, 0.0);
-        assert_eq!(rollover_out, -30.0);
-        assert_eq!(remaining, -30.0);
+        assert_eq!(rollover_in, Decimal::ZERO);
+        assert_eq!(rollover_out, Decimal::new(-30, 0));
+        assert_eq!(remaining, Decimal::new(-30, 0));
     }
 
     #[test]
     fn refund_month_increases_remaining() {
         let setting = rollover_setting("2026-05", "0");
 
-        let (rollover_in, rollover_out, remaining) =
-            compute_rollover_for_month(&setting, "2026-05", |_| 100.0, |_| -25.0);
+        let (rollover_in, rollover_out, remaining) = compute_rollover_for_month(
+            &setting,
+            "2026-05",
+            |_| Decimal::new(100, 0),
+            |_| Decimal::new(-25, 0),
+        );
 
-        assert_eq!(rollover_in, 0.0);
-        assert_eq!(rollover_out, 125.0);
-        assert_eq!(remaining, 125.0);
+        assert_eq!(rollover_in, Decimal::ZERO);
+        assert_eq!(rollover_out, Decimal::new(125, 0));
+        assert_eq!(remaining, Decimal::new(125, 0));
     }
 
     #[test]

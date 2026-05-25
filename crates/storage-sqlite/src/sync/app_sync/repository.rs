@@ -844,6 +844,89 @@ fn upsert_json_row(
     Ok(())
 }
 
+fn upsert_json_fields_with_conflict_target(
+    conn: &mut SqliteConnection,
+    table: &str,
+    conflict_target: &str,
+    fields: &[(String, serde_json::Value)],
+) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    let columns = fields
+        .iter()
+        .map(|(k, _)| quote_identifier(k))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let values = fields
+        .iter()
+        .map(|(_, v)| json_value_to_sql_literal(v))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let upserts = fields
+        .iter()
+        .map(|(k, _)| {
+            let quoted = quote_identifier(k);
+            format!("{quoted}=excluded.{quoted}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "INSERT INTO {} ({columns}) VALUES ({values}) \
+         ON CONFLICT {conflict_target} DO UPDATE SET {upserts}",
+        quote_identifier(table),
+    );
+    diesel::sql_query(sql)
+        .execute(conn)
+        .map_err(StorageError::from)?;
+    Ok(())
+}
+
+fn field_string<'a>(fields: &'a [(String, serde_json::Value)], name: &str) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(key, _)| key == name)
+        .and_then(|(_, value)| value.as_str())
+}
+
+fn spending_natural_conflict_target(
+    entity: &SyncEntity,
+    fields: &[(String, serde_json::Value)],
+) -> Option<&'static str> {
+    match entity {
+        SyncEntity::BudgetGroupAssignment => Some("(\"taxonomy_id\", \"category_id\")"),
+        SyncEntity::BudgetTarget => match field_string(fields, "target_type") {
+            Some("category") => {
+                Some("(\"period_key\", \"taxonomy_id\", \"category_id\") WHERE \"target_type\" = 'category'")
+            }
+            Some("group_buffer") => {
+                Some("(\"period_key\", \"group_id\") WHERE \"target_type\" = 'group_buffer'")
+            }
+            _ => None,
+        },
+        SyncEntity::BudgetRolloverSetting => match field_string(fields, "target_type") {
+            Some("category") => {
+                Some("(\"taxonomy_id\", \"category_id\") WHERE \"target_type\" = 'category'")
+            }
+            Some("group") => Some("(\"group_id\") WHERE \"target_type\" = 'group'"),
+            _ => None,
+        },
+        SyncEntity::SpendingCategorizationRule => {
+            let has_preset_key = field_string(fields, "preset_id").is_some_and(|value| {
+                !value.trim().is_empty()
+                    && field_string(fields, "preset_rule_key")
+                        .is_some_and(|key| !key.trim().is_empty())
+            });
+            has_preset_key.then_some(
+                "(\"preset_id\", \"preset_rule_key\") WHERE \"preset_id\" IS NOT NULL",
+            )
+        }
+        _ => None,
+    }
+}
+
 /// Convert a serializable DB model to a JSON object with snake_case keys
 /// suitable for SQL upsert. Returns None if serialization fails.
 fn model_to_sql_fields<T: serde::Serialize>(
@@ -1271,34 +1354,45 @@ fn apply_remote_event_lww_tx(
                         ));
                     }
 
-                    let columns = fields
-                        .iter()
-                        .map(|(k, _)| quote_identifier(k))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let values = fields
-                        .iter()
-                        .map(|(_, v)| json_value_to_sql_literal(v))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let upserts = fields
-                        .iter()
-                        .map(|(k, _)| {
-                            let quoted = quote_identifier(k);
-                            format!("{quoted}=excluded.{quoted}")
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    if let Some(conflict_target) =
+                        spending_natural_conflict_target(&entity, &fields)
+                    {
+                        upsert_json_fields_with_conflict_target(
+                            conn,
+                            table_name,
+                            conflict_target,
+                            &fields,
+                        )?;
+                    } else {
+                        let columns = fields
+                            .iter()
+                            .map(|(k, _)| quote_identifier(k))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let values = fields
+                            .iter()
+                            .map(|(_, v)| json_value_to_sql_literal(v))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let upserts = fields
+                            .iter()
+                            .map(|(k, _)| {
+                                let quoted = quote_identifier(k);
+                                format!("{quoted}=excluded.{quoted}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
 
-                    let sql = format!(
-                        "INSERT INTO {} ({columns}) VALUES ({values}) \
-                         ON CONFLICT({}) DO UPDATE SET {upserts}",
-                        quote_identifier(table_name),
-                        quote_identifier(pk_name)
-                    );
-                    diesel::sql_query(sql)
-                        .execute(conn)
-                        .map_err(StorageError::from)?;
+                        let sql = format!(
+                            "INSERT INTO {} ({columns}) VALUES ({values}) \
+                             ON CONFLICT({}) DO UPDATE SET {upserts}",
+                            quote_identifier(table_name),
+                            quote_identifier(pk_name)
+                        );
+                        diesel::sql_query(sql)
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
+                    }
 
                     // Side effect for SyncEntity::Snapshot: an `ON CONFLICT
                     // DO UPDATE` updates `holdings_snapshots.positions` JSON
@@ -2556,9 +2650,10 @@ mod tests {
     use crate::db::{create_pool, get_connection, init, run_migrations, write_actor::spawn_writer};
     use crate::goals::GoalRepository;
     use crate::schema::{
-        accounts, activity_taxonomy_assignments, app_settings, assets, goals, goals_allocation,
-        import_account_templates, import_templates, platforms, sync_applied_events,
-        sync_device_config, sync_entity_metadata, sync_outbox, taxonomies, taxonomy_categories,
+        accounts, activity_taxonomy_assignments, app_settings, assets, budget_targets, goals,
+        goals_allocation, import_account_templates, import_templates, platforms,
+        sync_applied_events, sync_device_config, sync_entity_metadata, sync_outbox, taxonomies,
+        taxonomy_categories,
     };
     use wealthfolio_core::goals::{GoalRepositoryTrait, GoalSummaryUpdate};
 
@@ -5340,6 +5435,58 @@ mod tests {
             .first::<String>(&mut conn)
             .expect("spending setting value");
         assert_eq!(value, "true");
+    }
+
+    #[tokio::test]
+    async fn replay_budget_target_merges_natural_key_conflict() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        diesel::sql_query(
+            "INSERT INTO budget_targets
+             (id, period_key, target_type, taxonomy_id, category_id, group_id, amount, created_at, updated_at)
+             VALUES
+             ('target-local', '2026-05', 'category', 'spending_categories', 'cat_food', NULL, '100', '2026-02-15T00:00:00Z', '2026-02-15T00:00:00Z')",
+        )
+        .execute(&mut conn)
+        .expect("insert local budget target");
+        drop(conn);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::BudgetTarget,
+                "target-remote".to_string(),
+                SyncOperation::Create,
+                "evt-budget-target-remote".to_string(),
+                "2026-02-15T00:00:01Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "target-remote",
+                    "periodKey": "2026-05",
+                    "targetType": "category",
+                    "taxonomyId": "spending_categories",
+                    "categoryId": "cat_food",
+                    "groupId": null,
+                    "amount": "200",
+                    "createdAt": "2026-02-15T00:00:01Z",
+                    "updatedAt": "2026-02-15T00:00:01Z"
+                }),
+            )
+            .await
+            .expect("natural-key budget target replay should not fail");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let rows = budget_targets::table
+            .filter(budget_targets::period_key.eq("2026-05"))
+            .filter(budget_targets::target_type.eq("category"))
+            .filter(budget_targets::taxonomy_id.eq("spending_categories"))
+            .filter(budget_targets::category_id.eq("cat_food"))
+            .select((budget_targets::id, budget_targets::amount))
+            .load::<(String, String)>(&mut conn)
+            .expect("budget target rows");
+
+        assert_eq!(rows, vec![("target-remote".to_string(), "200".to_string())]);
     }
 
     #[tokio::test]

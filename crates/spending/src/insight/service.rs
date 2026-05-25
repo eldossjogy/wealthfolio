@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use wealthfolio_core::accounts::{
     account_supports_purpose, AccountPurpose, AccountRepositoryTrait,
@@ -20,7 +19,7 @@ use super::model::{
 use crate::activity_assignments::{
     ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentRepositoryTrait,
 };
-use crate::activity_classification::{activity_abs_amount, classify_activity};
+use crate::activity_classification::{activity_abs_amount, classify_activity, decimal_to_f64};
 use crate::budget::service::{
     category_meta, resolve_group_for_category, top_category_id, top_level_categories, TargetIndex,
 };
@@ -223,7 +222,8 @@ impl InsightService {
         let mut category_budgets: HashMap<String, AmountBlock> = HashMap::new();
         for cat in &top_categories {
             let block = fanout_amount(&month_prorations, |month| {
-                let amount = target_index.effective_category(month, SPENDING_TAXONOMY, &cat.id);
+                let amount =
+                    target_index.effective_category_decimal(month, SPENDING_TAXONOMY, &cat.id);
                 let has_override =
                     target_index.has_month_category(month, SPENDING_TAXONOMY, &cat.id);
                 (amount, has_override)
@@ -234,7 +234,7 @@ impl InsightService {
         let mut group_buffers: HashMap<String, AmountBlock> = HashMap::new();
         for g in &groups {
             let block = fanout_amount(&month_prorations, |month| {
-                let amount = target_index.effective_group_buffer(month, &g.id);
+                let amount = target_index.effective_group_buffer_decimal(month, &g.id);
                 let has_override = target_index.has_month_group_buffer(month, &g.id);
                 (amount, has_override)
             });
@@ -250,16 +250,19 @@ impl InsightService {
                 &spending_meta,
                 &other_group_id,
             );
-            let (spent, txn_count) = current_agg
+            let (spent_decimal, txn_count) = current_agg
                 .spending_by_top
                 .get(&cat.id)
                 .copied()
-                .unwrap_or((0.0, 0));
-            let prior_spent = prior_agg
-                .spending_by_top
-                .get(&cat.id)
-                .map(|(amount, _)| *amount)
-                .unwrap_or(0.0);
+                .unwrap_or((Decimal::ZERO, 0));
+            let spent = decimal_to_f64(spent_decimal);
+            let prior_spent = decimal_to_f64(
+                prior_agg
+                    .spending_by_top
+                    .get(&cat.id)
+                    .map(|(amount, _)| *amount)
+                    .unwrap_or(Decimal::ZERO),
+            );
             let budget = category_budgets.remove(&cat.id).unwrap_or_default();
             let remaining = budget.total - spent;
             rows_by_group
@@ -322,22 +325,21 @@ impl InsightService {
         });
 
         // ── 8. Uncategorized ──────────────────────────────────────────────────
+        let uncategorized_spend = decimal_to_f64(current_agg.uncategorized_spend);
+        let prior_uncategorized_spend = decimal_to_f64(prior_agg.uncategorized_spend);
         let mut uncategorized = UncategorizedBucket {
-            spent: current_agg.uncategorized_spend,
-            prior_spent: prior_agg.uncategorized_spend,
-            delta_vs_prior_pct: pct_change(
-                current_agg.uncategorized_spend,
-                prior_agg.uncategorized_spend,
-            ),
+            spent: uncategorized_spend,
+            prior_spent: prior_uncategorized_spend,
+            delta_vs_prior_pct: pct_change(uncategorized_spend, prior_uncategorized_spend),
             // Filled in after total_spent is known.
             pct_of_total_spent: None,
             txn_count: current_agg.uncategorized_count,
         };
 
         // ── 9. Headline + pace + status ───────────────────────────────────────
-        let total_spent = current_agg.total_outflow;
-        let total_income = current_agg.total_income;
-        let prior_total_spent = prior_agg.total_outflow;
+        let total_spent = decimal_to_f64(current_agg.total_outflow);
+        let total_income = decimal_to_f64(current_agg.total_income);
+        let prior_total_spent = decimal_to_f64(prior_agg.total_outflow);
         let total_budget: f64 = group_insights
             .iter()
             .map(|g| g.budget.total + g.buffer.total)
@@ -434,7 +436,7 @@ impl InsightService {
             .native_outflow_by_currency
             .iter()
             .filter(|(c, _)| c.as_str() != currency && !c.is_empty())
-            .map(|(c, v)| (c.clone(), *v))
+            .map(|(c, v)| (c.clone(), decimal_to_f64(*v)))
             .collect();
 
         let insight = SpendingInsight {
@@ -467,48 +469,46 @@ impl InsightService {
 struct SpendAggregate {
     /// total absolute outflow (sum of spending_amount over all activities,
     /// converted to target currency).
-    total_outflow: f64,
-    total_income: f64,
+    total_outflow: Decimal,
+    total_income: Decimal,
     /// Top-level spending category id → (spend, txn_count).
-    spending_by_top: HashMap<String, (f64, u32)>,
+    spending_by_top: HashMap<String, (Decimal, u32)>,
     /// Spend on activities that have no `spending_categories` assignment.
-    uncategorized_spend: f64,
+    uncategorized_spend: Decimal,
     uncategorized_count: u32,
     /// Native-currency outflow totals before FX, indexed by source currency.
     /// Empty (or single-entry equal to target) when no conversion happened.
     /// Lets the UI surface "source: €1,200" hints for single-foreign-currency
     /// reports and the list of contributing currencies for mixed reports.
-    native_outflow_by_currency: HashMap<String, f64>,
+    native_outflow_by_currency: HashMap<String, Decimal>,
 }
 
 /// Convert a native amount to the report's target currency at `as_of` date.
 /// Matches the net_worth convention: one rate per report (snapshot date),
 /// not per-activity-date. On error (no rate available even after the
-/// inverse-pair and latest-rate fallbacks), the amount passes through
-/// unconverted with a warn-log so an outage is visible but doesn't blank the
-/// dashboard.
+/// inverse-pair and latest-rate fallbacks), returns None so callers can exclude
+/// the native amount instead of mixing currencies into the target total.
 fn fx_to_target(
     fx: &dyn FxServiceTrait,
-    amount: f64,
+    amount: Decimal,
     from: &str,
     to: &str,
     as_of: NaiveDate,
-) -> f64 {
-    if amount == 0.0 || from == to || from.is_empty() {
-        return amount;
+) -> Option<Decimal> {
+    if amount == Decimal::ZERO || from == to || from.is_empty() {
+        return Some(amount);
     }
-    let dec = Decimal::from_f64_retain(amount).unwrap_or(Decimal::ZERO);
-    match fx.convert_currency_for_date(dec, from, to, as_of) {
-        Ok(converted) => converted.to_f64().unwrap_or(amount),
+    match fx.convert_currency_for_date(amount, from, to, as_of) {
+        Ok(converted) => Some(converted),
         Err(e) => {
             log::warn!(
-                "spending insight FX conversion {}→{} on {} failed ({}); passing through native amount",
+                "spending insight FX conversion {}→{} on {} failed ({}); excluding native amount",
                 from,
                 to,
                 as_of,
                 e,
             );
-            amount
+            None
         }
     }
 }
@@ -534,20 +534,22 @@ fn aggregate_spend(
         let amount = activity_abs_amount(a);
         let spending_native = classification.spending_amount(amount);
         let income_native = classification.income_amount(amount);
-        if spending_native == 0.0 && income_native == 0.0 {
+        if spending_native == Decimal::ZERO && income_native == Decimal::ZERO {
             continue;
         }
-        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
-        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
         agg.total_income += income;
         agg.total_outflow += spending;
-        if spending_native != 0.0 {
+        if spending_native != Decimal::ZERO {
             *agg.native_outflow_by_currency
                 .entry(a.currency.clone())
-                .or_insert(0.0) += spending_native;
+                .or_insert(Decimal::ZERO) += spending_native;
         }
 
-        if spending == 0.0 {
+        if spending == Decimal::ZERO {
             continue;
         }
 
@@ -583,7 +585,10 @@ fn aggregate_spend(
         });
         let primary = assignments[0];
         let top_id = top_category_id(&primary.category_id, spending_meta);
-        let entry = agg.spending_by_top.entry(top_id).or_insert((0.0, 0));
+        let entry = agg
+            .spending_by_top
+            .entry(top_id)
+            .or_insert((Decimal::ZERO, 0));
         entry.0 += spending;
         entry.1 += 1;
     }
@@ -599,7 +604,7 @@ fn compute_by_day(
     target_currency: &str,
     fx_as_of: NaiveDate,
 ) -> Vec<DayBucket> {
-    let mut map: HashMap<NaiveDate, (f64, f64)> = HashMap::new();
+    let mut map: HashMap<NaiveDate, (Decimal, Decimal)> = HashMap::new();
     for a in acts {
         let Some(account_type) = account_types.get(&a.account_id) else {
             continue;
@@ -608,18 +613,20 @@ fn compute_by_day(
         let amount = activity_abs_amount(a);
         let spending_native = classification.spending_amount(amount);
         let income_native = classification.income_amount(amount);
-        if spending_native == 0.0 && income_native == 0.0 {
+        if spending_native == Decimal::ZERO && income_native == Decimal::ZERO {
             continue;
         }
         // FX-convert per activity using the same as-of date as the headline
         // aggregate so day-buckets sum to total_outflow within rounding.
-        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
-        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
         let date = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
             a.activity_date,
             timezone,
         );
-        let entry = map.entry(date).or_insert((0.0, 0.0));
+        let entry = map.entry(date).or_insert((Decimal::ZERO, Decimal::ZERO));
         entry.0 += spending;
         entry.1 += income;
     }
@@ -633,8 +640,8 @@ fn compute_by_day(
         .into_iter()
         .map(|(d, (spent, income))| DayBucket {
             date: format_date(d),
-            spent,
-            income,
+            spent: decimal_to_f64(spent),
+            income: decimal_to_f64(income),
         })
         .collect();
     out.sort_by(|a, b| a.date.cmp(&b.date));
@@ -650,18 +657,22 @@ fn compute_by_day_by_category(
     target_currency: &str,
     fx_as_of: NaiveDate,
 ) -> Vec<DayCategoryBucket> {
-    let mut map: HashMap<(String, String, String), (f64, u32)> = HashMap::new();
+    let mut map: HashMap<(String, String, String), (Decimal, u32)> = HashMap::new();
     for a in acts {
         let Some(account_type) = account_types.get(&a.account_id) else {
             continue;
         };
         let classification = classify_activity(a, account_type);
         let spending_native = classification.spending_amount(activity_abs_amount(a));
-        if spending_native == 0.0 {
+        if spending_native == Decimal::ZERO {
             continue;
         }
-        let amount = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
-        if amount == 0.0 {
+        let Some(amount) =
+            fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
+        else {
+            continue;
+        };
+        if amount == Decimal::ZERO {
             continue;
         }
 
@@ -691,7 +702,7 @@ fn compute_by_day_by_category(
 
         let entry = map
             .entry((date, SPENDING_TAXONOMY.to_string(), category_id.to_string()))
-            .or_insert((0.0, 0));
+            .or_insert((Decimal::ZERO, 0));
         entry.0 += amount;
         entry.1 += 1;
     }
@@ -703,7 +714,7 @@ fn compute_by_day_by_category(
                 date,
                 taxonomy_id,
                 category_id,
-                amount,
+                amount: decimal_to_f64(amount),
                 count,
             },
         )
@@ -726,9 +737,9 @@ fn compute_by_month(
     target_currency: &str,
     fx_as_of: NaiveDate,
 ) -> Vec<MonthBucket> {
-    let mut map: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut map: HashMap<String, (Decimal, Decimal)> = HashMap::new();
     for m in months {
-        map.insert(m.clone(), (0.0, 0.0));
+        map.insert(m.clone(), (Decimal::ZERO, Decimal::ZERO));
     }
     for a in acts {
         let Some(account_type) = account_types.get(&a.account_id) else {
@@ -738,13 +749,15 @@ fn compute_by_month(
         let amount = activity_abs_amount(a);
         let spending_native = classification.spending_amount(amount);
         let income_native = classification.income_amount(amount);
-        if spending_native == 0.0 && income_native == 0.0 {
+        if spending_native == Decimal::ZERO && income_native == Decimal::ZERO {
             continue;
         }
-        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
-        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
+        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
         let key = period_key_for_date_in_tz(a.activity_date, timezone);
-        let entry = map.entry(key).or_insert((0.0, 0.0));
+        let entry = map.entry(key).or_insert((Decimal::ZERO, Decimal::ZERO));
         entry.0 += spending;
         entry.1 += income;
     }
@@ -754,8 +767,8 @@ fn compute_by_month(
         .into_iter()
         .map(|(month, (spent, income))| MonthBucket {
             month,
-            spent,
-            income,
+            spent: decimal_to_f64(spent),
+            income: decimal_to_f64(income),
         })
         .collect();
     out.sort_by(|a, b| a.month.cmp(&b.month));
@@ -783,7 +796,7 @@ impl PeriodMeta {
 struct MonthProration {
     month: String,
     /// `days_in_window_for_this_month / days_in_this_month` — 1.0 for fully-covered months.
-    factor: f64,
+    factor: Decimal,
     /// True when the window does not fully cover the month.
     prorated: bool,
 }
@@ -804,13 +817,13 @@ fn build_month_prorations(
             let days_in_window = (win_end - win_start).num_days() + 1;
             let days_in_month = (m_end - m_start).num_days() + 1;
             let factor = if days_in_month > 0 {
-                days_in_window as f64 / days_in_month as f64
+                Decimal::from(days_in_window) / Decimal::from(days_in_month)
             } else {
-                0.0
+                Decimal::ZERO
             };
             MonthProration {
                 month: month.clone(),
-                factor: factor.clamp(0.0, 1.0),
+                factor: factor.clamp(Decimal::ZERO, Decimal::ONE),
                 prorated: days_in_window != days_in_month,
             }
         })
@@ -819,10 +832,10 @@ fn build_month_prorations(
 
 fn fanout_amount<F>(prorations: &[MonthProration], lookup: F) -> AmountBlock
 where
-    F: Fn(&str) -> (f64, bool),
+    F: Fn(&str) -> (Decimal, bool),
 {
     let mut breakdown = Vec::with_capacity(prorations.len());
-    let mut total = 0.0;
+    let mut total = Decimal::ZERO;
     for p in prorations {
         let (full_amount, has_override) = lookup(&p.month);
         let prorated_amount = full_amount * p.factor;
@@ -835,13 +848,13 @@ where
         };
         breakdown.push(MonthlyAmount {
             month: p.month.clone(),
-            amount: prorated_amount,
-            full_monthly_amount: full_amount,
+            amount: decimal_to_f64(prorated_amount),
+            full_monthly_amount: decimal_to_f64(full_amount),
             source,
         });
     }
     AmountBlock {
-        total,
+        total: decimal_to_f64(total),
         monthly_breakdown: breakdown,
     }
 }
@@ -1025,7 +1038,7 @@ fn compute_pace(
     let trail_days = TRAILING_WINDOW_DAYS.min(days_elapsed);
     let daily_avg = if trail_days > 0 {
         let trail_start = elapsed_d - Duration::days(trail_days - 1);
-        let mut sum = 0.0;
+        let mut sum = Decimal::ZERO;
         for a in acts {
             let Some(account_type) = account_types.get(&a.account_id) else {
                 continue;
@@ -1045,13 +1058,15 @@ fn compute_pace(
             }
             let classification = classify_activity(a, account_type);
             let native = classification.spending_amount(activity_abs_amount(a));
-            sum += fx_to_target(fx, native, &a.currency, target_currency, fx_as_of);
+            if let Some(amount) = fx_to_target(fx, native, &a.currency, target_currency, fx_as_of) {
+                sum += amount;
+            }
         }
         // Clamp at zero: a refund-heavy trailing window would otherwise produce
         // a negative daily_avg and a projection lower than current spent, which
         // is misleading. The actual run-rate of charges (net of refunds) is
         // bounded below by zero — refunds don't predict future "negative spend".
-        (sum / trail_days as f64).max(0.0)
+        (decimal_to_f64(sum) / trail_days as f64).max(0.0)
     } else {
         0.0
     };
@@ -1354,12 +1369,12 @@ mod tests {
                 "2026-05".to_string(),
             ],
         );
-        assert_eq!(p[0].factor, 1.0);
+        assert_eq!(p[0].factor, Decimal::ONE);
         assert!(!p[0].prorated);
-        assert_eq!(p[1].factor, 1.0);
+        assert_eq!(p[1].factor, Decimal::ONE);
         assert!(!p[1].prorated);
         // May only partially covered: 19 / 31
-        assert!((p[2].factor - 19.0 / 31.0).abs() < 1e-9);
+        assert_eq!(p[2].factor, Decimal::from(19) / Decimal::from(31));
         assert!(p[2].prorated);
     }
 
@@ -1371,10 +1386,10 @@ mod tests {
             &["2026-03".to_string(), "2026-04".to_string()],
         );
         // March: days 15..=31 = 17 days out of 31.
-        assert!((p[0].factor - 17.0 / 31.0).abs() < 1e-9);
+        assert_eq!(p[0].factor, Decimal::from(17) / Decimal::from(31));
         assert!(p[0].prorated);
         // April: fully covered.
-        assert_eq!(p[1].factor, 1.0);
+        assert_eq!(p[1].factor, Decimal::ONE);
     }
 
     // ── fanout_amount + source labelling ──────────────────────────────────────
@@ -1392,8 +1407,8 @@ mod tests {
         );
         // Education: default 50/mo, May override 150.
         let block = fanout_amount(&prorations, |month| match month {
-            "2026-05" => (150.0, true),
-            _ => (50.0, false),
+            "2026-05" => (Decimal::new(150, 0), true),
+            _ => (Decimal::new(50, 0), false),
         });
         let expected = 50.0 + 50.0 + 150.0 * (19.0 / 31.0);
         assert!((block.total - expected).abs() < 1e-9);
@@ -1423,10 +1438,10 @@ mod tests {
             dt(2026, 4, 30),
             &["2026-03".to_string(), "2026-04".to_string()],
         );
-        let a = fanout_amount(&prorations, |_| (100.0, false));
+        let a = fanout_amount(&prorations, |_| (Decimal::new(100, 0), false));
         let b = fanout_amount(&prorations, |month| match month {
-            "2026-04" => (50.0, true),
-            _ => (50.0, false),
+            "2026-04" => (Decimal::new(50, 0), true),
+            _ => (Decimal::new(50, 0), false),
         });
         let combined = combine_monthly([&a, &b]);
         assert_eq!(combined.len(), 2);
@@ -1716,10 +1731,13 @@ mod tests {
             "USD",
             NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
         );
-        assert!((agg.total_outflow - 150.0).abs() < 1e-9);
-        assert!((agg.uncategorized_spend - 50.0).abs() < 1e-9);
+        assert_eq!(agg.total_outflow, Decimal::new(150, 0));
+        assert_eq!(agg.uncategorized_spend, Decimal::new(50, 0));
         assert_eq!(agg.uncategorized_count, 1);
-        assert_eq!(agg.spending_by_top.get("cat_food").unwrap().0, 100.0);
+        assert_eq!(
+            agg.spending_by_top.get("cat_food").unwrap().0,
+            Decimal::new(100, 0)
+        );
         assert_eq!(agg.spending_by_top.get("cat_food").unwrap().1, 1);
 
         let day_categories = compute_by_day_by_category(

@@ -12,10 +12,9 @@ use async_trait::async_trait;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::activities::ActivityDB;
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::{activities, spending_activity_events};
+use crate::schema::spending_activity_events;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::activity_events::{ActivityEvent, ActivityEventsRepositoryTrait};
 
@@ -150,11 +149,6 @@ impl ActivityEventsRepositoryTrait for ActivityEventsRepository {
                     }
                 }
 
-                let updated = diesel::update(activities::table.find(&activity_id))
-                    .set(activities::updated_at.eq(&now))
-                    .get_result::<ActivityDB>(tx.conn())
-                    .map_err(StorageError::from)?;
-                tx.update(&updated)?;
                 Ok(())
             })
             .await

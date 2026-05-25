@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use diesel::prelude::*;
 use diesel::r2d2::{self, Pool};
+use diesel::sql_types::{BigInt, Text};
 use diesel::SqliteConnection;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -25,6 +26,12 @@ use crate::schema::{asset_taxonomy_assignments, taxonomies, taxonomy_categories}
 pub struct TaxonomyRepository {
     pool: Arc<Pool<r2d2::ConnectionManager<SqliteConnection>>>,
     writer: WriteHandle,
+}
+
+#[derive(QueryableByName)]
+struct CountRow {
+    #[diesel(sql_type = BigInt)]
+    count: i64,
 }
 
 impl TaxonomyRepository {
@@ -165,6 +172,36 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
             .optional()
             .map_err(StorageError::from)?;
         Ok(result.map(Category::from))
+    }
+
+    fn get_category_spending_reference_count(
+        &self,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> Result<usize> {
+        let mut conn = get_connection(&self.pool)?;
+        let row = diesel::sql_query(
+            "SELECT (
+                (SELECT COUNT(*) FROM activity_taxonomy_assignments WHERE taxonomy_id = ? AND category_id = ?) +
+                (SELECT COUNT(*) FROM budget_group_assignments WHERE taxonomy_id = ? AND category_id = ?) +
+                (SELECT COUNT(*) FROM budget_targets WHERE taxonomy_id = ? AND category_id = ?) +
+                (SELECT COUNT(*) FROM budget_rollover_settings WHERE taxonomy_id = ? AND category_id = ?) +
+                (SELECT COUNT(*) FROM spending_categorization_rules WHERE taxonomy_id = ? AND category_id = ?)
+            ) AS count",
+        )
+        .bind::<Text, _>(taxonomy_id)
+        .bind::<Text, _>(category_id)
+        .bind::<Text, _>(taxonomy_id)
+        .bind::<Text, _>(category_id)
+        .bind::<Text, _>(taxonomy_id)
+        .bind::<Text, _>(category_id)
+        .bind::<Text, _>(taxonomy_id)
+        .bind::<Text, _>(category_id)
+        .bind::<Text, _>(taxonomy_id)
+        .bind::<Text, _>(category_id)
+        .get_result::<CountRow>(&mut conn)
+        .map_err(StorageError::from)?;
+        Ok(row.count.max(0) as usize)
     }
 
     async fn create_category(&self, category: NewCategory) -> Result<Category> {

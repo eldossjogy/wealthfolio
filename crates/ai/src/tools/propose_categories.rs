@@ -448,6 +448,17 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
             key_lookup: HashMap::new(),
         });
     }
+    let history_account_ids = filters.account_ids.clone().or_else(|| {
+        filters.activity_ids.as_ref().map(|_| {
+            let mut ids = targets
+                .iter()
+                .map(|item| item.activity.account_id.clone())
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.dedup();
+            ids
+        })
+    });
 
     let tax_service = env.taxonomy_service();
     let all_taxonomies = tax_service
@@ -502,7 +513,7 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
     }
 
     let history_request = CashActivitySearchRequest {
-        account_ids: filters.account_ids.clone(),
+        account_ids: history_account_ids,
         status: CashActivityStatusFilter::Categorized,
         limit: HISTORY_FETCH_LIMIT,
         ..Default::default()
