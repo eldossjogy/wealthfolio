@@ -30,6 +30,17 @@ const SPENDING_TAXONOMY: &str = "spending_categories";
 const UNCATEGORIZED_CATEGORY_ID: &str = "__uncategorized__";
 const INCOME_TAXONOMY: &str = "income_sources";
 
+type CategoryAccumulator = (Option<String>, String, Option<String>, Decimal, usize);
+type SubcategoryAccumulator = (
+    Option<String>,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Decimal,
+    usize,
+);
+
 pub struct AnalyticsService {
     activity_repo: Arc<dyn ActivityRepositoryTrait>,
     account_repo: Arc<dyn AccountRepositoryTrait>,
@@ -770,20 +781,8 @@ fn build_summary(
 ) -> SpendingSummary {
     let mut by_month: HashMap<String, Decimal> = HashMap::new();
     let mut by_account: HashMap<String, Decimal> = HashMap::new();
-    let mut by_category: HashMap<String, (Option<String>, String, Option<String>, Decimal, usize)> =
-        HashMap::new();
-    let mut by_subcategory: HashMap<
-        String,
-        (
-            Option<String>,
-            String,
-            Option<String>,
-            String,
-            Option<String>,
-            Decimal,
-            usize,
-        ),
-    > = HashMap::new();
+    let mut by_category: HashMap<String, CategoryAccumulator> = HashMap::new();
+    let mut by_subcategory: HashMap<String, SubcategoryAccumulator> = HashMap::new();
     let mut by_month_by_category: HashMap<String, HashMap<String, Decimal>> = HashMap::new();
     let mut by_month_by_subcategory: HashMap<String, HashMap<String, Decimal>> = HashMap::new();
     let mut transaction_count = 0;
@@ -1182,10 +1181,7 @@ impl AnalyticsService {
             let acts = by_event.remove(&ev.event.id).unwrap_or_default();
 
             let mut total = Decimal::ZERO;
-            let mut by_category: HashMap<
-                String,
-                (Option<String>, String, Option<String>, Decimal, usize),
-            > = HashMap::new();
+            let mut by_category: HashMap<String, CategoryAccumulator> = HashMap::new();
             let mut daily: HashMap<String, Decimal> = HashMap::new();
             let mut transaction_count = 0;
 

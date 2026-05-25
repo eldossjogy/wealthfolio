@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::activity_taxonomy_assignments;
+use crate::spending::deterministic_ids::activity_taxonomy_assignment_id;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::activity_assignments::{
     ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentRepositoryTrait,
@@ -130,13 +130,22 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
         new: NewActivityTaxonomyAssignment,
     ) -> Result<ActivityTaxonomyAssignment> {
         let now = chrono::Utc::now().to_rfc3339();
+        let NewActivityTaxonomyAssignment {
+            id,
+            activity_id,
+            taxonomy_id,
+            category_id,
+            weight,
+            source,
+        } = new;
+        let id = id.unwrap_or_else(|| activity_taxonomy_assignment_id(&activity_id, &taxonomy_id));
         let row = NewActivityTaxonomyAssignmentDB {
-            id: new.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-            activity_id: new.activity_id,
-            taxonomy_id: new.taxonomy_id,
-            category_id: new.category_id,
-            weight: new.weight,
-            source: new.source,
+            id,
+            activity_id,
+            taxonomy_id,
+            category_id,
+            weight,
+            source,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -181,49 +190,58 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
             .exec_tx(move |tx| {
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
-                    // 1. Clear any existing assignment for (activity_id, taxonomy_id).
-                    let existing_ids: Vec<String> = activity_taxonomy_assignments::table
-                        .filter(activity_taxonomy_assignments::activity_id.eq(&item.activity_id))
-                        .filter(activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id))
+                    let NewActivityTaxonomyAssignment {
+                        id,
+                        activity_id,
+                        taxonomy_id,
+                        category_id,
+                        weight,
+                        source,
+                    } = item;
+                    let existing_id = activity_taxonomy_assignments::table
+                        .filter(activity_taxonomy_assignments::activity_id.eq(&activity_id))
+                        .filter(activity_taxonomy_assignments::taxonomy_id.eq(&taxonomy_id))
                         .select(activity_taxonomy_assignments::id)
-                        .load::<String>(tx.conn())
+                        .first::<String>(tx.conn())
+                        .optional()
                         .map_err(StorageError::from)?;
 
-                    diesel::delete(
-                        activity_taxonomy_assignments::table
-                            .filter(
-                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
-                            )
-                            .filter(
-                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
-                            ),
-                    )
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
-
-                    for old_id in &existing_ids {
-                        tx.delete::<ActivityTaxonomyAssignmentDB>(old_id.clone());
-                    }
-
-                    // 2. Insert the new assignment.
+                    let id = id.unwrap_or_else(|| {
+                        activity_taxonomy_assignment_id(&activity_id, &taxonomy_id)
+                    });
                     let row = NewActivityTaxonomyAssignmentDB {
-                        id: item.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        activity_id: item.activity_id,
-                        taxonomy_id: item.taxonomy_id,
-                        category_id: item.category_id,
-                        weight: item.weight,
-                        source: item.source,
+                        id,
+                        activity_id,
+                        taxonomy_id,
+                        category_id,
+                        weight,
+                        source,
                         created_at: now.clone(),
                         updated_at: now.clone(),
                     };
 
                     let inserted = diesel::insert_into(activity_taxonomy_assignments::table)
                         .values(&row)
+                        .on_conflict((
+                            activity_taxonomy_assignments::activity_id,
+                            activity_taxonomy_assignments::taxonomy_id,
+                        ))
+                        .do_update()
+                        .set((
+                            activity_taxonomy_assignments::category_id.eq(&row.category_id),
+                            activity_taxonomy_assignments::weight.eq(&row.weight),
+                            activity_taxonomy_assignments::source.eq(&row.source),
+                            activity_taxonomy_assignments::updated_at.eq(&row.updated_at),
+                        ))
                         .returning(ActivityTaxonomyAssignmentDB::as_returning())
                         .get_result::<ActivityTaxonomyAssignmentDB>(tx.conn())
                         .map_err(StorageError::from)?;
 
-                    tx.insert(&inserted)?;
+                    if existing_id.is_some() {
+                        tx.update(&inserted)?;
+                    } else {
+                        tx.insert(&inserted)?;
+                    }
                     out.push(inserted);
                 }
                 Ok(out)
@@ -251,14 +269,18 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
             .exec_tx(move |tx| {
                 let mut out = Vec::with_capacity(items.len());
                 for item in items {
+                    let NewActivityTaxonomyAssignment {
+                        id,
+                        activity_id,
+                        taxonomy_id,
+                        category_id,
+                        weight,
+                        source,
+                    } = item;
                     let existing: Vec<ActivityTaxonomyAssignmentDB> =
                         activity_taxonomy_assignments::table
-                            .filter(
-                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
-                            )
-                            .filter(
-                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
-                            )
+                            .filter(activity_taxonomy_assignments::activity_id.eq(&activity_id))
+                            .filter(activity_taxonomy_assignments::taxonomy_id.eq(&taxonomy_id))
                             .load::<ActivityTaxonomyAssignmentDB>(tx.conn())
                             .map_err(StorageError::from)?;
 
@@ -272,40 +294,43 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
                         continue;
                     }
 
-                    diesel::delete(
-                        activity_taxonomy_assignments::table
-                            .filter(
-                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
-                            )
-                            .filter(
-                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
-                            ),
-                    )
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
-
-                    for old in &existing {
-                        tx.delete::<ActivityTaxonomyAssignmentDB>(old.id.clone());
-                    }
-
+                    let had_existing = !existing.is_empty();
+                    let id = id.unwrap_or_else(|| {
+                        activity_taxonomy_assignment_id(&activity_id, &taxonomy_id)
+                    });
                     let row = NewActivityTaxonomyAssignmentDB {
-                        id: item.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        activity_id: item.activity_id,
-                        taxonomy_id: item.taxonomy_id,
-                        category_id: item.category_id,
-                        weight: item.weight,
-                        source: item.source,
+                        id,
+                        activity_id,
+                        taxonomy_id,
+                        category_id,
+                        weight,
+                        source,
                         created_at: now.clone(),
                         updated_at: now.clone(),
                     };
 
                     let inserted = diesel::insert_into(activity_taxonomy_assignments::table)
                         .values(&row)
+                        .on_conflict((
+                            activity_taxonomy_assignments::activity_id,
+                            activity_taxonomy_assignments::taxonomy_id,
+                        ))
+                        .do_update()
+                        .set((
+                            activity_taxonomy_assignments::category_id.eq(&row.category_id),
+                            activity_taxonomy_assignments::weight.eq(&row.weight),
+                            activity_taxonomy_assignments::source.eq(&row.source),
+                            activity_taxonomy_assignments::updated_at.eq(&row.updated_at),
+                        ))
                         .returning(ActivityTaxonomyAssignmentDB::as_returning())
                         .get_result::<ActivityTaxonomyAssignmentDB>(tx.conn())
                         .map_err(StorageError::from)?;
 
-                    tx.insert(&inserted)?;
+                    if had_existing {
+                        tx.update(&inserted)?;
+                    } else {
+                        tx.insert(&inserted)?;
+                    }
                     out.push(inserted);
                 }
                 Ok(out)

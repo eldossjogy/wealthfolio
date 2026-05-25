@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::spending_categorization_rules;
+use crate::spending::deterministic_ids::preset_categorization_rule_id;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule,
@@ -111,20 +112,44 @@ impl CategorizationRulesRepository {
 }
 
 fn new_rule_db(new_rule: NewCategorizationRule, now: &str) -> NewCategorizationRuleDB {
+    let NewCategorizationRule {
+        id,
+        name,
+        pattern,
+        match_type,
+        taxonomy_id,
+        category_id,
+        activity_type,
+        priority,
+        is_global,
+        account_id,
+        preset_id,
+        preset_rule_key,
+        preset_version,
+    } = new_rule;
+    let id = id.unwrap_or_else(
+        || match (preset_id.as_deref(), preset_rule_key.as_deref()) {
+            (Some(preset_id), Some(rule_key)) if !preset_id.is_empty() && !rule_key.is_empty() => {
+                preset_categorization_rule_id(preset_id, rule_key)
+            }
+            _ => Uuid::new_v4().to_string(),
+        },
+    );
+
     NewCategorizationRuleDB {
-        id: new_rule.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-        name: new_rule.name,
-        pattern: new_rule.pattern,
-        match_type: new_rule.match_type.as_str().to_string(),
-        taxonomy_id: new_rule.taxonomy_id,
-        category_id: new_rule.category_id,
-        activity_type: new_rule.activity_type,
-        priority: new_rule.priority,
-        is_global: if new_rule.is_global { 1 } else { 0 },
-        account_id: new_rule.account_id,
-        preset_id: new_rule.preset_id,
-        preset_rule_key: new_rule.preset_rule_key,
-        preset_version: new_rule.preset_version,
+        id,
+        name,
+        pattern,
+        match_type: match_type.as_str().to_string(),
+        taxonomy_id,
+        category_id,
+        activity_type,
+        priority,
+        is_global: if is_global { 1 } else { 0 },
+        account_id,
+        preset_id,
+        preset_rule_key,
+        preset_version,
         preset_modified: 0,
         created_at: now.to_string(),
         updated_at: now.to_string(),

@@ -15,6 +15,9 @@ use crate::errors::StorageError;
 use crate::schema::{
     budget_group_assignments, budget_groups, budget_rollover_settings, budget_targets,
 };
+use crate::spending::deterministic_ids::{
+    budget_group_assignment_id, budget_rollover_setting_id, budget_target_id,
+};
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::budget::{
     BudgetGroup, BudgetGroupAssignment, BudgetRepositoryTrait, BudgetRolloverSetting,
@@ -370,11 +373,19 @@ impl BudgetRepositoryTrait for BudgetRepository {
         self.writer
             .exec_tx(move |tx| {
                 for assignment in reassignments {
+                    let NewBudgetGroupAssignment {
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
+                    } = assignment;
+                    let id = id
+                        .unwrap_or_else(|| budget_group_assignment_id(&taxonomy_id, &category_id));
                     let row = NewBudgetGroupAssignmentDB {
-                        id: assignment.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        group_id: assignment.group_id,
-                        taxonomy_id: assignment.taxonomy_id,
-                        category_id: assignment.category_id,
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
                         is_system: 0,
                         created_at: now.clone(),
                         updated_at: now.clone(),
@@ -525,11 +536,19 @@ impl BudgetRepositoryTrait for BudgetRepository {
             .exec_tx(move |tx| {
                 let mut out = Vec::with_capacity(assignments.len());
                 for assignment in assignments {
+                    let NewBudgetGroupAssignment {
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
+                    } = assignment;
+                    let id = id
+                        .unwrap_or_else(|| budget_group_assignment_id(&taxonomy_id, &category_id));
                     let row = NewBudgetGroupAssignmentDB {
-                        id: assignment.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        group_id: assignment.group_id,
-                        taxonomy_id: assignment.taxonomy_id,
-                        category_id: assignment.category_id,
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
                         is_system: 0,
                         created_at: now.clone(),
                         updated_at: now.clone(),
@@ -569,14 +588,33 @@ impl BudgetRepositoryTrait for BudgetRepository {
 
     async fn upsert_target(&self, target: NewBudgetTarget) -> Result<BudgetTarget> {
         let now = chrono::Utc::now().to_rfc3339();
+        let NewBudgetTarget {
+            id,
+            period_key,
+            target_type,
+            taxonomy_id,
+            category_id,
+            group_id,
+            amount,
+        } = target;
+        let target_type = target_type.as_str().to_string();
+        let id = id.unwrap_or_else(|| {
+            budget_target_id(
+                &period_key,
+                &target_type,
+                taxonomy_id.as_deref(),
+                category_id.as_deref(),
+                group_id.as_deref(),
+            )
+        });
         let row = NewBudgetTargetDB {
-            id: target.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-            period_key: target.period_key,
-            target_type: target.target_type.as_str().to_string(),
-            taxonomy_id: target.taxonomy_id,
-            category_id: target.category_id,
-            group_id: target.group_id,
-            amount: target.amount,
+            id,
+            period_key,
+            target_type,
+            taxonomy_id,
+            category_id,
+            group_id,
+            amount,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -659,15 +697,34 @@ impl BudgetRepositoryTrait for BudgetRepository {
         setting: NewBudgetRolloverSetting,
     ) -> Result<BudgetRolloverSetting> {
         let now = chrono::Utc::now().to_rfc3339();
+        let NewBudgetRolloverSetting {
+            id,
+            target_type,
+            taxonomy_id,
+            category_id,
+            group_id,
+            enabled,
+            start_month,
+            starting_balance,
+        } = setting;
+        let target_type = target_type.as_str().to_string();
+        let id = id.unwrap_or_else(|| {
+            budget_rollover_setting_id(
+                &target_type,
+                taxonomy_id.as_deref(),
+                category_id.as_deref(),
+                group_id.as_deref(),
+            )
+        });
         let row = NewBudgetRolloverSettingDB {
-            id: setting.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-            target_type: setting.target_type.as_str().to_string(),
-            taxonomy_id: setting.taxonomy_id,
-            category_id: setting.category_id,
-            group_id: setting.group_id,
-            enabled: if setting.enabled { 1 } else { 0 },
-            start_month: setting.start_month,
-            starting_balance: setting.starting_balance,
+            id,
+            target_type,
+            taxonomy_id,
+            category_id,
+            group_id,
+            enabled: if enabled { 1 } else { 0 },
+            start_month,
+            starting_balance,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -809,10 +866,16 @@ impl BudgetRepositoryTrait for BudgetRepository {
                 }
 
                 let now = chrono::Utc::now().to_rfc3339();
-                let mut inserted_rows: Vec<BudgetTargetDB> = Vec::new();
                 for source_row in source_rows {
+                    let id = budget_target_id(
+                        &target,
+                        &source_row.target_type,
+                        source_row.taxonomy_id.as_deref(),
+                        source_row.category_id.as_deref(),
+                        source_row.group_id.as_deref(),
+                    );
                     let new_row = NewBudgetTargetDB {
-                        id: Uuid::new_v4().to_string(),
+                        id,
                         period_key: target.clone(),
                         target_type: source_row.target_type.clone(),
                         taxonomy_id: source_row.taxonomy_id.clone(),
@@ -831,7 +894,6 @@ impl BudgetRepositoryTrait for BudgetRepository {
                         .map_err(StorageError::from)?;
                     if let Some(row) = inserted {
                         tx.update(&row)?;
-                        inserted_rows.push(row);
                     }
                 }
 

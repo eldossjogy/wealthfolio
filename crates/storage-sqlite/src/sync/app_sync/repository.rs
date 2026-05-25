@@ -18,8 +18,8 @@ use wealthfolio_core::sync::{
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::{
-    activity_taxonomy_assignments, sync_applied_events, sync_cursor, sync_device_config,
-    sync_engine_state, sync_entity_metadata, sync_outbox, sync_table_state,
+    sync_applied_events, sync_cursor, sync_device_config, sync_engine_state, sync_entity_metadata,
+    sync_outbox, sync_table_state,
 };
 
 use super::model::{
@@ -100,12 +100,6 @@ struct PragmaTableXInfoRow {
 struct TableRowCountResult {
     #[diesel(sql_type = diesel::sql_types::BigInt)]
     count: i64,
-}
-
-#[derive(diesel::QueryableByName)]
-struct TextValueRow {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    value: String,
 }
 
 const USER_SYNCABLE_HOLDINGS_SNAPSHOTS_FILTER: &str =
@@ -857,53 +851,6 @@ fn upsert_json_row(
     Ok(())
 }
 
-fn upsert_json_fields_with_conflict_target(
-    conn: &mut SqliteConnection,
-    table: &str,
-    conflict_target: &str,
-    fields: &[(String, serde_json::Value)],
-) -> Result<()> {
-    if fields.is_empty() {
-        return Ok(());
-    }
-
-    let columns = fields
-        .iter()
-        .map(|(k, _)| quote_identifier(k))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let values = fields
-        .iter()
-        .map(|(_, v)| json_value_to_sql_literal(v))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let upserts = fields
-        .iter()
-        .map(|(k, _)| {
-            let quoted = quote_identifier(k);
-            format!("{quoted}=excluded.{quoted}")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let sql = format!(
-        "INSERT INTO {} ({columns}) VALUES ({values}) \
-         ON CONFLICT {conflict_target} DO UPDATE SET {upserts}",
-        quote_identifier(table),
-    );
-    diesel::sql_query(sql)
-        .execute(conn)
-        .map_err(StorageError::from)?;
-    Ok(())
-}
-
-fn field_string<'a>(fields: &'a [(String, serde_json::Value)], name: &str) -> Option<&'a str> {
-    fields
-        .iter()
-        .find(|(key, _)| key == name)
-        .and_then(|(_, value)| value.as_str())
-}
-
 fn load_entity_metadata_tx(
     conn: &mut SqliteConnection,
     entity_db: &str,
@@ -937,157 +884,6 @@ fn should_apply_against_metadata(
             client_timestamp,
             event_id,
         ))
-    }
-}
-
-fn field_non_empty_string<'a>(
-    fields: &'a [(String, serde_json::Value)],
-    name: &str,
-) -> Option<&'a str> {
-    field_string(fields, name).filter(|value| !value.trim().is_empty())
-}
-
-fn select_existing_id_by_fields(
-    conn: &mut SqliteConnection,
-    table: &str,
-    conditions: &[(&str, &str)],
-) -> Result<Option<String>> {
-    if conditions.iter().any(|(_, value)| value.trim().is_empty()) {
-        return Ok(None);
-    }
-
-    let where_clause = conditions
-        .iter()
-        .map(|(column, value)| {
-            format!(
-                "{} = '{}'",
-                quote_identifier(column),
-                escape_sqlite_str(value)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    let sql = format!(
-        "SELECT {} AS value FROM {} WHERE {} LIMIT 1",
-        quote_identifier("id"),
-        quote_identifier(table),
-        where_clause
-    );
-
-    let row = diesel::sql_query(sql)
-        .get_result::<TextValueRow>(conn)
-        .optional()
-        .map_err(StorageError::from)?;
-    Ok(row.map(|row| row.value))
-}
-
-fn spending_natural_existing_id(
-    conn: &mut SqliteConnection,
-    entity: &SyncEntity,
-    fields: &[(String, serde_json::Value)],
-) -> Result<Option<String>> {
-    match entity {
-        SyncEntity::BudgetGroupAssignment => {
-            let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
-                return Ok(None);
-            };
-            let Some(category_id) = field_non_empty_string(fields, "category_id") else {
-                return Ok(None);
-            };
-            select_existing_id_by_fields(
-                conn,
-                "budget_group_assignments",
-                &[("taxonomy_id", taxonomy_id), ("category_id", category_id)],
-            )
-        }
-        SyncEntity::BudgetTarget => match field_string(fields, "target_type") {
-            Some("category") => {
-                let Some(period_key) = field_non_empty_string(fields, "period_key") else {
-                    return Ok(None);
-                };
-                let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
-                    return Ok(None);
-                };
-                let Some(category_id) = field_non_empty_string(fields, "category_id") else {
-                    return Ok(None);
-                };
-                select_existing_id_by_fields(
-                    conn,
-                    "budget_targets",
-                    &[
-                        ("target_type", "category"),
-                        ("period_key", period_key),
-                        ("taxonomy_id", taxonomy_id),
-                        ("category_id", category_id),
-                    ],
-                )
-            }
-            Some("group_buffer") => {
-                let Some(period_key) = field_non_empty_string(fields, "period_key") else {
-                    return Ok(None);
-                };
-                let Some(group_id) = field_non_empty_string(fields, "group_id") else {
-                    return Ok(None);
-                };
-                select_existing_id_by_fields(
-                    conn,
-                    "budget_targets",
-                    &[
-                        ("target_type", "group_buffer"),
-                        ("period_key", period_key),
-                        ("group_id", group_id),
-                    ],
-                )
-            }
-            _ => Ok(None),
-        },
-        SyncEntity::BudgetRolloverSetting => match field_string(fields, "target_type") {
-            Some("category") => {
-                let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
-                    return Ok(None);
-                };
-                let Some(category_id) = field_non_empty_string(fields, "category_id") else {
-                    return Ok(None);
-                };
-                select_existing_id_by_fields(
-                    conn,
-                    "budget_rollover_settings",
-                    &[
-                        ("target_type", "category"),
-                        ("taxonomy_id", taxonomy_id),
-                        ("category_id", category_id),
-                    ],
-                )
-            }
-            Some("group") => {
-                let Some(group_id) = field_non_empty_string(fields, "group_id") else {
-                    return Ok(None);
-                };
-                select_existing_id_by_fields(
-                    conn,
-                    "budget_rollover_settings",
-                    &[("target_type", "group"), ("group_id", group_id)],
-                )
-            }
-            _ => Ok(None),
-        },
-        SyncEntity::SpendingCategorizationRule => {
-            let Some(preset_id) = field_non_empty_string(fields, "preset_id") else {
-                return Ok(None);
-            };
-            let Some(preset_rule_key) = field_non_empty_string(fields, "preset_rule_key") else {
-                return Ok(None);
-            };
-            select_existing_id_by_fields(
-                conn,
-                "spending_categorization_rules",
-                &[
-                    ("preset_id", preset_id),
-                    ("preset_rule_key", preset_rule_key),
-                ],
-            )
-        }
-        _ => Ok(None),
     }
 }
 
@@ -1129,42 +925,6 @@ fn is_syncable_system_taxonomy_id(taxonomy_id: &str) -> bool {
         taxonomy_id,
         "custom_groups" | "spending_categories" | "income_sources"
     )
-}
-
-fn spending_natural_conflict_target(
-    entity: &SyncEntity,
-    fields: &[(String, serde_json::Value)],
-) -> Option<&'static str> {
-    match entity {
-        SyncEntity::BudgetGroupAssignment => Some("(\"taxonomy_id\", \"category_id\")"),
-        SyncEntity::BudgetTarget => match field_string(fields, "target_type") {
-            Some("category") => {
-                Some("(\"period_key\", \"taxonomy_id\", \"category_id\") WHERE \"target_type\" = 'category'")
-            }
-            Some("group_buffer") => {
-                Some("(\"period_key\", \"group_id\") WHERE \"target_type\" = 'group_buffer'")
-            }
-            _ => None,
-        },
-        SyncEntity::BudgetRolloverSetting => match field_string(fields, "target_type") {
-            Some("category") => {
-                Some("(\"taxonomy_id\", \"category_id\") WHERE \"target_type\" = 'category'")
-            }
-            Some("group") => Some("(\"group_id\") WHERE \"target_type\" = 'group'"),
-            _ => None,
-        },
-        SyncEntity::SpendingCategorizationRule => {
-            let has_preset_key = field_string(fields, "preset_id").is_some_and(|value| {
-                !value.trim().is_empty()
-                    && field_string(fields, "preset_rule_key")
-                        .is_some_and(|key| !key.trim().is_empty())
-            });
-            has_preset_key.then_some(
-                "(\"preset_id\", \"preset_rule_key\") WHERE \"preset_id\" IS NOT NULL",
-            )
-        }
-        _ => None,
-    }
 }
 
 /// Convert a serializable DB model to a JSON object with snake_case keys
@@ -1342,152 +1102,6 @@ fn mark_table_incremental_applied_tx(conn: &mut SqliteConnection, table_name: &s
     Ok(())
 }
 
-fn has_newer_activity_assignment_for_pair_tx(
-    conn: &mut SqliteConnection,
-    assignment_id: &str,
-    activity_id: &str,
-    taxonomy_id: &str,
-    incoming_event_id: &str,
-    incoming_client_timestamp: &str,
-) -> Result<bool> {
-    let existing_ids = activity_taxonomy_assignments::table
-        .filter(activity_taxonomy_assignments::activity_id.eq(activity_id))
-        .filter(activity_taxonomy_assignments::taxonomy_id.eq(taxonomy_id))
-        .filter(activity_taxonomy_assignments::id.ne(assignment_id))
-        .select(activity_taxonomy_assignments::id)
-        .load::<String>(conn)
-        .map_err(StorageError::from)?;
-
-    let entity_db = enum_to_db(&SyncEntity::ActivityTaxonomyAssignment)?;
-    for existing_id in existing_ids {
-        let Some(meta) = sync_entity_metadata::table
-            .find((entity_db.clone(), existing_id))
-            .first::<SyncEntityMetadataDB>(conn)
-            .optional()
-            .map_err(StorageError::from)?
-        else {
-            continue;
-        };
-
-        let previous_op = enum_from_db::<SyncOperation>(&meta.last_op)?;
-        if previous_op != SyncOperation::Delete
-            && !should_apply_lww(
-                &meta.last_client_timestamp,
-                &meta.last_event_id,
-                incoming_client_timestamp,
-                incoming_event_id,
-            )
-        {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-fn apply_activity_taxonomy_assignment_event(
-    conn: &mut SqliteConnection,
-    assignment_id: &str,
-    op: SyncOperation,
-    event_id: &str,
-    client_timestamp: &str,
-    payload_json: &serde_json::Value,
-) -> Result<bool> {
-    const TABLE: &str = "activity_taxonomy_assignments";
-
-    match op {
-        SyncOperation::Delete => {
-            let sql = format!(
-                "DELETE FROM {} WHERE {} = '{}'",
-                quote_identifier(TABLE),
-                quote_identifier("id"),
-                escape_sqlite_str(assignment_id)
-            );
-            diesel::sql_query(sql)
-                .execute(conn)
-                .map_err(StorageError::from)?;
-        }
-        SyncOperation::Create | SyncOperation::Update => {
-            let payload_obj = payload_json.as_object().ok_or_else(|| {
-                Error::Database(DatabaseError::Internal(
-                    "Sync payload must be a JSON object".to_string(),
-                ))
-            })?;
-
-            let fields = payload_obj
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect::<Vec<_>>();
-            let fields = normalize_payload_fields(conn, TABLE, fields)?;
-            let mut row = serde_json::Map::new();
-            for (key, value) in fields {
-                row.insert(key, value);
-            }
-
-            if let Some(payload_id) = row.get("id") {
-                if !payload_value_matches_entity_id(payload_id, assignment_id) {
-                    return Err(Error::Database(DatabaseError::Internal(format!(
-                        "Sync payload PK 'id' does not match entity_id '{}'",
-                        assignment_id
-                    ))));
-                }
-            } else {
-                row.insert(
-                    "id".to_string(),
-                    serde_json::Value::String(assignment_id.to_string()),
-                );
-            }
-
-            let activity_id = row
-                .get("activity_id")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    Error::Database(DatabaseError::Internal(
-                        "activity_taxonomy_assignment payload missing activity_id".to_string(),
-                    ))
-                })?;
-            let taxonomy_id = row
-                .get("taxonomy_id")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    Error::Database(DatabaseError::Internal(
-                        "activity_taxonomy_assignment payload missing taxonomy_id".to_string(),
-                    ))
-                })?;
-
-            if has_newer_activity_assignment_for_pair_tx(
-                conn,
-                assignment_id,
-                activity_id,
-                taxonomy_id,
-                event_id,
-                client_timestamp,
-            )? {
-                return Ok(false);
-            }
-
-            let delete_sql = format!(
-                "DELETE FROM {} WHERE {} = '{}' AND {} = '{}' AND {} != '{}'",
-                quote_identifier(TABLE),
-                quote_identifier("activity_id"),
-                escape_sqlite_str(activity_id),
-                quote_identifier("taxonomy_id"),
-                escape_sqlite_str(taxonomy_id),
-                quote_identifier("id"),
-                escape_sqlite_str(assignment_id),
-            );
-            diesel::sql_query(delete_sql)
-                .execute(conn)
-                .map_err(StorageError::from)?;
-
-            upsert_json_row(conn, TABLE, &["id"], &row)?;
-        }
-    }
-
-    mark_table_incremental_applied_tx(conn, TABLE)?;
-    Ok(true)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn apply_remote_event_lww_tx(
     conn: &mut SqliteConnection,
@@ -1523,15 +1137,6 @@ fn apply_remote_event_lww_tx(
         let mut applied_entity_change = true;
         if entity == SyncEntity::CustomTaxonomy {
             apply_custom_taxonomy_event(conn, &entity_id_value, op, &payload_json)?;
-        } else if entity == SyncEntity::ActivityTaxonomyAssignment {
-            applied_entity_change = apply_activity_taxonomy_assignment_event(
-                conn,
-                &entity_id_value,
-                op,
-                &event_id_value,
-                &client_timestamp_value,
-                &payload_json,
-            )?;
         } else if entity == SyncEntity::SpendingSetting
             && !is_syncable_spending_setting_key(&entity_id_value)
         {
@@ -1580,65 +1185,35 @@ fn apply_remote_event_lww_tx(
                     }
                     validate_spending_decimal_field(&entity, &fields)?;
 
-                    if let Some(conflict_target) =
-                        spending_natural_conflict_target(&entity, &fields)
-                    {
-                        if let Some(existing_id) =
-                            spending_natural_existing_id(conn, &entity, &fields)?
-                        {
-                            if existing_id != entity_id_value {
-                                if let Some(meta) =
-                                    load_entity_metadata_tx(conn, &entity_db, &existing_id)?
-                                {
-                                    applied_entity_change = should_apply_against_metadata(
-                                        &meta,
-                                        op,
-                                        &client_timestamp_value,
-                                        &event_id_value,
-                                    )?;
-                                }
-                            }
-                        }
+                    let columns = fields
+                        .iter()
+                        .map(|(k, _)| quote_identifier(k))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let values = fields
+                        .iter()
+                        .map(|(_, v)| json_value_to_sql_literal(v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let upserts = fields
+                        .iter()
+                        .map(|(k, _)| {
+                            let quoted = quote_identifier(k);
+                            format!("{quoted}=excluded.{quoted}")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
 
-                        if applied_entity_change {
-                            upsert_json_fields_with_conflict_target(
-                                conn,
-                                table_name,
-                                conflict_target,
-                                &fields,
-                            )?;
-                        }
-                    } else {
-                        let columns = fields
-                            .iter()
-                            .map(|(k, _)| quote_identifier(k))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let values = fields
-                            .iter()
-                            .map(|(_, v)| json_value_to_sql_literal(v))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let upserts = fields
-                            .iter()
-                            .map(|(k, _)| {
-                                let quoted = quote_identifier(k);
-                                format!("{quoted}=excluded.{quoted}")
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-
-                        let sql = format!(
-                            "INSERT INTO {} ({columns}) VALUES ({values}) \
-                             ON CONFLICT({}) DO UPDATE SET {upserts}",
-                            quote_identifier(table_name),
-                            quote_identifier(pk_name)
-                        );
-                        if applied_entity_change {
-                            diesel::sql_query(sql)
-                                .execute(conn)
-                                .map_err(StorageError::from)?;
-                        }
+                    let sql = format!(
+                        "INSERT INTO {} ({columns}) VALUES ({values}) \
+                         ON CONFLICT({}) DO UPDATE SET {upserts}",
+                        quote_identifier(table_name),
+                        quote_identifier(pk_name)
+                    );
+                    if applied_entity_change {
+                        diesel::sql_query(sql)
+                            .execute(conn)
+                            .map_err(StorageError::from)?;
                     }
 
                     // Side effect for SyncEntity::Snapshot: an `ON CONFLICT
@@ -2897,10 +2472,9 @@ mod tests {
     use crate::db::{create_pool, get_connection, init, run_migrations, write_actor::spawn_writer};
     use crate::goals::GoalRepository;
     use crate::schema::{
-        accounts, activity_taxonomy_assignments, app_settings, assets, budget_targets, goals,
-        goals_allocation, import_account_templates, import_templates, platforms,
-        sync_applied_events, sync_device_config, sync_entity_metadata, sync_outbox, taxonomies,
-        taxonomy_categories,
+        accounts, app_settings, assets, goals, goals_allocation, import_account_templates,
+        import_templates, platforms, sync_applied_events, sync_device_config, sync_entity_metadata,
+        sync_outbox, taxonomies, taxonomy_categories,
     };
     use wealthfolio_core::goals::{GoalRepositoryTrait, GoalSummaryUpdate};
 
@@ -3045,50 +2619,6 @@ mod tests {
             escape_sqlite_str(asset_id)
         );
         diesel::sql_query(sql)
-            .execute(conn)
-            .map_err(StorageError::from)?;
-        Ok(())
-    }
-
-    fn insert_activity_for_test(
-        conn: &mut SqliteConnection,
-        activity_id: &str,
-        account_id: &str,
-    ) -> Result<()> {
-        let sql = format!(
-            "INSERT INTO activities (id, account_id, asset_id, activity_type, activity_type_override, source_type, subtype, status, activity_date, settlement_date, quantity, unit_price, amount, fee, currency, fx_rate, notes, metadata, source_system, source_record_id, source_group_id, idempotency_key, import_run_id, is_user_modified, needs_review, created_at, updated_at)
-             VALUES ('{}', '{}', NULL, 'WITHDRAWAL', NULL, NULL, NULL, 'COMPLETED', '2026-01-01', NULL, NULL, NULL, '-12.34', NULL, 'USD', NULL, 'SYNC TEST', NULL, 'MANUAL', NULL, NULL, NULL, NULL, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-            escape_sqlite_str(activity_id),
-            escape_sqlite_str(account_id),
-        );
-        diesel::sql_query(sql)
-            .execute(conn)
-            .map_err(StorageError::from)?;
-        Ok(())
-    }
-
-    fn insert_activity_taxonomy_for_test(
-        conn: &mut SqliteConnection,
-        taxonomy_id_value: &str,
-    ) -> Result<()> {
-        let sql = format!(
-            "INSERT INTO taxonomies (id, name, color, description, is_system, is_single_select, sort_order, created_at, updated_at, scope)
-             VALUES ('{}', 'Sync Taxonomy', '#8abceb', NULL, 0, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'activity')",
-            escape_sqlite_str(taxonomy_id_value),
-        );
-        diesel::sql_query(sql)
-            .execute(conn)
-            .map_err(StorageError::from)?;
-
-        let categories_sql = format!(
-            "INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, description, sort_order, created_at, updated_at, icon)
-             VALUES
-             ('cat-a', '{}', NULL, 'Category A', 'cat_a', '#808080', NULL, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL),
-             ('cat-b', '{}', NULL, 'Category B', 'cat_b', '#808080', NULL, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)",
-            escape_sqlite_str(taxonomy_id_value),
-            escape_sqlite_str(taxonomy_id_value),
-        );
-        diesel::sql_query(categories_sql)
             .execute(conn)
             .map_err(StorageError::from)?;
         Ok(())
@@ -5695,130 +5225,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replay_budget_target_merges_natural_key_conflict() {
-        let (pool, writer) = setup_db();
-        let repo = AppSyncRepository::new(pool.clone(), writer);
-        let mut conn = get_connection(&pool).expect("conn");
-        diesel::sql_query(
-            "INSERT INTO budget_targets
-             (id, period_key, target_type, taxonomy_id, category_id, group_id, amount, created_at, updated_at)
-             VALUES
-             ('target-local', '2026-05', 'category', 'spending_categories', 'cat_food', NULL, '100', '2026-02-15T00:00:00Z', '2026-02-15T00:00:00Z')",
-        )
-        .execute(&mut conn)
-        .expect("insert local budget target");
-        drop(conn);
-
-        let applied = repo
-            .apply_remote_event_lww(
-                SyncEntity::BudgetTarget,
-                "target-remote".to_string(),
-                SyncOperation::Create,
-                "evt-budget-target-remote".to_string(),
-                "2026-02-15T00:00:01Z".to_string(),
-                1,
-                serde_json::json!({
-                    "id": "target-remote",
-                    "periodKey": "2026-05",
-                    "targetType": "category",
-                    "taxonomyId": "spending_categories",
-                    "categoryId": "cat_food",
-                    "groupId": null,
-                    "amount": "200",
-                    "createdAt": "2026-02-15T00:00:01Z",
-                    "updatedAt": "2026-02-15T00:00:01Z"
-                }),
-            )
-            .await
-            .expect("natural-key budget target replay should not fail");
-        assert!(applied);
-
-        let mut conn = get_connection(&pool).expect("conn");
-        let rows = budget_targets::table
-            .filter(budget_targets::period_key.eq("2026-05"))
-            .filter(budget_targets::target_type.eq("category"))
-            .filter(budget_targets::taxonomy_id.eq("spending_categories"))
-            .filter(budget_targets::category_id.eq("cat_food"))
-            .select((budget_targets::id, budget_targets::amount))
-            .load::<(String, String)>(&mut conn)
-            .expect("budget target rows");
-
-        assert_eq!(rows, vec![("target-remote".to_string(), "200".to_string())]);
-    }
-
-    #[tokio::test]
-    async fn replay_budget_target_preserves_newer_natural_key_conflict() {
-        let (pool, writer) = setup_db();
-        let repo = AppSyncRepository::new(pool.clone(), writer);
-        let mut conn = get_connection(&pool).expect("conn");
-        diesel::sql_query(
-            "INSERT INTO budget_targets
-             (id, period_key, target_type, taxonomy_id, category_id, group_id, amount, created_at, updated_at)
-             VALUES
-             ('target-local-newer', '2026-05', 'category', 'spending_categories', 'cat_food', NULL, '300', '2026-02-15T00:00:05Z', '2026-02-15T00:00:05Z')",
-        )
-        .execute(&mut conn)
-        .expect("insert local budget target");
-        diesel::insert_into(sync_entity_metadata::table)
-            .values(SyncEntityMetadataDB {
-                entity: enum_to_db(&SyncEntity::BudgetTarget).expect("entity"),
-                entity_id: "target-local-newer".to_string(),
-                last_event_id: "evt-budget-target-local-newer".to_string(),
-                last_client_timestamp: "2026-02-15T00:00:05Z".to_string(),
-                last_op: enum_to_db(&SyncOperation::Update).expect("op"),
-                last_seq: 5,
-            })
-            .execute(&mut conn)
-            .expect("insert metadata");
-        drop(conn);
-
-        let applied = repo
-            .apply_remote_event_lww(
-                SyncEntity::BudgetTarget,
-                "target-remote-older".to_string(),
-                SyncOperation::Create,
-                "evt-budget-target-remote-older".to_string(),
-                "2026-02-15T00:00:01Z".to_string(),
-                1,
-                serde_json::json!({
-                    "id": "target-remote-older",
-                    "periodKey": "2026-05",
-                    "targetType": "category",
-                    "taxonomyId": "spending_categories",
-                    "categoryId": "cat_food",
-                    "groupId": null,
-                    "amount": "100",
-                    "createdAt": "2026-02-15T00:00:01Z",
-                    "updatedAt": "2026-02-15T00:00:01Z"
-                }),
-            )
-            .await
-            .expect("natural-key budget target replay should not fail");
-        assert!(!applied);
-
-        let mut conn = get_connection(&pool).expect("conn");
-        let rows = budget_targets::table
-            .filter(budget_targets::period_key.eq("2026-05"))
-            .filter(budget_targets::target_type.eq("category"))
-            .filter(budget_targets::taxonomy_id.eq("spending_categories"))
-            .filter(budget_targets::category_id.eq("cat_food"))
-            .select((budget_targets::id, budget_targets::amount))
-            .load::<(String, String)>(&mut conn)
-            .expect("budget target rows");
-        assert_eq!(
-            rows,
-            vec![("target-local-newer".to_string(), "300".to_string())]
-        );
-
-        let applied_event_count: i64 = sync_applied_events::table
-            .filter(sync_applied_events::event_id.eq("evt-budget-target-remote-older"))
-            .count()
-            .get_result(&mut conn)
-            .expect("applied event count");
-        assert_eq!(applied_event_count, 1);
-    }
-
-    #[tokio::test]
     async fn replay_budget_target_rejects_invalid_decimal_amount() {
         let (pool, writer) = setup_db();
         let repo = AppSyncRepository::new(pool, writer);
@@ -5847,142 +5253,6 @@ mod tests {
             .expect_err("invalid decimal should fail replay");
 
         assert!(err.to_string().contains("valid decimal"));
-    }
-
-    #[tokio::test]
-    async fn replay_activity_assignment_replaces_existing_activity_taxonomy_pair() {
-        let (pool, writer) = setup_db();
-        let repo = AppSyncRepository::new(pool.clone(), writer);
-        let mut conn = get_connection(&pool).expect("conn");
-        insert_account_for_test(&mut conn, "acc-assignment").expect("insert account");
-        insert_activity_for_test(&mut conn, "act-assignment", "acc-assignment")
-            .expect("insert activity");
-        insert_activity_taxonomy_for_test(&mut conn, "tax-assignment").expect("insert taxonomy");
-        diesel::sql_query(
-            "INSERT INTO activity_taxonomy_assignments (id, activity_id, taxonomy_id, category_id, weight, source, created_at, updated_at)
-             VALUES ('assignment-old', 'act-assignment', 'tax-assignment', 'cat-a', 10000, 'manual', '2026-02-15T00:00:00Z', '2026-02-15T00:00:00Z')",
-        )
-        .execute(&mut conn)
-        .expect("insert existing assignment");
-        drop(conn);
-
-        let applied = repo
-            .apply_remote_event_lww(
-                SyncEntity::ActivityTaxonomyAssignment,
-                "assignment-new".to_string(),
-                SyncOperation::Create,
-                "evt-assignment-new".to_string(),
-                "2026-02-15T00:00:01Z".to_string(),
-                1,
-                serde_json::json!({
-                    "id": "assignment-new",
-                    "activityId": "act-assignment",
-                    "taxonomyId": "tax-assignment",
-                    "categoryId": "cat-b",
-                    "weight": 10000,
-                    "source": "manual",
-                    "createdAt": "2026-02-15T00:00:01Z",
-                    "updatedAt": "2026-02-15T00:00:01Z"
-                }),
-            )
-            .await
-            .expect("apply assignment");
-        assert!(applied);
-
-        let mut conn = get_connection(&pool).expect("conn");
-        let rows = activity_taxonomy_assignments::table
-            .filter(activity_taxonomy_assignments::activity_id.eq("act-assignment"))
-            .filter(activity_taxonomy_assignments::taxonomy_id.eq("tax-assignment"))
-            .select((
-                activity_taxonomy_assignments::id,
-                activity_taxonomy_assignments::category_id,
-            ))
-            .load::<(String, String)>(&mut conn)
-            .expect("assignment rows");
-
-        assert_eq!(
-            rows,
-            vec![("assignment-new".to_string(), "cat-b".to_string())]
-        );
-    }
-
-    #[tokio::test]
-    async fn replay_activity_assignment_preserves_newer_logical_pair() {
-        let (pool, writer) = setup_db();
-        let repo = AppSyncRepository::new(pool.clone(), writer);
-        let mut conn = get_connection(&pool).expect("conn");
-        insert_account_for_test(&mut conn, "acc-assignment-lww").expect("insert account");
-        insert_activity_for_test(&mut conn, "act-assignment-lww", "acc-assignment-lww")
-            .expect("insert activity");
-        insert_activity_taxonomy_for_test(&mut conn, "tax-assignment-lww")
-            .expect("insert taxonomy");
-        diesel::sql_query(
-            "INSERT INTO activity_taxonomy_assignments (id, activity_id, taxonomy_id, category_id, weight, source, created_at, updated_at)
-             VALUES ('assignment-local-newer', 'act-assignment-lww', 'tax-assignment-lww', 'cat-a', 10000, 'manual', '2026-02-15T00:00:10Z', '2026-02-15T00:00:10Z')",
-        )
-        .execute(&mut conn)
-        .expect("insert existing assignment");
-        diesel::insert_into(sync_entity_metadata::table)
-            .values(SyncEntityMetadataDB {
-                entity: enum_to_db(&SyncEntity::ActivityTaxonomyAssignment).expect("entity"),
-                entity_id: "assignment-local-newer".to_string(),
-                last_event_id: "evt-assignment-local-newer".to_string(),
-                last_client_timestamp: "2026-02-15T00:00:10Z".to_string(),
-                last_op: enum_to_db(&SyncOperation::Update).expect("op"),
-                last_seq: 10,
-            })
-            .execute(&mut conn)
-            .expect("insert metadata");
-        drop(conn);
-
-        let applied = repo
-            .apply_remote_event_lww(
-                SyncEntity::ActivityTaxonomyAssignment,
-                "assignment-remote-older".to_string(),
-                SyncOperation::Create,
-                "evt-assignment-remote-older".to_string(),
-                "2026-02-15T00:00:01Z".to_string(),
-                1,
-                serde_json::json!({
-                    "id": "assignment-remote-older",
-                    "activityId": "act-assignment-lww",
-                    "taxonomyId": "tax-assignment-lww",
-                    "categoryId": "cat-b",
-                    "weight": 10000,
-                    "source": "manual",
-                    "createdAt": "2026-02-15T00:00:01Z",
-                    "updatedAt": "2026-02-15T00:00:01Z"
-                }),
-            )
-            .await
-            .expect("apply assignment");
-        assert!(
-            !applied,
-            "older remote assignment should lose to newer logical pair"
-        );
-
-        let mut conn = get_connection(&pool).expect("conn");
-        let rows = activity_taxonomy_assignments::table
-            .filter(activity_taxonomy_assignments::activity_id.eq("act-assignment-lww"))
-            .filter(activity_taxonomy_assignments::taxonomy_id.eq("tax-assignment-lww"))
-            .select((
-                activity_taxonomy_assignments::id,
-                activity_taxonomy_assignments::category_id,
-            ))
-            .load::<(String, String)>(&mut conn)
-            .expect("assignment rows");
-
-        assert_eq!(
-            rows,
-            vec![("assignment-local-newer".to_string(), "cat-a".to_string())]
-        );
-
-        let applied_event_count: i64 = sync_applied_events::table
-            .filter(sync_applied_events::event_id.eq("evt-assignment-remote-older"))
-            .count()
-            .get_result(&mut conn)
-            .expect("applied event count");
-        assert_eq!(applied_event_count, 1);
     }
 
     #[tokio::test]
