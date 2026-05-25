@@ -24,7 +24,6 @@ const REGEX_SIZE_LIMIT_BYTES: usize = 64 * 1024;
 
 pub fn compile_regex_pattern(pattern: &str) -> Result<Regex, regex::Error> {
     RegexBuilder::new(pattern)
-        .case_insensitive(true)
         .size_limit(REGEX_SIZE_LIMIT_BYTES)
         .build()
 }
@@ -186,6 +185,14 @@ mod tests {
         assert_eq!(m.rule.id, "a");
         let m = match_compiled(&compiled, "BARABC", "barabc", "WITHDRAWAL", "acct1").unwrap();
         assert_eq!(m.rule.id, "re");
+    }
+
+    #[test]
+    fn regex_matches_remain_case_sensitive_by_default() {
+        let rules = vec![rule("re", r"^Coffee$", RuleMatchType::Regex, 1)];
+
+        assert!(match_rules(&rules, "Coffee", "WITHDRAWAL", "acct1").is_some());
+        assert!(match_rules(&rules, "COFFEE", "WITHDRAWAL", "acct1").is_none());
     }
 
     #[test]

@@ -1206,10 +1206,11 @@ fn apply_remote_event_lww_tx(
         } else if entity == SyncEntity::SpendingSetting
             && !is_syncable_spending_setting_key(&entity_id_value)
         {
-            return Err(Error::Database(DatabaseError::Internal(format!(
-                "Unsupported synced app setting '{}'",
+            log::warn!(
+                "Skipping unsupported synced spending setting '{}'",
                 entity_id_value
-            ))));
+            );
+            applied_entity_change = false;
         } else if let Some((table_name, pk_name)) = entity_storage_mapping(&entity) {
             match op {
                 SyncOperation::Delete => {
@@ -5183,7 +5184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replay_spending_setting_only_allows_spending_keys() {
+    async fn replay_spending_setting_skips_non_spending_keys() {
         let (pool, writer) = setup_db();
         let repo = AppSyncRepository::new(pool.clone(), writer);
 
@@ -5212,7 +5213,7 @@ mod tests {
             .expect("spending setting value");
         assert_eq!(value, "true");
 
-        let result = repo
+        let skipped = repo
             .apply_remote_event_lww(
                 SyncEntity::SpendingSetting,
                 "theme".to_string(),
@@ -5225,11 +5226,82 @@ mod tests {
                     "settingValue": "dark"
                 }),
             )
-            .await;
+            .await
+            .expect("unsupported app setting should be skipped, not fatal");
         assert!(
-            result.is_err(),
-            "non-spending app setting should be rejected"
+            !skipped,
+            "unsupported app setting should not apply an entity change"
         );
+
+        let applied_event_count: i64 = sync_applied_events::table
+            .filter(sync_applied_events::event_id.eq("evt-theme-setting"))
+            .count()
+            .get_result(&mut conn)
+            .expect("applied event count");
+        assert_eq!(applied_event_count, 1);
+
+        let theme_count: i64 = app_settings::table
+            .filter(app_settings::setting_key.eq("theme"))
+            .count()
+            .get_result(&mut conn)
+            .expect("theme setting count");
+        assert_eq!(theme_count, 0);
+    }
+
+    #[tokio::test]
+    async fn replay_batch_skips_unsupported_spending_setting_without_aborting() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+
+        let applied = repo
+            .apply_remote_events_lww_batch(vec![
+                (
+                    SyncEntity::SpendingSetting,
+                    "theme".to_string(),
+                    SyncOperation::Update,
+                    "evt-theme-setting-batch".to_string(),
+                    "2026-02-15T00:00:00Z".to_string(),
+                    1,
+                    serde_json::json!({
+                        "settingKey": "theme",
+                        "settingValue": "dark"
+                    }),
+                ),
+                (
+                    SyncEntity::SpendingSetting,
+                    "spending.enabled".to_string(),
+                    SyncOperation::Update,
+                    "evt-spending-setting-batch".to_string(),
+                    "2026-02-15T00:00:01Z".to_string(),
+                    2,
+                    serde_json::json!({
+                        "settingKey": "spending.enabled",
+                        "settingValue": "true"
+                    }),
+                ),
+            ])
+            .await
+            .expect("batch should not abort on unsupported app setting");
+
+        assert_eq!(applied, 1);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let applied_event_count: i64 = sync_applied_events::table
+            .filter(
+                sync_applied_events::event_id
+                    .eq_any(["evt-theme-setting-batch", "evt-spending-setting-batch"]),
+            )
+            .count()
+            .get_result(&mut conn)
+            .expect("applied event count");
+        assert_eq!(applied_event_count, 2);
+
+        let value = app_settings::table
+            .filter(app_settings::setting_key.eq("spending.enabled"))
+            .select(app_settings::setting_value)
+            .first::<String>(&mut conn)
+            .expect("spending setting value");
+        assert_eq!(value, "true");
     }
 
     #[tokio::test]

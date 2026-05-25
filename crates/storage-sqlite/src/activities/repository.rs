@@ -785,6 +785,31 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(activities_db.into_iter().map(Activity::from).collect())
     }
 
+    fn get_activities_by_ids(&self, activity_ids: &[String]) -> Result<Vec<Activity>> {
+        if activity_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut results = Vec::new();
+
+        for chunk in chunk_for_sqlite(activity_ids) {
+            let activities_db = activities::table
+                .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+                .filter(accounts::is_archived.eq(false))
+                .filter(activities::id.eq_any(chunk))
+                .select(ActivityDB::as_select())
+                .order(activities::activity_date.asc())
+                .load::<ActivityDB>(&mut conn)
+                .map_err(StorageError::from)?;
+
+            results.extend(activities_db.into_iter().map(Activity::from));
+        }
+
+        results.sort_by(|a, b| a.activity_date.cmp(&b.activity_date));
+        Ok(results)
+    }
+
     fn get_activities_by_account_ids_in_date_range(
         &self,
         account_ids: &[String],
@@ -2219,6 +2244,50 @@ mod tests {
             .select(activities::is_user_modified)
             .first(conn)
             .expect("activity is_user_modified")
+    }
+
+    #[tokio::test]
+    async fn get_activities_by_ids_filters_missing_and_archived_accounts() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-active");
+        insert_account_with_archived(&mut conn, "acc-archived", true);
+        insert_activity_with_subtype(&mut conn, "act-active", "acc-active", "DEPOSIT", None, None);
+        insert_activity_with_subtype(
+            &mut conn,
+            "act-archived",
+            "acc-archived",
+            "DEPOSIT",
+            None,
+            None,
+        );
+        drop(conn);
+
+        let ids = vec![
+            "act-archived".to_string(),
+            "missing".to_string(),
+            "act-active".to_string(),
+        ];
+        let activities = repo.get_activities_by_ids(&ids).expect("activities");
+        let activity_ids = activities
+            .iter()
+            .map(|activity| activity.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(activity_ids, vec!["act-active"]);
+    }
+
+    #[tokio::test]
+    async fn get_activities_by_ids_empty_input_returns_empty() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool, writer);
+
+        let activities = repo
+            .get_activities_by_ids(&[])
+            .expect("empty activity lookup");
+
+        assert!(activities.is_empty());
     }
 
     #[tokio::test]

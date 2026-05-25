@@ -4,7 +4,7 @@ import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { makeAssistantToolUI } from "@assistant-ui/react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { useRuntimeContext } from "../../hooks/use-runtime-context";
 import type { CreateCategorizationRuleArgs, CreateCategorizationRuleOutput } from "../../types";
 
@@ -15,6 +15,10 @@ type CreateCategorizationRuleToolUIContentProps = ToolCallMessagePartProps<
 
 function formatMatchType(value?: string): string {
   return (value ?? "contains").replace(/_/g, " ");
+}
+
+function nextClientRuleId(): string | null {
+  return globalThis.crypto?.randomUUID?.() ?? null;
 }
 
 function CreateCategorizationRuleLoadingState() {
@@ -88,6 +92,14 @@ function CreateCategorizationRuleToolUIContentImpl({
   const { create } = useCategorizationRuleMutations();
   const [localSubmitted, setLocalSubmitted] = useState(false);
   const [persistError, setPersistError] = useState(false);
+  const [createError, setCreateError] = useState(false);
+  const [ruleIdOverride, setRuleIdOverride] = useState<string | null | undefined>(undefined);
+  const resultRuleId = result?.rule?.id ?? null;
+
+  useEffect(() => {
+    setCreateError(false);
+    setRuleIdOverride(undefined);
+  }, [resultRuleId]);
 
   if (status?.type === "running") return <CreateCategorizationRuleLoadingState />;
   if (!result) return null;
@@ -103,7 +115,19 @@ function CreateCategorizationRuleToolUIContentImpl({
 
   const handleCreate = async () => {
     setPersistError(false);
-    const created = await create.mutateAsync(rule);
+    setCreateError(false);
+
+    let created: Awaited<ReturnType<typeof create.mutateAsync>>;
+    try {
+      const ruleToCreate = ruleIdOverride === undefined ? rule : { ...rule, id: ruleIdOverride };
+      created = await create.mutateAsync(ruleToCreate);
+    } catch (error) {
+      setCreateError(true);
+      setRuleIdOverride(nextClientRuleId());
+      console.error("Failed to create categorization rule:", error);
+      return;
+    }
+
     setLocalSubmitted(true);
 
     if (!threadId || !toolCallId) {
@@ -168,9 +192,14 @@ function CreateCategorizationRuleToolUIContentImpl({
             ) : isSubmitted ? (
               <Icons.Check className="mr-2 h-4 w-4" />
             ) : null}
-            {isSubmitted ? "Rule created" : "Create rule"}
+            {isSubmitted ? "Rule created" : createError ? "Retry create" : "Create rule"}
           </Button>
         </div>
+        {createError ? (
+          <p className="text-destructive text-xs">
+            Rule was not created. Retry will use a fresh draft id.
+          </p>
+        ) : null}
         {persistError ? (
           <p className="text-destructive text-xs">
             Rule created, but this chat could not be updated. Refresh rules before retrying from

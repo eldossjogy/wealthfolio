@@ -4,13 +4,23 @@ use crate::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Trait defining the contract for Activity repository operations.
 #[async_trait]
 pub trait ActivityRepositoryTrait: Send + Sync {
     fn get_activity(&self, activity_id: &str) -> Result<Activity>;
     fn get_activities(&self) -> Result<Vec<Activity>>;
+    fn get_activities_by_ids(&self, activity_ids: &[String]) -> Result<Vec<Activity>> {
+        if activity_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let requested: HashSet<&str> = activity_ids.iter().map(String::as_str).collect();
+        let mut activities = self.get_activities()?;
+        activities.retain(|activity| requested.contains(activity.id.as_str()));
+        Ok(activities)
+    }
     fn get_activities_by_account_id(&self, account_id: &str) -> Result<Vec<Activity>>;
     fn get_activities_by_account_ids(&self, account_ids: &[String]) -> Result<Vec<Activity>>;
     fn get_activities_by_account_ids_in_date_range(

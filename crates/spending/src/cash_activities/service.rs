@@ -348,13 +348,13 @@ impl CashActivityService {
             return Ok(Vec::new());
         }
 
-        let requested: HashSet<&str> = activity_ids.iter().map(String::as_str).collect();
+        let allowed_accounts: HashSet<&str> = target_accounts.iter().map(String::as_str).collect();
         let mut activities = self
             .activity_repo
-            .get_activities_by_account_ids(&target_accounts)
+            .get_activities_by_ids(activity_ids)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?
             .into_iter()
-            .filter(|activity| requested.contains(activity.id.as_str()))
+            .filter(|activity| allowed_accounts.contains(activity.account_id.as_str()))
             .collect::<Vec<_>>();
         retain_classified_cash_activities(&mut activities, &account_types);
 

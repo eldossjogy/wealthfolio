@@ -23,8 +23,10 @@ pub struct CreateCategorizationRuleArgs {
     /// when omitted, the tool generates "{pattern} → {category_path}".
     #[serde(default)]
     pub name: Option<String>,
-    /// Substring/pattern to match against the transaction notes/payee. Case-insensitive
-    /// (handled downstream). For `matchType: "regex"` this is a Rust regex.
+    /// Substring/pattern to match against the transaction notes/payee. Contains,
+    /// starts_with, and exact matches are case-insensitive. For `matchType:
+    /// "regex"` this is a Rust regex and is case-sensitive unless the pattern
+    /// includes an inline flag such as `(?i)`.
     pub pattern: String,
     /// "contains" (default) | "starts_with" | "exact" | "regex". Use "contains" unless
     /// the user explicitly asks for stricter matching.
@@ -107,7 +109,7 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
                     },
                     "pattern": {
                         "type": "string",
-                        "description": "Substring/pattern matched against transaction notes (case-insensitive). For \"contains\" matchType use a distinctive merchant fragment (e.g. \"T&T\", \"COBS BREAD\")."
+                        "description": "Substring/pattern matched against transaction notes. contains/starts_with/exact are case-insensitive; regex is a Rust regex and is case-sensitive unless it uses an inline flag like (?i). For \"contains\" matchType use a distinctive merchant fragment (e.g. \"T&T\", \"COBS BREAD\")."
                     },
                     "matchType": {
                         "type": "string",
