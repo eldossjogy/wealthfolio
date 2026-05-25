@@ -598,6 +598,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    spending_preset_rule_deletions (preset_id, preset_rule_key) {
+        preset_id -> Text,
+        preset_rule_key -> Text,
+        rule_id -> Text,
+        deleted_at -> Text,
+    }
+}
+
+diesel::table! {
     budget_groups (id) {
         id -> Text,
         name -> Text,
@@ -754,6 +763,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     spending_event_types,
     spending_events,
     spending_categorization_rules,
+    spending_preset_rule_deletions,
     budget_groups,
     budget_group_assignments,
     budget_targets,

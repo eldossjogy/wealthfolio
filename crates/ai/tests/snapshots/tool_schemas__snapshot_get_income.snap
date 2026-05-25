@@ -1,5 +1,6 @@
 ---
 source: crates/ai/tests/tool_schemas.rs
+assertion_line: 104
 expression: snapshot
 ---
 {
@@ -10,7 +11,7 @@ expression: snapshot
         "enum": [
           "YTD",
           "LAST_YEAR",
-          "TOTAL"
+          "ALL"
         ],
         "type": "string"
       }

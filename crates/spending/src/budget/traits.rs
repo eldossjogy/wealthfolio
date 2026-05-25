@@ -29,6 +29,10 @@ pub trait BudgetRepositoryTrait: Send + Sync {
         &self,
         assignments: Vec<NewBudgetGroupAssignment>,
     ) -> Result<Vec<BudgetGroupAssignment>>;
+    async fn upsert_system_group_assignments(
+        &self,
+        assignments: Vec<NewBudgetGroupAssignment>,
+    ) -> Result<Vec<BudgetGroupAssignment>>;
 
     async fn list_targets(&self) -> Result<Vec<BudgetTarget>>;
     async fn upsert_target(&self, target: NewBudgetTarget) -> Result<BudgetTarget>;

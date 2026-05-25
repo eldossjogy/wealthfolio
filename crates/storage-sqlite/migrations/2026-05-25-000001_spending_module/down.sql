@@ -23,6 +23,8 @@ DROP INDEX IF EXISTS idx_budget_groups_sort;
 DROP TABLE IF EXISTS budget_groups;
 
 -- Drop spending_categorization_rules
+DROP INDEX IF EXISTS idx_spending_preset_rule_deletions_rule;
+DROP TABLE IF EXISTS spending_preset_rule_deletions;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_preset_unique;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_activity_type;
 DROP INDEX IF EXISTS idx_spending_categorization_rules_is_global;

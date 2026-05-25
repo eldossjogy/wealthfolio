@@ -18,7 +18,7 @@ use crate::schema::{
 use crate::spending::deterministic_ids::{
     budget_group_assignment_id, budget_rollover_setting_id, budget_target_id,
 };
-use wealthfolio_core::sync::SyncEntity;
+use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 use wealthfolio_spending::budget::{
     BudgetGroup, BudgetGroupAssignment, BudgetRepositoryTrait, BudgetRolloverSetting,
     BudgetRolloverTargetType, BudgetTarget, BudgetTargetType, NewBudgetGroup,
@@ -59,6 +59,10 @@ impl crate::sync::SyncOutboxModel for BudgetGroupDB {
     fn sync_entity_id(&self) -> &str {
         &self.id
     }
+
+    fn should_sync_outbox(&self, _op: SyncOperation) -> bool {
+        self.is_system == 0 || self.updated_at != self.created_at
+    }
 }
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
@@ -90,6 +94,10 @@ impl crate::sync::SyncOutboxModel for BudgetGroupAssignmentDB {
     const ENTITY: SyncEntity = SyncEntity::BudgetGroupAssignment;
     fn sync_entity_id(&self) -> &str {
         &self.id
+    }
+
+    fn should_sync_outbox(&self, _op: SyncOperation) -> bool {
+        self.is_system == 0 || self.updated_at != self.created_at
     }
 }
 
@@ -175,6 +183,76 @@ pub struct BudgetRepository {
 impl BudgetRepository {
     pub fn new(pool: Arc<DbPool>, writer: WriteHandle) -> Self {
         Self { pool, writer }
+    }
+
+    async fn upsert_group_assignments_with_system_flag(
+        &self,
+        assignments: Vec<NewBudgetGroupAssignment>,
+        is_system: i32,
+    ) -> Result<Vec<BudgetGroupAssignment>> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.writer
+            .exec_tx(move |tx| {
+                let mut out = Vec::with_capacity(assignments.len());
+                for assignment in assignments {
+                    let NewBudgetGroupAssignment {
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
+                    } = assignment;
+                    let id = id
+                        .unwrap_or_else(|| budget_group_assignment_id(&taxonomy_id, &category_id));
+                    let existing = budget_group_assignments::table
+                        .filter(budget_group_assignments::taxonomy_id.eq(&taxonomy_id))
+                        .filter(budget_group_assignments::category_id.eq(&category_id))
+                        .first::<BudgetGroupAssignmentDB>(tx.conn())
+                        .optional()
+                        .map_err(StorageError::from)?;
+                    if let Some(existing) = existing {
+                        if existing.group_id == group_id && existing.is_system == is_system {
+                            out.push(existing);
+                            continue;
+                        }
+                        diesel::update(budget_group_assignments::table.find(&existing.id))
+                            .set((
+                                budget_group_assignments::group_id.eq(&group_id),
+                                budget_group_assignments::is_system.eq(is_system),
+                                budget_group_assignments::updated_at.eq(&now),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        let updated = budget_group_assignments::table
+                            .find(&existing.id)
+                            .first::<BudgetGroupAssignmentDB>(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&updated)?;
+                        out.push(updated);
+                        continue;
+                    }
+
+                    let row = NewBudgetGroupAssignmentDB {
+                        id,
+                        group_id,
+                        taxonomy_id,
+                        category_id,
+                        is_system,
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    };
+                    let inserted = diesel::insert_into(budget_group_assignments::table)
+                        .values(&row)
+                        .returning(BudgetGroupAssignmentDB::as_returning())
+                        .get_result(tx.conn())
+                        .map_err(StorageError::from)?;
+                    tx.update(&inserted)?;
+                    out.push(inserted);
+                }
+                Ok(out)
+            })
+            .await
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+            .map_err(|e| anyhow::anyhow!(e))
     }
 }
 
@@ -483,6 +561,22 @@ impl BudgetRepositoryTrait for BudgetRepository {
                         created_at: now.clone(),
                         updated_at: now.clone(),
                     };
+                    let existing = budget_groups::table
+                        .filter(budget_groups::key.eq(&row.key))
+                        .first::<BudgetGroupDB>(tx.conn())
+                        .optional()
+                        .map_err(StorageError::from)?;
+                    if let Some(existing) = existing {
+                        if existing.name == row.name
+                            && existing.color == row.color
+                            && existing.icon == row.icon
+                            && existing.sort_order == row.sort_order
+                            && existing.is_system == 1
+                        {
+                            out.push(existing);
+                            continue;
+                        }
+                    }
                     let inserted = diesel::insert_into(budget_groups::table)
                         .values(&row)
                         .on_conflict(budget_groups::key)
@@ -531,50 +625,16 @@ impl BudgetRepositoryTrait for BudgetRepository {
         &self,
         assignments: Vec<NewBudgetGroupAssignment>,
     ) -> Result<Vec<BudgetGroupAssignment>> {
-        let now = chrono::Utc::now().to_rfc3339();
-        self.writer
-            .exec_tx(move |tx| {
-                let mut out = Vec::with_capacity(assignments.len());
-                for assignment in assignments {
-                    let NewBudgetGroupAssignment {
-                        id,
-                        group_id,
-                        taxonomy_id,
-                        category_id,
-                    } = assignment;
-                    let id = id
-                        .unwrap_or_else(|| budget_group_assignment_id(&taxonomy_id, &category_id));
-                    let row = NewBudgetGroupAssignmentDB {
-                        id,
-                        group_id,
-                        taxonomy_id,
-                        category_id,
-                        is_system: 0,
-                        created_at: now.clone(),
-                        updated_at: now.clone(),
-                    };
-                    let inserted = diesel::insert_into(budget_group_assignments::table)
-                        .values(&row)
-                        .on_conflict((
-                            budget_group_assignments::taxonomy_id,
-                            budget_group_assignments::category_id,
-                        ))
-                        .do_update()
-                        .set((
-                            budget_group_assignments::group_id.eq(&row.group_id),
-                            budget_group_assignments::updated_at.eq(&row.updated_at),
-                        ))
-                        .returning(BudgetGroupAssignmentDB::as_returning())
-                        .get_result(tx.conn())
-                        .map_err(StorageError::from)?;
-                    tx.update(&inserted)?;
-                    out.push(inserted);
-                }
-                Ok(out)
-            })
+        self.upsert_group_assignments_with_system_flag(assignments, 0)
             .await
-            .map(|rows| rows.into_iter().map(Into::into).collect())
-            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    async fn upsert_system_group_assignments(
+        &self,
+        assignments: Vec<NewBudgetGroupAssignment>,
+    ) -> Result<Vec<BudgetGroupAssignment>> {
+        self.upsert_group_assignments_with_system_flag(assignments, 1)
+            .await
     }
 
     async fn list_targets(&self) -> Result<Vec<BudgetTarget>> {

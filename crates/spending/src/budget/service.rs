@@ -355,6 +355,12 @@ impl BudgetService {
         }
 
         let mut group_rows = Vec::with_capacity(groups.len());
+        let mut spending_planned_total = Decimal::ZERO;
+        let mut spending_actual_total = Decimal::ZERO;
+        let mut spending_remaining_total = Decimal::ZERO;
+        let mut group_buffer_total = Decimal::ZERO;
+        let mut rollover_in_total = Decimal::ZERO;
+        let mut rollover_out_total = Decimal::ZERO;
         for group in &groups {
             let mut categories = rows_by_group.remove(&group.id).unwrap_or_default();
             categories.sort_by(|a, b| a.name.cmp(&b.name));
@@ -430,6 +436,12 @@ impl BudgetService {
                     planned_total_decimal - actual_decimal,
                 )
             };
+            spending_planned_total += planned_total_decimal;
+            spending_actual_total += actual_decimal;
+            spending_remaining_total += remaining;
+            group_buffer_total += buffer_decimal;
+            rollover_in_total += rollover_in;
+            rollover_out_total += rollover_out;
             group_rows.push(BudgetGroupRow {
                 group: group.clone(),
                 category_target_total,
@@ -452,6 +464,8 @@ impl BudgetService {
         });
 
         let mut income_rows = Vec::with_capacity(top_income_categories.len());
+        let mut income_planned_total = Decimal::ZERO;
+        let mut income_actual_total = Decimal::ZERO;
         for category in &top_income_categories {
             let actual = current_actuals
                 .get(&(INCOME_TAXONOMY.to_string(), category.id.clone()))
@@ -459,6 +473,8 @@ impl BudgetService {
                 .unwrap_or(Decimal::ZERO);
             let target =
                 target_index.effective_category_decimal(&period_key, INCOME_TAXONOMY, &category.id);
+            income_planned_total += target;
+            income_actual_total += actual;
             income_rows.push(BudgetCategoryRow {
                 taxonomy_id: INCOME_TAXONOMY.to_string(),
                 category_id: category.id.clone(),
@@ -486,14 +502,14 @@ impl BudgetService {
         income_rows.sort_by(|a, b| a.name.cmp(&b.name));
 
         let totals = BudgetTotals {
-            spending_planned: group_rows.iter().map(|g| g.planned_total).sum(),
-            spending_actual: group_rows.iter().map(|g| g.actual).sum(),
-            spending_remaining: group_rows.iter().map(|g| g.remaining).sum(),
-            income_planned: income_rows.iter().map(|r| r.target).sum(),
-            income_actual: income_rows.iter().map(|r| r.actual).sum(),
-            group_buffer: group_rows.iter().map(|g| g.buffer).sum(),
-            rollover_in: group_rows.iter().map(|g| g.rollover_in).sum(),
-            rollover_out: group_rows.iter().map(|g| g.rollover_out).sum(),
+            spending_planned: decimal_to_f64(spending_planned_total),
+            spending_actual: decimal_to_f64(spending_actual_total),
+            spending_remaining: decimal_to_f64(spending_remaining_total),
+            income_planned: decimal_to_f64(income_planned_total),
+            income_actual: decimal_to_f64(income_actual_total),
+            group_buffer: decimal_to_f64(group_buffer_total),
+            rollover_in: decimal_to_f64(rollover_in_total),
+            rollover_out: decimal_to_f64(rollover_out_total),
             overspent_count: group_rows.iter().filter(|g| g.overspent).count()
                 + group_rows
                     .iter()
@@ -651,7 +667,7 @@ impl BudgetService {
         let group_by_key: HashMap<String, String> =
             groups.into_iter().map(|g| (g.key, g.id)).collect();
         self.repo
-            .upsert_group_assignments(default_assignment_inputs(&group_by_key))
+            .upsert_system_group_assignments(default_assignment_inputs(&group_by_key))
             .await?;
         self.get(period_key, currency, timezone).await
     }

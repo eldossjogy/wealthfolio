@@ -13,7 +13,7 @@ use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::{spending_activity_events, spending_event_types, spending_events};
 use crate::spending::activity_events::ActivityEventDB;
-use wealthfolio_core::sync::SyncEntity;
+use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 use wealthfolio_spending::events::{
     Event, EventType, EventTypesRepositoryTrait, EventsRepositoryTrait, NewEvent, NewEventType,
     UpdateEvent,
@@ -49,6 +49,10 @@ impl crate::sync::SyncOutboxModel for EventTypeDB {
     const ENTITY: SyncEntity = SyncEntity::SpendingEventType;
     fn sync_entity_id(&self) -> &str {
         &self.id
+    }
+
+    fn should_sync_outbox(&self, _op: SyncOperation) -> bool {
+        self.key.is_none() || self.updated_at != self.created_at
     }
 }
 

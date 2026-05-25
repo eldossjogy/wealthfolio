@@ -1,6 +1,6 @@
 //! Storage adapter for spending::categorization_rules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -12,9 +12,10 @@ use uuid::Uuid;
 
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::spending_categorization_rules;
+use crate::schema::{spending_categorization_rules, spending_preset_rule_deletions};
 use crate::spending::deterministic_ids::preset_categorization_rule_id;
-use wealthfolio_core::sync::SyncEntity;
+use crate::sync::OutboxWriteRequest;
+use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule,
     PresetImportCounts, RuleMatchType, UpdateCategorizationRule,
@@ -64,11 +65,50 @@ pub struct NewCategorizationRuleDB {
     pub updated_at: String,
 }
 
+#[derive(Insertable, Debug, Clone)]
+#[diesel(table_name = crate::schema::spending_preset_rule_deletions)]
+struct PresetRuleDeletionDB {
+    preset_id: String,
+    preset_rule_key: String,
+    rule_id: String,
+    deleted_at: String,
+}
+
 impl crate::sync::SyncOutboxModel for CategorizationRuleDB {
     const ENTITY: SyncEntity = SyncEntity::SpendingCategorizationRule;
     fn sync_entity_id(&self) -> &str {
         &self.id
     }
+}
+
+fn upsert_preset_rule_deletion(
+    conn: &mut diesel::sqlite::SqliteConnection,
+    preset_id: &str,
+    preset_rule_key: &str,
+    rule_id: &str,
+    deleted_at: &str,
+) -> std::result::Result<(), StorageError> {
+    let row = PresetRuleDeletionDB {
+        preset_id: preset_id.to_string(),
+        preset_rule_key: preset_rule_key.to_string(),
+        rule_id: rule_id.to_string(),
+        deleted_at: deleted_at.to_string(),
+    };
+
+    diesel::insert_into(spending_preset_rule_deletions::table)
+        .values(&row)
+        .on_conflict((
+            spending_preset_rule_deletions::preset_id,
+            spending_preset_rule_deletions::preset_rule_key,
+        ))
+        .do_update()
+        .set((
+            spending_preset_rule_deletions::rule_id.eq(&row.rule_id),
+            spending_preset_rule_deletions::deleted_at.eq(&row.deleted_at),
+        ))
+        .execute(conn)
+        .map_err(StorageError::from)?;
+    Ok(())
 }
 
 fn parse_dt(s: &str) -> NaiveDateTime {
@@ -290,6 +330,13 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                     .into_iter()
                     .filter_map(|row| row.preset_rule_key.clone().map(|key| (key, row)))
                     .collect();
+                let deleted_rule_keys: HashSet<String> = spending_preset_rule_deletions::table
+                    .filter(spending_preset_rule_deletions::preset_id.eq(&preset_id))
+                    .select(spending_preset_rule_deletions::preset_rule_key)
+                    .load::<String>(tx.conn())
+                    .map_err(StorageError::from)?
+                    .into_iter()
+                    .collect();
 
                 let now = chrono::Utc::now().to_rfc3339();
                 let mut counts = PresetImportCounts::default();
@@ -298,6 +345,11 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                     let Some(rule_key) = rule.preset_rule_key.clone() else {
                         continue;
                     };
+                    if deleted_rule_keys.contains(&rule_key) {
+                        existing_by_key.remove(&rule_key);
+                        counts.skipped_existing += 1;
+                        continue;
+                    }
                     if let Some(mut existing) = existing_by_key.remove(&rule_key) {
                         if existing.preset_modified != 0
                             || existing.preset_version.as_deref() == Some(preset_version.as_str())
@@ -360,6 +412,45 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                     counts.added += 1;
                 }
 
+                for (_, row) in existing_by_key {
+                    if row.preset_modified != 0 {
+                        diesel::update(spending_categorization_rules::table.find(&row.id))
+                            .set((
+                                spending_categorization_rules::preset_id.eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_rule_key
+                                    .eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_version
+                                    .eq::<Option<String>>(None),
+                                spending_categorization_rules::preset_modified.eq(0),
+                                spending_categorization_rules::updated_at.eq(&now),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        let mut detached = row.clone();
+                        detached.preset_id = None;
+                        detached.preset_rule_key = None;
+                        detached.preset_version = None;
+                        detached.preset_modified = 0;
+                        detached.updated_at = now.clone();
+                        tx.update(&detached)?;
+                    } else {
+                        diesel::delete(spending_categorization_rules::table.find(&row.id))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.queue_outbox(OutboxWriteRequest::new(
+                            SyncEntity::SpendingCategorizationRule,
+                            row.id.clone(),
+                            SyncOperation::Delete,
+                            serde_json::json!({
+                                "id": row.id,
+                                "presetId": preset_id,
+                                "presetRuleKey": row.preset_rule_key,
+                                "presetDeleteKind": "preset_upgrade_removed",
+                            }),
+                        ));
+                    }
+                }
+
                 Ok(counts)
             })
             .await
@@ -370,11 +461,39 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
         let id = id.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let affected = diesel::delete(spending_categorization_rules::table.find(&id))
-                    .execute(tx.conn())
+                let existing = spending_categorization_rules::table
+                    .find(&id)
+                    .first::<CategorizationRuleDB>(tx.conn())
+                    .optional()
                     .map_err(StorageError::from)?;
-                if affected > 0 {
-                    tx.delete::<CategorizationRuleDB>(id.clone());
+                if let Some(existing) = existing {
+                    if let (Some(preset_id), Some(rule_key)) = (
+                        existing.preset_id.as_deref(),
+                        existing.preset_rule_key.as_deref(),
+                    ) {
+                        let now = chrono::Utc::now().to_rfc3339();
+                        upsert_preset_rule_deletion(
+                            tx.conn(),
+                            preset_id,
+                            rule_key,
+                            &existing.id,
+                            &now,
+                        )?;
+                    }
+                    diesel::delete(spending_categorization_rules::table.find(&id))
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
+                    tx.queue_outbox(OutboxWriteRequest::new(
+                        SyncEntity::SpendingCategorizationRule,
+                        id.clone(),
+                        SyncOperation::Delete,
+                        serde_json::json!({
+                            "id": id,
+                            "presetId": existing.preset_id,
+                            "presetRuleKey": existing.preset_rule_key,
+                            "presetDeleteKind": "rule",
+                        }),
+                    ));
                 }
                 Ok(())
             })
@@ -394,6 +513,13 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                 let mut removed = 0usize;
                 let mut kept = 0usize;
                 let now = chrono::Utc::now().to_rfc3339();
+
+                diesel::delete(
+                    spending_preset_rule_deletions::table
+                        .filter(spending_preset_rule_deletions::preset_id.eq(&preset_id)),
+                )
+                .execute(tx.conn())
+                .map_err(StorageError::from)?;
 
                 for row in rows {
                     if row.preset_modified != 0 {
@@ -422,7 +548,17 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         diesel::delete(spending_categorization_rules::table.find(&row.id))
                             .execute(tx.conn())
                             .map_err(StorageError::from)?;
-                        tx.delete::<CategorizationRuleDB>(row.id.clone());
+                        tx.queue_outbox(OutboxWriteRequest::new(
+                            SyncEntity::SpendingCategorizationRule,
+                            row.id.clone(),
+                            SyncOperation::Delete,
+                            serde_json::json!({
+                                "id": row.id,
+                                "presetId": row.preset_id,
+                                "presetRuleKey": row.preset_rule_key,
+                                "presetDeleteKind": "preset_uninstall",
+                            }),
+                        ));
                         removed += 1;
                     }
                 }

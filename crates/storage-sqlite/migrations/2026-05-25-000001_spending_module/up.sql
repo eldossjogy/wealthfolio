@@ -5,87 +5,28 @@
 -- Adds:
 --   - Columns: taxonomies.scope, taxonomy_categories.icon
 --   - Tables: activity_taxonomy_assignments, spending_activity_events, spending_event_types,
---             spending_events, spending_categorization_rules, budget_groups,
+--             spending_events, spending_categorization_rules,
+--             spending_preset_rule_deletions, budget_groups,
 --             budget_group_assignments, budget_targets,
 --             budget_rollover_settings
 --   - Seeds: 'Spending Categories' + 'Income Sources' system taxonomies (scope='activity')
 --           with full category trees ported from PR #494; 7 default event types
 --
 -- Notes on intentional non-additions:
---   - `accounts` only gets a one-time account_type canonicalization for legacy broker raw_type rows.
+--   - `accounts` only gets a one-time fallback for non-canonical legacy account_type rows.
 --   - `activities.name` not added: existing `notes` column carries payee/merchant string
 --     (rules pattern-match on it; CSV import maps Description → notes).
 
--- Normalize account_type values that may have been persisted from broker raw_type before
--- the broker mapper canonicalized them. Keep this list aligned with
--- crates/connect/src/broker/models.rs::map_broker_account_type.
+-- Spending introduces CREDIT_CARD as a new account type. Pre-spending rows should not
+-- be inferred as credit-card accounts from loose legacy strings; only preserve known
+-- cash/crypto aliases and otherwise fall back to the previous default.
 UPDATE accounts
 SET account_type = CASE
-    WHEN UPPER(TRIM(account_type)) IN ('CREDIT CARD', 'CREDITCARD', 'CARD')
-        THEN 'CREDIT_CARD'
-    WHEN UPPER(TRIM(account_type)) LIKE '%CREDIT%'
-        AND UPPER(TRIM(account_type)) LIKE '%CARD%'
-        THEN 'CREDIT_CARD'
     WHEN UPPER(TRIM(account_type)) IN ('CRYPTO', 'CRYPTO_ACCOUNT', 'CRYPTO ACCOUNT')
         THEN 'CRYPTOCURRENCY'
-    WHEN UPPER(TRIM(account_type)) LIKE '%CRYPTO%'
-        THEN 'CRYPTOCURRENCY'
-    WHEN UPPER(TRIM(account_type)) IN (
-        'DEFAULT',
-        'SECURITY',
-        'RRSP',
-        'RSP',
-        'TFSA',
-        'FHSA',
-        'RESP',
-        'LIRA',
-        'LRSP',
-        'RRIF',
-        'LIF',
-        'DPSP',
-        'IRA',
-        'TRADITIONAL_IRA',
-        'TRADITIONAL IRA',
-        'ROTH_IRA',
-        'ROTH IRA',
-        'ROTH',
-        '401K',
-        '401(K)',
-        '403B',
-        '403(B)',
-        'SEP_IRA',
-        'SEP IRA',
-        'SEP',
-        'SIMPLE_IRA',
-        'SIMPLE IRA',
-        '529',
-        'HSA',
-        'MARGIN',
-        'MARGIN_ACCOUNT',
-        'INVESTMENT',
-        'BROKERAGE',
-        'INDIVIDUAL',
-        'JOINT',
-        'JOINT_ACCOUNT',
-        'CORPORATE',
-        'BUSINESS',
-        'TRUST',
-        'REGISTERED_ACCOUNT'
-    )
-        THEN 'SECURITIES'
-    WHEN UPPER(TRIM(account_type)) LIKE '%RRSP%'
-        OR UPPER(TRIM(account_type)) LIKE '%TFSA%'
-        OR UPPER(TRIM(account_type)) LIKE '%MARGIN%'
-        OR UPPER(TRIM(account_type)) LIKE '%IRA%'
-        OR UPPER(TRIM(account_type)) LIKE '%401%'
-        OR UPPER(TRIM(account_type)) LIKE '%BROKERAGE%'
-        OR UPPER(TRIM(account_type)) LIKE '%INVESTMENT%'
-        THEN 'SECURITIES'
-    WHEN UPPER(TRIM(account_type)) IN ('CASH_ACCOUNT')
+    WHEN UPPER(TRIM(account_type)) IN ('CASH_ACCOUNT', 'CASH')
         THEN 'CASH'
-    WHEN UPPER(TRIM(account_type)) LIKE '%CASH%'
-        THEN 'CASH'
-    ELSE account_type
+    ELSE 'SECURITIES'
 END
 WHERE account_type NOT IN ('SECURITIES', 'CASH', 'CREDIT_CARD', 'CRYPTOCURRENCY');
 
@@ -219,6 +160,18 @@ CREATE INDEX idx_spending_categorization_rules_activity_type ON spending_categor
 CREATE UNIQUE INDEX idx_spending_categorization_rules_preset_unique
   ON spending_categorization_rules(preset_id, preset_rule_key)
   WHERE preset_id IS NOT NULL;
+
+CREATE TABLE spending_preset_rule_deletions (
+    preset_id TEXT NOT NULL,
+    preset_rule_key TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (preset_id, preset_rule_key),
+    UNIQUE (rule_id)
+);
+
+CREATE INDEX idx_spending_preset_rule_deletions_rule
+    ON spending_preset_rule_deletions(rule_id);
 
 -- ============================================================================
 -- 6. BUDGET tables

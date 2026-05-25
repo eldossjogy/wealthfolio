@@ -2,7 +2,6 @@ use chrono::Utc;
 use log::{debug, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
 use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 
 use crate::{ApiRetryClass, SyncPushEventRequest, SyncPushRequest, SyncState};
@@ -36,6 +35,7 @@ pub const DEVICE_SYNC_NOT_READY_BACKOFF_CAP_SECS: u64 = 60 * 60;
 pub const DEVICE_SYNC_OUTBOX_PRUNE_INTERVAL_SECS: u64 = 24 * 60 * 60;
 pub const DEVICE_SYNC_SENT_OUTBOX_RETENTION_DAYS: i64 = 7;
 pub const DEVICE_SYNC_DEAD_OUTBOX_RETENTION_DAYS: i64 = 30;
+const MAX_REMOTE_ENTITY_ID_LEN: usize = 256;
 
 /// Exponential backoff in seconds with cap.
 pub fn backoff_seconds(consecutive_failures: i32) -> i64 {
@@ -46,16 +46,12 @@ pub fn backoff_seconds(consecutive_failures: i32) -> i64 {
     2_i64.pow(capped as u32) * BASE_DELAY_SECONDS
 }
 
-fn remote_entity_id_is_valid(entity: &SyncEntity, entity_id: &str) -> bool {
-    match entity {
-        SyncEntity::SpendingSetting => {
-            matches!(entity_id, "spending.enabled" | "spending.account_ids")
-        }
-        SyncEntity::CustomTaxonomy => {
-            entity_id == "custom_groups" || Uuid::parse_str(entity_id).is_ok()
-        }
-        _ => Uuid::parse_str(entity_id).is_ok(),
-    }
+fn remote_entity_id_is_valid(_entity: &SyncEntity, entity_id: &str) -> bool {
+    !entity_id.is_empty()
+        && entity_id.len() <= MAX_REMOTE_ENTITY_ID_LEN
+        && entity_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-'))
 }
 
 fn sync_entity_name(entity: &SyncEntity) -> &'static str {
@@ -1851,51 +1847,41 @@ mod tests {
     }
 
     #[test]
-    fn remote_entity_id_validation_allows_syncable_spending_setting_keys() {
-        assert!(remote_entity_id_is_valid(
-            &SyncEntity::SpendingSetting,
-            "spending.enabled"
-        ));
-        assert!(remote_entity_id_is_valid(
-            &SyncEntity::SpendingSetting,
-            "spending.account_ids"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::SpendingSetting,
-            "theme"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::Account,
-            "spending.enabled"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::SpendingEventType,
-            "event-type-travel"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::BudgetGroup,
-            "budget_group_needs"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::BudgetGroupAssignment,
-            "bga_cat_housing"
-        ));
-        assert!(remote_entity_id_is_valid(
-            &SyncEntity::CustomTaxonomy,
-            "custom_groups"
-        ));
-        assert!(!remote_entity_id_is_valid(
-            &SyncEntity::CustomTaxonomy,
-            "spending_categories"
-        ));
-        assert!(remote_entity_id_is_valid(
-            &SyncEntity::Account,
-            "019cb093-06a8-7534-8677-546317b17957"
-        ));
-        assert!(remote_entity_id_is_valid(
-            &SyncEntity::CustomTaxonomy,
-            "019cb093-06a8-7534-8677-546317b17957"
-        ));
+    fn remote_entity_id_validation_allows_bounded_safe_keys() {
+        let accepted_ids = [
+            "019cb093-06a8-7534-8677-546317b17957",
+            "spending.enabled",
+            "spending.account_ids",
+            "custom_groups",
+            "spending_categories",
+            "income_sources",
+            "activity_taxonomy_assignment:36:019cb093-06a8-7534-8677-546317b17957:13:custom_groups",
+            "budget_target:category:7:2026-05:19:spending_categories:11:cat_housing",
+            "budget_rollover_setting:group:36:019cb093-06a8-7534-8677-546317b17957",
+            "spending_categorization_rule:preset:9:groceries:6:rule_1",
+        ];
+        for entity_id in accepted_ids {
+            assert!(
+                remote_entity_id_is_valid(&SyncEntity::Account, entity_id),
+                "expected entity_id to be valid: {entity_id}"
+            );
+        }
+
+        let mut rejected_ids = vec![
+            "".to_string(),
+            "has space".to_string(),
+            "path/with/slash".to_string(),
+            "tab\tchar".to_string(),
+            "emoji😀".to_string(),
+        ];
+        rejected_ids.push("a".repeat(MAX_REMOTE_ENTITY_ID_LEN + 1));
+
+        for entity_id in rejected_ids {
+            assert!(
+                !remote_entity_id_is_valid(&SyncEntity::Account, &entity_id),
+                "expected entity_id to be invalid: {entity_id}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -577,6 +577,8 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
         .list()
         .await
         .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+    let compiled_rules =
+        wealthfolio_spending::categorization_rules::matcher::compile_rules(&all_rules);
 
     let total = targets.len();
     let mut proposals = Vec::new();
@@ -587,9 +589,12 @@ pub(crate) async fn compute_categorization_state<E: AiEnvironment>(
         let date = act.activity_date.format("%Y-%m-%d").to_string();
         let notes_trimmed = act.notes.as_deref().map(truncate_notes);
 
-        let rule_match = wealthfolio_spending::categorization_rules::match_rules(
-            &all_rules,
-            act.notes.as_deref().unwrap_or(""),
+        let notes = act.notes.as_deref().unwrap_or("");
+        let notes_upper = notes.to_uppercase();
+        let rule_match = wealthfolio_spending::categorization_rules::matcher::match_compiled(
+            &compiled_rules,
+            &notes_upper,
+            notes,
             act.effective_type(),
             &act.account_id,
         );

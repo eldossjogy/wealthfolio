@@ -18,8 +18,8 @@ use wealthfolio_core::sync::{
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::{
-    sync_applied_events, sync_cursor, sync_device_config, sync_engine_state, sync_entity_metadata,
-    sync_outbox, sync_table_state,
+    spending_preset_rule_deletions, sync_applied_events, sync_cursor, sync_device_config,
+    sync_engine_state, sync_entity_metadata, sync_outbox, sync_table_state,
 };
 
 use super::model::{
@@ -102,69 +102,138 @@ struct TableRowCountResult {
     count: i64,
 }
 
-const USER_SYNCABLE_HOLDINGS_SNAPSHOTS_FILTER: &str =
-    "account_id IN (SELECT id FROM accounts) AND source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')";
-const MANUAL_QUOTES_FILTER: &str = "source = 'MANUAL'";
-const USER_IMPORT_RUNS_FILTER: &str =
-    "UPPER(run_type) = 'IMPORT' AND UPPER(source_system) IN ('CSV', 'MANUAL')";
-const USER_SYNCABLE_ACTIVITIES_FILTER: &str = "is_user_modified = 1 \
-     OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
-     OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
-         AND (source_record_id IS NULL OR TRIM(source_record_id) = ''))";
-const SPENDING_SETTINGS_FILTER: &str =
-    "setting_key IN ('spending.enabled', 'spending.account_ids')";
-const SPENDING_SETTINGS_OVERWRITE_RISK_FILTER: &str = "setting_key = 'spending.account_ids' \
-     OR (setting_key = 'spending.enabled' AND LOWER(setting_value) != 'true')";
-// Spending/income seed category IDs use the `cat_` prefix; user-created rows use UUIDs.
-const SYNCABLE_TAXONOMY_CATEGORIES_FILTER: &str =
-    "taxonomy_id = 'custom_groups' OR (taxonomy_id IN ('spending_categories', 'income_sources') AND id NOT LIKE 'cat_%')";
-const USER_MODIFIED_BUDGET_GROUPS_FILTER: &str = "is_system = 0 OR updated_at != created_at";
-const USER_MODIFIED_BUDGET_GROUP_ASSIGNMENTS_FILTER: &str =
-    "is_system = 0 OR updated_at != created_at";
-const USER_MODIFIED_SPENDING_EVENT_TYPES_FILTER: &str = "key IS NULL OR updated_at != created_at";
+#[derive(diesel::QueryableByName)]
+struct TextIdRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    id: String,
+}
 
-const OVERWRITE_RISK_TABLE_COUNTS: &[(&str, Option<&str>)] = &[
-    ("platforms", None),
-    ("market_data_custom_providers", None),
-    ("accounts", None),
-    (
-        "assets",
-        Some("kind IN ('PROPERTY', 'VEHICLE', 'COLLECTIBLE', 'PRECIOUS_METAL', 'PRIVATE_EQUITY', 'LIABILITY', 'OTHER')"),
-    ),
-    ("quotes", Some(MANUAL_QUOTES_FILTER)),
-    ("goals", None),
-    ("goal_plans", None),
-    ("ai_threads", None),
-    ("ai_messages", None),
-    ("ai_thread_tags", None),
-    ("contribution_limits", None),
-    ("import_runs", Some(USER_IMPORT_RUNS_FILTER)),
-    ("activities", Some(USER_SYNCABLE_ACTIVITIES_FILTER)),
-    ("import_templates", Some("UPPER(scope) != 'SYSTEM'")),
-    ("app_settings", Some(SPENDING_SETTINGS_OVERWRITE_RISK_FILTER)),
-    ("activity_taxonomy_assignments", None),
-    ("spending_activity_events", None),
-    ("spending_categorization_rules", None),
-    ("spending_events", None),
-    (
-        "spending_event_types",
-        Some(USER_MODIFIED_SPENDING_EVENT_TYPES_FILTER),
-    ),
-    ("budget_groups", Some(USER_MODIFIED_BUDGET_GROUPS_FILTER)),
-    (
-        "budget_group_assignments",
-        Some(USER_MODIFIED_BUDGET_GROUP_ASSIGNMENTS_FILTER),
-    ),
-    ("budget_targets", None),
-    ("budget_rollover_settings", None),
-    ("import_account_templates", None),
-    ("taxonomies", Some("is_system = 0")),
-    (
-        "taxonomy_categories",
-        Some(SYNCABLE_TAXONOMY_CATEGORIES_FILTER),
-    ),
-    ("asset_taxonomy_assignments", None),
-    ("goals_allocation", None),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncRowFilter {
+    UserSyncableHoldingsSnapshots,
+    ManualQuotes,
+    UserImportRuns,
+    UserSyncableActivities,
+    UserImportTemplates,
+    SpendingSettings,
+    SpendingSettingsOverwriteRisk,
+    UserTaxonomies,
+    SyncableTaxonomyCategories,
+    UserModifiedBudgetGroups,
+    UserModifiedBudgetGroupAssignments,
+    UserModifiedSpendingEventTypes,
+    OverwriteRiskAssets,
+}
+
+impl SyncRowFilter {
+    fn sql(self) -> &'static str {
+        match self {
+            Self::UserSyncableHoldingsSnapshots => {
+                "account_id IN (SELECT id FROM accounts) AND source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')"
+            }
+            Self::ManualQuotes => "source = 'MANUAL'",
+            Self::UserImportRuns => {
+                "UPPER(run_type) = 'IMPORT' AND UPPER(source_system) IN ('CSV', 'MANUAL')"
+            }
+            Self::UserSyncableActivities => {
+                "is_user_modified = 1 \
+                 OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                 OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                     AND (source_record_id IS NULL OR TRIM(source_record_id) = ''))"
+            }
+            Self::UserImportTemplates => "UPPER(scope) != 'SYSTEM'",
+            Self::SpendingSettings => "setting_key IN ('spending.enabled', 'spending.account_ids')",
+            Self::SpendingSettingsOverwriteRisk => {
+                "setting_key = 'spending.account_ids' \
+                 OR (setting_key = 'spending.enabled' AND LOWER(setting_value) != 'true')"
+            }
+            Self::UserTaxonomies => "is_system = 0",
+            // Spending/income seed category IDs use the `cat_` prefix; user-created rows use UUIDs.
+            Self::SyncableTaxonomyCategories => {
+                "taxonomy_id = 'custom_groups' OR (taxonomy_id IN ('spending_categories', 'income_sources') AND id NOT LIKE 'cat_%')"
+            }
+            Self::UserModifiedBudgetGroups | Self::UserModifiedBudgetGroupAssignments => {
+                "is_system = 0 OR updated_at != created_at"
+            }
+            Self::UserModifiedSpendingEventTypes => "key IS NULL OR updated_at != created_at",
+            Self::OverwriteRiskAssets => {
+                "kind IN ('PROPERTY', 'VEHICLE', 'COLLECTIBLE', 'PRECIOUS_METAL', 'PRIVATE_EQUITY', 'LIABILITY', 'OTHER')"
+            }
+        }
+    }
+}
+
+struct SyncTableFilterSpec {
+    table: &'static str,
+    filter: SyncRowFilter,
+}
+
+const OVERWRITE_RISK_UNFILTERED_TABLES: &[&str] = &[
+    "platforms",
+    "market_data_custom_providers",
+    "accounts",
+    "goals",
+    "goal_plans",
+    "ai_threads",
+    "ai_messages",
+    "ai_thread_tags",
+    "contribution_limits",
+    "activity_taxonomy_assignments",
+    "spending_activity_events",
+    "spending_categorization_rules",
+    "spending_events",
+    "budget_targets",
+    "budget_rollover_settings",
+    "import_account_templates",
+    "asset_taxonomy_assignments",
+    "goals_allocation",
+];
+
+const OVERWRITE_RISK_FILTERED_TABLES: &[SyncTableFilterSpec] = &[
+    SyncTableFilterSpec {
+        table: "assets",
+        filter: SyncRowFilter::OverwriteRiskAssets,
+    },
+    SyncTableFilterSpec {
+        table: "quotes",
+        filter: SyncRowFilter::ManualQuotes,
+    },
+    SyncTableFilterSpec {
+        table: "import_runs",
+        filter: SyncRowFilter::UserImportRuns,
+    },
+    SyncTableFilterSpec {
+        table: "activities",
+        filter: SyncRowFilter::UserSyncableActivities,
+    },
+    SyncTableFilterSpec {
+        table: "import_templates",
+        filter: SyncRowFilter::UserImportTemplates,
+    },
+    SyncTableFilterSpec {
+        table: "app_settings",
+        filter: SyncRowFilter::SpendingSettingsOverwriteRisk,
+    },
+    SyncTableFilterSpec {
+        table: "spending_event_types",
+        filter: SyncRowFilter::UserModifiedSpendingEventTypes,
+    },
+    SyncTableFilterSpec {
+        table: "budget_groups",
+        filter: SyncRowFilter::UserModifiedBudgetGroups,
+    },
+    SyncTableFilterSpec {
+        table: "budget_group_assignments",
+        filter: SyncRowFilter::UserModifiedBudgetGroupAssignments,
+    },
+    SyncTableFilterSpec {
+        table: "taxonomies",
+        filter: SyncRowFilter::UserTaxonomies,
+    },
+    SyncTableFilterSpec {
+        table: "taxonomy_categories",
+        filter: SyncRowFilter::SyncableTaxonomyCategories,
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,6 +413,14 @@ fn apply_value_migration(table: &str, column: &str, value: serde_json::Value) ->
             }
             value
         }
+        ("accounts", "account_type") => {
+            if let Some(s) = value.as_str() {
+                if !matches!(s, "SECURITIES" | "CASH" | "CREDIT_CARD" | "CRYPTOCURRENCY") {
+                    return serde_json::Value::String("SECURITIES".to_string());
+                }
+            }
+            value
+        }
         _ => value,
     }
 }
@@ -482,31 +559,49 @@ fn normalize_outbox_payload(payload: serde_json::Value) -> Result<serde_json::Va
 /// During restore: only rows matching the filter are deleted before importing snapshot data,
 /// so that unfiltered rows (e.g. system taxonomies) are preserved.
 /// Tables not listed here are exported/restored unfiltered.
-const SYNC_TABLE_SNAPSHOT_FILTERS: &[(&str, &str)] = &[
-    (
-        "holdings_snapshots",
-        USER_SYNCABLE_HOLDINGS_SNAPSHOTS_FILTER,
-    ),
-    ("quotes", MANUAL_QUOTES_FILTER),
+const SYNC_TABLE_SNAPSHOT_FILTERS: &[SyncTableFilterSpec] = &[
+    SyncTableFilterSpec {
+        table: "holdings_snapshots",
+        filter: SyncRowFilter::UserSyncableHoldingsSnapshots,
+    },
+    SyncTableFilterSpec {
+        table: "quotes",
+        filter: SyncRowFilter::ManualQuotes,
+    },
     // Taxonomy rows are all seeded by migrations — no user-created taxonomies yet.
     // Export nothing; the table is in APP_SYNC_TABLES for future custom taxonomy support.
-    ("taxonomies", "is_system = 0"),
+    SyncTableFilterSpec {
+        table: "taxonomies",
+        filter: SyncRowFilter::UserTaxonomies,
+    },
     // Only export user-created categories under syncable system taxonomies.
-    ("taxonomy_categories", SYNCABLE_TAXONOMY_CATEGORIES_FILTER),
+    SyncTableFilterSpec {
+        table: "taxonomy_categories",
+        filter: SyncRowFilter::SyncableTaxonomyCategories,
+    },
     // Only export user-initiated import runs (CSV/manual), matching the outbox policy.
-    ("import_runs", USER_IMPORT_RUNS_FILTER),
+    SyncTableFilterSpec {
+        table: "import_runs",
+        filter: SyncRowFilter::UserImportRuns,
+    },
     // Activities: match the outbox policy so broker activities don't reference
     // filtered-out import_runs (which would cause FK violations on restore).
-    ("activities", USER_SYNCABLE_ACTIVITIES_FILTER),
+    SyncTableFilterSpec {
+        table: "activities",
+        filter: SyncRowFilter::UserSyncableActivities,
+    },
     // Only the spending module's app_settings keys participate in sync.
-    ("app_settings", SPENDING_SETTINGS_FILTER),
+    SyncTableFilterSpec {
+        table: "app_settings",
+        filter: SyncRowFilter::SpendingSettings,
+    },
 ];
 
 fn snapshot_filter_for_table(table: &str) -> Option<&'static str> {
     SYNC_TABLE_SNAPSHOT_FILTERS
         .iter()
-        .find(|(t, _)| *t == table)
-        .map(|(_, f)| *f)
+        .find(|spec| spec.table == table)
+        .map(|spec| spec.filter.sql())
 }
 
 fn delete_orphan_snapshot_rows(conn: &mut SqliteConnection) -> Result<()> {
@@ -927,6 +1022,123 @@ fn is_syncable_system_taxonomy_id(taxonomy_id: &str) -> bool {
     )
 }
 
+fn sql_string_list(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| format!("'{}'", escape_sqlite_str(value)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn tombstone_spending_children_for_removed_categories(
+    conn: &mut SqliteConnection,
+    taxonomy_id: &str,
+    category_clause: &str,
+    event_id: &str,
+    client_timestamp: &str,
+    seq: i64,
+) -> Result<()> {
+    for (entity, table_name) in [
+        (
+            SyncEntity::ActivityTaxonomyAssignment,
+            "activity_taxonomy_assignments",
+        ),
+        (
+            SyncEntity::BudgetGroupAssignment,
+            "budget_group_assignments",
+        ),
+        (SyncEntity::BudgetTarget, "budget_targets"),
+        (
+            SyncEntity::BudgetRolloverSetting,
+            "budget_rollover_settings",
+        ),
+    ] {
+        let sql = format!(
+            "SELECT id FROM {} WHERE taxonomy_id = '{}' {}",
+            quote_identifier(table_name),
+            escape_sqlite_str(taxonomy_id),
+            category_clause
+        );
+        let rows = diesel::sql_query(sql)
+            .load::<TextIdRow>(conn)
+            .map_err(StorageError::from)?;
+        for row in rows {
+            upsert_entity_metadata_tx(
+                conn,
+                entity,
+                &row.id,
+                event_id,
+                client_timestamp,
+                SyncOperation::Delete,
+                seq,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn preset_rule_delete_kind(payload_json: &serde_json::Value) -> Option<&str> {
+    payload_json
+        .get("preset_delete_kind")
+        .or_else(|| payload_json.get("presetDeleteKind"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn preset_rule_identity_from_payload(payload_json: &serde_json::Value) -> Option<(String, String)> {
+    let preset_id = payload_json
+        .get("preset_id")
+        .or_else(|| payload_json.get("presetId"))
+        .and_then(serde_json::Value::as_str)?;
+    let rule_key = payload_json
+        .get("preset_rule_key")
+        .or_else(|| payload_json.get("presetRuleKey"))
+        .and_then(serde_json::Value::as_str)?;
+    Some((preset_id.to_string(), rule_key.to_string()))
+}
+
+fn upsert_preset_rule_deletion_tx(
+    conn: &mut SqliteConnection,
+    preset_id: &str,
+    preset_rule_key: &str,
+    rule_id: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    diesel::insert_into(spending_preset_rule_deletions::table)
+        .values((
+            spending_preset_rule_deletions::preset_id.eq(preset_id),
+            spending_preset_rule_deletions::preset_rule_key.eq(preset_rule_key),
+            spending_preset_rule_deletions::rule_id.eq(rule_id),
+            spending_preset_rule_deletions::deleted_at.eq(deleted_at),
+        ))
+        .on_conflict((
+            spending_preset_rule_deletions::preset_id,
+            spending_preset_rule_deletions::preset_rule_key,
+        ))
+        .do_update()
+        .set((
+            spending_preset_rule_deletions::rule_id.eq(rule_id),
+            spending_preset_rule_deletions::deleted_at.eq(deleted_at),
+        ))
+        .execute(conn)
+        .map_err(StorageError::from)?;
+    Ok(())
+}
+
+fn tombstone_remote_preset_rule_delete(
+    conn: &mut SqliteConnection,
+    rule_id: &str,
+    payload_json: &serde_json::Value,
+    deleted_at: &str,
+) -> Result<()> {
+    if preset_rule_delete_kind(payload_json) != Some("rule") {
+        return Ok(());
+    }
+    let Some((preset_id, rule_key)) = preset_rule_identity_from_payload(payload_json) else {
+        return Ok(());
+    };
+    upsert_preset_rule_deletion_tx(conn, &preset_id, &rule_key, rule_id, deleted_at)
+}
+
 /// Convert a serializable DB model to a JSON object with snake_case keys
 /// suitable for SQL upsert. Returns None if serialization fails.
 fn model_to_sql_fields<T: serde::Serialize>(
@@ -958,9 +1170,20 @@ fn apply_custom_taxonomy_event(
     taxonomy_id: &str,
     op: SyncOperation,
     payload_json: &serde_json::Value,
+    event_id: &str,
+    client_timestamp: &str,
+    seq: i64,
 ) -> Result<()> {
     match op {
         SyncOperation::Delete => {
+            tombstone_spending_children_for_removed_categories(
+                conn,
+                taxonomy_id,
+                "",
+                event_id,
+                client_timestamp,
+                seq,
+            )?;
             let sql = if is_syncable_system_taxonomy_id(taxonomy_id) {
                 format!(
                     "DELETE FROM \"taxonomy_categories\" WHERE \"taxonomy_id\" = '{}'",
@@ -1034,6 +1257,14 @@ fn apply_custom_taxonomy_event(
             // Delete local categories that are NOT in the incoming payload.
             // This cascades their assignments via FK ON DELETE CASCADE.
             if incoming_cat_ids.is_empty() {
+                tombstone_spending_children_for_removed_categories(
+                    conn,
+                    taxonomy_id,
+                    "",
+                    event_id,
+                    client_timestamp,
+                    seq,
+                )?;
                 let sql = format!(
                     "DELETE FROM \"taxonomy_categories\" WHERE \"taxonomy_id\" = '{}'",
                     escape_sqlite_str(taxonomy_id)
@@ -1042,11 +1273,16 @@ fn apply_custom_taxonomy_event(
                     .execute(conn)
                     .map_err(StorageError::from)?;
             } else {
-                let placeholders = incoming_cat_ids
-                    .iter()
-                    .map(|id| format!("'{}'", escape_sqlite_str(id)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let placeholders = sql_string_list(&incoming_cat_ids);
+                let category_clause = format!("AND category_id NOT IN ({})", placeholders);
+                tombstone_spending_children_for_removed_categories(
+                    conn,
+                    taxonomy_id,
+                    &category_clause,
+                    event_id,
+                    client_timestamp,
+                    seq,
+                )?;
                 let sql = format!(
                     "DELETE FROM \"taxonomy_categories\" WHERE \"taxonomy_id\" = '{}' AND \"id\" NOT IN ({})",
                     escape_sqlite_str(taxonomy_id),
@@ -1136,7 +1372,15 @@ fn apply_remote_event_lww_tx(
     if should_apply {
         let mut applied_entity_change = true;
         if entity == SyncEntity::CustomTaxonomy {
-            apply_custom_taxonomy_event(conn, &entity_id_value, op, &payload_json)?;
+            apply_custom_taxonomy_event(
+                conn,
+                &entity_id_value,
+                op,
+                &payload_json,
+                &event_id_value,
+                &client_timestamp_value,
+                seq_value,
+            )?;
         } else if entity == SyncEntity::SpendingSetting
             && !is_syncable_spending_setting_key(&entity_id_value)
         {
@@ -1148,6 +1392,14 @@ fn apply_remote_event_lww_tx(
         } else if let Some((table_name, pk_name)) = entity_storage_mapping(&entity) {
             match op {
                 SyncOperation::Delete => {
+                    if entity == SyncEntity::SpendingCategorizationRule {
+                        tombstone_remote_preset_rule_delete(
+                            conn,
+                            &entity_id_value,
+                            &payload_json,
+                            &client_timestamp_value,
+                        )?;
+                    }
                     let sql = format!(
                         "DELETE FROM {} WHERE {} = '{}'",
                         quote_identifier(table_name),
@@ -1404,9 +1656,9 @@ impl AppSyncRepository {
         let mut total_rows = 0_i64;
         let mut non_empty_tables = Vec::new();
 
-        for (table, filter) in OVERWRITE_RISK_TABLE_COUNTS {
+        let mut record_table = |table: &str, filter: Option<SyncRowFilter>| -> Result<()> {
             let table_ident = quote_identifier(table);
-            let count_sql = match filter {
+            let count_sql = match filter.map(SyncRowFilter::sql) {
                 Some(filter) => {
                     format!("SELECT COUNT(*) AS count FROM {table_ident} WHERE {filter}")
                 }
@@ -1422,6 +1674,14 @@ impl AppSyncRepository {
                     rows: row.count,
                 });
             }
+            Ok(())
+        };
+
+        for table in OVERWRITE_RISK_UNFILTERED_TABLES {
+            record_table(table, None)?;
+        }
+        for spec in OVERWRITE_RISK_FILTERED_TABLES {
+            record_table(spec.table, Some(spec.filter))?;
         }
 
         non_empty_tables.sort_by(|a, b| b.rows.cmp(&a.rows).then_with(|| a.table.cmp(&b.table)));
@@ -2476,6 +2736,7 @@ mod tests {
         import_templates, platforms, sync_applied_events, sync_device_config, sync_entity_metadata,
         sync_outbox, taxonomies, taxonomy_categories,
     };
+    use wealthfolio_core::accounts::account_types;
     use wealthfolio_core::goals::{GoalRepositoryTrait, GoalSummaryUpdate};
 
     fn setup_db() -> (
@@ -4427,6 +4688,49 @@ mod tests {
             .expect("goal row");
         assert_eq!(target_amount_value, 50000.0);
         assert_eq!(status_lifecycle_value, "achieved");
+    }
+
+    #[tokio::test]
+    async fn replay_maps_legacy_account_type_to_securities() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::Account,
+                "acc-legacy-account-type".to_string(),
+                SyncOperation::Create,
+                "evt-legacy-account-type".to_string(),
+                "2026-05-25T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "acc-legacy-account-type",
+                    "name": "Legacy Account Type",
+                    "account_type": "TFSA",
+                    "group": serde_json::Value::Null,
+                    "currency": "USD",
+                    "is_default": false,
+                    "is_active": true,
+                    "platform_id": serde_json::Value::Null,
+                    "account_number": serde_json::Value::Null,
+                    "meta": serde_json::Value::Null,
+                    "provider": serde_json::Value::Null,
+                    "provider_account_id": serde_json::Value::Null,
+                    "is_archived": false,
+                    "tracking_mode": "NOT_SET"
+                }),
+            )
+            .await
+            .expect("apply account create");
+        assert!(applied, "expected account create to apply");
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let account_type_value: String = accounts::table
+            .filter(accounts::id.eq("acc-legacy-account-type"))
+            .select(accounts::account_type)
+            .first(&mut conn)
+            .expect("account row");
+        assert_eq!(account_type_value, account_types::SECURITIES);
     }
 
     #[tokio::test]
