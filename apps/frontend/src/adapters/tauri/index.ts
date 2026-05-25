@@ -121,6 +121,9 @@ export * from "../shared/ai-threads";
 // Health Center Commands
 export * from "../shared/health";
 
+// Allocation Target Commands
+export * from "../shared/allocation-targets";
+
 // Data Export Commands
 export { exportDataFile } from "./exports";
 

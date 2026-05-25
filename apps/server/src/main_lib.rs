@@ -119,6 +119,13 @@ pub struct AppState {
     pub budget_service: Arc<wealthfolio_spending::budget::BudgetService>,
     pub spending_analytics_service: Arc<wealthfolio_spending::analytics::AnalyticsService>,
     pub spending_insight_service: Arc<wealthfolio_spending::insight::InsightService>,
+    pub target_profile_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::TargetProfileServiceTrait
+            + Send
+            + Sync,
+    >,
+    pub drift_service:
+        Arc<dyn wealthfolio_core::portfolio::allocation_targets::DriftServiceTrait + Send + Sync>,
 }
 
 pub fn init_tracing() {
@@ -426,6 +433,30 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
 
     let allocation_service: Arc<dyn AllocationServiceTrait + Send + Sync> = Arc::new(
         AllocationService::new(holdings_service.clone(), taxonomy_service.clone()),
+    );
+
+    let target_profile_repository = Arc::new(
+        wealthfolio_storage_sqlite::portfolio::allocation_targets::TargetProfileRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let target_profile_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::TargetProfileServiceTrait
+            + Send
+            + Sync,
+    > = Arc::new(
+        wealthfolio_core::portfolio::allocation_targets::TargetProfileService::new(
+            target_profile_repository,
+        ),
+    );
+    let drift_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::DriftServiceTrait + Send + Sync,
+    > = Arc::new(
+        wealthfolio_core::portfolio::allocation_targets::DriftService::new(
+            target_profile_service.clone(),
+            allocation_service.clone(),
+        ),
     );
 
     let performance_service = Arc::new(
@@ -769,6 +800,8 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         budget_service,
         spending_analytics_service,
         spending_insight_service,
+        target_profile_service,
+        drift_service,
     });
 
     #[cfg(feature = "device-sync")]

@@ -1,4 +1,5 @@
 pub mod allocation;
+pub mod allocation_targets;
 pub mod fire;
 pub mod holdings;
 pub mod income;

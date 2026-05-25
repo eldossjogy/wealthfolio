@@ -319,6 +319,21 @@ export {
   updateHealthConfig,
 } from "../shared/health";
 
+// Allocation Target Commands
+export {
+  activateTargetProfile,
+  archiveTargetProfile,
+  createTargetProfile,
+  deleteTargetProfile,
+  getTargetDrift,
+  getTargetDriftForProfile,
+  getTargetProfile,
+  listTargetNodes,
+  listTargetProfiles,
+  saveTargetNodes,
+  updateTargetProfile,
+} from "../shared/allocation-targets";
+
 // Data Export Commands
 export { exportDataFile } from "./exports";
 

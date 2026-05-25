@@ -363,6 +363,18 @@ export const COMMANDS: CommandMap = {
   remove_ai_thread_tag: { method: "DELETE", path: "/ai/threads" },
   get_ai_thread_tags: { method: "GET", path: "/ai/threads" },
   update_tool_result: { method: "PATCH", path: "/ai/tool-result" },
+  // Allocation Targets
+  list_target_profiles: { method: "GET", path: "/allocation-targets/profiles" },
+  get_target_profile: { method: "GET", path: "/allocation-targets/profiles" },
+  create_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
+  update_target_profile: { method: "PUT", path: "/allocation-targets/profiles" },
+  activate_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
+  archive_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
+  delete_target_profile: { method: "DELETE", path: "/allocation-targets/profiles" },
+  list_target_nodes: { method: "GET", path: "/allocation-targets/profiles" },
+  save_target_nodes: { method: "POST", path: "/allocation-targets/profiles" },
+  get_target_drift: { method: "POST", path: "/allocation-targets/drift" },
+  get_target_drift_for_profile: { method: "POST", path: "/allocation-targets/profiles" },
   // Alternative Assets
   create_alternative_asset: { method: "POST", path: "/alternative-assets" },
   update_alternative_asset_valuation: { method: "PUT", path: "/alternative-assets" },
@@ -1744,6 +1756,62 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     }
     case "get_alternative_holdings":
       break;
+    // Allocation Targets
+    case "list_target_profiles":
+      break;
+    case "get_target_profile": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "create_target_profile": {
+      const { input } = payload as { input: Record<string, unknown> };
+      body = JSON.stringify(input);
+      break;
+    }
+    case "update_target_profile": {
+      const { id, input } = payload as { id: string; input: Record<string, unknown> };
+      url += `/${encodeURIComponent(id)}`;
+      body = JSON.stringify(input);
+      break;
+    }
+    case "activate_target_profile": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}/activate`;
+      break;
+    }
+    case "archive_target_profile": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}/archive`;
+      break;
+    }
+    case "delete_target_profile": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "list_target_nodes": {
+      const { profileId } = payload as { profileId: string };
+      url += `/${encodeURIComponent(profileId)}/nodes`;
+      break;
+    }
+    case "save_target_nodes": {
+      const { profileId, nodes } = payload as { profileId: string; nodes: unknown[] };
+      url += `/${encodeURIComponent(profileId)}/nodes`;
+      body = JSON.stringify(nodes);
+      break;
+    }
+    case "get_target_drift": {
+      const { input } = payload as { input: { filter: unknown } };
+      body = JSON.stringify({ filter: input.filter });
+      break;
+    }
+    case "get_target_drift_for_profile": {
+      const { profileId, filter } = payload as { profileId: string; filter: unknown };
+      url += `/${encodeURIComponent(profileId)}/drift`;
+      body = JSON.stringify({ filter });
+      break;
+    }
     // AI Providers
     case "get_ai_providers":
       break;

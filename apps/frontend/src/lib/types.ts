@@ -2251,3 +2251,90 @@ export interface SaveUpTrajectoryPointDTO {
 export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
   range: [number, number];
 }
+
+// ============================================================================
+// Allocation Target Types
+// ============================================================================
+
+export type ProfileStatus = "draft" | "active" | "archived";
+export type TargetScopeType = "all" | "portfolio" | "account";
+export type TriggerType = "manual" | "threshold";
+export type RebalanceTo = "nearest_band" | "exact_target";
+export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
+
+export interface TargetProfile {
+  id: string;
+  name: string;
+  status: ProfileStatus;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  taxonomyId: string;
+  baseCurrency: string;
+  triggerType: TriggerType;
+  driftBandBps: number;
+  rebalanceTo: RebalanceTo;
+  allowSells: boolean;
+  minTradeAmount: string;
+  wholeSharesOnly: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewTargetProfile {
+  name: string;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  taxonomyId: string;
+  baseCurrency: string;
+  triggerType: TriggerType;
+  driftBandBps: number;
+  rebalanceTo: RebalanceTo;
+  allowSells: boolean;
+  minTradeAmount: string;
+  wholeSharesOnly: boolean;
+}
+
+export interface TargetAllocationNode {
+  id: string;
+  profileId: string;
+  categoryId: string;
+  targetBps: number;
+  isLocked: boolean;
+  isRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewTargetAllocationNode {
+  profileId: string;
+  categoryId: string;
+  targetBps: number;
+  isLocked: boolean;
+  isRequired: boolean;
+}
+
+export interface DriftRow {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  currentBps: number;
+  targetBps: number;
+  driftBps: number;
+  currentValue: number;
+  targetValue: number;
+  valueDelta: number;
+  status: DriftStatus;
+  isRequired: boolean;
+  isZeroCurrent: boolean;
+}
+
+export interface DriftReport {
+  profileId: string;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  totalValue: number;
+  baseCurrency: string;
+  maxDriftBps: number;
+  outOfBandCount: number;
+  rows: DriftRow[];
+}
