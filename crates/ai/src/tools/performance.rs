@@ -200,6 +200,9 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
             let mut account_tracking_modes = std::collections::HashMap::new();
             let account_ids: Vec<String> = accounts
                 .into_iter()
+                .filter(|account| {
+                    account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+                })
                 .map(|account| {
                     account_tracking_modes.insert(account.id.clone(), account.tracking_mode);
                     account.id

@@ -1201,6 +1201,12 @@ fn parse_amount(value: &str) -> Decimal {
     }
 }
 
+fn validate_decimal_amount(value: &str, field_name: &str) -> Result<()> {
+    Decimal::from_str(value)
+        .map(|_| ())
+        .map_err(|_| invalid_budget_input(&format!("Invalid {field_name} amount")))
+}
+
 fn normalize_period_key(period_key: Option<String>, timezone: &str) -> Result<String> {
     match period_key {
         Some(key) if key == DEFAULT_PERIOD_KEY => Ok(key),
@@ -1221,6 +1227,8 @@ fn validate_period_key(period_key: &str) -> Result<()> {
 }
 
 fn validate_budget_target(target: &NewBudgetTarget) -> Result<()> {
+    validate_decimal_amount(&target.amount, "budget target")?;
+
     match target.target_type {
         BudgetTargetType::Category => {
             if target.taxonomy_id.as_deref().unwrap_or_default().is_empty()
@@ -1247,6 +1255,8 @@ fn validate_budget_target(target: &NewBudgetTarget) -> Result<()> {
 }
 
 fn validate_rollover_setting(setting: &NewBudgetRolloverSetting) -> Result<()> {
+    validate_decimal_amount(&setting.starting_balance, "rollover starting balance")?;
+
     match setting.target_type {
         BudgetRolloverTargetType::Category => {
             if setting.taxonomy_id.as_deref() != Some(SPENDING_TAXONOMY)
@@ -1483,6 +1493,37 @@ mod tests {
         for assignment in DEFAULT_ASSIGNMENTS {
             uuid::Uuid::parse_str(assignment.id).unwrap();
         }
+    }
+
+    #[test]
+    fn validates_budget_target_decimal_amount() {
+        let target = NewBudgetTarget {
+            id: None,
+            period_key: DEFAULT_PERIOD_KEY.to_string(),
+            target_type: BudgetTargetType::Category,
+            taxonomy_id: Some(SPENDING_TAXONOMY.to_string()),
+            category_id: Some("cat_groceries".to_string()),
+            group_id: None,
+            amount: "not-a-number".to_string(),
+        };
+
+        assert!(validate_budget_target(&target).is_err());
+    }
+
+    #[test]
+    fn validates_rollover_starting_balance_decimal_amount() {
+        let setting = NewBudgetRolloverSetting {
+            id: None,
+            target_type: BudgetRolloverTargetType::Category,
+            taxonomy_id: Some(SPENDING_TAXONOMY.to_string()),
+            category_id: Some("cat_groceries".to_string()),
+            group_id: None,
+            enabled: true,
+            start_month: "2026-01".to_string(),
+            starting_balance: "bad-balance".to_string(),
+        };
+
+        assert!(validate_rollover_setting(&setting).is_err());
     }
 
     #[test]

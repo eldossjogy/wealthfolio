@@ -537,13 +537,15 @@ fn aggregate_spend(
         if spending_native == Decimal::ZERO && income_native == Decimal::ZERO {
             continue;
         }
-        let spending = fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
-            .unwrap_or(Decimal::ZERO);
-        let income = fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
-            .unwrap_or(Decimal::ZERO);
+        let spending_converted =
+            fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of);
+        let income_converted =
+            fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of);
+        let spending = spending_converted.unwrap_or(Decimal::ZERO);
+        let income = income_converted.unwrap_or(Decimal::ZERO);
         agg.total_income += income;
         agg.total_outflow += spending;
-        if spending_native != Decimal::ZERO {
+        if spending_native != Decimal::ZERO && spending_converted.is_some() {
             *agg.native_outflow_by_currency
                 .entry(a.currency.clone())
                 .or_insert(Decimal::ZERO) += spending_native;
@@ -1267,7 +1269,9 @@ mod tests {
     /// tests cover the same-currency happy path without standing up the real
     /// FxService + DB. Cross-currency conversion is exercised by integration
     /// tests at the repository layer.
-    struct PassthroughFx;
+    struct PassthroughFx {
+        fail_cross_currency: bool,
+    }
 
     type CoreResult<T> = std::result::Result<T, wealthfolio_core::Error>;
 
@@ -1296,10 +1300,15 @@ mod tests {
         fn convert_currency_for_date(
             &self,
             amount: Decimal,
-            _: &str,
-            _: &str,
+            from: &str,
+            to: &str,
             _: NaiveDate,
         ) -> CoreResult<Decimal> {
+            if self.fail_cross_currency && from != to {
+                return Err(wealthfolio_core::Error::CurrencyConversionFailed(
+                    "missing test rate".to_string(),
+                ));
+            }
             Ok(amount)
         }
         fn get_latest_exchange_rates(&self) -> CoreResult<Vec<ExchangeRate>> {
@@ -1331,7 +1340,15 @@ mod tests {
     }
 
     fn fx() -> PassthroughFx {
-        PassthroughFx
+        PassthroughFx {
+            fail_cross_currency: false,
+        }
+    }
+
+    fn failing_cross_currency_fx() -> PassthroughFx {
+        PassthroughFx {
+            fail_cross_currency: true,
+        }
     }
 
     // ── PeriodMeta + months_in_window ─────────────────────────────────────────
@@ -1756,5 +1773,59 @@ mod tests {
         assert_eq!(day_categories.len(), 2);
         assert_eq!(by_category.get("cat_food"), Some(&100.0));
         assert_eq!(by_category.get(UNCATEGORIZED_CATEGORY_ID), Some(&50.0));
+    }
+
+    #[test]
+    fn aggregate_excludes_native_outflow_when_fx_conversion_fails() {
+        use rust_decimal::Decimal;
+        use serde_json::Value;
+        use wealthfolio_core::accounts::account_types;
+        use wealthfolio_core::activities::{Activity, ActivityStatus};
+
+        let activity = Activity {
+            id: "foreign-spend".to_string(),
+            account_id: "acct".to_string(),
+            asset_id: None,
+            activity_type: "WITHDRAWAL".to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: None,
+            status: ActivityStatus::Posted,
+            activity_date: dt(2026, 5, 10),
+            settlement_date: None,
+            quantity: None,
+            unit_price: None,
+            amount: Some(Decimal::new(10000, 2)),
+            fee: None,
+            currency: "EUR".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None::<Value>,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+            is_user_modified: false,
+            needs_review: false,
+            created_at: dt(2026, 5, 10),
+            updated_at: dt(2026, 5, 10),
+        };
+        let acts = vec![&activity];
+        let mut account_types = HashMap::new();
+        account_types.insert("acct".to_string(), account_types::CREDIT_CARD.to_string());
+
+        let agg = aggregate_spend(
+            &acts,
+            &account_types,
+            &HashMap::new(),
+            &HashMap::new(),
+            &failing_cross_currency_fx(),
+            "USD",
+            NaiveDate::from_ymd_opt(2026, 5, 31).unwrap(),
+        );
+
+        assert_eq!(agg.total_outflow, Decimal::ZERO);
+        assert!(agg.native_outflow_by_currency.is_empty());
     }
 }

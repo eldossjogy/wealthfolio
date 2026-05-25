@@ -4,6 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 use diesel::prelude::*;
 use diesel::r2d2::{self, Pool};
 use diesel::sqlite::SqliteConnection;
+use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
@@ -101,6 +102,12 @@ struct TableRowCountResult {
     count: i64,
 }
 
+#[derive(diesel::QueryableByName)]
+struct TextValueRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    value: String,
+}
+
 const USER_SYNCABLE_HOLDINGS_SNAPSHOTS_FILTER: &str =
     "account_id IN (SELECT id FROM accounts) AND source IN ('MANUAL_ENTRY', 'CSV_IMPORT', 'SYNTHETIC', 'BROKER_IMPORTED')";
 const MANUAL_QUOTES_FILTER: &str = "source = 'MANUAL'";
@@ -114,6 +121,9 @@ const SPENDING_SETTINGS_FILTER: &str =
     "setting_key IN ('spending.enabled', 'spending.account_ids')";
 const SPENDING_SETTINGS_OVERWRITE_RISK_FILTER: &str = "setting_key = 'spending.account_ids' \
      OR (setting_key = 'spending.enabled' AND LOWER(setting_value) != 'true')";
+// Spending/income seed category IDs use the `cat_` prefix; user-created rows use UUIDs.
+const SYNCABLE_TAXONOMY_CATEGORIES_FILTER: &str =
+    "taxonomy_id = 'custom_groups' OR (taxonomy_id IN ('spending_categories', 'income_sources') AND id NOT LIKE 'cat_%')";
 const USER_MODIFIED_BUDGET_GROUPS_FILTER: &str = "is_system = 0 OR updated_at != created_at";
 const USER_MODIFIED_BUDGET_GROUP_ASSIGNMENTS_FILTER: &str =
     "is_system = 0 OR updated_at != created_at";
@@ -155,7 +165,10 @@ const OVERWRITE_RISK_TABLE_COUNTS: &[(&str, Option<&str>)] = &[
     ("budget_rollover_settings", None),
     ("import_account_templates", None),
     ("taxonomies", Some("is_system = 0")),
-    ("taxonomy_categories", Some("taxonomy_id = 'custom_groups'")),
+    (
+        "taxonomy_categories",
+        Some(SYNCABLE_TAXONOMY_CATEGORIES_FILTER),
+    ),
     ("asset_taxonomy_assignments", None),
     ("goals_allocation", None),
 ];
@@ -484,8 +497,8 @@ const SYNC_TABLE_SNAPSHOT_FILTERS: &[(&str, &str)] = &[
     // Taxonomy rows are all seeded by migrations — no user-created taxonomies yet.
     // Export nothing; the table is in APP_SYNC_TABLES for future custom taxonomy support.
     ("taxonomies", "is_system = 0"),
-    // Only export user-created categories under custom_groups.
-    ("taxonomy_categories", "taxonomy_id = 'custom_groups'"),
+    // Only export user-created categories under syncable system taxonomies.
+    ("taxonomy_categories", SYNCABLE_TAXONOMY_CATEGORIES_FILTER),
     // Only export user-initiated import runs (CSV/manual), matching the outbox policy.
     ("import_runs", USER_IMPORT_RUNS_FILTER),
     // Activities: match the outbox policy so broker activities don't reference
@@ -891,6 +904,233 @@ fn field_string<'a>(fields: &'a [(String, serde_json::Value)], name: &str) -> Op
         .and_then(|(_, value)| value.as_str())
 }
 
+fn load_entity_metadata_tx(
+    conn: &mut SqliteConnection,
+    entity_db: &str,
+    entity_id: &str,
+) -> Result<Option<SyncEntityMetadataDB>> {
+    let row = sync_entity_metadata::table
+        .find((entity_db.to_string(), entity_id.to_string()))
+        .first::<SyncEntityMetadataDB>(conn)
+        .optional()
+        .map_err(StorageError::from)?;
+    Ok(row)
+}
+
+fn should_apply_against_metadata(
+    meta: &SyncEntityMetadataDB,
+    op: SyncOperation,
+    client_timestamp: &str,
+    event_id: &str,
+) -> Result<bool> {
+    let previous_op = enum_from_db::<SyncOperation>(&meta.last_op)?;
+    if op == SyncOperation::Delete && previous_op != SyncOperation::Delete {
+        Ok(true)
+    } else if previous_op == SyncOperation::Delete
+        && matches!(op, SyncOperation::Create | SyncOperation::Update)
+    {
+        Ok(false)
+    } else {
+        Ok(should_apply_lww(
+            &meta.last_client_timestamp,
+            &meta.last_event_id,
+            client_timestamp,
+            event_id,
+        ))
+    }
+}
+
+fn field_non_empty_string<'a>(
+    fields: &'a [(String, serde_json::Value)],
+    name: &str,
+) -> Option<&'a str> {
+    field_string(fields, name).filter(|value| !value.trim().is_empty())
+}
+
+fn select_existing_id_by_fields(
+    conn: &mut SqliteConnection,
+    table: &str,
+    conditions: &[(&str, &str)],
+) -> Result<Option<String>> {
+    if conditions.iter().any(|(_, value)| value.trim().is_empty()) {
+        return Ok(None);
+    }
+
+    let where_clause = conditions
+        .iter()
+        .map(|(column, value)| {
+            format!(
+                "{} = '{}'",
+                quote_identifier(column),
+                escape_sqlite_str(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let sql = format!(
+        "SELECT {} AS value FROM {} WHERE {} LIMIT 1",
+        quote_identifier("id"),
+        quote_identifier(table),
+        where_clause
+    );
+
+    let row = diesel::sql_query(sql)
+        .get_result::<TextValueRow>(conn)
+        .optional()
+        .map_err(StorageError::from)?;
+    Ok(row.map(|row| row.value))
+}
+
+fn spending_natural_existing_id(
+    conn: &mut SqliteConnection,
+    entity: &SyncEntity,
+    fields: &[(String, serde_json::Value)],
+) -> Result<Option<String>> {
+    match entity {
+        SyncEntity::BudgetGroupAssignment => {
+            let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
+                return Ok(None);
+            };
+            let Some(category_id) = field_non_empty_string(fields, "category_id") else {
+                return Ok(None);
+            };
+            select_existing_id_by_fields(
+                conn,
+                "budget_group_assignments",
+                &[("taxonomy_id", taxonomy_id), ("category_id", category_id)],
+            )
+        }
+        SyncEntity::BudgetTarget => match field_string(fields, "target_type") {
+            Some("category") => {
+                let Some(period_key) = field_non_empty_string(fields, "period_key") else {
+                    return Ok(None);
+                };
+                let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
+                    return Ok(None);
+                };
+                let Some(category_id) = field_non_empty_string(fields, "category_id") else {
+                    return Ok(None);
+                };
+                select_existing_id_by_fields(
+                    conn,
+                    "budget_targets",
+                    &[
+                        ("target_type", "category"),
+                        ("period_key", period_key),
+                        ("taxonomy_id", taxonomy_id),
+                        ("category_id", category_id),
+                    ],
+                )
+            }
+            Some("group_buffer") => {
+                let Some(period_key) = field_non_empty_string(fields, "period_key") else {
+                    return Ok(None);
+                };
+                let Some(group_id) = field_non_empty_string(fields, "group_id") else {
+                    return Ok(None);
+                };
+                select_existing_id_by_fields(
+                    conn,
+                    "budget_targets",
+                    &[
+                        ("target_type", "group_buffer"),
+                        ("period_key", period_key),
+                        ("group_id", group_id),
+                    ],
+                )
+            }
+            _ => Ok(None),
+        },
+        SyncEntity::BudgetRolloverSetting => match field_string(fields, "target_type") {
+            Some("category") => {
+                let Some(taxonomy_id) = field_non_empty_string(fields, "taxonomy_id") else {
+                    return Ok(None);
+                };
+                let Some(category_id) = field_non_empty_string(fields, "category_id") else {
+                    return Ok(None);
+                };
+                select_existing_id_by_fields(
+                    conn,
+                    "budget_rollover_settings",
+                    &[
+                        ("target_type", "category"),
+                        ("taxonomy_id", taxonomy_id),
+                        ("category_id", category_id),
+                    ],
+                )
+            }
+            Some("group") => {
+                let Some(group_id) = field_non_empty_string(fields, "group_id") else {
+                    return Ok(None);
+                };
+                select_existing_id_by_fields(
+                    conn,
+                    "budget_rollover_settings",
+                    &[("target_type", "group"), ("group_id", group_id)],
+                )
+            }
+            _ => Ok(None),
+        },
+        SyncEntity::SpendingCategorizationRule => {
+            let Some(preset_id) = field_non_empty_string(fields, "preset_id") else {
+                return Ok(None);
+            };
+            let Some(preset_rule_key) = field_non_empty_string(fields, "preset_rule_key") else {
+                return Ok(None);
+            };
+            select_existing_id_by_fields(
+                conn,
+                "spending_categorization_rules",
+                &[
+                    ("preset_id", preset_id),
+                    ("preset_rule_key", preset_rule_key),
+                ],
+            )
+        }
+        _ => Ok(None),
+    }
+}
+
+fn validate_spending_decimal_field(
+    entity: &SyncEntity,
+    fields: &[(String, serde_json::Value)],
+) -> Result<()> {
+    let field_name = match entity {
+        SyncEntity::BudgetTarget => Some("amount"),
+        SyncEntity::BudgetRolloverSetting => Some("starting_balance"),
+        _ => None,
+    };
+
+    let Some(field_name) = field_name else {
+        return Ok(());
+    };
+    let Some((_, value)) = fields.iter().find(|(key, _)| key == field_name) else {
+        return Ok(());
+    };
+    let Some(amount) = value.as_str() else {
+        return Err(Error::Database(DatabaseError::Internal(format!(
+            "{} sync payload field '{}' must be a decimal string",
+            enum_to_db(entity)?,
+            field_name
+        ))));
+    };
+
+    amount.parse::<Decimal>().map(|_| ()).map_err(|_| {
+        Error::Database(DatabaseError::Internal(format!(
+            "{} sync payload field '{}' is not a valid decimal",
+            enum_to_db(entity).unwrap_or_else(|_| "spending".to_string()),
+            field_name
+        )))
+    })
+}
+
+fn is_syncable_system_taxonomy_id(taxonomy_id: &str) -> bool {
+    matches!(
+        taxonomy_id,
+        "custom_groups" | "spending_categories" | "income_sources"
+    )
+}
+
 fn spending_natural_conflict_target(
     entity: &SyncEntity,
     fields: &[(String, serde_json::Value)],
@@ -952,7 +1192,7 @@ fn model_to_sql_fields<T: serde::Serialize>(
 
 /// Apply a custom taxonomy bundle event (create/update/delete).
 /// For create/update: upserts taxonomy row, upserts each category, deletes stale categories.
-/// For delete: deletes the taxonomy row (FK cascade handles categories + assignments).
+/// For delete: deletes custom taxonomy rows, or only categories for seeded system taxonomies.
 fn apply_custom_taxonomy_event(
     conn: &mut SqliteConnection,
     taxonomy_id: &str,
@@ -961,10 +1201,17 @@ fn apply_custom_taxonomy_event(
 ) -> Result<()> {
     match op {
         SyncOperation::Delete => {
-            let sql = format!(
-                "DELETE FROM \"taxonomies\" WHERE \"id\" = '{}'",
-                escape_sqlite_str(taxonomy_id)
-            );
+            let sql = if is_syncable_system_taxonomy_id(taxonomy_id) {
+                format!(
+                    "DELETE FROM \"taxonomy_categories\" WHERE \"taxonomy_id\" = '{}'",
+                    escape_sqlite_str(taxonomy_id)
+                )
+            } else {
+                format!(
+                    "DELETE FROM \"taxonomies\" WHERE \"id\" = '{}'",
+                    escape_sqlite_str(taxonomy_id)
+                )
+            };
             diesel::sql_query(sql)
                 .execute(conn)
                 .map_err(StorageError::from)?;
@@ -978,8 +1225,10 @@ fn apply_custom_taxonomy_event(
                     )))
                 })?;
 
-            // Reject system taxonomy payloads (except custom_groups which allows user categories)
-            if bundle.taxonomy.is_system != 0 && bundle.taxonomy.id != "custom_groups" {
+            // Reject most system taxonomy payloads; these seeded taxonomies allow user categories.
+            if bundle.taxonomy.is_system != 0
+                && !is_syncable_system_taxonomy_id(&bundle.taxonomy.id)
+            {
                 return Err(Error::Database(DatabaseError::Internal(
                     "Cannot sync system taxonomy".to_string(),
                 )));
@@ -1003,9 +1252,8 @@ fn apply_custom_taxonomy_event(
                 }
             }
 
-            // Upsert taxonomy row — skip for custom_groups since it's seeded by migrations
-            // and only its categories are user data.
-            if taxonomy_id != "custom_groups" {
+            // Upsert taxonomy row only for custom taxonomies; seeded system taxonomies are local.
+            if !is_syncable_system_taxonomy_id(taxonomy_id) {
                 let tax_fields = model_to_sql_fields(&bundle.taxonomy)?;
                 upsert_json_row(conn, "taxonomies", &["id"], &tax_fields)?;
             }
@@ -1262,34 +1510,11 @@ fn apply_remote_event_lww_tx(
     }
 
     let entity_db = enum_to_db(&entity)?;
-    let metadata_row = sync_entity_metadata::table
-        .filter(sync_entity_metadata::entity.eq(&entity_db))
-        .filter(sync_entity_metadata::entity_id.eq(&entity_id_value))
-        .first::<SyncEntityMetadataDB>(conn)
-        .optional()
-        .map_err(StorageError::from)?;
+    let metadata_row = load_entity_metadata_tx(conn, &entity_db, &entity_id_value)?;
 
     let mut should_apply = match metadata_row.as_ref() {
         Some(meta) => {
-            let previous_op = enum_from_db::<SyncOperation>(&meta.last_op)?;
-            // Tombstones intentionally dominate all non-delete events for the same ID, and an
-            // incoming delete wins over a prior create/update even if its client timestamp is
-            // older. Reusing a UUID after deletion requires a full snapshot bootstrap/reset;
-            // otherwise stale updates from another device can resurrect rows the user deleted.
-            if op == SyncOperation::Delete && previous_op != SyncOperation::Delete {
-                true
-            } else if previous_op == SyncOperation::Delete
-                && matches!(op, SyncOperation::Create | SyncOperation::Update)
-            {
-                false
-            } else {
-                should_apply_lww(
-                    &meta.last_client_timestamp,
-                    &meta.last_event_id,
-                    &client_timestamp_value,
-                    &event_id_value,
-                )
-            }
+            should_apply_against_metadata(meta, op, &client_timestamp_value, &event_id_value)?
         }
         None => true,
     };
@@ -1353,16 +1578,36 @@ fn apply_remote_event_lww_tx(
                             serde_json::Value::String(entity_id_value.clone()),
                         ));
                     }
+                    validate_spending_decimal_field(&entity, &fields)?;
 
                     if let Some(conflict_target) =
                         spending_natural_conflict_target(&entity, &fields)
                     {
-                        upsert_json_fields_with_conflict_target(
-                            conn,
-                            table_name,
-                            conflict_target,
-                            &fields,
-                        )?;
+                        if let Some(existing_id) =
+                            spending_natural_existing_id(conn, &entity, &fields)?
+                        {
+                            if existing_id != entity_id_value {
+                                if let Some(meta) =
+                                    load_entity_metadata_tx(conn, &entity_db, &existing_id)?
+                                {
+                                    applied_entity_change = should_apply_against_metadata(
+                                        &meta,
+                                        op,
+                                        &client_timestamp_value,
+                                        &event_id_value,
+                                    )?;
+                                }
+                            }
+                        }
+
+                        if applied_entity_change {
+                            upsert_json_fields_with_conflict_target(
+                                conn,
+                                table_name,
+                                conflict_target,
+                                &fields,
+                            )?;
+                        }
                     } else {
                         let columns = fields
                             .iter()
@@ -1389,9 +1634,11 @@ fn apply_remote_event_lww_tx(
                             quote_identifier(table_name),
                             quote_identifier(pk_name)
                         );
-                        diesel::sql_query(sql)
-                            .execute(conn)
-                            .map_err(StorageError::from)?;
+                        if applied_entity_change {
+                            diesel::sql_query(sql)
+                                .execute(conn)
+                                .map_err(StorageError::from)?;
+                        }
                     }
 
                     // Side effect for SyncEntity::Snapshot: an `ON CONFLICT
@@ -1410,7 +1657,7 @@ fn apply_remote_event_lww_tx(
                     // rows via `write_snapshot_positions`. A heavier "parse
                     // JSON and reinsert here" fix is deferred to Phase B's
                     // read-path switchover.
-                    if matches!(entity, SyncEntity::Snapshot) {
+                    if applied_entity_change && matches!(entity, SyncEntity::Snapshot) {
                         diesel::sql_query("DELETE FROM snapshot_positions WHERE snapshot_id = ?")
                             .bind::<diesel::sql_types::Text, _>(entity_id_value.clone())
                             .execute(conn)
@@ -2674,6 +2921,16 @@ mod tests {
         let pool = create_pool(&db_path).expect("create pool");
         let writer = spawn_writer(pool.as_ref().clone()).expect("spawn writer");
         (pool, writer)
+    }
+
+    #[test]
+    fn taxonomy_category_snapshot_filter_includes_user_category_taxonomies() {
+        let filter = snapshot_filter_for_table("taxonomy_categories").expect("filter");
+
+        assert!(filter.contains("custom_groups"));
+        assert!(filter.contains("spending_categories"));
+        assert!(filter.contains("income_sources"));
+        assert!(filter.contains("id NOT LIKE 'cat_%'"));
     }
 
     #[test]
@@ -5487,6 +5744,109 @@ mod tests {
             .expect("budget target rows");
 
         assert_eq!(rows, vec![("target-remote".to_string(), "200".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn replay_budget_target_preserves_newer_natural_key_conflict() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        diesel::sql_query(
+            "INSERT INTO budget_targets
+             (id, period_key, target_type, taxonomy_id, category_id, group_id, amount, created_at, updated_at)
+             VALUES
+             ('target-local-newer', '2026-05', 'category', 'spending_categories', 'cat_food', NULL, '300', '2026-02-15T00:00:05Z', '2026-02-15T00:00:05Z')",
+        )
+        .execute(&mut conn)
+        .expect("insert local budget target");
+        diesel::insert_into(sync_entity_metadata::table)
+            .values(SyncEntityMetadataDB {
+                entity: enum_to_db(&SyncEntity::BudgetTarget).expect("entity"),
+                entity_id: "target-local-newer".to_string(),
+                last_event_id: "evt-budget-target-local-newer".to_string(),
+                last_client_timestamp: "2026-02-15T00:00:05Z".to_string(),
+                last_op: enum_to_db(&SyncOperation::Update).expect("op"),
+                last_seq: 5,
+            })
+            .execute(&mut conn)
+            .expect("insert metadata");
+        drop(conn);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::BudgetTarget,
+                "target-remote-older".to_string(),
+                SyncOperation::Create,
+                "evt-budget-target-remote-older".to_string(),
+                "2026-02-15T00:00:01Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "target-remote-older",
+                    "periodKey": "2026-05",
+                    "targetType": "category",
+                    "taxonomyId": "spending_categories",
+                    "categoryId": "cat_food",
+                    "groupId": null,
+                    "amount": "100",
+                    "createdAt": "2026-02-15T00:00:01Z",
+                    "updatedAt": "2026-02-15T00:00:01Z"
+                }),
+            )
+            .await
+            .expect("natural-key budget target replay should not fail");
+        assert!(!applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let rows = budget_targets::table
+            .filter(budget_targets::period_key.eq("2026-05"))
+            .filter(budget_targets::target_type.eq("category"))
+            .filter(budget_targets::taxonomy_id.eq("spending_categories"))
+            .filter(budget_targets::category_id.eq("cat_food"))
+            .select((budget_targets::id, budget_targets::amount))
+            .load::<(String, String)>(&mut conn)
+            .expect("budget target rows");
+        assert_eq!(
+            rows,
+            vec![("target-local-newer".to_string(), "300".to_string())]
+        );
+
+        let applied_event_count: i64 = sync_applied_events::table
+            .filter(sync_applied_events::event_id.eq("evt-budget-target-remote-older"))
+            .count()
+            .get_result(&mut conn)
+            .expect("applied event count");
+        assert_eq!(applied_event_count, 1);
+    }
+
+    #[tokio::test]
+    async fn replay_budget_target_rejects_invalid_decimal_amount() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool, writer);
+
+        let err = repo
+            .apply_remote_event_lww(
+                SyncEntity::BudgetTarget,
+                "target-invalid".to_string(),
+                SyncOperation::Create,
+                "evt-budget-target-invalid".to_string(),
+                "2026-02-15T00:00:01Z".to_string(),
+                1,
+                serde_json::json!({
+                    "id": "target-invalid",
+                    "periodKey": "2026-05",
+                    "targetType": "category",
+                    "taxonomyId": "spending_categories",
+                    "categoryId": "cat_food",
+                    "groupId": null,
+                    "amount": "bad",
+                    "createdAt": "2026-02-15T00:00:01Z",
+                    "updatedAt": "2026-02-15T00:00:01Z"
+                }),
+            )
+            .await
+            .expect_err("invalid decimal should fail replay");
+
+        assert!(err.to_string().contains("valid decimal"));
     }
 
     #[tokio::test]

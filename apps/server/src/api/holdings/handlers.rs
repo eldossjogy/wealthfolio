@@ -205,9 +205,13 @@ pub async fn get_historical_valuations(
                 .map_err(|e| anyhow::anyhow!("Invalid endDate: {}", e))
         })
         .transpose()?;
+    let account_ids = holdings_account_ids(&state, std::slice::from_ref(&q.account_id))?;
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let vals = state
         .valuation_service
-        .get_historical_valuations(&q.account_id, start, end)?;
+        .get_historical_valuations(&account_ids[0], start, end)?;
     Ok(Json(vals))
 }
 
