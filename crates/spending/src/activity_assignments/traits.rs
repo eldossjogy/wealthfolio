@@ -33,6 +33,15 @@ pub trait ActivityTaxonomyAssignmentRepositoryTrait: Send + Sync {
         items: Vec<NewActivityTaxonomyAssignment>,
     ) -> Result<Vec<ActivityTaxonomyAssignment>>;
 
+    /// Rule-rerun variant of `assign_many_single_select`.
+    /// Re-checks current rows inside the write transaction so manual assignments
+    /// are never overwritten by a stale precomputed rerun batch.
+    async fn assign_rule_many_single_select(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>>;
+
     /// Remove a single assignment by id.
     async fn delete(&self, id: &str) -> Result<()>;
 

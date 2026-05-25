@@ -142,12 +142,10 @@ impl AnalyticsService {
 
         let start = DateTime::parse_from_rfc3339(&req.start_date)?.with_timezone(&Utc);
         let end = DateTime::parse_from_rfc3339(&req.end_date)?.with_timezone(&Utc);
-        // Prior window: same length, immediately preceding `start`. The `−1s`
-        // exclusive boundary already shifts prior_end one tick below current's
-        // start; we therefore subtract `period_secs − 1` (not `period_secs`)
-        // so prior_start..=prior_end covers the same number of seconds as
-        // current. Without the −1, prior was always one second shorter.
-        let period_secs = (end - start).num_seconds().max(1);
+        // Prior window: same inclusive length, immediately preceding `start`.
+        // `period_secs` includes both endpoints because activity filters use
+        // inclusive comparisons.
+        let period_secs = (end - start).num_seconds().max(0) + 1;
         let prior_end = start - Duration::seconds(1);
         let prior_start = prior_end - Duration::seconds((period_secs - 1).max(0));
 
@@ -225,11 +223,6 @@ impl AnalyticsService {
             entry.0 += income_amount;
             entry.1 += spending_amount;
         }
-        let positive_spending_days: HashSet<String> = by_day_map
-            .iter()
-            .filter(|(_, (_, outflow))| *outflow > 0.0)
-            .map(|(d, _)| format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()))
-            .collect();
         // Signed per-day outflow so `Σ by_day.outflow == current.net` minus
         // income, matching the headline. Refund days emit a negative outflow;
         // chart consumers that want non-negative bars should clamp at render.
@@ -347,9 +340,8 @@ impl AnalyticsService {
             }
             // Surface uncategorized outflow as an explicit synthetic row so
             // Σ spending_breakdown.amount == current.outflow (matches the
-            // insight pipeline's UncategorizedBucket and lets the frontend
-            // legacy projection drop its synthetic-row workaround). Sentinel
-            // id matches insight-projection.ts:UNCATEGORIZED_CATEGORY_ID.
+            // insight pipeline's UncategorizedBucket). Sentinel id matches
+            // insight-projection.ts:UNCATEGORIZED_CATEGORY_ID.
             if !had_spending_assignment && spending_amount != 0.0 {
                 let entry = spending_acc
                     .entry((
@@ -373,7 +365,7 @@ impl AnalyticsService {
 
         let mut spending_breakdown: Vec<CategoryBreakdownRow> = spending_acc
             .into_iter()
-            .filter(|(_, (amount, _))| current.outflow > 0.0 && *amount != 0.0)
+            .filter(|(_, (amount, _))| *amount != 0.0)
             .map(
                 |((taxonomy_id, category_id), (amount, count))| CategoryBreakdownRow {
                     taxonomy_id,
@@ -408,10 +400,7 @@ impl AnalyticsService {
 
         let mut by_day_by_category: Vec<DayCategoryBucket> = by_day_cat_acc
             .into_iter()
-            .filter(|((date, taxonomy_id, _), (amount, _))| {
-                *amount != 0.0
-                    && (taxonomy_id == INCOME_TAXONOMY || positive_spending_days.contains(date))
-            })
+            .filter(|(_, (amount, _))| *amount != 0.0)
             .map(
                 |((date, taxonomy_id, category_id), (amount, count))| DayCategoryBucket {
                     date,

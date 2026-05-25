@@ -37,73 +37,146 @@ struct DefaultGroup {
     sort_order: i32,
 }
 
+struct DefaultAssignment {
+    id: &'static str,
+    category_id: &'static str,
+    group_key: &'static str,
+}
+
+const BUDGET_GROUP_NEEDS_ID: &str = "032ecb02-5912-42e8-9724-2cd566fc08d5";
+const BUDGET_GROUP_WANTS_ID: &str = "a409e0d6-9152-49c8-a5b4-a147a8ac636e";
+const BUDGET_GROUP_SAVINGS_ID: &str = "1fb6f2a3-3245-4702-83e8-ab116458d13e";
+const BUDGET_GROUP_GIVING_ID: &str = "8cbd26c8-e3b2-4176-8c61-e5c11e10b808";
+const BUDGET_GROUP_PERSONAL_ID: &str = "3ff71753-5dd5-4372-9ca2-63d8d9a04851";
+const BUDGET_GROUP_OTHER_ID: &str = "6e25d097-0c73-4521-9407-d47e8dfb73e2";
+
 const DEFAULT_GROUPS: [DefaultGroup; 6] = [
     DefaultGroup {
-        id: "budget_group_needs",
+        id: BUDGET_GROUP_NEEDS_ID,
         name: "Needs",
         key: "needs",
-        color: "#4A90A4",
+        color: "#4F6B92",
         icon: "Home",
         sort_order: 1,
     },
     DefaultGroup {
-        id: "budget_group_wants",
+        id: BUDGET_GROUP_WANTS_ID,
         name: "Wants",
         key: "wants",
-        color: "#9B59B6",
+        color: "#8E7CB3",
         icon: "Sparkles",
         sort_order: 2,
     },
     DefaultGroup {
-        id: "budget_group_savings",
+        id: BUDGET_GROUP_SAVINGS_ID,
         name: "Savings",
         key: "savings",
-        color: "#27AE60",
+        color: "#6B8E54",
         icon: "PiggyBank",
         sort_order: 3,
     },
     DefaultGroup {
-        id: "budget_group_giving",
+        id: BUDGET_GROUP_GIVING_ID,
         name: "Giving",
         key: "giving",
-        color: "#E74C3C",
+        color: "#A35742",
         icon: "Gift",
         sort_order: 4,
     },
     DefaultGroup {
-        id: "budget_group_personal",
+        id: BUDGET_GROUP_PERSONAL_ID,
         name: "Personal",
         key: "personal",
-        color: "#1ABC9C",
+        color: "#B89A4C",
         icon: "User",
         sort_order: 5,
     },
     DefaultGroup {
-        id: "budget_group_other",
+        id: BUDGET_GROUP_OTHER_ID,
         name: "Other",
         key: "other",
-        color: "#7F8C8D",
+        color: "#9C998E",
         icon: "MoreHorizontal",
         sort_order: 99,
     },
 ];
 
-const DEFAULT_ASSIGNMENTS: [(&str, &str); 15] = [
-    ("cat_housing", "needs"),
-    ("cat_groceries", "needs"),
-    ("cat_transport", "needs"),
-    ("cat_health", "needs"),
-    ("cat_bills", "needs"),
-    ("cat_fees", "needs"),
-    ("cat_education", "needs"),
-    ("cat_food", "wants"),
-    ("cat_shopping", "wants"),
-    ("cat_entertainment", "wants"),
-    ("cat_travel", "wants"),
-    ("cat_gifts", "giving"),
-    ("cat_savings", "savings"),
-    ("cat_personal", "personal"),
-    ("cat_other_expense", "other"),
+const DEFAULT_ASSIGNMENTS: [DefaultAssignment; 15] = [
+    DefaultAssignment {
+        id: "d36f8d92-36f8-4e07-b4b4-9e979ce8a9f4",
+        category_id: "cat_housing",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "c9a1ef0d-72b2-4f75-858d-5f48e5bc7626",
+        category_id: "cat_groceries",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "e9543a4c-dead-42f6-9e73-7343e8f43392",
+        category_id: "cat_transport",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "aa46cdeb-d224-4f3f-9ffb-f6331bafeade",
+        category_id: "cat_health",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "00769d66-fac3-45e9-9e98-1db5d4447bec",
+        category_id: "cat_bills",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "9eeaa7b8-aa98-4861-94d3-54650226d9cc",
+        category_id: "cat_fees",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "5ba8b7fa-bd44-456a-9165-dfdf554bfe10",
+        category_id: "cat_education",
+        group_key: "needs",
+    },
+    DefaultAssignment {
+        id: "2f4bbcbd-8120-4fbe-ab4a-85f7c406e488",
+        category_id: "cat_food",
+        group_key: "wants",
+    },
+    DefaultAssignment {
+        id: "39148a03-c9e9-40e4-867f-5949146b85b8",
+        category_id: "cat_shopping",
+        group_key: "wants",
+    },
+    DefaultAssignment {
+        id: "c2721f07-e7b6-4c74-b449-f138a7d7dabf",
+        category_id: "cat_entertainment",
+        group_key: "wants",
+    },
+    DefaultAssignment {
+        id: "5a2a7585-9f60-4a4b-9cbe-420432720f28",
+        category_id: "cat_travel",
+        group_key: "wants",
+    },
+    DefaultAssignment {
+        id: "d48afe20-18d3-422e-bc26-bd16f4d9d78c",
+        category_id: "cat_gifts",
+        group_key: "giving",
+    },
+    DefaultAssignment {
+        id: "2f46a6a5-dda6-41c7-b372-a0d4f2e571eb",
+        category_id: "cat_savings",
+        group_key: "savings",
+    },
+    DefaultAssignment {
+        id: "dc8d3b07-dbc5-4134-bc31-9f65a7f726bc",
+        category_id: "cat_personal",
+        group_key: "personal",
+    },
+    DefaultAssignment {
+        id: "fb622784-fb8a-497d-8b36-8eb8f347c222",
+        category_id: "cat_other_expense",
+        group_key: "other",
+    },
 ];
 
 type MonthActuals = HashMap<(String, String), f64>;
@@ -1005,14 +1078,14 @@ fn default_assignment_inputs(
 ) -> Vec<NewBudgetGroupAssignment> {
     DEFAULT_ASSIGNMENTS
         .iter()
-        .filter_map(|(category_id, group_key)| {
+        .filter_map(|assignment| {
             group_by_key
-                .get(*group_key)
+                .get(assignment.group_key)
                 .map(|group_id| NewBudgetGroupAssignment {
-                    id: Some(format!("bga_{}", category_id)),
+                    id: Some(assignment.id.to_string()),
                     group_id: group_id.clone(),
                     taxonomy_id: SPENDING_TAXONOMY.to_string(),
-                    category_id: (*category_id).to_string(),
+                    category_id: assignment.category_id.to_string(),
                 })
         })
         .collect()
@@ -1366,6 +1439,16 @@ mod tests {
     }
 
     #[test]
+    fn seeded_budget_group_sync_ids_are_uuids() {
+        for group in DEFAULT_GROUPS {
+            uuid::Uuid::parse_str(group.id).unwrap();
+        }
+        for assignment in DEFAULT_ASSIGNMENTS {
+            uuid::Uuid::parse_str(assignment.id).unwrap();
+        }
+    }
+
+    #[test]
     fn target_index_uses_sparse_month_overrides_over_defaults() {
         let targets = vec![
             target(
@@ -1389,7 +1472,7 @@ mod tests {
                 BudgetTargetType::GroupBuffer,
                 None,
                 None,
-                Some("budget_group_needs"),
+                Some(BUDGET_GROUP_NEEDS_ID),
                 "500",
             ),
         ];
@@ -1408,7 +1491,7 @@ mod tests {
             0.0
         );
         assert_eq!(
-            index.effective_group_buffer("2026-04", "budget_group_needs"),
+            index.effective_group_buffer("2026-04", BUDGET_GROUP_NEEDS_ID),
             500.0
         );
         assert!(index.has_default_category(SPENDING_TAXONOMY, "cat_groceries"));

@@ -42,8 +42,10 @@ async fn update_spending_settings(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SpendingSettingsUpdate>,
 ) -> ApiResult<Json<SpendingSettings>> {
-    let before = state.spending_settings_service.get().await?;
-    let after = state.spending_settings_service.update(payload).await?;
+    let (before, after) = state
+        .spending_settings_service
+        .update_with_previous(payload)
+        .await?;
 
     // Newly-added accounts need a first-time categorize. Toggling `enabled`
     // false → true unfreezes the existing opted-in list, so we re-scan all

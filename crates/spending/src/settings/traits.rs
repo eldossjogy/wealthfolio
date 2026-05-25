@@ -10,4 +10,7 @@ pub trait SpendingSettingsRepositoryTrait: Send + Sync {
 
     /// Upsert a setting value.
     async fn set_setting(&self, key: &str, value: &str) -> Result<()>;
+
+    /// Upsert multiple setting values in one storage transaction.
+    async fn set_settings(&self, values: Vec<(String, String)>) -> Result<()>;
 }

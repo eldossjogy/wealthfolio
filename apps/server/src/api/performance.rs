@@ -81,6 +81,20 @@ fn parse_tracking_mode(mode: Option<String>) -> Option<TrackingMode> {
     })
 }
 
+fn account_ids_for_purpose(
+    state: &AppState,
+    account_ids: &[String],
+    purpose: AccountPurpose,
+) -> ApiResult<Vec<String>> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, purpose))
+        .map(|account| account.id)
+        .collect())
+}
+
 fn empty_performance_metrics(
     id: &str,
     currency: String,
@@ -273,10 +287,25 @@ async fn get_income_summary_for_account(
     State(state): State<Arc<AppState>>,
     Query(q): Query<IncomeSummaryAccountQuery>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    let account_ids: Option<Vec<String>> = q.account_id.map(|id| vec![id]);
+    let account_ids: Vec<String> = if let Some(id) = q.account_id {
+        account_ids_for_purpose(&state, &[id], AccountPurpose::Income)?
+    } else {
+        state
+            .account_service
+            .get_active_accounts()?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Income)
+            })
+            .map(|account| account.id)
+            .collect()
+    };
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let items = state
         .income_service
-        .get_income_summary(account_ids.as_deref())?;
+        .get_income_summary(Some(&account_ids))?;
     Ok(Json(items))
 }
 
@@ -290,22 +319,31 @@ async fn get_income_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IncomeSummaryBody>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    let account_ids: Option<Vec<String>> = match &body.filter {
-        None => None,
+    let account_ids: Vec<String> = match &body.filter {
+        None => state
+            .account_service
+            .get_active_accounts()?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Income)
+            })
+            .map(|account| account.id)
+            .collect(),
         Some(filter) => {
             let base = state.base_currency.read().unwrap().clone();
-            Some(
-                state
-                    .portfolio_service
-                    .resolve_account_scope(filter, &base)
-                    .map_err(crate::error::ApiError::from)?
-                    .account_ids,
-            )
+            let resolved = state
+                .portfolio_service
+                .resolve_account_scope(filter, &base)
+                .map_err(crate::error::ApiError::from)?;
+            account_ids_for_purpose(&state, &resolved.account_ids, AccountPurpose::Income)?
         }
     };
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let items = state
         .income_service
-        .get_income_summary(account_ids.as_deref())?;
+        .get_income_summary(Some(&account_ids))?;
     Ok(Json(items))
 }
 

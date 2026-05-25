@@ -180,7 +180,9 @@ impl CategorizationRulesService {
             }
         }
 
-        self.assignment_service.bulk_apply(writes).await?;
+        self.assignment_service
+            .bulk_apply_rule_assignments(writes, only_uncategorized)
+            .await?;
         Ok(matched_count)
     }
 
@@ -228,23 +230,13 @@ impl CategorizationRulesService {
                 message: format!("Unknown preset: {preset_id}"),
             })?;
 
-        let existing_rules = self.repo.list().await?;
-        let installed_by_key: HashMap<(String, String), CategorizationRule> = existing_rules
-            .into_iter()
-            .filter_map(|rule| {
-                Some((
-                    (rule.preset_id.clone()?, rule.preset_rule_key.clone()?),
-                    rule,
-                ))
-            })
-            .collect();
-
         let mut result = ImportPresetResult {
             preset_id: preset.preset_id.clone(),
             preset_version: preset.preset_version.clone(),
             total: preset.rules.len(),
             ..Default::default()
         };
+        let mut rules_to_import = Vec::new();
 
         for rule in preset.rules {
             let Some((tax_id, cat_id)) = category_resolver.get(&rule.category_key).cloned() else {
@@ -257,12 +249,20 @@ impl CategorizationRulesService {
                 result.skipped_unknown_category += 1;
                 continue;
             };
+            let match_type = RuleMatchType::try_parse(&rule.match_type).ok_or_else(|| {
+                SpendingError::InvalidInput {
+                    message: format!(
+                        "Unknown matchType '{}' in preset '{}' rule '{}'",
+                        rule.match_type, preset.preset_id, rule.key
+                    ),
+                }
+            })?;
 
             let new_rule = NewCategorizationRule {
                 id: None,
                 name: rule.name,
                 pattern: rule.pattern,
-                match_type: RuleMatchType::parse(&rule.match_type),
+                match_type,
                 taxonomy_id: Some(tax_id),
                 category_id: Some(cat_id),
                 activity_type: None,
@@ -274,26 +274,16 @@ impl CategorizationRulesService {
                 preset_version: Some(preset.preset_version.clone()),
             };
             validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
-
-            let key = (preset.preset_id.clone(), rule.key);
-            let Some(installed) = installed_by_key.get(&key) else {
-                self.repo.create(new_rule).await?;
-                result.added += 1;
-                continue;
-            };
-
-            if installed.preset_modified
-                || installed.preset_version.as_deref() == Some(preset.preset_version.as_str())
-            {
-                result.skipped_existing += 1;
-                continue;
-            }
-
-            self.repo
-                .replace_preset_rule(&installed.id, new_rule)
-                .await?;
-            result.updated += 1;
+            rules_to_import.push(new_rule);
         }
+
+        let counts = self
+            .repo
+            .import_preset_rules(&preset.preset_id, &preset.preset_version, rules_to_import)
+            .await?;
+        result.added = counts.added;
+        result.updated = counts.updated;
+        result.skipped_existing = counts.skipped_existing;
         Ok(result)
     }
 
@@ -405,31 +395,71 @@ mod tests {
         ) -> Result<CategorizationRule> {
             unimplemented!()
         }
-        async fn replace_preset_rule(
+        async fn import_preset_rules(
             &self,
-            id: &str,
-            n: NewCategorizationRule,
-        ) -> Result<CategorizationRule> {
+            preset_id: &str,
+            preset_version: &str,
+            new_rules: Vec<NewCategorizationRule>,
+        ) -> Result<crate::categorization_rules::PresetImportCounts> {
             let mut rules = self.rules.lock().unwrap();
-            let existing = rules
-                .iter_mut()
-                .find(|rule| rule.id == id)
-                .ok_or_else(|| anyhow::anyhow!("missing mock rule"))?;
-            existing.name = n.name;
-            existing.pattern = n.pattern;
-            existing.match_type = n.match_type;
-            existing.taxonomy_id = n.taxonomy_id;
-            existing.category_id = n.category_id;
-            existing.activity_type = n.activity_type;
-            existing.priority = n.priority;
-            existing.is_global = n.is_global;
-            existing.account_id = n.account_id;
-            existing.preset_id = n.preset_id;
-            existing.preset_rule_key = n.preset_rule_key;
-            existing.preset_version = n.preset_version;
-            existing.preset_modified = false;
-            existing.updated_at = Utc::now().naive_utc();
-            Ok(existing.clone())
+            let mut counts = crate::categorization_rules::PresetImportCounts::default();
+            for n in new_rules {
+                let Some(rule_key) = n.preset_rule_key.clone() else {
+                    continue;
+                };
+                let existing = rules.iter_mut().find(|rule| {
+                    rule.preset_id.as_deref() == Some(preset_id)
+                        && rule.preset_rule_key.as_deref() == Some(rule_key.as_str())
+                });
+                if let Some(existing) = existing {
+                    if existing.preset_modified
+                        || existing.preset_version.as_deref() == Some(preset_version)
+                    {
+                        counts.skipped_existing += 1;
+                        continue;
+                    }
+                    existing.name = n.name;
+                    existing.pattern = n.pattern;
+                    existing.match_type = n.match_type;
+                    existing.taxonomy_id = n.taxonomy_id;
+                    existing.category_id = n.category_id;
+                    existing.activity_type = n.activity_type;
+                    existing.priority = n.priority;
+                    existing.is_global = n.is_global;
+                    existing.account_id = n.account_id;
+                    existing.preset_id = n.preset_id;
+                    existing.preset_rule_key = n.preset_rule_key;
+                    existing.preset_version = n.preset_version;
+                    existing.preset_modified = false;
+                    existing.updated_at = Utc::now().naive_utc();
+                    counts.updated += 1;
+                    continue;
+                }
+
+                let now = Utc::now().naive_utc();
+                rules.push(CategorizationRule {
+                    id: n.id.unwrap_or_else(|| {
+                        format!("rule-{}", now.and_utc().timestamp_nanos_opt().unwrap())
+                    }),
+                    name: n.name,
+                    pattern: n.pattern,
+                    match_type: n.match_type,
+                    taxonomy_id: n.taxonomy_id,
+                    category_id: n.category_id,
+                    activity_type: n.activity_type,
+                    priority: n.priority,
+                    is_global: n.is_global,
+                    account_id: n.account_id,
+                    preset_id: n.preset_id,
+                    preset_rule_key: n.preset_rule_key,
+                    preset_version: n.preset_version,
+                    preset_modified: false,
+                    created_at: now,
+                    updated_at: now,
+                });
+                counts.added += 1;
+            }
+            Ok(counts)
         }
         async fn delete(&self, _id: &str) -> Result<()> {
             unimplemented!()
@@ -500,6 +530,49 @@ mod tests {
                     });
                     existing.push(row.clone());
                 }
+            }
+            Ok(rows)
+        }
+        async fn assign_rule_many_single_select(
+            &self,
+            items: Vec<NewActivityTaxonomyAssignment>,
+            only_uncategorized: bool,
+        ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+            let mut rows = Vec::new();
+            let mut existing = self.existing.lock().unwrap();
+            for item in items {
+                let current: Vec<ActivityTaxonomyAssignment> = existing
+                    .iter()
+                    .filter(|a| {
+                        a.activity_id == item.activity_id && a.taxonomy_id == item.taxonomy_id
+                    })
+                    .cloned()
+                    .collect();
+                if current
+                    .iter()
+                    .any(|a| a.source.eq_ignore_ascii_case("manual"))
+                {
+                    continue;
+                }
+                if only_uncategorized && !current.is_empty() {
+                    continue;
+                }
+                self.writes.lock().unwrap().push(item.clone());
+                let row = ActivityTaxonomyAssignment {
+                    id: format!("row-{}-{}", item.activity_id, item.taxonomy_id),
+                    activity_id: item.activity_id,
+                    taxonomy_id: item.taxonomy_id,
+                    category_id: item.category_id,
+                    weight: item.weight,
+                    source: item.source,
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                };
+                existing.retain(|a| {
+                    !(a.activity_id == row.activity_id && a.taxonomy_id == row.taxonomy_id)
+                });
+                existing.push(row.clone());
+                rows.push(row);
             }
             Ok(rows)
         }

@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
-use wealthfolio_spending::categorization_rules::{NewCategorizationRule, RuleMatchType};
+use wealthfolio_spending::categorization_rules::{
+    compile_regex_pattern, NewCategorizationRule, RuleMatchType, MAX_REGEX_PATTERN_LEN,
+};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,10 +147,16 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
             args.category_key
         );
 
-        if args.pattern.trim().is_empty() {
+        let pattern = args.pattern.trim().to_string();
+        if pattern.is_empty() {
             return Err(AiError::ToolExecutionFailed(
                 "pattern is required and cannot be empty".to_string(),
             ));
+        }
+        if pattern.len() > MAX_REGEX_PATTERN_LEN {
+            return Err(AiError::ToolExecutionFailed(format!(
+                "pattern must be {MAX_REGEX_PATTERN_LEN} characters or fewer"
+            )));
         }
         if args.category_key.trim().is_empty() {
             return Err(AiError::ToolExecutionFailed(
@@ -212,10 +220,17 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
             )));
         };
 
-        let match_type = match args.match_type.as_deref() {
-            Some(s) => RuleMatchType::parse(s),
+        let match_type = match args.match_type.as_deref().map(str::trim) {
+            Some(s) if !s.is_empty() => RuleMatchType::try_parse(s).ok_or_else(|| {
+                AiError::ToolExecutionFailed(format!("unsupported matchType: {s}"))
+            })?,
             None => RuleMatchType::Contains,
+            Some(_) => RuleMatchType::Contains,
         };
+        if matches!(match_type, RuleMatchType::Regex) {
+            compile_regex_pattern(&pattern)
+                .map_err(|err| AiError::ToolExecutionFailed(format!("invalid regex: {err}")))?;
+        }
 
         let category_path = path_parts.join(" / ");
 
@@ -226,7 +241,7 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{} → {}", args.pattern.trim(), category_path));
+            .unwrap_or_else(|| format!("{} → {}", pattern, category_path));
 
         let account_id = args
             .account_id
@@ -248,7 +263,7 @@ impl<E: AiEnvironment + 'static> Tool for CreateCategorizationRuleTool<E> {
         let new_rule = NewCategorizationRule {
             id: Some(Uuid::now_v7().to_string()),
             name,
-            pattern: args.pattern.trim().to_string(),
+            pattern,
             match_type,
             taxonomy_id: Some(taxonomy_id),
             category_id: Some(category_id.clone()),

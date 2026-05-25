@@ -1955,6 +1955,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn credit_card_accounts_reject_investment_activity_updates() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut account = create_test_account("card-1", "USD");
+        account.account_type = "CREDIT_CARD".to_string();
+        account_service.add_account(account);
+        asset_service.add_asset(create_test_asset("AAPL", "USD"));
+        activity_repository.add_activity(create_stored_activity(
+            "activity-1",
+            "card-1",
+            Some("AAPL"),
+        ));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let update = create_test_activity_update(
+            "activity-1",
+            "card-1",
+            Some(AssetResolutionInput {
+                id: Some("AAPL".to_string()),
+                ..Default::default()
+            }),
+            "USD",
+        );
+
+        let err = activity_service
+            .update_activity(update)
+            .await
+            .expect_err("credit cards should reject investment activity updates");
+
+        assert!(err
+            .to_string()
+            .contains("BUY activities are not supported for credit card accounts"));
+    }
+
+    #[tokio::test]
     async fn sync_prepare_marks_unsupported_credit_card_activity_as_review_draft() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());

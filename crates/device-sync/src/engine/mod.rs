@@ -46,8 +46,16 @@ pub fn backoff_seconds(consecutive_failures: i32) -> i64 {
     2_i64.pow(capped as u32) * BASE_DELAY_SECONDS
 }
 
-fn remote_entity_id_is_valid(entity_id: &str) -> bool {
-    Uuid::parse_str(entity_id).is_ok()
+fn remote_entity_id_is_valid(entity: &SyncEntity, entity_id: &str) -> bool {
+    match entity {
+        SyncEntity::SpendingSetting => {
+            matches!(entity_id, "spending.enabled" | "spending.account_ids")
+        }
+        SyncEntity::CustomTaxonomy => {
+            entity_id == "custom_groups" || Uuid::parse_str(entity_id).is_ok()
+        }
+        _ => Uuid::parse_str(entity_id).is_ok(),
+    }
 }
 
 fn sync_entity_name(entity: &SyncEntity) -> &'static str {
@@ -439,9 +447,9 @@ where
     let mut future_key_version_event_ids = Vec::new();
 
     for event in pending {
-        if !remote_entity_id_is_valid(&event.entity_id) {
+        if !remote_entity_id_is_valid(&event.entity, &event.entity_id) {
             warn!(
-                "[DeviceSync] Marking outbox event dead due to non-UUID entity_id (event_id={}, entity={:?}, entity_id={})",
+                "[DeviceSync] Marking outbox event dead due to invalid entity_id (event_id={}, entity={:?}, entity_id={})",
                 event.event_id,
                 event.entity,
                 event.entity_id
@@ -491,7 +499,7 @@ where
         ports
             .mark_outbox_dead(
                 invalid_entity_id_event_ids,
-                Some("Remote sync requires UUID entity_id".to_string()),
+                Some("Remote sync requires a valid entity_id".to_string()),
                 Some("invalid_entity_id".to_string()),
             )
             .await
@@ -1840,6 +1848,54 @@ mod tests {
             not_ready_backoff_ms(DEVICE_SYNC_NOT_READY_BACKOFF_AFTER + 20),
             DEVICE_SYNC_NOT_READY_BACKOFF_CAP_SECS * 1000
         );
+    }
+
+    #[test]
+    fn remote_entity_id_validation_allows_syncable_spending_setting_keys() {
+        assert!(remote_entity_id_is_valid(
+            &SyncEntity::SpendingSetting,
+            "spending.enabled"
+        ));
+        assert!(remote_entity_id_is_valid(
+            &SyncEntity::SpendingSetting,
+            "spending.account_ids"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::SpendingSetting,
+            "theme"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::Account,
+            "spending.enabled"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::SpendingEventType,
+            "event-type-travel"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::BudgetGroup,
+            "budget_group_needs"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::BudgetGroupAssignment,
+            "bga_cat_housing"
+        ));
+        assert!(remote_entity_id_is_valid(
+            &SyncEntity::CustomTaxonomy,
+            "custom_groups"
+        ));
+        assert!(!remote_entity_id_is_valid(
+            &SyncEntity::CustomTaxonomy,
+            "spending_categories"
+        ));
+        assert!(remote_entity_id_is_valid(
+            &SyncEntity::Account,
+            "019cb093-06a8-7534-8677-546317b17957"
+        ));
+        assert!(remote_entity_id_is_valid(
+            &SyncEntity::CustomTaxonomy,
+            "019cb093-06a8-7534-8677-546317b17957"
+        ));
     }
 
     #[tokio::test]

@@ -111,7 +111,7 @@ impl EventTypesRepositoryTrait for EventTypesRepository {
                     .returning(EventTypeDB::as_returning())
                     .get_result(tx.conn())
                     .map_err(StorageError::from)?;
-                tx.update(&inserted)?;
+                tx.insert(&inserted)?;
                 Ok(inserted)
             })
             .await
@@ -277,7 +277,7 @@ impl EventsRepositoryTrait for EventsRepository {
                     .returning(EventDB::as_returning())
                     .get_result(tx.conn())
                     .map_err(StorageError::from)?;
-                tx.update(&inserted)?;
+                tx.insert(&inserted)?;
                 Ok(inserted)
             })
             .await

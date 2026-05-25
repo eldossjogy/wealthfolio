@@ -24,11 +24,8 @@ import type {
 } from "../types/budget";
 
 export function useBudget(periodKey?: string) {
-  // Normalize: backend treats undefined the same as "default"; without this the
-  // two callers cache under different keys and refetch twice.
-  const normalizedKey = periodKey ?? "default";
   return useQuery({
-    queryKey: [QueryKeys.SPENDING_BUDGET, normalizedKey],
+    queryKey: [QueryKeys.SPENDING_BUDGET, periodKey ?? null],
     queryFn: () => getBudget(periodKey),
   });
 }

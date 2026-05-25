@@ -943,9 +943,9 @@ fn compute_prior_window(
 ) -> (DateTime<Utc>, DateTime<Utc>) {
     match compare {
         CompareMode::Prior => {
-            let span = (end - start).num_seconds().max(1);
+            let span = (end - start).num_seconds().max(0) + 1;
             let prior_end = start - Duration::seconds(1);
-            let prior_start = prior_end - Duration::seconds(span);
+            let prior_start = prior_end - Duration::seconds(span - 1);
             (prior_start, prior_end)
         }
         CompareMode::YearOverYear => {
@@ -1082,6 +1082,9 @@ fn compute_health_status(spent: f64, budget: f64, income: f64, projected: f64) -
     // be noise, not signal.
     if income > 0.0 && income < spent {
         return HealthStatus::CashflowNegative;
+    }
+    if budget <= 0.0 && spent > 0.0 {
+        return HealthStatus::Over;
     }
     if budget > 0.0 && (projected > budget || spent / budget > APPROACHING_THRESHOLD) {
         return HealthStatus::Approaching;
@@ -1437,9 +1440,8 @@ mod tests {
     #[test]
     fn prior_window_matches_size_of_current() {
         let (s, e) = compute_prior_window(dt(2026, 3, 1), dt(2026, 5, 19), CompareMode::Prior);
-        // span = end - start; prior_end = start - 1s; prior_start = prior_end - span.
-        let span = (dt(2026, 5, 19) - dt(2026, 3, 1)).num_seconds();
-        assert_eq!((e - s).num_seconds(), span);
+        let span = (dt(2026, 5, 19) - dt(2026, 3, 1)).num_seconds() + 1;
+        assert_eq!((e - s).num_seconds() + 1, span);
         assert!(e < dt(2026, 3, 1));
     }
 
@@ -1496,6 +1498,14 @@ mod tests {
         assert_eq!(
             compute_health_status(50.0, 100.0, 0.0, 50.0),
             HealthStatus::OnTrack
+        );
+    }
+
+    #[test]
+    fn status_over_when_spending_without_budget() {
+        assert_eq!(
+            compute_health_status(50.0, 0.0, 0.0, 50.0),
+            HealthStatus::Over
         );
     }
 

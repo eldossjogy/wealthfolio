@@ -39,18 +39,27 @@ impl SpendingSettingsRepositoryTrait for SpendingSettingsRepository {
     }
 
     async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        let row = AppSettingDB {
-            setting_key: key.to_string(),
-            setting_value: value.to_string(),
-        };
+        self.set_settings(vec![(key.to_string(), value.to_string())])
+            .await
+    }
+
+    async fn set_settings(&self, values: Vec<(String, String)>) -> Result<()> {
+        let rows: Vec<AppSettingDB> = values
+            .into_iter()
+            .map(|(key, value)| AppSettingDB {
+                setting_key: key,
+                setting_value: value,
+            })
+            .collect();
         self.writer
             .exec_tx(move |tx| {
-                let conn = tx.conn();
-                diesel::replace_into(app_settings)
-                    .values(&row)
-                    .execute(conn)
-                    .map_err(StorageError::from)?;
-                tx.update(&row)?;
+                for row in rows {
+                    diesel::replace_into(app_settings)
+                        .values(&row)
+                        .execute(tx.conn())
+                        .map_err(StorageError::from)?;
+                    tx.update(&row)?;
+                }
                 Ok(())
             })
             .await

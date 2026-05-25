@@ -101,12 +101,8 @@ pub async fn update_spending_settings(
 ) -> Result<SpendingSettings, String> {
     debug!("Updating spending settings...");
     let settings_service = state.spending_settings_service();
-    let before = settings_service
-        .get()
-        .await
-        .map_err(|e| format!("Failed to load spending settings: {}", e))?;
-    let after = settings_service
-        .update(update)
+    let (before, after) = settings_service
+        .update_with_previous(update)
         .await
         .map_err(|e| format!("Failed to update spending settings: {}", e))?;
 

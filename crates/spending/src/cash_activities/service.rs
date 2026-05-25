@@ -20,11 +20,13 @@ use crate::activity_assignments::{
     ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService, BulkCategoryAssignment,
 };
 use crate::activity_classification::{classify_activity, SpendingClassification};
+use crate::error::SpendingError;
 use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
 const INCOME_TAXONOMY: &str = "income_sources";
+const MAX_CASH_ACTIVITY_SEARCH_LIMIT: usize = 1_000;
 
 /// Service for listing/searching activities scoped to the user's spending accounts.
 /// Mutation (create/update/delete) goes through the existing core ActivityService;
@@ -303,7 +305,8 @@ impl CashActivityService {
 
         // Paginate
         let offset = req.offset.min(total_count);
-        let end = offset.saturating_add(req.limit).min(total_count);
+        let limit = req.limit.min(MAX_CASH_ACTIVITY_SEARCH_LIMIT);
+        let end = offset.saturating_add(limit).min(total_count);
         let page: Vec<Activity> = activities.drain(offset..end).collect();
         // Drop the rest — we no longer need them.
         drop(activities);
@@ -426,18 +429,22 @@ impl CashActivityService {
     pub async fn set_event(&self, activity_id: &str, event_id: Option<String>) -> Result<Activity> {
         let activity = self.ensure_activity_in_spending_scope(activity_id).await?;
         if let Some(ref event_id) = event_id {
-            let event = self
-                .events
-                .get_event(event_id)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("Spending event not found: {event_id}"))?;
+            let event =
+                self.events
+                    .get_event(event_id)
+                    .await?
+                    .ok_or_else(|| SpendingError::NotFound {
+                        entity: "Spending event",
+                        id: event_id.clone(),
+                    })?;
             if !self
                 .events
                 .contains_activity_date(&event, &activity.activity_date)?
             {
-                return Err(anyhow::anyhow!(
-                    "Activity date is outside the selected event date range"
-                ));
+                return Err(SpendingError::InvalidInput {
+                    message: "Activity date is outside the selected event date range".to_string(),
+                }
+                .into());
             }
         }
         self.activity_events
@@ -485,9 +492,10 @@ impl CashActivityService {
         taxonomy_id: &str,
     ) -> Result<Activity> {
         if taxonomy_id != SPENDING_TAXONOMY && taxonomy_id != INCOME_TAXONOMY {
-            return Err(anyhow::anyhow!(
-                "Taxonomy is not assignable to spending activities"
-            ));
+            return Err(SpendingError::InvalidInput {
+                message: "Taxonomy is not assignable to spending activities".to_string(),
+            }
+            .into());
         }
         self.ensure_activity_in_spending_scope(activity_id).await
     }
@@ -495,7 +503,10 @@ impl CashActivityService {
     async fn ensure_activity_in_spending_scope(&self, activity_id: &str) -> Result<Activity> {
         let s = self.settings.get().await?;
         if !s.enabled {
-            return Err(anyhow::anyhow!("Spending tracking is disabled"));
+            return Err(SpendingError::InvalidInput {
+                message: "Spending tracking is disabled".to_string(),
+            }
+            .into());
         }
 
         let activity = self
@@ -503,9 +514,10 @@ impl CashActivityService {
             .get_activity(activity_id)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         if !s.account_ids.iter().any(|id| id == &activity.account_id) {
-            return Err(anyhow::anyhow!(
-                "Activity account is not opted into spending tracking"
-            ));
+            return Err(SpendingError::InvalidInput {
+                message: "Activity account is not opted into spending tracking".to_string(),
+            }
+            .into());
         }
 
         let account = self
@@ -515,9 +527,10 @@ impl CashActivityService {
         if account.is_archived
             || !account_supports_purpose(&account.account_type, AccountPurpose::Spending)
         {
-            return Err(anyhow::anyhow!(
-                "Activity account does not support spending tracking"
-            ));
+            return Err(SpendingError::InvalidInput {
+                message: "Activity account does not support spending tracking".to_string(),
+            }
+            .into());
         }
 
         Ok(activity)

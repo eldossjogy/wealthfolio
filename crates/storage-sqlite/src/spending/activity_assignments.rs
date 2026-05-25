@@ -223,7 +223,89 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
                         .get_result::<ActivityTaxonomyAssignmentDB>(tx.conn())
                         .map_err(StorageError::from)?;
 
-                    tx.update(&inserted)?;
+                    tx.insert(&inserted)?;
+                    out.push(inserted);
+                }
+                Ok(out)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(inserted_dbs
+            .into_iter()
+            .map(ActivityTaxonomyAssignment::from)
+            .collect())
+    }
+
+    async fn assign_rule_many_single_select(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let inserted_dbs: Vec<ActivityTaxonomyAssignmentDB> = self
+            .writer
+            .exec_tx(move |tx| {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    let existing: Vec<ActivityTaxonomyAssignmentDB> =
+                        activity_taxonomy_assignments::table
+                            .filter(
+                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
+                            )
+                            .filter(
+                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
+                            )
+                            .load::<ActivityTaxonomyAssignmentDB>(tx.conn())
+                            .map_err(StorageError::from)?;
+
+                    if existing
+                        .iter()
+                        .any(|row| row.source.eq_ignore_ascii_case("manual"))
+                    {
+                        continue;
+                    }
+                    if only_uncategorized && !existing.is_empty() {
+                        continue;
+                    }
+
+                    diesel::delete(
+                        activity_taxonomy_assignments::table
+                            .filter(
+                                activity_taxonomy_assignments::activity_id.eq(&item.activity_id),
+                            )
+                            .filter(
+                                activity_taxonomy_assignments::taxonomy_id.eq(&item.taxonomy_id),
+                            ),
+                    )
+                    .execute(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                    for old in &existing {
+                        tx.delete::<ActivityTaxonomyAssignmentDB>(old.id.clone());
+                    }
+
+                    let row = NewActivityTaxonomyAssignmentDB {
+                        id: item.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        activity_id: item.activity_id,
+                        taxonomy_id: item.taxonomy_id,
+                        category_id: item.category_id,
+                        weight: item.weight,
+                        source: item.source,
+                        created_at: now.clone(),
+                        updated_at: now.clone(),
+                    };
+
+                    let inserted = diesel::insert_into(activity_taxonomy_assignments::table)
+                        .values(&row)
+                        .returning(ActivityTaxonomyAssignmentDB::as_returning())
+                        .get_result::<ActivityTaxonomyAssignmentDB>(tx.conn())
+                        .map_err(StorageError::from)?;
+
+                    tx.insert(&inserted)?;
                     out.push(inserted);
                 }
                 Ok(out)

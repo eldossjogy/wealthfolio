@@ -1,4 +1,4 @@
-import { useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useState, type FC } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
@@ -25,7 +25,6 @@ import {
   PrivacyAmount,
   Skeleton,
   formatCompactAmount,
-  getInitialIntervalData,
   usePersistentState,
   type TimePeriod,
 } from "@wealthfolio/ui";
@@ -35,6 +34,18 @@ import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-acti
 import { useSpendingReport } from "../hooks/use-spending-report";
 import { topCategoryId } from "../lib/category-rollup";
 import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  calendarDaysBetweenInclusive,
+  daysInCalendarMonth,
+  formatZonedDateKey,
+  getZonedDateParts,
+  localDateBoundaryToISOString,
+  localDateParts,
+  zonedCalendarDateBoundaryToDate,
+  type ZonedCalendarDate,
+} from "../lib/timezone";
 import { BudgetLineChartCard } from "./budget-line-chart-card";
 import { CashFlowStrip } from "./cash-flow-strip";
 import { EventsCard } from "./events-card";
@@ -44,27 +55,77 @@ const FUTURE_BAR = "#E5E7EB";
 const SPENDING_TAXONOMY = "spending_categories";
 const DEFAULT_INTERVAL: TimePeriod = "1M";
 const INTERVAL_STORAGE_KEY = "spending-interval";
+const INTERVAL_DESCRIPTIONS: Record<TimePeriod, string> = {
+  "1D": "past day",
+  "1W": "past week",
+  "1M": "past month",
+  "3M": "past 3 months",
+  "6M": "past 6 months",
+  YTD: "year to date",
+  "1Y": "past year",
+  "5Y": "past 5 years",
+  ALL: "All Time",
+};
 
-function rangeToReportRequest(range: DateRange | undefined) {
+function rangeToReportRequest(range: DateRange | undefined, timezone?: string | null) {
   const from = range?.from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const to = range?.to ?? new Date();
-  const start = new Date(from);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(to);
-  end.setHours(23, 59, 59, 999);
   return {
-    startDate: start.toISOString(),
-    endDate: end.toISOString(),
+    startDate: localDateBoundaryToISOString(from, "start", timezone),
+    endDate: localDateBoundaryToISOString(to, "end", timezone),
+  };
+}
+
+function localDateFromParts(date: ZonedCalendarDate): Date {
+  return new Date(date.year, date.month - 1, date.day);
+}
+
+function spendingIntervalData(code: TimePeriod, timezone?: string | null) {
+  const today = getZonedDateParts(new Date(), timezone);
+  const start = (() => {
+    switch (code) {
+      case "1D":
+        return addCalendarDays(today, -1);
+      case "1W":
+        return addCalendarDays(today, -7);
+      case "1M":
+        return addCalendarMonths(today, -1);
+      case "3M":
+        return addCalendarMonths(today, -3);
+      case "6M":
+        return addCalendarMonths(today, -6);
+      case "YTD":
+        return { year: today.year, month: 1, day: 1 };
+      case "1Y":
+        return { ...today, year: today.year - 1 };
+      case "5Y":
+        return { ...today, year: today.year - 5 };
+      case "ALL":
+        return { year: 1970, month: 1, day: 1 };
+    }
+  })();
+
+  return {
+    code,
+    description: INTERVAL_DESCRIPTIONS[code],
+    range: {
+      from: localDateFromParts(start),
+      to: localDateFromParts(today),
+    },
   };
 }
 
 function priorRange(range: DateRange | undefined): DateRange | undefined {
   if (!range?.from || !range?.to) return undefined;
-  const span = range.to.getTime() - range.from.getTime();
-  if (span <= 0) return undefined;
+  const start = localDateParts(range.from);
+  const end = localDateParts(range.to);
+  const days = calendarDaysBetweenInclusive(start, end);
+  if (days <= 0) return undefined;
+  const priorEnd = addCalendarDays(start, -1);
+  const priorStart = addCalendarDays(priorEnd, -(days - 1));
   return {
-    from: new Date(range.from.getTime() - span - 24 * 3600 * 1000),
-    to: new Date(range.from.getTime() - 24 * 3600 * 1000),
+    from: localDateFromParts(priorStart),
+    to: localDateFromParts(priorEnd),
   };
 }
 
@@ -93,6 +154,7 @@ export default function SpendingTabContent() {
   const { isBalanceHidden } = useBalancePrivacy();
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
+  const appTimezone = settings?.timezone ?? undefined;
   const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -117,13 +179,23 @@ export default function SpendingTabContent() {
   );
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>(
-    () => getInitialIntervalData(intervalCode).range,
+    () => spendingIntervalData(intervalCode, appTimezone).range,
   );
   const [selectedIntervalDescription, setSelectedIntervalDescription] = useState<string>(
-    () => getInitialIntervalData(intervalCode).description,
+    () => spendingIntervalData(intervalCode, appTimezone).description,
   );
 
-  const reportReq = useMemo(() => rangeToReportRequest(dateRange), [dateRange]);
+  useEffect(() => {
+    const initial = spendingIntervalData(intervalCode, appTimezone);
+    setActiveCode(intervalCode);
+    setDateRange(initial.range);
+    setSelectedIntervalDescription(initial.description);
+  }, [intervalCode, appTimezone]);
+
+  const reportReq = useMemo(
+    () => rangeToReportRequest(dateRange, appTimezone),
+    [dateRange, appTimezone],
+  );
   // `priorRange` returns undefined for invalid / zero-span ranges; in that
   // case feeding it back through `rangeToReportRequest` produces the
   // current-month default, which would make priorReport identical to
@@ -132,8 +204,9 @@ export default function SpendingTabContent() {
   // have a prior window and gate the query on it.
   const priorRangeForReport = useMemo(() => priorRange(dateRange), [dateRange]);
   const priorReportReq = useMemo(
-    () => (priorRangeForReport ? rangeToReportRequest(priorRangeForReport) : reportReq),
-    [priorRangeForReport, reportReq],
+    () =>
+      priorRangeForReport ? rangeToReportRequest(priorRangeForReport, appTimezone) : reportReq,
+    [priorRangeForReport, reportReq, appTimezone],
   );
 
   const {
@@ -163,43 +236,53 @@ export default function SpendingTabContent() {
   const dataErrored = reportErrored || activitiesErrored || budgetErrored;
 
   const monthReportReq = useMemo(() => {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    return rangeToReportRequest({ from: monthStart, to: now });
-  }, []);
+    const today = getZonedDateParts(new Date(), appTimezone);
+    const start = { year: today.year, month: today.month, day: 1 };
+    return {
+      startDate: zonedCalendarDateBoundaryToDate(start, "start", appTimezone).toISOString(),
+      endDate: zonedCalendarDateBoundaryToDate(today, "end", appTimezone).toISOString(),
+    };
+  }, [appTimezone]);
   const { data: monthReport } = useSpendingReport(monthReportReq);
 
   const subsActivitiesReq = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now);
-    start.setDate(now.getDate() - 90);
-    return rangeToReportRequest({ from: start, to: now });
-  }, []);
+    const end = getZonedDateParts(new Date(), appTimezone);
+    const start = addCalendarDays(end, -90);
+    return {
+      startDate: zonedCalendarDateBoundaryToDate(start, "start", appTimezone).toISOString(),
+      endDate: zonedCalendarDateBoundaryToDate(end, "end", appTimezone).toISOString(),
+    };
+  }, [appTimezone]);
   const { data: subsActivities = [] } = useCashActivities({
     startDate: subsActivitiesReq.startDate,
     endDate: subsActivitiesReq.endDate,
   });
 
   const historyReportReq = useMemo(() => {
-    const now = new Date();
-    const historyStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    const historyEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    return rangeToReportRequest({ from: historyStart, to: historyEnd });
-  }, []);
+    const today = getZonedDateParts(new Date(), appTimezone);
+    const historyStart = addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -3);
+    const historyEndMonth = addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -1);
+    const historyEnd = {
+      ...historyEndMonth,
+      day: daysInCalendarMonth(historyEndMonth.year, historyEndMonth.month),
+    };
+    return {
+      startDate: zonedCalendarDateBoundaryToDate(historyStart, "start", appTimezone).toISOString(),
+      endDate: zonedCalendarDateBoundaryToDate(historyEnd, "end", appTimezone).toISOString(),
+    };
+  }, [appTimezone]);
   const { data: historyReport } = useSpendingReport(historyReportReq);
 
   const historicalDailyAvg = useMemo(() => {
     const total = historyReport?.current.outflow ?? 0;
     if (total <= 0) return 0;
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), 0);
-    const days = Math.max(
-      1,
-      Math.round((end.getTime() - start.getTime()) / (24 * 3600 * 1000)) + 1,
-    );
+    const today = getZonedDateParts(new Date(), appTimezone);
+    const start = addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -3);
+    const endMonth = addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -1);
+    const end = { ...endMonth, day: daysInCalendarMonth(endMonth.year, endMonth.month) };
+    const days = Math.max(1, calendarDaysBetweenInclusive(start, end));
     return total / days;
-  }, [historyReport?.current.outflow]);
+  }, [historyReport?.current.outflow, appTimezone]);
 
   // Always render in the user's base currency. The backend FX-converts every
   // activity in `report` to base at period end, so labeling by the first
@@ -227,11 +310,12 @@ export default function SpendingTabContent() {
   const handleIntervalSelect = (
     code: TimePeriod,
     description: string,
-    range: DateRange | undefined,
+    _range: DateRange | undefined,
   ) => {
+    const initial = spendingIntervalData(code, appTimezone);
     setActiveCode(code);
-    setSelectedIntervalDescription(description);
-    setDateRange(range);
+    setSelectedIntervalDescription(initial.description || description);
+    setDateRange(initial.range);
     setSearchParams(
       (prev) => {
         const p = new URLSearchParams(prev);
@@ -260,8 +344,8 @@ export default function SpendingTabContent() {
     const buckets = report?.byDay ?? [];
     if (buckets.length === 0) return { barData: [], avgValue: 0, avgLabel: "avg" };
     const sorted = buckets.slice().sort((a, b) => a.date.localeCompare(b.date));
-    const today = new Date();
-    const todayKey = formatDateISO(today);
+    const todayParts = getZonedDateParts(new Date(), appTimezone);
+    const todayKey = formatZonedDateKey(new Date(), appTimezone);
     const monthLabels = [
       "Jan",
       "Feb",
@@ -305,7 +389,7 @@ export default function SpendingTabContent() {
       } else {
         key = `${year}-${mStr}`;
         label =
-          year !== today.getFullYear()
+          year !== todayParts.year
             ? `${monthLabels[month - 1]} '${String(year).slice(2)}`
             : monthLabels[month - 1];
         sortKey = `${yStr}-${mStr}`;
@@ -363,7 +447,7 @@ export default function SpendingTabContent() {
     const labelByGranularity =
       granularity === "day" ? "daily avg" : granularity === "week" ? "weekly avg" : "monthly avg";
     return { barData: data, avgValue: avg, avgLabel: labelByGranularity };
-  }, [report?.byDay, granularity, dateRange]);
+  }, [report?.byDay, granularity, dateRange, appTimezone]);
 
   const categoriesMeta = useMemo(() => {
     const meta = new Map<
@@ -436,7 +520,7 @@ export default function SpendingTabContent() {
         }`,
       });
     }
-    const uncategorized = categoryRows.find((c) => c.id === "uncategorized");
+    const uncategorized = categoryRows.find((c) => c.id === "__uncategorized__");
     if (uncategorized && uncategorized.txCount > 0) {
       items.push({
         icon: "+",

@@ -617,6 +617,7 @@ diesel::table! {
         group_id -> Text,
         taxonomy_id -> Text,
         category_id -> Text,
+        is_system -> Integer,
         created_at -> Text,
         updated_at -> Text,
     }

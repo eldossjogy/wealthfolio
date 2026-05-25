@@ -27,7 +27,13 @@ import {
   type ReportsPeriod,
   type ReportsRange,
 } from "../lib/reports-period";
-import { createZonedDayHourFormatter } from "../lib/timezone";
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  createZonedDayHourFormatter,
+  getZonedDateParts,
+  zonedCalendarDateBoundaryToDate,
+} from "../lib/timezone";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const PERIOD_STORAGE_KEY = "spending-insights-period";
@@ -126,10 +132,10 @@ export default function SpendingInsightsPage() {
     [period],
   );
 
-  const range = useMemo(() => periodToReportsRange(period), [period]);
+  const range = useMemo(() => periodToReportsRange(period, appTimezone), [period, appTimezone]);
   const eventsRange = useMemo(
-    () => shiftRangeBack(range, period, eventsWindowOffset),
-    [range, period, eventsWindowOffset],
+    () => shiftRangeBack(range, period, eventsWindowOffset, appTimezone),
+    [range, period, eventsWindowOffset, appTimezone],
   );
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
   const { accounts = [] } = useAccounts({ filterActive: false });
@@ -184,13 +190,13 @@ export default function SpendingInsightsPage() {
 
   // 12-week activity window for the weekday × hour heatmap.
   const heatmapRequest = useMemo(() => {
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    const start = new Date(end);
-    start.setDate(end.getDate() - HEATMAP_WEEKS * 7);
-    start.setHours(0, 0, 0, 0);
-    return { startDate: start.toISOString(), endDate: end.toISOString() };
-  }, []);
+    const end = getZonedDateParts(new Date(), appTimezone);
+    const start = addCalendarDays(end, -HEATMAP_WEEKS * 7);
+    return {
+      startDate: zonedCalendarDateBoundaryToDate(start, "start", appTimezone).toISOString(),
+      endDate: zonedCalendarDateBoundaryToDate(end, "end", appTimezone).toISOString(),
+    };
+  }, [appTimezone]);
   const { data: heatmapActivities = [] } = useCashActivities(heatmapRequest);
   const {
     data: heatmapInsight,
@@ -410,13 +416,24 @@ const MONTHS_PER_PERIOD: Record<ReportsPeriod, number> = {
   "1Y": 12,
 };
 
-function shiftRangeBack(range: ReportsRange, period: ReportsPeriod, offset: number): ReportsRange {
+function shiftRangeBack(
+  range: ReportsRange,
+  period: ReportsPeriod,
+  offset: number,
+  timezone?: string | null,
+): ReportsRange {
   if (offset === 0) return range;
   const months = MONTHS_PER_PERIOD[period] * offset;
-  const start = new Date(range.start);
-  start.setMonth(start.getMonth() - months);
-  const end = new Date(range.end);
-  end.setMonth(end.getMonth() - months);
+  const start = zonedCalendarDateBoundaryToDate(
+    addCalendarMonths(getZonedDateParts(range.start, timezone), -months),
+    "start",
+    timezone,
+  );
+  const end = zonedCalendarDateBoundaryToDate(
+    addCalendarMonths(getZonedDateParts(range.end, timezone), -months),
+    "end",
+    timezone,
+  );
   return { ...range, start, end };
 }
 

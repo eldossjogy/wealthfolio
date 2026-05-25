@@ -120,6 +120,20 @@ fn performance_account_ids(
         .collect())
 }
 
+fn income_account_ids(
+    state: &ServiceContext,
+    account_ids: &[String],
+) -> Result<Vec<String>, String> {
+    Ok(state
+        .account_service()
+        .get_accounts_by_ids(account_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, AccountPurpose::Income))
+        .map(|account| account.id)
+        .collect())
+}
+
 // ============================================================================
 // Snapshot Info Types
 // ============================================================================
@@ -448,15 +462,28 @@ pub async fn get_income_summary(
     filter: Option<AccountScopeInput>,
 ) -> Result<Vec<IncomeSummary>, String> {
     debug!("Fetching income summary...");
-    let account_ids: Option<Vec<String>> = if let Some(input) = filter {
+    let account_ids: Vec<String> = if let Some(input) = filter {
         let af = input.into_account_filter()?;
-        Some(resolve_scope(&af, &state).await?.account_ids)
+        let resolved = resolve_scope(&af, &state).await?;
+        income_account_ids(&state, &resolved.account_ids)?
     } else {
-        None
+        state
+            .account_service()
+            .get_active_accounts()
+            .map_err(|e| format!("Failed to fetch active accounts: {}", e))?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Income)
+            })
+            .map(|account| account.id)
+            .collect()
     };
+    if account_ids.is_empty() {
+        return Ok(Vec::new());
+    }
     state
         .income_service()
-        .get_income_summary(account_ids.as_deref())
+        .get_income_summary(Some(&account_ids))
         .map_err(|e| e.to_string())
 }
 

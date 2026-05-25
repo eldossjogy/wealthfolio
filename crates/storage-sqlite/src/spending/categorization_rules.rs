@@ -1,5 +1,6 @@
 //! Storage adapter for spending::categorization_rules.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -14,8 +15,8 @@ use crate::errors::StorageError;
 use crate::schema::spending_categorization_rules;
 use wealthfolio_core::sync::SyncEntity;
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule, RuleMatchType,
-    UpdateCategorizationRule,
+    CategorizationRule, CategorizationRulesRepositoryTrait, NewCategorizationRule,
+    PresetImportCounts, RuleMatchType, UpdateCategorizationRule,
 };
 
 #[derive(Queryable, Identifiable, Selectable, Serialize, Deserialize, Debug, Clone)]
@@ -109,6 +110,27 @@ impl CategorizationRulesRepository {
     }
 }
 
+fn new_rule_db(new_rule: NewCategorizationRule, now: &str) -> NewCategorizationRuleDB {
+    NewCategorizationRuleDB {
+        id: new_rule.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+        name: new_rule.name,
+        pattern: new_rule.pattern,
+        match_type: new_rule.match_type.as_str().to_string(),
+        taxonomy_id: new_rule.taxonomy_id,
+        category_id: new_rule.category_id,
+        activity_type: new_rule.activity_type,
+        priority: new_rule.priority,
+        is_global: if new_rule.is_global { 1 } else { 0 },
+        account_id: new_rule.account_id,
+        preset_id: new_rule.preset_id,
+        preset_rule_key: new_rule.preset_rule_key,
+        preset_version: new_rule.preset_version,
+        preset_modified: 0,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+    }
+}
+
 #[async_trait]
 impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
     async fn list(&self) -> Result<Vec<CategorizationRule>> {
@@ -138,24 +160,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
 
     async fn create(&self, new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
         let now = chrono::Utc::now().to_rfc3339();
-        let row = NewCategorizationRuleDB {
-            id: new_rule.id.unwrap_or_else(|| Uuid::new_v4().to_string()),
-            name: new_rule.name,
-            pattern: new_rule.pattern,
-            match_type: new_rule.match_type.as_str().to_string(),
-            taxonomy_id: new_rule.taxonomy_id,
-            category_id: new_rule.category_id,
-            activity_type: new_rule.activity_type,
-            priority: new_rule.priority,
-            is_global: if new_rule.is_global { 1 } else { 0 },
-            account_id: new_rule.account_id,
-            preset_id: new_rule.preset_id,
-            preset_rule_key: new_rule.preset_rule_key,
-            preset_version: new_rule.preset_version,
-            preset_modified: 0,
-            created_at: now.clone(),
-            updated_at: now,
-        };
+        let row = new_rule_db(new_rule, &now);
         self.writer
             .exec_tx(move |tx| {
                 let inserted = diesel::insert_into(spending_categorization_rules::table)
@@ -163,7 +168,7 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                     .returning(CategorizationRuleDB::as_returning())
                     .get_result(tx.conn())
                     .map_err(StorageError::from)?;
-                tx.update(&inserted)?;
+                tx.insert(&inserted)?;
                 Ok(inserted)
             })
             .await
@@ -242,60 +247,97 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
             .map_err(|e| anyhow::anyhow!(e))
     }
 
-    async fn replace_preset_rule(
+    async fn import_preset_rules(
         &self,
-        id: &str,
-        rule: NewCategorizationRule,
-    ) -> Result<CategorizationRule> {
-        let id = id.to_string();
+        preset_id: &str,
+        preset_version: &str,
+        rules: Vec<NewCategorizationRule>,
+    ) -> Result<PresetImportCounts> {
+        let preset_id = preset_id.to_string();
+        let preset_version = preset_version.to_string();
         self.writer
             .exec_tx(move |tx| {
-                let mut existing: CategorizationRuleDB = spending_categorization_rules::table
-                    .find(&id)
-                    .first::<CategorizationRuleDB>(tx.conn())
+                let existing_rows: Vec<CategorizationRuleDB> = spending_categorization_rules::table
+                    .filter(spending_categorization_rules::preset_id.eq(&preset_id))
+                    .load::<CategorizationRuleDB>(tx.conn())
                     .map_err(StorageError::from)?;
+                let mut existing_by_key: HashMap<String, CategorizationRuleDB> = existing_rows
+                    .into_iter()
+                    .filter_map(|row| row.preset_rule_key.clone().map(|key| (key, row)))
+                    .collect();
 
-                existing.name = rule.name;
-                existing.pattern = rule.pattern;
-                existing.match_type = rule.match_type.as_str().to_string();
-                existing.taxonomy_id = rule.taxonomy_id;
-                existing.category_id = rule.category_id;
-                existing.activity_type = rule.activity_type;
-                existing.priority = rule.priority;
-                existing.is_global = if rule.is_global { 1 } else { 0 };
-                existing.account_id = rule.account_id;
-                existing.preset_id = rule.preset_id;
-                existing.preset_rule_key = rule.preset_rule_key;
-                existing.preset_version = rule.preset_version;
-                existing.preset_modified = 0;
-                existing.updated_at = chrono::Utc::now().to_rfc3339();
+                let now = chrono::Utc::now().to_rfc3339();
+                let mut counts = PresetImportCounts::default();
 
-                diesel::update(spending_categorization_rules::table.find(&id))
-                    .set((
-                        spending_categorization_rules::name.eq(&existing.name),
-                        spending_categorization_rules::pattern.eq(&existing.pattern),
-                        spending_categorization_rules::match_type.eq(&existing.match_type),
-                        spending_categorization_rules::taxonomy_id.eq(&existing.taxonomy_id),
-                        spending_categorization_rules::category_id.eq(&existing.category_id),
-                        spending_categorization_rules::activity_type.eq(&existing.activity_type),
-                        spending_categorization_rules::priority.eq(existing.priority),
-                        spending_categorization_rules::is_global.eq(existing.is_global),
-                        spending_categorization_rules::account_id.eq(&existing.account_id),
-                        spending_categorization_rules::preset_id.eq(&existing.preset_id),
-                        spending_categorization_rules::preset_rule_key
-                            .eq(&existing.preset_rule_key),
-                        spending_categorization_rules::preset_version.eq(&existing.preset_version),
-                        spending_categorization_rules::preset_modified.eq(0),
-                        spending_categorization_rules::updated_at.eq(&existing.updated_at),
-                    ))
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
+                for rule in rules {
+                    let Some(rule_key) = rule.preset_rule_key.clone() else {
+                        continue;
+                    };
+                    if let Some(mut existing) = existing_by_key.remove(&rule_key) {
+                        if existing.preset_modified != 0
+                            || existing.preset_version.as_deref() == Some(preset_version.as_str())
+                        {
+                            counts.skipped_existing += 1;
+                            continue;
+                        }
 
-                tx.update(&existing)?;
-                Ok(existing)
+                        existing.name = rule.name;
+                        existing.pattern = rule.pattern;
+                        existing.match_type = rule.match_type.as_str().to_string();
+                        existing.taxonomy_id = rule.taxonomy_id;
+                        existing.category_id = rule.category_id;
+                        existing.activity_type = rule.activity_type;
+                        existing.priority = rule.priority;
+                        existing.is_global = if rule.is_global { 1 } else { 0 };
+                        existing.account_id = rule.account_id;
+                        existing.preset_id = rule.preset_id;
+                        existing.preset_rule_key = rule.preset_rule_key;
+                        existing.preset_version = rule.preset_version;
+                        existing.preset_modified = 0;
+                        existing.updated_at = now.clone();
+
+                        diesel::update(spending_categorization_rules::table.find(&existing.id))
+                            .set((
+                                spending_categorization_rules::name.eq(&existing.name),
+                                spending_categorization_rules::pattern.eq(&existing.pattern),
+                                spending_categorization_rules::match_type.eq(&existing.match_type),
+                                spending_categorization_rules::taxonomy_id
+                                    .eq(&existing.taxonomy_id),
+                                spending_categorization_rules::category_id
+                                    .eq(&existing.category_id),
+                                spending_categorization_rules::activity_type
+                                    .eq(&existing.activity_type),
+                                spending_categorization_rules::priority.eq(existing.priority),
+                                spending_categorization_rules::is_global.eq(existing.is_global),
+                                spending_categorization_rules::account_id.eq(&existing.account_id),
+                                spending_categorization_rules::preset_id.eq(&existing.preset_id),
+                                spending_categorization_rules::preset_rule_key
+                                    .eq(&existing.preset_rule_key),
+                                spending_categorization_rules::preset_version
+                                    .eq(&existing.preset_version),
+                                spending_categorization_rules::preset_modified.eq(0),
+                                spending_categorization_rules::updated_at.eq(&existing.updated_at),
+                            ))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.update(&existing)?;
+                        counts.updated += 1;
+                        continue;
+                    }
+
+                    let row = new_rule_db(rule, &now);
+                    let inserted = diesel::insert_into(spending_categorization_rules::table)
+                        .values(&row)
+                        .returning(CategorizationRuleDB::as_returning())
+                        .get_result(tx.conn())
+                        .map_err(StorageError::from)?;
+                    tx.insert(&inserted)?;
+                    counts.added += 1;
+                }
+
+                Ok(counts)
             })
             .await
-            .map(CategorizationRule::from)
             .map_err(|e| anyhow::anyhow!(e))
     }
 

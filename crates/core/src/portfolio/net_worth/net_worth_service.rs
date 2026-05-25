@@ -268,12 +268,8 @@ impl NetWorthService {
         (oldest_date, stale_assets)
     }
 
-    fn valuation_base_value(valuation: &DailyAccountValuation) -> Decimal {
-        (valuation.total_value * valuation.fx_rate_to_base).round_dp(DECIMAL_PRECISION)
-    }
-
     fn credit_card_liability_value(valuation: &DailyAccountValuation) -> Decimal {
-        let value = Self::valuation_base_value(valuation);
+        let value = valuation.cash_balance_base.round_dp(DECIMAL_PRECISION);
         if value < Decimal::ZERO {
             value.abs()
         } else {
@@ -282,7 +278,7 @@ impl NetWorthService {
     }
 
     fn credit_card_asset_value(valuation: &DailyAccountValuation) -> Decimal {
-        let value = Self::valuation_base_value(valuation);
+        let value = valuation.cash_balance_base.round_dp(DECIMAL_PRECISION);
         if value > Decimal::ZERO {
             value
         } else {

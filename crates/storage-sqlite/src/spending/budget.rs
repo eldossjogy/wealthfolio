@@ -66,6 +66,7 @@ pub struct BudgetGroupAssignmentDB {
     pub group_id: String,
     pub taxonomy_id: String,
     pub category_id: String,
+    pub is_system: i32,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -77,6 +78,7 @@ pub struct NewBudgetGroupAssignmentDB {
     pub group_id: String,
     pub taxonomy_id: String,
     pub category_id: String,
+    pub is_system: i32,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -293,7 +295,7 @@ impl BudgetRepositoryTrait for BudgetRepository {
                     .returning(BudgetGroupDB::as_returning())
                     .get_result(tx.conn())
                     .map_err(StorageError::from)?;
-                tx.update(&inserted)?;
+                tx.insert(&inserted)?;
                 Ok(inserted)
             })
             .await
@@ -373,6 +375,7 @@ impl BudgetRepositoryTrait for BudgetRepository {
                         group_id: assignment.group_id,
                         taxonomy_id: assignment.taxonomy_id,
                         category_id: assignment.category_id,
+                        is_system: 0,
                         created_at: now.clone(),
                         updated_at: now.clone(),
                     };
@@ -527,6 +530,7 @@ impl BudgetRepositoryTrait for BudgetRepository {
                         group_id: assignment.group_id,
                         taxonomy_id: assignment.taxonomy_id,
                         category_id: assignment.category_id,
+                        is_system: 0,
                         created_at: now.clone(),
                         updated_at: now.clone(),
                     };

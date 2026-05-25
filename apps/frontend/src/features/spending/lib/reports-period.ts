@@ -8,6 +8,17 @@
 
 import type { DateRange } from "@/lib/types";
 
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  calendarDaysBetweenInclusive,
+  calendarMonthsBetweenInclusive,
+  daysInCalendarMonth,
+  getZonedDateParts,
+  zonedCalendarDateBoundaryToDate,
+  type ZonedCalendarDate,
+} from "./timezone";
+
 export type ReportsPeriod = "1M" | "3M" | "6M" | "YTD" | "1Y";
 
 export const REPORTS_PERIODS: ReportsPeriod[] = ["1M", "3M", "6M", "YTD", "1Y"];
@@ -28,9 +39,12 @@ export interface ReportsRange {
 }
 
 /** Convert a period selection into the active date range. */
-export function periodToReportsRange(period: ReportsPeriod): ReportsRange {
+export function periodToReportsRange(
+  period: ReportsPeriod,
+  timezone?: string | null,
+): ReportsRange {
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const today = getZonedDateParts(now, timezone);
 
   // For 1M we span the full calendar month so "X days left in May" reads
   // correctly and forecasts can project past today. Other periods stay
@@ -39,55 +53,68 @@ export function periodToReportsRange(period: ReportsPeriod): ReportsRange {
   const { start, end } = (() => {
     switch (period) {
       case "1M": {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        return { start: monthStart, end: monthEnd };
+        return {
+          start: { year: today.year, month: today.month, day: 1 },
+          end: {
+            year: today.year,
+            month: today.month,
+            day: daysInCalendarMonth(today.year, today.month),
+          },
+        };
       }
       case "3M":
         return {
-          start: new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0),
+          start: addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -2),
           end: today,
         };
       case "6M":
         return {
-          start: new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0),
+          start: addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -5),
           end: today,
         };
       case "YTD":
-        return { start: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0), end: today };
+        return { start: { year: today.year, month: 1, day: 1 }, end: today };
       case "1Y":
         return {
-          start: new Date(now.getFullYear(), now.getMonth() - 11, 1, 0, 0, 0, 0),
+          start: addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -11),
           end: today,
         };
     }
   })();
 
   return {
-    start,
-    end,
-    days: daysBetweenInclusive(start, end),
-    months: monthsBetweenInclusive(start, end),
+    start: zonedCalendarDateBoundaryToDate(start, "start", timezone),
+    end: zonedCalendarDateBoundaryToDate(end, "end", timezone),
+    days: calendarDaysBetweenInclusive(start, end),
+    months: calendarMonthsBetweenInclusive(start, end),
   };
 }
 
 /** Comparison range — equally-sized prior window or same period last year. */
-export function comparisonRange(range: ReportsRange, mode: ComparisonMode): ReportsRange | null {
+export function comparisonRange(
+  range: ReportsRange,
+  mode: ComparisonMode,
+  timezone?: string | null,
+): ReportsRange | null {
   if (mode === "none") return null;
+  const startParts = getZonedDateParts(range.start, timezone);
+  const endParts = getZonedDateParts(range.end, timezone);
   if (mode === "yoy") {
-    const start = new Date(range.start);
-    start.setFullYear(start.getFullYear() - 1);
-    const end = new Date(range.end);
-    end.setFullYear(end.getFullYear() - 1);
-    return { start, end, days: range.days, months: range.months };
+    const start = subtractCalendarYear(startParts);
+    const end = subtractCalendarYear(endParts);
+    return {
+      start: zonedCalendarDateBoundaryToDate(start, "start", timezone),
+      end: zonedCalendarDateBoundaryToDate(end, "end", timezone),
+      days: range.days,
+      months: range.months,
+    };
   }
   // mode === "prior" — equally sized window ending the day before `range.start`
-  const span = range.end.getTime() - range.start.getTime();
-  const priorEnd = new Date(range.start.getTime() - 1);
-  const priorStart = new Date(priorEnd.getTime() - span);
+  const priorEnd = addCalendarDays(startParts, -1);
+  const priorStart = addCalendarDays(priorEnd, -(range.days - 1));
   return {
-    start: priorStart,
-    end: priorEnd,
+    start: zonedCalendarDateBoundaryToDate(priorStart, "start", timezone),
+    end: zonedCalendarDateBoundaryToDate(priorEnd, "end", timezone),
     days: range.days,
     months: range.months,
   };
@@ -124,12 +151,11 @@ export function comparisonLabel(mode: ComparisonMode): string {
   }
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────
-
-function daysBetweenInclusive(a: Date, b: Date): number {
-  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-}
-
-function monthsBetweenInclusive(a: Date, b: Date): number {
-  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) + 1;
+function subtractCalendarYear(date: ZonedCalendarDate): ZonedCalendarDate {
+  const year = date.year - 1;
+  return {
+    year,
+    month: date.month,
+    day: Math.min(date.day, daysInCalendarMonth(year, date.month)),
+  };
 }

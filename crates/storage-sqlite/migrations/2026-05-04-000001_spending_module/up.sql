@@ -245,6 +245,7 @@ CREATE TABLE budget_group_assignments (
     group_id TEXT NOT NULL,
     taxonomy_id TEXT NOT NULL DEFAULT 'spending_categories',
     category_id TEXT NOT NULL,
+    is_system INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
 
@@ -252,6 +253,7 @@ CREATE TABLE budget_group_assignments (
     FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE CASCADE,
 
     CHECK (taxonomy_id = 'spending_categories'),
+    CHECK (is_system IN (0, 1)),
     UNIQUE (taxonomy_id, category_id)
 );
 
@@ -340,12 +342,12 @@ CREATE INDEX idx_budget_rollover_settings_group ON budget_rollover_settings(grou
 -- tracker design. Categories without a direct design counterpart fall back to
 -- Flexoki 500/600 shades (see apps/frontend/src/globals.css).
 INSERT INTO budget_groups (id, name, key, color, icon, sort_order, is_system) VALUES
-  ('budget_group_needs',    'Needs',    'needs',    '#4F6B92', 'Home',          1, 1),
-  ('budget_group_wants',    'Wants',    'wants',    '#8E7CB3', 'Sparkles',      2, 1),
-  ('budget_group_savings',  'Savings',  'savings',  '#6B8E54', 'PiggyBank',     3, 1),
-  ('budget_group_giving',   'Giving',   'giving',   '#A35742', 'Gift',          4, 1),
-  ('budget_group_personal', 'Personal', 'personal', '#B89A4C', 'User',          5, 1),
-  ('budget_group_other',    'Other',    'other',    '#9C998E', 'MoreHorizontal',99, 1);
+  ('032ecb02-5912-42e8-9724-2cd566fc08d5', 'Needs',    'needs',    '#4F6B92', 'Home',          1, 1),
+  ('a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'Wants',    'wants',    '#8E7CB3', 'Sparkles',      2, 1),
+  ('1fb6f2a3-3245-4702-83e8-ab116458d13e', 'Savings',  'savings',  '#6B8E54', 'PiggyBank',     3, 1),
+  ('8cbd26c8-e3b2-4176-8c61-e5c11e10b808', 'Giving',   'giving',   '#A35742', 'Gift',          4, 1),
+  ('3ff71753-5dd5-4372-9ca2-63d8d9a04851', 'Personal', 'personal', '#B89A4C', 'User',          5, 1),
+  ('6e25d097-0c73-4521-9407-d47e8dfb73e2', 'Other',    'other',    '#9C998E', 'MoreHorizontal',99, 1);
 
 INSERT INTO taxonomies (id, name, color, description, is_system, is_single_select, sort_order, scope)
 VALUES
@@ -377,22 +379,22 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
   ('cat_savings',         'spending_categories', NULL, 'Savings',          'savings',         '#6B8E54', 'PiggyBank',     14),
   ('cat_other_expense',   'spending_categories', NULL, 'Other Expenses',   'other_expense',   '#B6B2A4', 'MoreHorizontal',99);
 
-INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id) VALUES
-  ('bga_cat_housing',       'budget_group_needs',    'spending_categories', 'cat_housing'),
-  ('bga_cat_groceries',     'budget_group_needs',    'spending_categories', 'cat_groceries'),
-  ('bga_cat_transport',     'budget_group_needs',    'spending_categories', 'cat_transport'),
-  ('bga_cat_health',        'budget_group_needs',    'spending_categories', 'cat_health'),
-  ('bga_cat_bills',         'budget_group_needs',    'spending_categories', 'cat_bills'),
-  ('bga_cat_fees',          'budget_group_needs',    'spending_categories', 'cat_fees'),
-  ('bga_cat_education',     'budget_group_needs',    'spending_categories', 'cat_education'),
-  ('bga_cat_food',          'budget_group_wants',    'spending_categories', 'cat_food'),
-  ('bga_cat_shopping',      'budget_group_wants',    'spending_categories', 'cat_shopping'),
-  ('bga_cat_entertainment', 'budget_group_wants',    'spending_categories', 'cat_entertainment'),
-  ('bga_cat_travel',        'budget_group_wants',    'spending_categories', 'cat_travel'),
-  ('bga_cat_gifts',         'budget_group_giving',   'spending_categories', 'cat_gifts'),
-  ('bga_cat_personal',      'budget_group_personal', 'spending_categories', 'cat_personal'),
-  ('bga_cat_savings',       'budget_group_savings',  'spending_categories', 'cat_savings'),
-  ('bga_cat_other_expense', 'budget_group_other',    'spending_categories', 'cat_other_expense');
+INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id, is_system) VALUES
+  ('d36f8d92-36f8-4e07-b4b4-9e979ce8a9f4', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_housing', 1),
+  ('c9a1ef0d-72b2-4f75-858d-5f48e5bc7626', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_groceries', 1),
+  ('e9543a4c-dead-42f6-9e73-7343e8f43392', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_transport', 1),
+  ('aa46cdeb-d224-4f3f-9ffb-f6331bafeade', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_health', 1),
+  ('00769d66-fac3-45e9-9e98-1db5d4447bec', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_bills', 1),
+  ('9eeaa7b8-aa98-4861-94d3-54650226d9cc', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_fees', 1),
+  ('5ba8b7fa-bd44-456a-9165-dfdf554bfe10', '032ecb02-5912-42e8-9724-2cd566fc08d5', 'spending_categories', 'cat_education', 1),
+  ('2f4bbcbd-8120-4fbe-ab4a-85f7c406e488', 'a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'spending_categories', 'cat_food', 1),
+  ('39148a03-c9e9-40e4-867f-5949146b85b8', 'a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'spending_categories', 'cat_shopping', 1),
+  ('c2721f07-e7b6-4c74-b449-f138a7d7dabf', 'a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'spending_categories', 'cat_entertainment', 1),
+  ('5a2a7585-9f60-4a4b-9cbe-420432720f28', 'a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'spending_categories', 'cat_travel', 1),
+  ('d48afe20-18d3-422e-bc26-bd16f4d9d78c', '8cbd26c8-e3b2-4176-8c61-e5c11e10b808', 'spending_categories', 'cat_gifts', 1),
+  ('dc8d3b07-dbc5-4134-bc31-9f65a7f726bc', '3ff71753-5dd5-4372-9ca2-63d8d9a04851', 'spending_categories', 'cat_personal', 1),
+  ('2f46a6a5-dda6-41c7-b372-a0d4f2e571eb', '1fb6f2a3-3245-4702-83e8-ab116458d13e', 'spending_categories', 'cat_savings', 1),
+  ('fb622784-fb8a-497d-8b36-8eb8f347c222', '6e25d097-0c73-4521-9407-d47e8dfb73e2', 'spending_categories', 'cat_other_expense', 1);
 
 -- ----------------------------------------------------------------------------
 -- 9b. Spending Categories: SUBCATEGORIES
@@ -501,18 +503,17 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
 -- ============================================================================
 
 INSERT INTO spending_event_types (id, key, name, color) VALUES
-  ('event-type-travel',           'travel',           'Travel',           '#7B96C9'),
-  ('event-type-holiday',          'holiday',          'Holiday',          '#6B8E54'),
-  ('event-type-business',         'business',         'Business',         '#B89A4C'),
-  ('event-type-education',        'education',        'Education',        '#5A7A3E'),
-  ('event-type-medical',          'medical',          'Medical',          '#B0552E'),
-  ('event-type-special-occasion', 'special_occasion', 'Special Occasion', '#8E7CB3'),
-  ('event-type-other',            'other',            'Other',            '#9C998E');
+  ('255600dc-c2a3-47e0-979d-a602c21fc337', 'travel',           'Travel',           '#7B96C9'),
+  ('51e3eedb-5484-45ba-a525-6b88209c46ed', 'holiday',          'Holiday',          '#6B8E54'),
+  ('d9871ccb-5396-4c70-ac08-5b07ed90e64a', 'business',         'Business',         '#B89A4C'),
+  ('22442173-c794-45bf-97ee-9b3f9a7c8ba3', 'education',        'Education',        '#5A7A3E'),
+  ('94fc13ed-ac40-466b-8071-64f1e3c72204', 'medical',          'Medical',          '#B0552E'),
+  ('1aaab8fb-8fd9-4543-bd46-d9ee4a5a8564', 'special_occasion', 'Special Occasion', '#8E7CB3'),
+  ('fa4812ee-e06e-4117-a819-e4d88b7acbaf', 'other',            'Other',            '#9C998E');
 
 -- ============================================================================
 -- 9. SEED: ENABLE SPENDING MODULE BY DEFAULT
 -- ============================================================================
 
-INSERT INTO app_settings (setting_key, setting_value)
-VALUES ('spending.enabled', 'true')
-ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value;
+INSERT OR IGNORE INTO app_settings (setting_key, setting_value)
+VALUES ('spending.enabled', 'true');

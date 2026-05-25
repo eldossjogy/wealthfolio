@@ -19,13 +19,17 @@ impl RuleMatchType {
             Self::Regex => "regex",
         }
     }
-    pub fn parse(s: &str) -> Self {
+    pub fn try_parse(s: &str) -> Option<Self> {
         match s {
-            "starts_with" => Self::StartsWith,
-            "exact" => Self::Exact,
-            "regex" => Self::Regex,
-            _ => Self::Contains,
+            "contains" => Some(Self::Contains),
+            "starts_with" => Some(Self::StartsWith),
+            "exact" => Some(Self::Exact),
+            "regex" => Some(Self::Regex),
+            _ => None,
         }
+    }
+    pub fn parse(s: &str) -> Self {
+        Self::try_parse(s).unwrap_or(Self::Contains)
     }
 }
 
@@ -110,6 +114,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_parse_rejects_unknown_match_type() {
+        assert_eq!(
+            RuleMatchType::try_parse("contains"),
+            Some(RuleMatchType::Contains)
+        );
+        assert_eq!(
+            RuleMatchType::try_parse("regex"),
+            Some(RuleMatchType::Regex)
+        );
+        assert_eq!(RuleMatchType::try_parse("glob"), None);
+    }
 
     #[test]
     fn update_rule_preserves_explicit_null_nullable_fields() {

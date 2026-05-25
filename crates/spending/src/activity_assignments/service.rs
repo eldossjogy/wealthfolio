@@ -99,6 +99,19 @@ impl ActivityTaxonomyAssignmentService {
         }
         self.repo.assign_many_single_select(items).await
     }
+
+    pub async fn bulk_apply_rule_assignments(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.repo
+            .assign_rule_many_single_select(items, only_uncategorized)
+            .await
+    }
 }
 
 /// Lightweight input for the bulk-assign service method. Doesn't carry weight

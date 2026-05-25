@@ -806,7 +806,7 @@ impl ActivityRepositoryTrait for ActivityRepository {
             results.extend(activities_db.into_iter().map(Activity::from));
         }
 
-        results.sort_by(|a, b| a.activity_date.cmp(&b.activity_date));
+        results.sort_by_key(|a| a.activity_date);
         Ok(results)
     }
 

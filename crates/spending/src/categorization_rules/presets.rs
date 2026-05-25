@@ -144,6 +144,7 @@ pub fn installed_rule_keys<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::categorization_rules::RuleMatchType;
     use regex::Regex;
 
     #[test]
@@ -164,6 +165,13 @@ mod tests {
                 assert!(
                     !rule.category_key.trim().is_empty(),
                     "rule {} has an empty categoryKey",
+                    rule.key
+                );
+                assert!(
+                    RuleMatchType::try_parse(&rule.match_type).is_some(),
+                    "unknown matchType {} in preset {} rule {}",
+                    rule.match_type,
+                    preset.preset_id,
                     rule.key
                 );
                 if rule.match_type == "regex" {

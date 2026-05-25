@@ -112,6 +112,12 @@ const USER_SYNCABLE_ACTIVITIES_FILTER: &str = "is_user_modified = 1 \
          AND (source_record_id IS NULL OR TRIM(source_record_id) = ''))";
 const SPENDING_SETTINGS_FILTER: &str =
     "setting_key IN ('spending.enabled', 'spending.account_ids')";
+const SPENDING_SETTINGS_OVERWRITE_RISK_FILTER: &str = "setting_key = 'spending.account_ids' \
+     OR (setting_key = 'spending.enabled' AND LOWER(setting_value) != 'true')";
+const USER_MODIFIED_BUDGET_GROUPS_FILTER: &str = "is_system = 0 OR updated_at != created_at";
+const USER_MODIFIED_BUDGET_GROUP_ASSIGNMENTS_FILTER: &str =
+    "is_system = 0 OR updated_at != created_at";
+const USER_MODIFIED_SPENDING_EVENT_TYPES_FILTER: &str = "key IS NULL OR updated_at != created_at";
 
 const OVERWRITE_RISK_TABLE_COUNTS: &[(&str, Option<&str>)] = &[
     ("platforms", None),
@@ -131,7 +137,22 @@ const OVERWRITE_RISK_TABLE_COUNTS: &[(&str, Option<&str>)] = &[
     ("import_runs", Some(USER_IMPORT_RUNS_FILTER)),
     ("activities", Some(USER_SYNCABLE_ACTIVITIES_FILTER)),
     ("import_templates", Some("UPPER(scope) != 'SYSTEM'")),
-    ("app_settings", Some(SPENDING_SETTINGS_FILTER)),
+    ("app_settings", Some(SPENDING_SETTINGS_OVERWRITE_RISK_FILTER)),
+    ("activity_taxonomy_assignments", None),
+    ("spending_activity_events", None),
+    ("spending_categorization_rules", None),
+    ("spending_events", None),
+    (
+        "spending_event_types",
+        Some(USER_MODIFIED_SPENDING_EVENT_TYPES_FILTER),
+    ),
+    ("budget_groups", Some(USER_MODIFIED_BUDGET_GROUPS_FILTER)),
+    (
+        "budget_group_assignments",
+        Some(USER_MODIFIED_BUDGET_GROUP_ASSIGNMENTS_FILTER),
+    ),
+    ("budget_targets", None),
+    ("budget_rollover_settings", None),
     ("import_account_templates", None),
     ("taxonomies", Some("is_system = 0")),
     ("taxonomy_categories", Some("taxonomy_id = 'custom_groups'")),
@@ -2329,9 +2350,8 @@ impl AppSyncRepository {
                 let attach_sql =
                     format!("ATTACH DATABASE '{}' AS {}", escaped_path, snapshot_alias);
 
-                // Note: PRAGMA foreign_keys cannot be changed inside a transaction
-                // (SQLite silently ignores it). Instead, APP_SYNC_TABLES is ordered
-                // to respect FK dependencies (parent tables before children).
+                // APP_SYNC_TABLES is parent-first for inserts. Restore clears the
+                // selected tables in reverse order, then inserts in canonical order.
                 diesel::sql_query(attach_sql)
                     .execute(conn)
                     .map_err(StorageError::from)?;
@@ -2360,6 +2380,13 @@ impl AppSyncRepository {
                     .execute(conn)
                     .map_err(StorageError::from)?;
 
+                    struct RestorePlan {
+                        table: String,
+                        clear_sql: String,
+                        copy_sql: String,
+                    }
+
+                    let mut restore_plans = Vec::new();
                     for table in &table_set {
                         let target_columns = load_table_columns(conn, "main", table)?;
                         let source_columns = load_table_columns(conn, &snapshot_alias, table)?;
@@ -2410,18 +2437,29 @@ impl AppSyncRepository {
                             }
                             None => format!("DELETE FROM {table_ident}"),
                         };
-                        diesel::sql_query(clear_sql)
+                        restore_plans.push(RestorePlan {
+                            table: table.clone(),
+                            clear_sql,
+                            copy_sql,
+                        });
+                    }
+
+                    for plan in restore_plans.iter().rev() {
+                        diesel::sql_query(&plan.clear_sql)
                             .execute(conn)
                             .map_err(StorageError::from)?;
-                        if table == "holdings_snapshots" {
+                        if plan.table == "holdings_snapshots" {
                             delete_orphan_snapshot_rows(conn)?;
                         }
-                        diesel::sql_query(copy_sql)
+                    }
+
+                    for plan in &restore_plans {
+                        diesel::sql_query(&plan.copy_sql)
                             .execute(conn)
                             .map_err(StorageError::from)?;
 
                         let state_row = SyncTableStateDB {
-                            table_name: table.clone(),
+                            table_name: plan.table.clone(),
                             enabled: 1,
                             last_snapshot_restore_at: Some(now.clone()),
                             last_incremental_apply_at: None,

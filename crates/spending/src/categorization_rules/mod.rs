@@ -8,10 +8,10 @@ pub mod presets;
 pub mod service;
 pub mod traits;
 
-pub use matcher::{match_rules, RuleMatch};
+pub use matcher::{compile_regex_pattern, match_rules, RuleMatch, MAX_REGEX_PATTERN_LEN};
 pub use model::{
     CategorizationRule, NewCategorizationRule, RuleMatchType, UpdateCategorizationRule,
 };
 pub use presets::{ImportPresetResult, RemovePresetResult, RulePreset, RulePresetSummary};
 pub use service::CategorizationRulesService;
-pub use traits::CategorizationRulesRepositoryTrait;
+pub use traits::{CategorizationRulesRepositoryTrait, PresetImportCounts};
