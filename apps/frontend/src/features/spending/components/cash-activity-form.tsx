@@ -139,7 +139,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
       accountId: activity?.accountId ?? "",
       activityType: (activity?.activityType as FormValues["activityType"]) ?? "WITHDRAWAL",
       activityDate: activity?.activityDate ? new Date(activity.activityDate) : new Date(),
-      amount: activity?.amount ? parseFloat(activity.amount) : 0,
+      amount: activity?.amount ? Math.abs(parseFloat(activity.amount)) : 0,
       notes: activity?.notes ?? "",
       category:
         activity?.categoryTaxonomyId && activity?.categoryId
@@ -154,7 +154,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
         accountId: activity?.accountId ?? spendingAccounts[0]?.id ?? "",
         activityType: (activity?.activityType as FormValues["activityType"]) ?? "WITHDRAWAL",
         activityDate: activity?.activityDate ? new Date(activity.activityDate) : new Date(),
-        amount: activity?.amount ? parseFloat(activity.amount) : 0,
+        amount: activity?.amount ? Math.abs(parseFloat(activity.amount)) : 0,
         notes: activity?.notes ?? "",
         category:
           activity?.categoryTaxonomyId && activity?.categoryId

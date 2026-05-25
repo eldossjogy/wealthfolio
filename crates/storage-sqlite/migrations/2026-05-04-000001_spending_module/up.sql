@@ -12,9 +12,82 @@
 --           with full category trees ported from PR #494; 7 default event types
 --
 -- Notes on intentional non-additions:
---   - `accounts` untouched: account names + spending opt-in list cover checking/savings/credit.
+--   - `accounts` only gets a one-time account_type canonicalization for legacy broker raw_type rows.
 --   - `activities.name` not added: existing `notes` column carries payee/merchant string
 --     (rules pattern-match on it; CSV import maps Description → notes).
+
+-- Normalize account_type values that may have been persisted from broker raw_type before
+-- the broker mapper canonicalized them. Keep this list aligned with
+-- crates/connect/src/broker/models.rs::map_broker_account_type.
+UPDATE accounts
+SET account_type = CASE
+    WHEN UPPER(TRIM(account_type)) IN ('CREDIT CARD', 'CREDITCARD', 'CARD')
+        THEN 'CREDIT_CARD'
+    WHEN UPPER(TRIM(account_type)) LIKE '%CREDIT%'
+        AND UPPER(TRIM(account_type)) LIKE '%CARD%'
+        THEN 'CREDIT_CARD'
+    WHEN UPPER(TRIM(account_type)) IN ('CRYPTO', 'CRYPTO_ACCOUNT', 'CRYPTO ACCOUNT')
+        THEN 'CRYPTOCURRENCY'
+    WHEN UPPER(TRIM(account_type)) LIKE '%CRYPTO%'
+        THEN 'CRYPTOCURRENCY'
+    WHEN UPPER(TRIM(account_type)) IN (
+        'DEFAULT',
+        'SECURITY',
+        'RRSP',
+        'RSP',
+        'TFSA',
+        'FHSA',
+        'RESP',
+        'LIRA',
+        'LRSP',
+        'RRIF',
+        'LIF',
+        'DPSP',
+        'IRA',
+        'TRADITIONAL_IRA',
+        'TRADITIONAL IRA',
+        'ROTH_IRA',
+        'ROTH IRA',
+        'ROTH',
+        '401K',
+        '401(K)',
+        '403B',
+        '403(B)',
+        'SEP_IRA',
+        'SEP IRA',
+        'SEP',
+        'SIMPLE_IRA',
+        'SIMPLE IRA',
+        '529',
+        'HSA',
+        'MARGIN',
+        'MARGIN_ACCOUNT',
+        'INVESTMENT',
+        'BROKERAGE',
+        'INDIVIDUAL',
+        'JOINT',
+        'JOINT_ACCOUNT',
+        'CORPORATE',
+        'BUSINESS',
+        'TRUST',
+        'REGISTERED_ACCOUNT'
+    )
+        THEN 'SECURITIES'
+    WHEN UPPER(TRIM(account_type)) LIKE '%RRSP%'
+        OR UPPER(TRIM(account_type)) LIKE '%TFSA%'
+        OR UPPER(TRIM(account_type)) LIKE '%MARGIN%'
+        OR UPPER(TRIM(account_type)) LIKE '%IRA%'
+        OR UPPER(TRIM(account_type)) LIKE '%401%'
+        OR UPPER(TRIM(account_type)) LIKE '%BROKERAGE%'
+        OR UPPER(TRIM(account_type)) LIKE '%INVESTMENT%'
+        THEN 'SECURITIES'
+    WHEN UPPER(TRIM(account_type)) IN ('CASH_ACCOUNT')
+        THEN 'CASH'
+    WHEN UPPER(TRIM(account_type)) LIKE '%CASH%'
+        THEN 'CASH'
+    ELSE account_type
+END
+WHERE account_type NOT IN ('SECURITIES', 'CASH', 'CREDIT_CARD', 'CRYPTOCURRENCY');
 
 -- ============================================================================
 -- 1. EXTEND TAXONOMIES: scope + icon
@@ -47,7 +120,7 @@ CREATE TABLE activity_taxonomy_assignments (
 
 CREATE INDEX ix_activity_taxonomy_assignments_activity ON activity_taxonomy_assignments(activity_id);
 CREATE INDEX ix_activity_taxonomy_assignments_category ON activity_taxonomy_assignments(taxonomy_id, category_id);
-CREATE UNIQUE INDEX ix_activity_taxonomy_assignment_unique ON activity_taxonomy_assignments(activity_id, taxonomy_id, category_id);
+CREATE UNIQUE INDEX ix_activity_taxonomy_assignment_unique ON activity_taxonomy_assignments(activity_id, taxonomy_id);
 
 -- ============================================================================
 -- 3. EVENT_TYPES (lookup) + EVENTS

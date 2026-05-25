@@ -481,7 +481,7 @@ interface ImportContextValue {
     drafts: DraftActivity[],
     options?: { revision?: number },
   ) => Promise<ValidationResult>;
-  previewAssets: (drafts: DraftActivity[]) => Promise<void>;
+  previewAssets: (drafts: DraftActivity[], options?: { revision?: number }) => Promise<void>;
 }
 
 const ImportContext = createContext<ImportContextValue | null>(null);
@@ -582,7 +582,7 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
         let updatedDrafts = drafts;
         if (activitiesToValidate.length > 0) {
           const validated = await checkActivitiesImport({ activities: activitiesToValidate });
-          if (run !== validationRunRef.current) {
+          if (run !== validationRunRef.current || draftRevisionRef.current > requestedRevision) {
             return { ok: false, hasErrors: false };
           }
 
@@ -652,15 +652,16 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
             } as DraftActivity;
           });
         }
-        if (run === validationRunRef.current) {
-          dispatch({ type: "SET_VALIDATED_DRAFT_ACTIVITIES", payload: updatedDrafts });
-          dispatch({ type: "MARK_VALIDATED", payload: requestedRevision });
+        if (run !== validationRunRef.current || draftRevisionRef.current > requestedRevision) {
+          return { ok: false, hasErrors: false };
         }
+        dispatch({ type: "SET_VALIDATED_DRAFT_ACTIVITIES", payload: updatedDrafts });
+        dispatch({ type: "MARK_VALIDATED", payload: requestedRevision });
         const hasErrors = updatedDrafts.some((d) => d.status !== "skipped" && d.status === "error");
         return { ok: true, hasErrors };
       } catch (error) {
         logger.error(`Backend validation failed: ${error}`);
-        if (run === validationRunRef.current) {
+        if (run === validationRunRef.current && draftRevisionRef.current <= requestedRevision) {
           dispatch({
             type: "SET_VALIDATION_ERROR",
             payload: "Backend validation failed. Retry validation before importing.",
@@ -677,8 +678,9 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
   );
 
   const previewAssets = useCallback(
-    async (drafts: DraftActivity[]) => {
+    async (drafts: DraftActivity[], options?: { revision?: number }) => {
       const run = ++previewRunRef.current;
+      const requestedRevision = options?.revision ?? draftRevisionRef.current;
       const candidates = drafts
         .map(buildImportAssetCandidateFromDraft)
         .filter((c): c is NonNullable<typeof c> => c !== null)
@@ -690,7 +692,7 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
       dispatch({ type: "SET_ASSET_PREVIEW_ERROR", payload: null });
       try {
         const preview = await previewImportAssets({ candidates });
-        if (run !== previewRunRef.current) return;
+        if (run !== previewRunRef.current || draftRevisionRef.current > requestedRevision) return;
         dispatch({ type: "SET_ASSET_PREVIEW_ITEMS", payload: preview });
         dispatch({ type: "CLEAR_PENDING_IMPORT_ASSETS" });
 
@@ -718,7 +720,7 @@ export function ImportProvider({ children, initialAccountId }: ImportProviderPro
         }
         dispatch({ type: "SET_DRAFT_ACTIVITIES", payload: nextDrafts });
       } catch (error) {
-        if (run !== previewRunRef.current) return;
+        if (run !== previewRunRef.current || draftRevisionRef.current > requestedRevision) return;
         dispatch({
           type: "SET_ASSET_PREVIEW_ERROR",
           payload: error instanceof Error ? error.message : "Failed to preview import assets.",

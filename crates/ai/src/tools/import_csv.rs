@@ -159,7 +159,7 @@ pub struct ImportCsvMappingOutput {
     /// Headers detected by parse_csv.
     pub detected_headers: Vec<String>,
 
-    /// First few data rows (≤10) so the UI can preview without re-parsing.
+    /// Redacted in persisted tool results; the UI reparses live csvContent from tool args.
     pub sample_rows: Vec<Vec<String>>,
 
     /// Total number of rows parsed (before truncation).
@@ -699,8 +699,6 @@ fn estimate_confidence(
     }
 }
 
-const MAX_SAMPLE_ROWS: usize = 10;
-
 fn valid_account_id(value: &str, accounts: &[Account]) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1017,12 +1015,7 @@ impl<E: AiEnvironment + 'static> Tool for ImportCsvTool<E> {
         if total_rows == 0 {
             debug!("import_csv: parse_csv returned 0 data rows");
         }
-        let sample_rows: Vec<Vec<String>> = parsed_csv
-            .rows
-            .iter()
-            .take(MAX_SAMPLE_ROWS)
-            .cloned()
-            .collect();
+        let sample_rows = Vec::new();
 
         // If we have no saved template, build the mapping from LLM + auto-detect.
         let applied_mapping = if let Some(m) = mapping {

@@ -82,6 +82,17 @@ impl EventsService {
     pub async fn get_event(&self, id: &str) -> Result<Option<Event>> {
         self.events_repo.get(id).await
     }
+
+    pub fn contains_activity_date(
+        &self,
+        event: &Event,
+        activity_date: &DateTime<Utc>,
+    ) -> Result<bool> {
+        let start = parse_event_start_bound(&event.start_date)?;
+        let end = parse_event_end_bound(&event.end_date)?;
+        Ok(activity_date >= &start && activity_date <= &end)
+    }
+
     pub async fn create_event(&self, new_event: NewEvent) -> Result<Event> {
         validate_event_range(&new_event.start_date, &new_event.end_date)?;
         self.events_repo.create(new_event).await

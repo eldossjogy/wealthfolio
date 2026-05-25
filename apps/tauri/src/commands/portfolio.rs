@@ -104,6 +104,22 @@ fn holdings_account_ids(
         .collect())
 }
 
+fn performance_account_ids(
+    state: &ServiceContext,
+    account_ids: &[String],
+) -> Result<Vec<String>, String> {
+    Ok(state
+        .account_service()
+        .get_accounts_by_ids(account_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|account| {
+            account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+        })
+        .map(|account| account.id)
+        .collect())
+}
+
 // ============================================================================
 // Snapshot Info Types
 // ============================================================================
@@ -343,17 +359,20 @@ pub async fn get_historical_valuations(
             .portfolio_service()
             .resolve_account_scope(&account_filter, &base_currency)
             .map_err(|e| e.to_string())?;
-        if resolved.account_ids.len() == 1 {
+        let account_ids = holdings_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            Ok(Vec::new())
+        } else if account_ids.len() == 1 {
             state
                 .valuation_service()
-                .get_historical_valuations(&resolved.account_ids[0], from_date_opt, to_date_opt)
+                .get_historical_valuations(&account_ids[0], from_date_opt, to_date_opt)
                 .map_err(|e| e.to_string())
         } else {
             state
                 .valuation_service()
                 .get_historical_valuations_for_accounts(
                     &resolved.scope_id,
-                    &resolved.account_ids,
+                    &account_ids,
                     &resolved.base_currency,
                     from_date_opt,
                     to_date_opt,
@@ -361,6 +380,11 @@ pub async fn get_historical_valuations(
                 .map_err(|e| e.to_string())
         }
     } else if let Some(account_id) = account_id {
+        let account_ids =
+            holdings_account_ids(state.inner().as_ref(), std::slice::from_ref(&account_id))?;
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         state
             .valuation_service()
             .get_historical_valuations(&account_id, from_date_opt, to_date_opt)
@@ -371,11 +395,15 @@ pub async fn get_historical_valuations(
             .portfolio_service()
             .resolve_account_scope(&AccountScope::All, &base_currency)
             .map_err(|e| e.to_string())?;
+        let account_ids = holdings_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
         state
             .valuation_service()
             .get_historical_valuations_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 from_date_opt,
                 to_date_opt,
@@ -521,12 +549,21 @@ pub async fn calculate_performance_history(
             .portfolio_service()
             .resolve_account_scope(&account_filter, &base_currency)
             .map_err(|e| e.to_string())?;
-        let tracking_modes = account_tracking_modes(state.inner().as_ref(), &resolved.account_ids)?;
+        let account_ids = performance_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start_date_opt,
+                end_date_opt,
+            ));
+        }
+        let tracking_modes = account_tracking_modes(state.inner().as_ref(), &account_ids)?;
         state
             .performance_service()
             .calculate_performance_history_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start_date_opt,
@@ -643,12 +680,21 @@ pub async fn calculate_performance_summary(
             .portfolio_service()
             .resolve_account_scope(&account_filter, &base_currency)
             .map_err(|e| e.to_string())?;
-        let tracking_modes = account_tracking_modes(state.inner().as_ref(), &resolved.account_ids)?;
+        let account_ids = performance_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start_date_opt,
+                end_date_opt,
+            ));
+        }
+        let tracking_modes = account_tracking_modes(state.inner().as_ref(), &account_ids)?;
         state
             .performance_service()
             .calculate_performance_summary_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start_date_opt,

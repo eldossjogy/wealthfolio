@@ -189,8 +189,8 @@ async fn get_activity_assignments(
     Path(activity_id): Path<String>,
 ) -> ApiResult<Json<Vec<ActivityTaxonomyAssignment>>> {
     let rows = state
-        .activity_taxonomy_assignment_service
-        .list_for_activity(&activity_id)
+        .cash_activity_service
+        .list_assignments(&activity_id)
         .await?;
     Ok(Json(rows))
 }
@@ -208,8 +208,8 @@ async fn assign_activity_category(
     Json(body): Json<AssignBody>,
 ) -> ApiResult<Json<ActivityTaxonomyAssignment>> {
     let row = state
-        .activity_taxonomy_assignment_service
-        .assign_single(&activity_id, &body.taxonomy_id, &body.category_id)
+        .cash_activity_service
+        .assign_category(&activity_id, &body.taxonomy_id, &body.category_id)
         .await?;
     Ok(Json(row))
 }
@@ -219,8 +219,8 @@ async fn unassign_activity_category(
     Path((activity_id, taxonomy_id)): Path<(String, String)>,
 ) -> ApiResult<()> {
     state
-        .activity_taxonomy_assignment_service
-        .unassign(&activity_id, &taxonomy_id)
+        .cash_activity_service
+        .unassign_category(&activity_id, &taxonomy_id)
         .await?;
     Ok(())
 }
@@ -235,8 +235,8 @@ async fn bulk_assign_categories(
         )));
     }
     let result = state
-        .activity_taxonomy_assignment_service
-        .assign_many_single_select(&items)
+        .cash_activity_service
+        .bulk_assign_categories(&items)
         .await?;
     Ok(Json(result))
 }

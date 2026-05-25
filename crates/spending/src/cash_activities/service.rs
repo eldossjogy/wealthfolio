@@ -16,9 +16,15 @@ use super::{
     },
     CASH_ACTIVITY_TYPES,
 };
-use crate::activity_assignments::{ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService};
+use crate::activity_assignments::{
+    ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService, BulkCategoryAssignment,
+};
 use crate::activity_classification::{classify_activity, SpendingClassification};
+use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
+
+const SPENDING_TAXONOMY: &str = "spending_categories";
+const INCOME_TAXONOMY: &str = "income_sources";
 
 /// Service for listing/searching activities scoped to the user's spending accounts.
 /// Mutation (create/update/delete) goes through the existing core ActivityService;
@@ -29,6 +35,7 @@ pub struct CashActivityService {
     settings: Arc<SpendingSettingsService>,
     assignments: Arc<ActivityTaxonomyAssignmentService>,
     activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
+    events: Arc<EventsService>,
 }
 
 impl CashActivityService {
@@ -38,6 +45,7 @@ impl CashActivityService {
         settings: Arc<SpendingSettingsService>,
         assignments: Arc<ActivityTaxonomyAssignmentService>,
         activity_events: Arc<dyn crate::activity_events::ActivityEventsRepositoryTrait>,
+        events: Arc<EventsService>,
     ) -> Self {
         Self {
             activity_repo,
@@ -45,6 +53,7 @@ impl CashActivityService {
             settings,
             assignments,
             activity_events,
+            events,
         }
     }
 
@@ -367,6 +376,44 @@ impl CashActivityService {
             .collect())
     }
 
+    pub async fn list_assignments(
+        &self,
+        activity_id: &str,
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        self.ensure_activity_in_spending_scope(activity_id).await?;
+        self.assignments.list_for_activity(activity_id).await
+    }
+
+    pub async fn assign_category(
+        &self,
+        activity_id: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> Result<ActivityTaxonomyAssignment> {
+        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id)
+            .await?;
+        self.assignments
+            .assign_single(activity_id, taxonomy_id, category_id)
+            .await
+    }
+
+    pub async fn unassign_category(&self, activity_id: &str, taxonomy_id: &str) -> Result<()> {
+        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id)
+            .await?;
+        self.assignments.unassign(activity_id, taxonomy_id).await
+    }
+
+    pub async fn bulk_assign_categories(
+        &self,
+        items: &[BulkCategoryAssignment],
+    ) -> Result<Vec<ActivityTaxonomyAssignment>> {
+        for item in items {
+            self.ensure_activity_assignment_allowed(&item.activity_id, &item.taxonomy_id)
+                .await?;
+        }
+        self.assignments.assign_many_single_select(items).await
+    }
+
     /// Set or clear the spending-event tag on an activity. Pass `None` to clear.
     ///
     /// **Return contract**: returns the underlying `Activity` row, which does
@@ -377,12 +424,26 @@ impl CashActivityService {
     /// caller (`useCashActivities`) discards this return value and refetches
     /// via the spending caches, which is the intended pattern.
     pub async fn set_event(&self, activity_id: &str, event_id: Option<String>) -> Result<Activity> {
+        let activity = self.ensure_activity_in_spending_scope(activity_id).await?;
+        if let Some(ref event_id) = event_id {
+            let event = self
+                .events
+                .get_event(event_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Spending event not found: {event_id}"))?;
+            if !self
+                .events
+                .contains_activity_date(&event, &activity.activity_date)?
+            {
+                return Err(anyhow::anyhow!(
+                    "Activity date is outside the selected event date range"
+                ));
+            }
+        }
         self.activity_events
             .set_activity_event_tag(activity_id, event_id)
             .await?;
-        self.activity_repo
-            .get_activity(activity_id)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))
+        Ok(activity)
     }
 
     fn resolve_target_accounts(
@@ -416,6 +477,50 @@ impl CashActivityService {
             .collect();
 
         Ok((target_accounts, account_types))
+    }
+
+    async fn ensure_activity_assignment_allowed(
+        &self,
+        activity_id: &str,
+        taxonomy_id: &str,
+    ) -> Result<Activity> {
+        if taxonomy_id != SPENDING_TAXONOMY && taxonomy_id != INCOME_TAXONOMY {
+            return Err(anyhow::anyhow!(
+                "Taxonomy is not assignable to spending activities"
+            ));
+        }
+        self.ensure_activity_in_spending_scope(activity_id).await
+    }
+
+    async fn ensure_activity_in_spending_scope(&self, activity_id: &str) -> Result<Activity> {
+        let s = self.settings.get().await?;
+        if !s.enabled {
+            return Err(anyhow::anyhow!("Spending tracking is disabled"));
+        }
+
+        let activity = self
+            .activity_repo
+            .get_activity(activity_id)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        if !s.account_ids.iter().any(|id| id == &activity.account_id) {
+            return Err(anyhow::anyhow!(
+                "Activity account is not opted into spending tracking"
+            ));
+        }
+
+        let account = self
+            .account_repo
+            .get_by_id(&activity.account_id)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        if account.is_archived
+            || !account_supports_purpose(&account.account_type, AccountPurpose::Spending)
+        {
+            return Err(anyhow::anyhow!(
+                "Activity account does not support spending tracking"
+            ));
+        }
+
+        Ok(activity)
     }
 }
 

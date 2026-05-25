@@ -185,8 +185,8 @@ pub async fn get_activity_assignments(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<Vec<ActivityTaxonomyAssignment>, String> {
     state
-        .activity_taxonomy_assignment_service()
-        .list_for_activity(&activity_id)
+        .cash_activity_service()
+        .list_assignments(&activity_id)
         .await
         .map_err(|e| format!("Failed to load activity assignments: {}", e))
 }
@@ -199,8 +199,8 @@ pub async fn assign_activity_category(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<ActivityTaxonomyAssignment, String> {
     state
-        .activity_taxonomy_assignment_service()
-        .assign_single(&activity_id, &taxonomy_id, &category_id)
+        .cash_activity_service()
+        .assign_category(&activity_id, &taxonomy_id, &category_id)
         .await
         .map_err(|e| format!("Failed to assign activity category: {}", e))
 }
@@ -212,8 +212,8 @@ pub async fn unassign_activity_category(
     state: State<'_, Arc<ServiceContext>>,
 ) -> Result<(), String> {
     state
-        .activity_taxonomy_assignment_service()
-        .unassign(&activity_id, &taxonomy_id)
+        .cash_activity_service()
+        .unassign_category(&activity_id, &taxonomy_id)
         .await
         .map_err(|e| format!("Failed to clear activity category: {}", e))
 }
@@ -232,8 +232,8 @@ pub async fn bulk_assign_categories(
         ));
     }
     state
-        .activity_taxonomy_assignment_service()
-        .assign_many_single_select(&items)
+        .cash_activity_service()
+        .bulk_assign_categories(&items)
         .await
         .map_err(|e| format!("Failed to bulk assign categories: {}", e))
 }

@@ -230,16 +230,19 @@ pub async fn get_historical_valuations_for_scope(
         })
         .transpose()?;
     let resolved = resolve_scope(&body.filter, &state)?;
-    let vals = if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    let vals = if account_ids.is_empty() {
+        Vec::new()
+    } else if account_ids.len() == 1 {
         state
             .valuation_service
-            .get_historical_valuations(&resolved.account_ids[0], start, end)?
+            .get_historical_valuations(&account_ids[0], start, end)?
     } else {
         state
             .valuation_service
             .get_historical_valuations_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 start,
                 end,

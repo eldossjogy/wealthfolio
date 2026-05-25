@@ -18,7 +18,7 @@ import { cn, formatDate, formatDateISO } from "@/lib/utils";
 
 import { CategoryIcon } from "../category-chips";
 import { useCashActivitySearch } from "../../hooks/use-cash-activity-search";
-import { isCashActivityOutflow } from "../../lib/constants";
+import { getActivitySpendingAmount } from "../../lib/constants";
 
 const SPENDING_TAXONOMY = "spending_categories";
 
@@ -118,9 +118,8 @@ export function CategoryTransactionsSheet({
     let outflowCount = 0;
     for (const it of items) {
       const account = accountById.get(it.accountId);
-      const amt = parseFloat(it.amount ?? "0");
-      if (!Number.isFinite(amt)) continue;
-      if (!isCashActivityOutflow(it.activityType, account?.accountType)) continue;
+      const amt = getActivitySpendingAmount(it, account?.accountType);
+      if (amt <= 0) continue;
       outflow += amt;
       outflowCount += 1;
     }
@@ -144,9 +143,8 @@ export function CategoryTransactionsSheet({
     let directAmount = 0; // Items tagged directly to the parent (no sub).
     for (const it of items) {
       const account = accountById.get(it.accountId);
-      const amt = parseFloat(it.amount ?? "0");
-      if (!Number.isFinite(amt)) continue;
-      if (!isCashActivityOutflow(it.activityType, account?.accountType)) continue;
+      const amt = getActivitySpendingAmount(it, account?.accountType);
+      if (amt <= 0) continue;
       const assignment = it.assignments.find((a) => a.taxonomyId === SPENDING_TAXONOMY);
       const subId = assignment?.categoryId;
       if (subId && subMeta.has(subId)) {
@@ -374,7 +372,10 @@ export function CategoryTransactionsSheet({
                   const account = accountById.get(it.accountId);
                   const amt = parseFloat(it.amount ?? "0");
                   const safeAmt = Number.isFinite(amt) ? amt : 0;
-                  const isOutflow = isCashActivityOutflow(it.activityType, account?.accountType);
+                  const spendingAmount = getActivitySpendingAmount(it, account?.accountType);
+                  const isOutflow = spendingAmount > 0;
+                  const displayAmount =
+                    spendingAmount !== 0 ? Math.abs(spendingAmount) : Math.abs(safeAmt);
                   return (
                     <li
                       key={it.id}
@@ -401,7 +402,7 @@ export function CategoryTransactionsSheet({
                         )}
                       >
                         {isOutflow ? "−" : "+"}
-                        <PrivacyAmount value={safeAmt} currency={it.currency} />
+                        <PrivacyAmount value={displayAmount} currency={it.currency} />
                         {it.currency !== currency && (
                           <span className="text-muted-foreground/70 ml-1 text-[9px] uppercase tracking-wide">
                             {it.currency}

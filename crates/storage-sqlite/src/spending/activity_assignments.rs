@@ -148,10 +148,10 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
                     .on_conflict((
                         activity_taxonomy_assignments::activity_id,
                         activity_taxonomy_assignments::taxonomy_id,
-                        activity_taxonomy_assignments::category_id,
                     ))
                     .do_update()
                     .set((
+                        activity_taxonomy_assignments::category_id.eq(&row.category_id),
                         activity_taxonomy_assignments::weight.eq(&row.weight),
                         activity_taxonomy_assignments::source.eq(&row.source),
                         activity_taxonomy_assignments::updated_at.eq(&row.updated_at),

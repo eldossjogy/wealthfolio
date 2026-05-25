@@ -10,7 +10,6 @@ use wealthfolio_core::{
     portfolio, portfolios, quotes, settings, taxonomies,
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
-use wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService;
 use wealthfolio_spending::analytics::AnalyticsService;
 use wealthfolio_spending::budget::BudgetService;
 use wealthfolio_spending::cash_activities::CashActivityService;
@@ -70,7 +69,6 @@ pub struct ServiceContext {
     pub portfolio_service: Arc<dyn portfolios::PortfolioServiceTrait>,
     pub spending_settings_service: Arc<SpendingSettingsService>,
     pub cash_activity_service: Arc<CashActivityService>,
-    pub activity_taxonomy_assignment_service: Arc<ActivityTaxonomyAssignmentService>,
     pub categorization_rules_service: Arc<CategorizationRulesService>,
     pub events_service: Arc<EventsService>,
     pub budget_service: Arc<BudgetService>,
@@ -105,10 +103,6 @@ impl ServiceContext {
 
     pub fn cash_activity_service(&self) -> Arc<CashActivityService> {
         Arc::clone(&self.cash_activity_service)
-    }
-
-    pub fn activity_taxonomy_assignment_service(&self) -> Arc<ActivityTaxonomyAssignmentService> {
-        Arc::clone(&self.activity_taxonomy_assignment_service)
     }
 
     pub fn categorization_rules_service(&self) -> Arc<CategorizationRulesService> {

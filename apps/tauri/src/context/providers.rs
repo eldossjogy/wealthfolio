@@ -226,36 +226,6 @@ pub async fn initialize_context(
         quote_sync_state_repository.clone(),
     ));
 
-    // Spending: cash_activity_service depends on the activity_repository + spending settings
-    //          + the assignments service (so search() can batch-fetch assignments and apply
-    //          status/category filters server-side).
-    let cash_activity_service = Arc::new(
-        wealthfolio_spending::cash_activities::CashActivityService::new(
-            activity_repository.clone(),
-            account_repository.clone(),
-            spending_settings_service.clone(),
-            activity_taxonomy_assignment_service.clone(),
-            activity_events_repo.clone(),
-        ),
-    );
-
-    // Spending: categorization_rules
-    let categorization_rules_repo: Arc<
-        dyn wealthfolio_spending::categorization_rules::CategorizationRulesRepositoryTrait,
-    > = Arc::new(
-        wealthfolio_storage_sqlite::spending::categorization_rules::CategorizationRulesRepository::new(
-            pool.clone(),
-            writer.clone(),
-        ),
-    );
-    let categorization_rules_service = Arc::new(
-        wealthfolio_spending::categorization_rules::CategorizationRulesService::new(
-            categorization_rules_repo,
-            activity_repository.clone(),
-            activity_taxonomy_assignment_service.clone(),
-        ),
-    );
-
     // Spending: events + event_types
     let event_types_repo: Arc<dyn wealthfolio_spending::events::EventTypesRepositoryTrait> =
         Arc::new(
@@ -276,6 +246,37 @@ pub async fn initialize_context(
         activity_repository.clone(),
         activity_events_repo.clone(),
     ));
+
+    // Spending: cash_activity_service depends on the activity_repository + spending settings
+    //          + the assignments service (so search() can batch-fetch assignments and apply
+    //          status/category filters server-side).
+    let cash_activity_service = Arc::new(
+        wealthfolio_spending::cash_activities::CashActivityService::new(
+            activity_repository.clone(),
+            account_repository.clone(),
+            spending_settings_service.clone(),
+            activity_taxonomy_assignment_service.clone(),
+            activity_events_repo.clone(),
+            events_service.clone(),
+        ),
+    );
+
+    // Spending: categorization_rules
+    let categorization_rules_repo: Arc<
+        dyn wealthfolio_spending::categorization_rules::CategorizationRulesRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::categorization_rules::CategorizationRulesRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let categorization_rules_service = Arc::new(
+        wealthfolio_spending::categorization_rules::CategorizationRulesService::new(
+            categorization_rules_repo,
+            activity_repository.clone(),
+            activity_taxonomy_assignment_service.clone(),
+        ),
+    );
 
     // Spending: budget
     let budget_repo: Arc<dyn wealthfolio_spending::budget::BudgetRepositoryTrait> = Arc::new(
@@ -559,7 +560,6 @@ pub async fn initialize_context(
             portfolio_service,
             spending_settings_service,
             cash_activity_service,
-            activity_taxonomy_assignment_service,
             categorization_rules_service,
             events_service,
             budget_service,

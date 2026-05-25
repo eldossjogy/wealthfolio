@@ -453,7 +453,7 @@ function ImportWizardContent() {
           dispatch({ type: "SET_ASSET_PREVIEW_ITEMS", payload: [] });
           dispatch({ type: "CLEAR_PENDING_IMPORT_ASSETS" });
           dispatch(nextStep());
-          void previewAssets(drafts);
+          void previewAssets(drafts, { revision: state.draftRevision + 1 });
           return;
         }
 
@@ -490,7 +490,7 @@ function ImportWizardContent() {
         dispatch({ type: "CLEAR_PENDING_IMPORT_ASSETS" });
         dispatch(nextStep());
         if (importProfile.assetResolutionEnabled) {
-          void previewAssets(drafts); // fire-and-forget: assets step shows spinner
+          void previewAssets(drafts, { revision: state.draftRevision + 1 }); // fire-and-forget: assets step shows spinner
         } else {
           void validateDrafts(drafts, { revision: state.draftRevision + 1 });
         }

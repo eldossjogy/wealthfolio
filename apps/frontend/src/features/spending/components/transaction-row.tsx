@@ -186,7 +186,7 @@ function TransactionRowImpl({
         )}
       >
         {sign}
-        <PrivacyAmount value={safeAmount} currency={a.currency} />
+        <PrivacyAmount value={Math.abs(safeAmount)} currency={a.currency} />
       </TableCell>
       <TableCell>
         <DropdownMenu>

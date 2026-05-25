@@ -125,6 +125,21 @@ fn account_tracking_modes(
         .collect())
 }
 
+fn performance_account_ids(
+    state: &AppState,
+    account_ids: &[String],
+) -> Result<Vec<String>, crate::error::ApiError> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| {
+            account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+        })
+        .map(|account| account.id)
+        .collect())
+}
+
 async fn calculate_performance_history(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PerfBody>,
@@ -139,12 +154,21 @@ async fn calculate_performance_history(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(Json(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start,
+                end,
+            )));
+        }
+        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
         state
             .performance_service
             .calculate_performance_history_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start,
@@ -191,12 +215,21 @@ async fn calculate_performance_summary(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(Json(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start,
+                end,
+            )));
+        }
+        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
         state
             .performance_service
             .calculate_performance_summary_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start,
