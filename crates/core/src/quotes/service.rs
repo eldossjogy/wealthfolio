@@ -68,6 +68,17 @@ pub struct ProviderInfo {
     pub provider_type: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FetchDividendsParams {
+    pub symbol: String,
+    pub exchange_mic: Option<String>,
+    pub instrument_type: Option<InstrumentType>,
+    pub quote_ccy: Option<String>,
+    pub preferred_provider: Option<String>,
+    pub start: Option<NaiveDate>,
+    pub end: Option<NaiveDate>,
+}
+
 fn resolve_effective_quote_currency(asset_quote_ccy: &str, quote_ccy: &str) -> Option<String> {
     if asset_quote_ccy.is_empty() || quote_ccy.is_empty() || asset_quote_ccy == quote_ccy {
         return None;
@@ -444,16 +455,9 @@ pub trait QuoteServiceTrait: Send + Sync {
     ) -> Result<Vec<Quote>>;
 
     /// Fetch cash dividends for a single symbol.
-    async fn fetch_dividends(
-        &self,
-        symbol: &str,
-        exchange_mic: Option<&str>,
-        instrument_type: Option<&InstrumentType>,
-        quote_ccy: Option<&str>,
-        preferred_provider: Option<&str>,
-        start: Option<NaiveDate>,
-        end: Option<NaiveDate>,
-    ) -> Result<Vec<DividendEvent>>;
+    async fn fetch_dividends(&self, _params: FetchDividendsParams) -> Result<Vec<DividendEvent>> {
+        unimplemented!("fetch_dividends is not implemented for this quote service")
+    }
 
     // =========================================================================
     // Sync Operations (via QuoteSyncService)
@@ -1606,16 +1610,17 @@ where
             .await
     }
 
-    async fn fetch_dividends(
-        &self,
-        symbol: &str,
-        exchange_mic: Option<&str>,
-        instrument_type: Option<&InstrumentType>,
-        quote_ccy: Option<&str>,
-        preferred_provider: Option<&str>,
-        start: Option<NaiveDate>,
-        end: Option<NaiveDate>,
-    ) -> Result<Vec<DividendEvent>> {
+    async fn fetch_dividends(&self, params: FetchDividendsParams) -> Result<Vec<DividendEvent>> {
+        let FetchDividendsParams {
+            symbol,
+            exchange_mic,
+            instrument_type,
+            quote_ccy,
+            preferred_provider,
+            start,
+            end,
+        } = params;
+
         let end_date = end.unwrap_or_else(|| Utc::now().date_naive());
         let start_date = start.unwrap_or_else(|| end_date - Duration::days(365 * 5));
         let start_dt = Utc.from_utc_datetime(&start_date.and_hms_opt(0, 0, 0).unwrap());
@@ -1625,15 +1630,19 @@ where
             .map(|provider| serde_json::json!({ "preferred_provider": provider }));
 
         let temp_asset = Asset {
-            id: symbol.to_string(),
-            instrument_symbol: Some(symbol.to_string()),
-            display_code: Some(symbol.to_string()),
+            id: symbol.clone(),
+            instrument_symbol: Some(symbol.clone()),
+            display_code: Some(symbol),
             kind: AssetKind::Investment,
-            instrument_type: Some(instrument_type.cloned().unwrap_or(InstrumentType::Equity)),
-            instrument_exchange_mic: exchange_mic.map(str::to_string),
+            instrument_type: Some(instrument_type.unwrap_or(InstrumentType::Equity)),
+            instrument_exchange_mic: exchange_mic.clone(),
             quote_ccy: quote_ccy
-                .map(str::to_string)
-                .or_else(|| exchange_mic.and_then(mic_to_currency).map(str::to_string))
+                .or_else(|| {
+                    exchange_mic
+                        .as_deref()
+                        .and_then(mic_to_currency)
+                        .map(str::to_string)
+                })
                 .unwrap_or_else(|| "USD".to_string()),
             quote_mode: QuoteMode::Market,
             provider_config,

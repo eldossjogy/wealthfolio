@@ -14,7 +14,8 @@ use axum::{
 use wealthfolio_core::assets::InstrumentType;
 use wealthfolio_core::portfolio::{snapshot::SnapshotRecalcMode, valuation::ValuationRecalcMode};
 use wealthfolio_core::quotes::{
-    LatestQuoteSnapshot, MarketSyncMode, ProviderInfo, Quote, QuoteImport, SymbolSearchResult,
+    FetchDividendsParams, LatestQuoteSnapshot, MarketSyncMode, ProviderInfo, Quote, QuoteImport,
+    SymbolSearchResult,
 };
 use wealthfolio_market_data::{DividendEvent, ExchangeInfo};
 
@@ -99,15 +100,15 @@ async fn fetch_dividends(
         .and_then(InstrumentType::from_external_str);
     let dividends = state
         .quote_service
-        .fetch_dividends(
-            &q.symbol,
-            q.exchange_mic.as_deref(),
-            inst_type.as_ref(),
-            q.quote_ccy.as_deref(),
-            q.provider_id.as_deref(),
-            q.start_date,
-            q.end_date,
-        )
+        .fetch_dividends(FetchDividendsParams {
+            symbol: q.symbol,
+            exchange_mic: q.exchange_mic,
+            instrument_type: inst_type,
+            quote_ccy: q.quote_ccy,
+            preferred_provider: q.provider_id,
+            start: q.start_date,
+            end: q.end_date,
+        })
         .await?;
     Ok(Json(dividends))
 }

@@ -264,7 +264,10 @@ export interface MarketDataAPI {
    * @param symbol Ticker symbol
    * @returns Promise resolving to array of dividend events
    */
-  fetchDividends(symbol: string, options?: FetchDividendsOptions): Promise<DividendEvent[]>;
+  fetchDividends(
+    symbol: string,
+    options?: FetchDividendsOptions,
+  ): Promise<DividendEvent[]>;
 }
 
 /**

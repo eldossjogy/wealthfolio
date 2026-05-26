@@ -11,8 +11,8 @@ use crate::{
 use log::{debug, error, warn};
 use tauri::{AppHandle, State};
 use wealthfolio_core::quotes::{
-    service::ProviderInfo, LatestQuoteSnapshot, MarketSyncMode, Quote, QuoteImport,
-    SymbolSearchResult,
+    service::ProviderInfo, FetchDividendsParams, LatestQuoteSnapshot, MarketSyncMode, Quote,
+    QuoteImport, SymbolSearchResult,
 };
 use wealthfolio_market_data::{DividendEvent, ExchangeInfo};
 
@@ -247,6 +247,7 @@ pub fn get_exchanges() -> Vec<ExchangeInfo> {
 
 /// Fetch dividend events for a symbol through configured market data providers.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_dividends(
     symbol: String,
     exchange_mic: Option<String>,
@@ -273,15 +274,15 @@ pub async fn fetch_dividends(
 
     state
         .quote_service()
-        .fetch_dividends(
-            &symbol,
-            exchange_mic.as_deref(),
-            inst_type.as_ref(),
-            quote_ccy.as_deref(),
-            provider_id.as_deref(),
+        .fetch_dividends(FetchDividendsParams {
+            symbol,
+            exchange_mic,
+            instrument_type: inst_type,
+            quote_ccy,
+            preferred_provider: provider_id,
             start,
             end,
-        )
+        })
         .await
         .map_err(|e| e.to_string())
 }
