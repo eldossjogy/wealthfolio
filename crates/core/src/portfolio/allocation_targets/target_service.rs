@@ -158,6 +158,24 @@ impl TargetProfileServiceTrait for TargetProfileService {
             )))
         })?;
         debug!("Activating target profile: {}", id);
+
+        // Archive any other active profile for the same scope before activating this one.
+        let scope_type = existing.scope_type.as_str();
+        let scope_id = existing.scope_id.as_deref();
+        if let Some(currently_active) = self
+            .repository
+            .get_active_profile_for_scope(scope_type, scope_id)?
+        {
+            if currently_active.id != id {
+                let archived = TargetProfile {
+                    status: ProfileStatus::Archived,
+                    updated_at: Self::now(),
+                    ..currently_active
+                };
+                self.repository.update_profile(archived).await?;
+            }
+        }
+
         let updated = TargetProfile {
             status: ProfileStatus::Active,
             updated_at: Self::now(),

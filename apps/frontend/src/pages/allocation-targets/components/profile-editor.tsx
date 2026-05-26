@@ -1,0 +1,437 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Switch,
+} from "@wealthfolio/ui";
+import { cn } from "@/lib/utils";
+import type { TargetProfile, TaxonomyWithCategories } from "@/lib/types";
+import { useTargetNodes } from "../hooks/use-target-mutations";
+import { useSaveTargetNodes } from "../hooks/use-target-mutations";
+import {
+  useCreateTargetProfile,
+  useUpdateTargetProfile,
+  useActivateTargetProfile,
+} from "../hooks/use-target-mutations";
+import { TargetNodeEditor, type NodeDraft } from "./target-node-editor";
+import { ModelPresetPicker } from "./model-preset-picker";
+import { BUILT_IN_PRESETS } from "./model-preset-picker";
+
+interface ProfileEditorProps {
+  profile: TargetProfile | null;
+  taxonomy: TaxonomyWithCategories;
+  initialPresetId?: string | null;
+  currentAllocation?: Record<string, number>;
+  baseCurrency: string;
+  onSaved: (profileId: string) => void;
+  onCancel: () => void;
+}
+
+const TRIGGER_OPTIONS = [
+  {
+    value: "threshold",
+    label: "Threshold",
+    description: "Rebalance when drift exceeds band",
+    badge: "Recommended",
+  },
+  {
+    value: "manual",
+    label: "Manual",
+    description: "Only rebalance when you trigger it",
+    badge: "Simple",
+  },
+] as const;
+
+const REBALANCE_TO_OPTIONS = [
+  {
+    value: "nearest_band",
+    label: "Nearest band",
+    description: "Minimum trades to come back in band",
+  },
+  {
+    value: "exact_target",
+    label: "Exact target",
+    description: "Aim for precise target percentages",
+  },
+] as const;
+
+function buildInitialNodes(
+  presetId: string | null | undefined,
+  categories: { id: string }[],
+  currentAllocation: Record<string, number>,
+): NodeDraft[] {
+  if (!presetId) {
+    return categories.map((c) => ({ categoryId: c.id, targetBps: 0, isLocked: false }));
+  }
+
+  if (presetId === "current") {
+    const raw = categories.map((c) => ({
+      categoryId: c.id,
+      targetBps: Math.round((currentAllocation[c.id] ?? 0) * 100),
+      isLocked: false,
+    }));
+    const sum = raw.reduce((s, n) => s + n.targetBps, 0);
+    if (sum > 0 && sum !== 10000) {
+      const diff = 10000 - sum;
+      const maxIdx = raw.reduce((mi, n, i) => (n.targetBps > raw[mi].targetBps ? i : mi), 0);
+      raw[maxIdx].targetBps += diff;
+    }
+    return raw;
+  }
+
+  const preset = BUILT_IN_PRESETS.find((p) => p.id === presetId);
+  if (!preset) return categories.map((c) => ({ categoryId: c.id, targetBps: 0, isLocked: false }));
+
+  return categories.map((c) => ({
+    categoryId: c.id,
+    targetBps: Math.round((preset.weights[c.id] ?? 0) * 100),
+    isLocked: false,
+  }));
+}
+
+export function ProfileEditor({
+  profile,
+  taxonomy,
+  initialPresetId,
+  currentAllocation = {},
+  baseCurrency,
+  onSaved,
+  onCancel,
+}: ProfileEditorProps) {
+  const topLevelCategories = useMemo(
+    () => taxonomy.categories.filter((c) => !c.parentId),
+    [taxonomy.categories],
+  );
+
+  const { data: existingNodesData } = useTargetNodes(profile?.id ?? null);
+
+  const [name, setName] = useState(profile?.name ?? "");
+  const [driftBandPct, setDriftBandPct] = useState(profile ? profile.driftBandBps / 100 : 5);
+  const [triggerType, setTriggerType] = useState<"threshold" | "manual">(
+    (profile?.triggerType as "threshold" | "manual") ?? "threshold",
+  );
+  const [rebalanceTo, setRebalanceTo] = useState<"nearest_band" | "exact_target">(
+    (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band",
+  );
+  const [allowSells, setAllowSells] = useState(profile?.allowSells ?? false);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(initialPresetId ?? null);
+
+  const [nodes, setNodes] = useState<NodeDraft[]>(() => {
+    if (!profile) {
+      return buildInitialNodes(initialPresetId ?? null, topLevelCategories, currentAllocation);
+    }
+    return [];
+  });
+
+  const nodesInitialized = useRef(false);
+  useEffect(() => {
+    if (!profile || nodesInitialized.current || !existingNodesData) return;
+    nodesInitialized.current = true;
+    setNodes(
+      existingNodesData.map((n) => ({
+        categoryId: n.categoryId,
+        targetBps: n.targetBps,
+        isLocked: n.isLocked,
+      })),
+    );
+  }, [profile, existingNodesData]);
+
+  const createProfile = useCreateTargetProfile();
+  const updateProfile = useUpdateTargetProfile();
+  const activateProfile = useActivateTargetProfile();
+  const saveNodes = useSaveTargetNodes();
+
+  const totalBps = nodes.reduce((s, n) => s + n.targetBps, 0);
+  const isValid = name.trim().length > 0 && totalBps === 10000;
+  const isSaving = createProfile.isPending || updateProfile.isPending || saveNodes.isPending;
+  const isActivating = isSaving || activateProfile.isPending;
+
+  // Build color map for ModelPresetPicker
+  const currentCategoriesForPicker = topLevelCategories.map((c) => ({
+    categoryId: c.id,
+    categoryName: c.name,
+    color: c.color,
+    value: 0,
+    percentage: currentAllocation[c.id] ?? 0,
+  }));
+
+  function handlePresetSelect(presetId: string) {
+    setSelectedPreset(presetId);
+    setNodes(buildInitialNodes(presetId, topLevelCategories, currentAllocation));
+  }
+
+  async function persistProfile(andActivate: boolean) {
+    const input = {
+      name: name.trim(),
+      scopeType: "all" as const,
+      scopeId: null,
+      taxonomyId: "asset_classes",
+      baseCurrency,
+      triggerType,
+      driftBandBps: Math.round(driftBandPct * 100),
+      rebalanceTo,
+      allowSells,
+      minTradeAmount: "0",
+      wholeSharesOnly: false,
+    };
+
+    let profileId: string;
+    if (profile) {
+      const updated = await updateProfile.mutateAsync({ id: profile.id, input });
+      profileId = updated.id;
+    } else {
+      const created = await createProfile.mutateAsync(input);
+      profileId = created.id;
+    }
+
+    await saveNodes.mutateAsync({
+      profileId,
+      nodes: nodes
+        .filter((n) => n.targetBps > 0)
+        .map((n) => ({
+          profileId,
+          categoryId: n.categoryId,
+          targetBps: n.targetBps,
+          isLocked: n.isLocked,
+          isRequired: true,
+        })),
+    });
+
+    if (andActivate) {
+      await activateProfile.mutateAsync(profileId);
+    }
+
+    onSaved(profileId);
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Metadata bar */}
+      <div className="bg-muted/20 flex flex-wrap items-center gap-4 rounded-lg border px-4 py-3">
+        {/* Profile name */}
+        <div className="min-w-40 flex-1">
+          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
+            Profile
+          </div>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Profile name…"
+            className="bg-transparent text-[14px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
+          />
+        </div>
+
+        <div className="bg-border h-7 w-px" />
+
+        {/* Taxonomy (display only) */}
+        <div>
+          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
+            Taxonomy
+          </div>
+          <span className="text-foreground text-[13px] font-medium">Asset classes</span>
+        </div>
+
+        <div className="bg-border h-7 w-px" />
+
+        {/* Drift band */}
+        <div>
+          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
+            Drift band
+          </div>
+          <span className="text-foreground text-[13px] font-medium tabular-nums">
+            ±{driftBandPct.toFixed(1)}%
+          </span>
+        </div>
+
+        <div className="bg-border h-7 w-px" />
+
+        {/* Total weight */}
+        <div>
+          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
+            Total weight
+          </div>
+          <span
+            className={cn(
+              "text-[13px] font-semibold tabular-nums",
+              totalBps === 10000 ? "text-green-700 dark:text-green-400" : "text-destructive",
+            )}
+          >
+            {(totalBps / 100).toFixed(1)}%{totalBps === 10000 && " ✓"}
+          </span>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Discard
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!isValid || isSaving}
+            onClick={() => persistProfile(false)}
+          >
+            {isSaving ? "Saving…" : "Save draft"}
+          </Button>
+          <Button
+            size="sm"
+            disabled={!isValid || isActivating}
+            onClick={() => persistProfile(true)}
+          >
+            {isActivating ? "Activating…" : "Activate"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Model presets */}
+      <div>
+        <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+          Model
+        </div>
+        <p className="text-muted-foreground mb-3 text-[12px]">
+          Start from a known mix or roll your own
+        </p>
+        <ModelPresetPicker
+          selected={selectedPreset}
+          onSelect={handlePresetSelect}
+          currentCategories={currentCategoriesForPicker}
+        />
+      </div>
+
+      {/* Target weights + Drift tolerance */}
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-[3fr_2fr]">
+        {/* Target weights */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Target weights</CardTitle>
+            <CardDescription>
+              Edit a row — unlocked categories auto-adjust. Click the lock to pin.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <TargetNodeEditor
+              categories={topLevelCategories}
+              nodes={nodes}
+              currentAllocation={currentAllocation}
+              onChange={setNodes}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Drift tolerance */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Drift tolerance</CardTitle>
+            <CardDescription>How far a sleeve can wander before flagging</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Band slider */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium">Tolerance band</span>
+                <span className="text-foreground text-[13px] font-semibold tabular-nums">
+                  ±{driftBandPct.toFixed(1)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.5}
+                max={10}
+                step={0.5}
+                value={driftBandPct}
+                onChange={(e) => setDriftBandPct(parseFloat(e.target.value))}
+                className="accent-foreground w-full"
+              />
+              <div className="text-muted-foreground flex justify-between text-[10px]">
+                <span>Tight (1%)</span>
+                <span>Standard (5%)</span>
+                <span>Loose (10%)</span>
+              </div>
+            </div>
+
+            {/* Rebalance method */}
+            <div className="space-y-2">
+              <span className="text-[13px] font-medium">Rebalance method</span>
+              <div className="space-y-1.5">
+                {TRIGGER_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors",
+                      triggerType === opt.value
+                        ? "border-foreground bg-muted/30"
+                        : "hover:border-muted-foreground/40 border-border",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="trigger"
+                      value={opt.value}
+                      checked={triggerType === opt.value}
+                      onChange={() => setTriggerType(opt.value)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-medium">{opt.label}</span>
+                        <span className="text-muted-foreground bg-muted rounded px-1.5 py-0.5 text-[10px]">
+                          {opt.badge}
+                        </span>
+                      </div>
+                      <p className="text-muted-foreground mt-0.5 text-[12px]">{opt.description}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Rebalance to */}
+            <div className="space-y-2">
+              <span className="text-[13px] font-medium">Rebalance to</span>
+              <div className="space-y-1.5">
+                {REBALANCE_TO_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors",
+                      rebalanceTo === opt.value
+                        ? "border-foreground bg-muted/30"
+                        : "hover:border-muted-foreground/40 border-border",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="rebalanceTo"
+                      value={opt.value}
+                      checked={rebalanceTo === opt.value}
+                      onChange={() => setRebalanceTo(opt.value)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <span className="text-[13px] font-medium">{opt.label}</span>
+                      <p className="text-muted-foreground mt-0.5 text-[12px]">{opt.description}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Allow sells */}
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <p className="text-[13px] font-medium">Allow sells</p>
+                <p className="text-muted-foreground text-[12px]">
+                  Sell overweight sleeves when rebalancing
+                </p>
+              </div>
+              <Switch checked={allowSells} onCheckedChange={setAllowSells} />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

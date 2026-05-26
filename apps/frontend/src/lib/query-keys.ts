@@ -141,6 +141,13 @@ export const QueryKeys = {
   assetTaxonomyAssignments: (assetId: string) => [QueryKeys.ASSET_TAXONOMY_ASSIGNMENTS, assetId],
   ASSET_CLASSIFICATIONS: "asset-classifications",
 
+  // Allocation Targets
+  TARGET_PROFILES: "targetProfiles",
+  TARGET_NODES: "targetNodes",
+  TARGET_DRIFT: "targetDrift",
+  targetNodes: (profileId: string) => [QueryKeys.TARGET_NODES, profileId],
+  targetDrift: (profileId: string, scope: unknown) => [QueryKeys.TARGET_DRIFT, profileId, scope],
+
   // Health Center
   HEALTH_STATUS: "healthStatus",
   HEALTH_CONFIG: "healthConfig",
