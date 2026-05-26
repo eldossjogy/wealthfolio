@@ -36,7 +36,7 @@ import {
   listenFileDropHover as listenImportFileDropHover,
 } from "@/adapters";
 import {
-  fetchYahooDividends,
+  fetchDividends,
   getAssetProfile,
   getMarketDataProviders,
   getQuoteHistory,
@@ -242,7 +242,7 @@ export function createAddonContext(addonId: string): AddonContext {
 
           // Market data
           searchTicker,
-          fetchYahooDividends,
+          fetchDividends,
           syncHistoryQuotes,
           getAssetProfile,
           updateAssetProfile,

@@ -146,7 +146,7 @@ export const COMMANDS: CommandMap = {
   search_symbol: { method: "GET", path: "/market-data/search" },
   resolve_symbol_quote: { method: "GET", path: "/market-data/resolve-currency" },
   get_quote_history: { method: "GET", path: "/market-data/quotes/history" },
-  fetch_yahoo_dividends: { method: "GET", path: "/market-data/yahoo/dividends" },
+  fetch_dividends: { method: "GET", path: "/market-data/dividends" },
   get_latest_quotes: { method: "POST", path: "/market-data/quotes/latest" },
   update_quote: { method: "PUT", path: "/market-data/quotes" },
   delete_quote: { method: "DELETE", path: "/market-data/quotes/id" },
@@ -951,10 +951,25 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       url += `?${params.toString()}`;
       break;
     }
-    case "fetch_yahoo_dividends": {
-      const { symbol } = payload as { symbol: string };
+    case "fetch_dividends": {
+      const { symbol, exchangeMic, instrumentType, quoteCcy, providerId, startDate, endDate } =
+        payload as {
+          symbol: string;
+          exchangeMic?: string;
+          instrumentType?: string;
+          quoteCcy?: string;
+          providerId?: string;
+          startDate?: string;
+          endDate?: string;
+        };
       const params = new URLSearchParams();
       params.set("symbol", symbol);
+      if (exchangeMic) params.set("exchangeMic", exchangeMic);
+      if (instrumentType) params.set("instrumentType", instrumentType);
+      if (quoteCcy) params.set("quoteCcy", quoteCcy);
+      if (providerId) params.set("providerId", providerId);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
       url += `?${params.toString()}`;
       break;
     }

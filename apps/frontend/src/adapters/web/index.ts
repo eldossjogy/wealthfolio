@@ -177,7 +177,7 @@ export {
   createAsset,
   deleteAsset,
   deleteQuote,
-  fetchYahooDividends,
+  fetchDividends,
   getAssetProfile,
   getAssets,
   getExchanges,
