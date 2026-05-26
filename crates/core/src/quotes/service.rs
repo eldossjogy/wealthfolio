@@ -36,8 +36,8 @@ use crate::portfolio::snapshot::is_quantity_significant;
 use crate::secrets::SecretStore;
 
 use wealthfolio_market_data::{
-    exchanges_for_currency, mic_to_exchange_name, yahoo_equity_provider_symbol_to_canonical,
-    ExchangeMap,
+    exchanges_for_currency, mic_to_currency, mic_to_exchange_name,
+    yahoo_equity_provider_symbol_to_canonical, DividendEvent, ExchangeMap,
 };
 
 /// Provider information combining static info with settings.
@@ -442,6 +442,18 @@ pub trait QuoteServiceTrait: Send + Sync {
         start: NaiveDate,
         end: NaiveDate,
     ) -> Result<Vec<Quote>>;
+
+    /// Fetch cash dividends for a single symbol.
+    async fn fetch_dividends(
+        &self,
+        symbol: &str,
+        exchange_mic: Option<&str>,
+        instrument_type: Option<&InstrumentType>,
+        quote_ccy: Option<&str>,
+        preferred_provider: Option<&str>,
+        start: Option<NaiveDate>,
+        end: Option<NaiveDate>,
+    ) -> Result<Vec<DividendEvent>>;
 
     // =========================================================================
     // Sync Operations (via QuoteSyncService)
@@ -1591,6 +1603,47 @@ where
             .read()
             .await
             .fetch_historical_quotes(&temp_asset, start_dt, end_dt)
+            .await
+    }
+
+    async fn fetch_dividends(
+        &self,
+        symbol: &str,
+        exchange_mic: Option<&str>,
+        instrument_type: Option<&InstrumentType>,
+        quote_ccy: Option<&str>,
+        preferred_provider: Option<&str>,
+        start: Option<NaiveDate>,
+        end: Option<NaiveDate>,
+    ) -> Result<Vec<DividendEvent>> {
+        let end_date = end.unwrap_or_else(|| Utc::now().date_naive());
+        let start_date = start.unwrap_or_else(|| end_date - Duration::days(365 * 5));
+        let start_dt = Utc.from_utc_datetime(&start_date.and_hms_opt(0, 0, 0).unwrap());
+        let end_dt = Utc.from_utc_datetime(&end_date.and_hms_opt(23, 59, 59).unwrap());
+
+        let provider_config = preferred_provider
+            .map(|provider| serde_json::json!({ "preferred_provider": provider }));
+
+        let temp_asset = Asset {
+            id: symbol.to_string(),
+            instrument_symbol: Some(symbol.to_string()),
+            display_code: Some(symbol.to_string()),
+            kind: AssetKind::Investment,
+            instrument_type: Some(instrument_type.cloned().unwrap_or(InstrumentType::Equity)),
+            instrument_exchange_mic: exchange_mic.map(str::to_string),
+            quote_ccy: quote_ccy
+                .map(str::to_string)
+                .or_else(|| exchange_mic.and_then(mic_to_currency).map(str::to_string))
+                .unwrap_or_else(|| "USD".to_string()),
+            quote_mode: QuoteMode::Market,
+            provider_config,
+            ..Default::default()
+        };
+
+        self.client
+            .read()
+            .await
+            .fetch_dividends(&temp_asset, start_dt, end_dt)
             .await
     }
 
