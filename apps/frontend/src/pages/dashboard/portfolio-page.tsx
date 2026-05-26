@@ -117,7 +117,7 @@ export default function PortfolioPage() {
         icon: Icons.Wallet,
         content: (
           <Suspense fallback={<PageLoader />}>
-            <NetWorthContent onAddAsset={handleAddAsset} onAddLiability={handleAddLiability} />
+            <NetWorthContent />
           </Suspense>
         ),
         actions: netWorthActions,

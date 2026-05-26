@@ -172,6 +172,7 @@ pub struct NetWorthHistoryPoint {
     pub total_assets: String,
     pub net_worth: String,
     pub net_contribution: String,
+    pub breakdown: std::collections::BTreeMap<String, String>,
     pub currency: String,
 }
 
@@ -514,6 +515,11 @@ pub fn get_net_worth_history(
             total_assets: point.total_assets.to_string(),
             net_worth: point.net_worth.to_string(),
             net_contribution: point.net_contribution.to_string(),
+            breakdown: point
+                .breakdown
+                .into_iter()
+                .map(|(key, value)| (key, value.to_string()))
+                .collect(),
             currency: point.currency,
         })
         .collect();
