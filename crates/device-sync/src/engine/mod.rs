@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 
-use crate::{ApiRetryClass, SyncPushEventRequest, SyncPushRequest, SyncState};
+use crate::{
+    sync_entity_from_remote, ApiRetryClass, SyncPushEventRequest, SyncPushRequest, SyncState,
+};
 
 pub mod ports;
 mod runtime;
@@ -762,7 +764,16 @@ where
                 if remote_event.device_id == device_id {
                     continue;
                 }
-                let local_entity = remote_event.entity;
+                let local_entity = match sync_entity_from_remote(&remote_event.entity) {
+                    Some(entity) => entity,
+                    None => {
+                        warn!(
+                            "[DeviceSync] Skipping unknown remote sync entity: entity={} event_id={} seq={}",
+                            remote_event.entity, remote_event.event_id, remote_event.seq
+                        );
+                        continue;
+                    }
+                };
                 let local_op = match parse_event_operation(&remote_event.event_type) {
                     Some(op) => op,
                     None => {
@@ -1270,6 +1281,7 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -1283,6 +1295,9 @@ mod tests {
         fail_mark_cycle_outcome: bool,
         pending_outbox: Arc<Mutex<Vec<wealthfolio_core::sync::SyncOutboxEvent>>>,
         dead_outbox_batches: Arc<Mutex<Vec<Vec<String>>>>,
+        pull_responses: Arc<Mutex<VecDeque<crate::SyncPullResponse>>>,
+        set_cursor_calls: Arc<Mutex<Vec<i64>>>,
+        applied_events: Arc<Mutex<Vec<ReplayEvent>>>,
         push_error: Option<TransportError>,
         reconcile_response: crate::ReconcileReadyStateResponse,
         persisted_trust_states: Arc<Mutex<Vec<String>>>,
@@ -1303,6 +1318,9 @@ mod tests {
                 fail_mark_cycle_outcome: false,
                 pending_outbox: Arc::new(Mutex::new(Vec::new())),
                 dead_outbox_batches: Arc::new(Mutex::new(Vec::new())),
+                pull_responses: Arc::new(Mutex::new(VecDeque::new())),
+                set_cursor_calls: Arc::new(Mutex::new(Vec::new())),
+                applied_events: Arc::new(Mutex::new(Vec::new())),
                 push_error: None,
                 reconcile_response: crate::ReconcileReadyStateResponse {
                     action: "NOOP".to_string(),
@@ -1391,14 +1409,17 @@ mod tests {
         }
 
         async fn set_cursor(&self, _cursor: i64) -> Result<(), String> {
+            self.set_cursor_calls.lock().await.push(_cursor);
             Ok(())
         }
 
         async fn apply_remote_events_lww_batch(
             &self,
-            _events: Vec<ReplayEvent>,
+            events: Vec<ReplayEvent>,
         ) -> Result<usize, String> {
-            Ok(0)
+            let applied = events.len();
+            self.applied_events.lock().await.extend(events);
+            Ok(applied)
         }
 
         async fn apply_remote_event_lww(&self, _event: ReplayEvent) -> Result<bool, String> {
@@ -1487,7 +1508,16 @@ mod tests {
             _from_cursor: Option<i64>,
             _limit: Option<i64>,
         ) -> Result<crate::SyncPullResponse, TransportError> {
-            unreachable!("not used by these tests")
+            self.pull_responses
+                .lock()
+                .await
+                .pop_front()
+                .ok_or_else(|| TransportError {
+                    message: "missing pull response".to_string(),
+                    retry_class: ApiRetryClass::Permanent,
+                    error_code: None,
+                    details: None,
+                })
         }
 
         async fn get_reconcile_ready_state(
@@ -1549,11 +1579,11 @@ mod tests {
 
         fn decrypt_sync_payload(
             &self,
-            _encrypted_payload: &str,
+            encrypted_payload: &str,
             _identity: &SyncIdentity,
             _payload_key_version: i32,
         ) -> Result<String, String> {
-            unreachable!("not used by these tests")
+            Ok(encrypted_payload.to_string())
         }
     }
 
@@ -1973,6 +2003,124 @@ mod tests {
             last_error_code: None,
             created_at: "2026-03-02T00:00:00Z".to_string(),
         }
+    }
+
+    fn ready_identity() -> SyncIdentity {
+        SyncIdentity {
+            device_id: Some("device-local".to_string()),
+            root_key: Some("root-key".to_string()),
+            key_version: Some(1),
+        }
+    }
+
+    fn pull_event(
+        event_id: &str,
+        entity: &str,
+        event_type: &str,
+        entity_id: &str,
+        seq: i64,
+        payload: &str,
+    ) -> crate::SyncEvent {
+        crate::SyncEvent {
+            event_id: event_id.to_string(),
+            device_id: "device-remote".to_string(),
+            event_type: event_type.to_string(),
+            entity: entity.to_string(),
+            entity_id: entity_id.to_string(),
+            client_timestamp: "2026-05-25T00:00:00Z".to_string(),
+            payload: payload.to_string(),
+            payload_key_version: 1,
+            seq,
+            user_id: "user-1".to_string(),
+            team_id: "team-1".to_string(),
+            server_timestamp: "2026-05-25T00:00:01Z".to_string(),
+        }
+    }
+
+    fn single_event_pull_response(
+        next_cursor: i64,
+        event: crate::SyncEvent,
+    ) -> crate::SyncPullResponse {
+        crate::SyncPullResponse {
+            from: 0,
+            to: next_cursor,
+            next_cursor,
+            has_more: false,
+            events: vec![event],
+            gc_watermark: None,
+            latest_snapshot_seq: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn run_sync_cycle_skips_unknown_remote_entity_and_advances_cursor() {
+        let mut ports = TestPorts::new(Some(ready_identity()), Ok(SyncState::Ready));
+        ports.reconcile_response.action = "PULL_TAIL".to_string();
+        ports.reconcile_response.cursor = Some(7);
+        ports
+            .pull_responses
+            .lock()
+            .await
+            .push_back(single_event_pull_response(
+                7,
+                pull_event(
+                    "evt-future-1",
+                    "future_entity",
+                    "future_entity.create.v1",
+                    "future-1",
+                    7,
+                    "not-json",
+                ),
+            ));
+
+        let result = run_sync_cycle(&ports, false)
+            .await
+            .expect("cycle should skip unknown remote entities");
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.cursor, 7);
+        assert_eq!(result.pulled_count, 0);
+        assert!(ports.applied_events.lock().await.is_empty());
+        assert_eq!(ports.set_cursor_calls.lock().await.as_slice(), [7]);
+        assert!(ports.engine_errors.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_sync_cycle_replays_known_remote_entity_normally() {
+        let mut ports = TestPorts::new(Some(ready_identity()), Ok(SyncState::Ready));
+        ports.reconcile_response.action = "PULL_TAIL".to_string();
+        ports.reconcile_response.cursor = Some(8);
+        ports
+            .pull_responses
+            .lock()
+            .await
+            .push_back(single_event_pull_response(
+                8,
+                pull_event(
+                    "evt-account-1",
+                    sync_entity_name(&SyncEntity::Account),
+                    "account.update.v1",
+                    "account-1",
+                    8,
+                    r#"{"id":"account-1","name":"Checking"}"#,
+                ),
+            ));
+
+        let result = run_sync_cycle(&ports, false)
+            .await
+            .expect("cycle should replay known remote entities");
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.cursor, 8);
+        assert_eq!(result.pulled_count, 1);
+        assert_eq!(ports.set_cursor_calls.lock().await.as_slice(), [8]);
+
+        let applied_events = ports.applied_events.lock().await;
+        assert_eq!(applied_events.len(), 1);
+        assert_eq!(applied_events[0].entity, SyncEntity::Account);
+        assert_eq!(applied_events[0].entity_id, "account-1");
+        assert_eq!(applied_events[0].op, SyncOperation::Update);
+        assert_eq!(applied_events[0].event_id, "evt-account-1");
     }
 
     #[tokio::test]
