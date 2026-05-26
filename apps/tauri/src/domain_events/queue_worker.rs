@@ -20,7 +20,7 @@ use wealthfolio_core::portfolio::valuation::ValuationRecalcMode;
 
 #[cfg(feature = "connect-sync")]
 use super::planner::plan_broker_sync;
-use super::planner::{plan_asset_enrichment, plan_portfolio_job};
+use super::planner::{plan_asset_enrichment, plan_categorization_job, plan_portfolio_job};
 #[cfg(feature = "connect-sync")]
 use crate::commands::brokers_sync::perform_broker_sync;
 use crate::context::ServiceContext;
@@ -194,6 +194,11 @@ async fn process_event_batch(
         refresh_all_goal_summaries(context).await;
     }
 
+    // 3. Auto-categorize newly-changed activities on opted-in spending accounts.
+    // Fire-and-forget — the activity command has already returned to the user;
+    // the dashboard will pick up new assignments on its next React Query refetch.
+    spawn_auto_categorize_for_batch(events, context).await;
+
     #[cfg(feature = "connect-sync")]
     {
         // 3. Plan and trigger broker sync for eligible tracking mode changes
@@ -236,6 +241,51 @@ async fn process_event_batch(
             });
         }
     }
+}
+
+/// Plans and spawns auto-categorization for this batch's spending-account
+/// activity changes. Loads `SpendingSettings` once per batch; no-op when
+/// spending tracking is disabled or no opted-in account was touched.
+///
+/// Fire-and-forget by design — categorization writes are idempotent and
+/// the user has already been told the activity was created/updated.
+async fn spawn_auto_categorize_for_batch(events: &[DomainEvent], context: &Arc<ServiceContext>) {
+    let settings = match context.spending_settings_service().get().await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(
+                "Skipping auto-categorization: failed to load spending settings: {}",
+                e
+            );
+            return;
+        }
+    };
+    if !settings.enabled || settings.account_ids.is_empty() {
+        return;
+    }
+    let opted_in: std::collections::HashSet<String> =
+        settings.account_ids.iter().cloned().collect();
+    let account_ids = plan_categorization_job(events, &opted_in);
+    if account_ids.is_empty() {
+        return;
+    }
+    info!(
+        "Triggering auto-categorization for {} account(s)",
+        account_ids.len()
+    );
+    let rules_service = context.categorization_rules_service();
+    tokio::spawn(async move {
+        match rules_service
+            .rerun_all(&account_ids, /* only_uncategorized */ true)
+            .await
+        {
+            Ok(count) if count > 0 => {
+                info!("Auto-categorization wrote {} assignment(s)", count);
+            }
+            Ok(_) => {}
+            Err(e) => warn!("Auto-categorization failed: {}", e),
+        }
+    });
 }
 
 /// Runs a portfolio job directly (not via event emission).

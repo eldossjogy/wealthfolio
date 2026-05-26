@@ -111,6 +111,14 @@ pub struct AppState {
     pub token_lifecycle: Arc<TokenLifecycleState>,
     pub custom_provider_service: Arc<wealthfolio_core::custom_provider::CustomProviderService>,
     pub portfolio_service: Arc<dyn PortfolioServiceTrait + Send + Sync>,
+    pub spending_settings_service: Arc<wealthfolio_spending::settings::SpendingSettingsService>,
+    pub cash_activity_service: Arc<wealthfolio_spending::cash_activities::CashActivityService>,
+    pub categorization_rules_service:
+        Arc<wealthfolio_spending::categorization_rules::CategorizationRulesService>,
+    pub events_service: Arc<wealthfolio_spending::events::EventsService>,
+    pub budget_service: Arc<wealthfolio_spending::budget::BudgetService>,
+    pub spending_analytics_service: Arc<wealthfolio_spending::analytics::AnalyticsService>,
+    pub spending_insight_service: Arc<wealthfolio_spending::insight::InsightService>,
 }
 
 pub fn init_tracing() {
@@ -263,6 +271,41 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     let settings = settings_service.get_settings()?;
     let base_currency = Arc::new(RwLock::new(settings.base_currency));
     let timezone = Arc::new(RwLock::new(settings.timezone.clone()));
+
+    let spending_settings_repo: Arc<
+        dyn wealthfolio_spending::settings::SpendingSettingsRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::settings::SpendingSettingsRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let spending_settings_service = Arc::new(
+        wealthfolio_spending::settings::SpendingSettingsService::new(spending_settings_repo),
+    );
+
+    let activity_assignments_repo: Arc<
+        dyn wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::activity_assignments::ActivityTaxonomyAssignmentRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    // Activity ↔ event tag join table (see spending/activity_events).
+    let activity_events_repo: Arc<
+        dyn wealthfolio_spending::activity_events::ActivityEventsRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::activity_events::ActivityEventsRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let activity_taxonomy_assignment_service = Arc::new(
+        wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentService::new(
+            activity_assignments_repo.clone(),
+        ),
+    );
 
     let account_repo = Arc::new(AccountRepository::new(pool.clone(), writer.clone()));
 
@@ -436,6 +479,114 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         .with_event_sink(domain_event_sink.clone()),
     );
 
+    // Spending: events + event_types
+    let event_types_repo: Arc<dyn wealthfolio_spending::events::EventTypesRepositoryTrait> =
+        Arc::new(
+            wealthfolio_storage_sqlite::spending::events::EventTypesRepository::new(
+                pool.clone(),
+                writer.clone(),
+            ),
+        );
+    let events_repo: Arc<dyn wealthfolio_spending::events::EventsRepositoryTrait> = Arc::new(
+        wealthfolio_storage_sqlite::spending::events::EventsRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let events_service = Arc::new(wealthfolio_spending::events::EventsService::new(
+        event_types_repo,
+        events_repo,
+        activity_repository.clone(),
+        activity_events_repo.clone(),
+    ));
+
+    // Spending: cash_activity_service depends on activity_repository + spending settings
+    //          + the assignments service (so search() can batch-fetch assignments and apply
+    //          status/category filters server-side).
+    let cash_activity_service = Arc::new(
+        wealthfolio_spending::cash_activities::CashActivityService::new(
+            activity_repository.clone(),
+            account_repo.clone(),
+            spending_settings_service.clone(),
+            activity_taxonomy_assignment_service.clone(),
+            activity_events_repo.clone(),
+            events_service.clone(),
+        ),
+    );
+
+    // Spending: categorization_rules
+    let categorization_rules_repo: Arc<
+        dyn wealthfolio_spending::categorization_rules::CategorizationRulesRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::categorization_rules::CategorizationRulesRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let categorization_rules_service = Arc::new(
+        wealthfolio_spending::categorization_rules::CategorizationRulesService::new(
+            categorization_rules_repo,
+            activity_repository.clone(),
+            activity_taxonomy_assignment_service.clone(),
+        ),
+    );
+
+    // Spending: budget
+    let budget_repo: Arc<dyn wealthfolio_spending::budget::BudgetRepositoryTrait> = Arc::new(
+        wealthfolio_storage_sqlite::spending::budget::BudgetRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let budget_service = Arc::new(wealthfolio_spending::budget::BudgetService::new(
+        budget_repo,
+        activity_repository.clone(),
+        account_repo.clone(),
+        activity_assignments_repo.clone(),
+        spending_settings_service.clone(),
+        taxonomy_service.clone(),
+        fx_service.clone(),
+    ));
+
+    // Spending: analytics
+    let analytics_assignment_repo: Arc<
+        dyn wealthfolio_spending::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait,
+    > = Arc::new(
+        wealthfolio_storage_sqlite::spending::activity_assignments::ActivityTaxonomyAssignmentRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let spending_analytics_service =
+        Arc::new(wealthfolio_spending::analytics::AnalyticsService::new(
+            activity_repository.clone(),
+            account_repo.clone(),
+            analytics_assignment_repo.clone(),
+            spending_settings_service.clone(),
+            taxonomy_service.clone(),
+            events_service.clone(),
+            fx_service.clone(),
+            activity_events_repo.clone(),
+        ));
+
+    // Spending: reconciled period insight (powers the Spending Insight dashboard).
+    let spending_insight_repo: Arc<dyn wealthfolio_spending::budget::BudgetRepositoryTrait> =
+        Arc::new(
+            wealthfolio_storage_sqlite::spending::budget::BudgetRepository::new(
+                pool.clone(),
+                writer.clone(),
+            ),
+        );
+    let spending_insight_service = Arc::new(wealthfolio_spending::insight::InsightService::new(
+        spending_insight_repo,
+        activity_repository.clone(),
+        account_repo.clone(),
+        analytics_assignment_repo,
+        spending_settings_service.clone(),
+        taxonomy_service.clone(),
+        fx_service.clone(),
+    ));
+
     // Alternative asset repository for alternative assets operations
     let alternative_asset_repository: Arc<dyn AlternativeAssetRepositoryTrait + Send + Sync> =
         Arc::new(AlternativeAssetRepository::new(
@@ -508,6 +659,10 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         performance_service.clone(),
         income_service.clone(),
         health_service.clone(),
+        taxonomy_service.clone(),
+        cash_activity_service.clone(),
+        activity_taxonomy_assignment_service.clone(),
+        categorization_rules_service.clone(),
     ));
     let ai_chat_service = Arc::new(ChatService::new(ai_environment, ChatConfig::default()));
 
@@ -551,6 +706,8 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         timezone.clone(),
         secret_store.clone(),
         token_lifecycle.clone(),
+        spending_settings_service.clone(),
+        categorization_rules_service.clone(),
     );
 
     let addon_service: Arc<dyn AddonServiceTrait + Send + Sync> = Arc::new(AddonService::new(
@@ -605,6 +762,13 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         token_lifecycle,
         custom_provider_service,
         portfolio_service,
+        spending_settings_service,
+        cash_activity_service,
+        categorization_rules_service,
+        events_service,
+        budget_service,
+        spending_analytics_service,
+        spending_insight_service,
     });
 
     #[cfg(feature = "device-sync")]

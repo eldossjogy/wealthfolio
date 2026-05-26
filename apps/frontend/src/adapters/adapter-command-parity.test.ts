@@ -26,6 +26,25 @@ function collectSourceFiles(dir: string): string[] {
   });
 }
 
+/**
+ * Collect all `features/*\/adapters/*.ts` files. Feature-local adapters call
+ * `invoke(...)` and must round-trip through both the Tauri command registry
+ * and the web COMMANDS dispatch.
+ */
+function collectFeatureAdapterFiles(): string[] {
+  const featuresDir = path.join(frontendSrcDir, "features");
+  const featureEntries = readdirSync(featuresDir, { withFileTypes: true });
+  return featureEntries.flatMap((feature) => {
+    if (!feature.isDirectory()) return [];
+    const adaptersDir = path.join(featuresDir, feature.name, "adapters");
+    try {
+      return collectSourceFiles(adaptersDir);
+    } catch {
+      return [];
+    }
+  });
+}
+
 function collectInvokedCommands(files: string[]): Map<string, string[]> {
   const commands = new Map<string, string[]>();
 
@@ -55,6 +74,7 @@ describe("adapter command parity", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/web")),
+      ...collectFeatureAdapterFiles(),
     ];
     const invokedCommands = collectInvokedCommands(files);
 
@@ -70,6 +90,7 @@ describe("adapter command parity", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/tauri")),
+      ...collectFeatureAdapterFiles(),
     ];
     const invokedCommands = collectInvokedCommands(files);
     const registeredCommands = collectRegisteredTauriCommands();

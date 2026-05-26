@@ -9,6 +9,7 @@ use std::sync::Arc;
 use super::constants::{DEFAULT_VALUATIONS_DAYS, MAX_VALUATIONS_POINTS};
 use crate::env::AiEnvironment;
 use crate::error::AiError;
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 
 // ============================================================================
 // Tool Arguments and Output
@@ -129,12 +130,20 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
 
         // Fetch valuations based on account scope
         let valuations: Vec<ValuationPointDto> = if let Some(account_id) = account_id {
-            // Single account valuations
-            let account_valuations = self
+            let account = self
                 .env
-                .valuation_service()
-                .get_historical_valuations(account_id, Some(start_date), Some(end_date))
+                .account_service()
+                .get_account(account_id)
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            let account_valuations =
+                if account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+                    self.env
+                        .valuation_service()
+                        .get_historical_valuations(account_id, Some(start_date), Some(end_date))
+                        .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+                } else {
+                    Vec::new()
+                };
 
             account_valuations
                 .into_iter()
@@ -151,7 +160,13 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
                 .account_service()
                 .get_active_non_archived_accounts()
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-            let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+            let account_ids: Vec<String> = accounts
+                .into_iter()
+                .filter(|account| {
+                    account_supports_purpose(&account.account_type, AccountPurpose::Holdings)
+                })
+                .map(|account| account.id)
+                .collect();
             self.env
                 .valuation_service()
                 .get_historical_valuations_for_accounts(
@@ -200,7 +215,13 @@ impl<E: AiEnvironment + 'static> Tool for GetValuationHistoryTool<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env::test_env::MockEnvironment;
+    use crate::env::test_env::{MockAccountService, MockEnvironment, MockValuationService};
+    use chrono::Utc;
+    use rust_decimal::Decimal;
+    use wealthfolio_core::{
+        accounts::{Account, TrackingMode},
+        valuation::DailyAccountValuation,
+    };
 
     #[tokio::test]
     async fn test_get_valuation_history_tool() {
@@ -223,7 +244,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_valuation_history_with_account_id() {
-        let env = Arc::new(MockEnvironment::new());
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("acc-123", "SECURITIES")],
+        });
+        let env = Arc::new(env);
         let tool = GetValuationHistoryTool::new(env, "USD".to_string());
 
         let result = tool
@@ -239,6 +264,31 @@ mod tests {
         assert_eq!(output.account_scope, "acc-123");
         assert_eq!(output.start_date, "2024-01-01");
         assert_eq!(output.end_date, "2024-12-31");
+    }
+
+    #[tokio::test]
+    async fn test_get_valuation_history_returns_empty_for_credit_card() {
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("card-1", "CREDIT_CARD")],
+        });
+        env.valuation_service = Arc::new(MockValuationService {
+            valuations: vec![test_valuation("card-1")],
+        });
+        let env = Arc::new(env);
+        let tool = GetValuationHistoryTool::new(env, "USD".to_string());
+
+        let output = tool
+            .call(GetValuationHistoryArgs {
+                account_id: Some("card-1".to_string()),
+                start_date: Some("2024-01-01".to_string()),
+                end_date: Some("2024-12-31".to_string()),
+            })
+            .await
+            .expect("credit card valuations should return empty output");
+
+        assert_eq!(output.account_scope, "card-1");
+        assert!(output.valuations.is_empty());
     }
 
     #[tokio::test]
@@ -259,5 +309,52 @@ mod tests {
         assert_eq!(output.currency, "EUR");
         assert_eq!(output.start_date, "2024-06-01");
         assert_eq!(output.end_date, "2024-06-30");
+    }
+
+    fn test_account(id: &str, account_type: &str) -> Account {
+        let now = Utc::now().naive_utc();
+        Account {
+            id: id.to_string(),
+            name: id.to_string(),
+            account_type: account_type.to_string(),
+            group: None,
+            currency: "USD".to_string(),
+            is_default: false,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+            platform_id: None,
+            account_number: None,
+            meta: None,
+            provider: None,
+            provider_account_id: None,
+            is_archived: false,
+            tracking_mode: TrackingMode::Transactions,
+        }
+    }
+
+    fn test_valuation(account_id: &str) -> DailyAccountValuation {
+        DailyAccountValuation {
+            id: format!("val-{account_id}"),
+            account_id: account_id.to_string(),
+            valuation_date: chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            account_currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: Decimal::ONE,
+            cash_balance: Decimal::ZERO,
+            investment_market_value: Decimal::ZERO,
+            total_value: Decimal::new(100, 0),
+            cost_basis: Decimal::ZERO,
+            net_contribution: Decimal::ZERO,
+            cash_balance_base: Decimal::ZERO,
+            investment_market_value_base: Decimal::ZERO,
+            total_value_base: Decimal::new(100, 0),
+            cost_basis_base: Decimal::ZERO,
+            net_contribution_base: Decimal::ZERO,
+            external_inflow_base: Decimal::ZERO,
+            external_outflow_base: Decimal::ZERO,
+            performance_eligible_value_base: Decimal::ZERO,
+            calculated_at: Utc::now(),
+        }
     }
 }

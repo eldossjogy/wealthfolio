@@ -70,6 +70,7 @@ interface LauncherActionItem {
 const accountTypeIcons: Record<AccountType | typeof PORTFOLIO_ACCOUNT_TYPE, Icon> = {
   [AccountType.SECURITIES]: Icons.Briefcase,
   [AccountType.CASH]: Icons.DollarSign,
+  [AccountType.CREDIT_CARD]: Icons.CreditCard,
   [AccountType.CRYPTOCURRENCY]: Icons.Bitcoin,
   [PORTFOLIO_ACCOUNT_TYPE]: Icons.Wallet,
 };

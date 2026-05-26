@@ -17,7 +17,11 @@ import {
   useUnlinkLiability,
 } from "@/hooks/use-alternative-assets";
 import { usePersistentState } from "@/hooks/use-persistent-state";
-import { HOLDING_CATEGORY_FILTERS, apiKindToAlternativeAssetKind } from "@/lib/constants";
+import {
+  AccountPurpose,
+  HOLDING_CATEGORY_FILTERS,
+  apiKindToAlternativeAssetKind,
+} from "@/lib/constants";
 import {
   Account,
   AccountScope,
@@ -63,7 +67,9 @@ export const HoldingsPage = () => {
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
 
   const { holdings, isLoading } = useHoldings(accountFilter);
-  const { accounts, isLoading: isAccountsLoading } = useAccounts();
+  const { accounts, isLoading: isAccountsLoading } = useAccounts({
+    accountPurpose: AccountPurpose.HOLDINGS,
+  });
   const { data: portfolios = [] } = usePortfolios();
   const { data: alternativeHoldings, isLoading: isAlternativeHoldingsLoading } =
     useAlternativeHoldings();

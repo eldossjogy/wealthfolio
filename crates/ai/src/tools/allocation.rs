@@ -4,6 +4,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
@@ -156,18 +157,30 @@ impl<E: AiEnvironment + 'static> Tool for GetAssetAllocationTool<E> {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
         let group_by = args.group_by.to_lowercase();
-        let scoped_account_ids = if account_id.is_none() {
+        let scoped_account_ids = if let Some(account_id) = account_id {
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+                Some(Vec::new())
+            } else {
+                None
+            }
+        } else {
             Some(
                 self.env
                     .account_service()
                     .get_active_non_archived_accounts()
                     .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
                     .into_iter()
+                    .filter(|account| {
+                        account_supports_purpose(&account.account_type, AccountPurpose::Holdings)
+                    })
                     .map(|account| account.id)
                     .collect::<Vec<_>>(),
             )
-        } else {
-            None
         };
 
         // Drill-down mode: return holdings for a specific category

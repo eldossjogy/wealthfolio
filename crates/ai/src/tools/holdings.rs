@@ -4,6 +4,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 
 use super::constants::MAX_HOLDINGS;
 use crate::env::AiEnvironment;
@@ -127,18 +128,33 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
         let account_id = args.account_id.as_deref().filter(|id| !id.is_empty());
 
         let holdings = if let Some(account_id) = account_id {
-            self.env
-                .holdings_service()
-                .get_holdings(account_id, &self.base_currency)
-                .await
-                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            let account = self
+                .env
+                .account_service()
+                .get_account(account_id)
+                .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+                Vec::new()
+            } else {
+                self.env
+                    .holdings_service()
+                    .get_holdings(account_id, &self.base_currency)
+                    .await
+                    .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
+            }
         } else {
             let accounts = self
                 .env
                 .account_service()
                 .get_active_non_archived_accounts()
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-            let account_ids: Vec<String> = accounts.into_iter().map(|account| account.id).collect();
+            let account_ids: Vec<String> = accounts
+                .into_iter()
+                .filter(|account| {
+                    account_supports_purpose(&account.account_type, AccountPurpose::Holdings)
+                })
+                .map(|account| account.id)
+                .collect();
             self.env
                 .holdings_service()
                 .get_holdings_for_accounts(&account_ids, &self.base_currency, "all")
@@ -221,7 +237,9 @@ impl<E: AiEnvironment + 'static> Tool for GetHoldingsTool<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env::test_env::MockEnvironment;
+    use crate::env::test_env::{MockAccountService, MockEnvironment};
+    use chrono::Utc;
+    use wealthfolio_core::accounts::{Account, TrackingMode};
 
     #[tokio::test]
     async fn test_get_holdings_tool() {
@@ -244,7 +262,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_holdings_with_account_id() {
-        let env = Arc::new(MockEnvironment::new());
+        let mut env = MockEnvironment::new();
+        env.account_service = Arc::new(MockAccountService {
+            accounts: vec![test_account("acc-123", "SECURITIES")],
+        });
+        let env = Arc::new(env);
         let tool = GetHoldingsTool::new(env, "USD".to_string());
 
         let result = tool
@@ -258,5 +280,27 @@ mod tests {
         let output = result.unwrap();
         assert_eq!(output.account_scope, "acc-123");
         assert_eq!(output.view_mode, "table");
+    }
+
+    fn test_account(id: &str, account_type: &str) -> Account {
+        let now = Utc::now().naive_utc();
+        Account {
+            id: id.to_string(),
+            name: id.to_string(),
+            account_type: account_type.to_string(),
+            group: None,
+            currency: "USD".to_string(),
+            is_default: false,
+            created_at: now,
+            updated_at: now,
+            platform_id: None,
+            account_number: None,
+            meta: None,
+            is_active: true,
+            provider: None,
+            provider_account_id: None,
+            is_archived: false,
+            tracking_mode: TrackingMode::Transactions,
+        }
     }
 }

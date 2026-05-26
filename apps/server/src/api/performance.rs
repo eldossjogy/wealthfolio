@@ -6,11 +6,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use rust_decimal::Decimal;
 use wealthfolio_core::{
-    accounts::{AccountServiceTrait, TrackingMode},
+    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait, TrackingMode},
     portfolio::{
         income::IncomeSummary,
-        performance::{PerformanceMetrics, SimplePerformanceMetrics},
+        performance::{PerformanceMetrics, ReturnMethod, SimplePerformanceMetrics},
     },
     portfolios::AccountScope,
 };
@@ -27,14 +28,25 @@ async fn calculate_accounts_simple_performance(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AccountsSimplePerfBody>,
 ) -> ApiResult<Json<Vec<SimplePerformanceMetrics>>> {
-    let ids = if let Some(ids) = body.account_ids {
-        ids
+    let ids: Vec<String> = if let Some(ids) = body.account_ids {
+        state
+            .account_service
+            .get_accounts_by_ids(&ids)?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            })
+            .map(|account| account.id)
+            .collect()
     } else {
         state
             .account_service
             .get_active_accounts()?
             .into_iter()
-            .map(|a| a.id)
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            })
+            .map(|account| account.id)
             .collect()
     };
     if ids.is_empty() {
@@ -69,6 +81,52 @@ fn parse_tracking_mode(mode: Option<String>) -> Option<TrackingMode> {
     })
 }
 
+fn account_ids_for_purpose(
+    state: &AppState,
+    account_ids: &[String],
+    purpose: AccountPurpose,
+) -> ApiResult<Vec<String>> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, purpose))
+        .map(|account| account.id)
+        .collect())
+}
+
+fn empty_performance_metrics(
+    id: &str,
+    currency: String,
+    start_date: Option<chrono::NaiveDate>,
+    end_date: Option<chrono::NaiveDate>,
+) -> PerformanceMetrics {
+    PerformanceMetrics {
+        id: id.to_string(),
+        returns: Vec::new(),
+        period_start_date: start_date,
+        period_end_date: end_date,
+        currency,
+        period_gain: Decimal::ZERO,
+        period_return: Some(Decimal::ZERO),
+        cumulative_twr: Some(Decimal::ZERO),
+        gain_loss_amount: None,
+        annualized_twr: Some(Decimal::ZERO),
+        simple_return: Decimal::ZERO,
+        annualized_simple_return: Decimal::ZERO,
+        cumulative_modified_dietz: Some(Decimal::ZERO),
+        annualized_modified_dietz: Some(Decimal::ZERO),
+        cumulative_mwr: Some(Decimal::ZERO),
+        annualized_mwr: Some(Decimal::ZERO),
+        volatility: Decimal::ZERO,
+        max_drawdown: Decimal::ZERO,
+        is_holdings_mode: false,
+        return_method: ReturnMethod::NotApplicable,
+        is_mixed_tracking_mode: false,
+        warnings: Vec::new(),
+    }
+}
+
 fn account_tracking_modes(
     state: &AppState,
     account_ids: &[String],
@@ -78,6 +136,21 @@ fn account_tracking_modes(
         .get_accounts_by_ids(account_ids)?
         .into_iter()
         .map(|account| (account.id, account.tracking_mode))
+        .collect())
+}
+
+fn performance_account_ids(
+    state: &AppState,
+    account_ids: &[String],
+) -> Result<Vec<String>, crate::error::ApiError> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| {
+            account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+        })
+        .map(|account| account.id)
         .collect())
 }
 
@@ -95,12 +168,21 @@ async fn calculate_performance_history(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(Json(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start,
+                end,
+            )));
+        }
+        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
         state
             .performance_service
             .calculate_performance_history_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start,
@@ -108,6 +190,17 @@ async fn calculate_performance_history(
             )
             .await?
     } else {
+        if body.item_type == "account" {
+            let account = state.account_service.get_account(&body.item_id)?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+                return Ok(Json(empty_performance_metrics(
+                    &body.item_id,
+                    account.currency,
+                    start,
+                    end,
+                )));
+            }
+        }
         state
             .performance_service
             .calculate_performance_history(
@@ -136,12 +229,21 @@ async fn calculate_performance_summary(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let tracking_modes = account_tracking_modes(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        if account_ids.is_empty() {
+            return Ok(Json(empty_performance_metrics(
+                &resolved.scope_id,
+                resolved.base_currency.clone(),
+                start,
+                end,
+            )));
+        }
+        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
         state
             .performance_service
             .calculate_performance_summary_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 &tracking_modes,
                 start,
@@ -149,6 +251,17 @@ async fn calculate_performance_summary(
             )
             .await?
     } else {
+        if body.item_type == "account" {
+            let account = state.account_service.get_account(&body.item_id)?;
+            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+                return Ok(Json(empty_performance_metrics(
+                    &body.item_id,
+                    account.currency,
+                    start,
+                    end,
+                )));
+            }
+        }
         state
             .performance_service
             .calculate_performance_summary(
@@ -174,10 +287,25 @@ async fn get_income_summary_for_account(
     State(state): State<Arc<AppState>>,
     Query(q): Query<IncomeSummaryAccountQuery>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    let account_ids: Option<Vec<String>> = q.account_id.map(|id| vec![id]);
+    let account_ids: Vec<String> = if let Some(id) = q.account_id {
+        account_ids_for_purpose(&state, &[id], AccountPurpose::Income)?
+    } else {
+        state
+            .account_service
+            .get_active_accounts()?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Income)
+            })
+            .map(|account| account.id)
+            .collect()
+    };
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let items = state
         .income_service
-        .get_income_summary(account_ids.as_deref())?;
+        .get_income_summary(Some(&account_ids))?;
     Ok(Json(items))
 }
 
@@ -191,22 +319,31 @@ async fn get_income_summary(
     State(state): State<Arc<AppState>>,
     Json(body): Json<IncomeSummaryBody>,
 ) -> ApiResult<Json<Vec<IncomeSummary>>> {
-    let account_ids: Option<Vec<String>> = match &body.filter {
-        None => None,
+    let account_ids: Vec<String> = match &body.filter {
+        None => state
+            .account_service
+            .get_active_accounts()?
+            .into_iter()
+            .filter(|account| {
+                account_supports_purpose(&account.account_type, AccountPurpose::Income)
+            })
+            .map(|account| account.id)
+            .collect(),
         Some(filter) => {
             let base = state.base_currency.read().unwrap().clone();
-            Some(
-                state
-                    .portfolio_service
-                    .resolve_account_scope(filter, &base)
-                    .map_err(crate::error::ApiError::from)?
-                    .account_ids,
-            )
+            let resolved = state
+                .portfolio_service
+                .resolve_account_scope(filter, &base)
+                .map_err(crate::error::ApiError::from)?;
+            account_ids_for_purpose(&state, &resolved.account_ids, AccountPurpose::Income)?
         }
     };
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let items = state
         .income_service
-        .get_income_summary(account_ids.as_deref())?;
+        .get_income_summary(Some(&account_ids))?;
     Ok(Json(items))
 }
 

@@ -187,6 +187,7 @@ impl<E: AiEnvironment + 'static> Tool for RecordActivitiesTool<E> {
                 id: a.id.clone(),
                 name: a.name.clone(),
                 currency: a.currency.clone(),
+                account_type: Some(a.account_type.clone()),
             })
             .collect();
 

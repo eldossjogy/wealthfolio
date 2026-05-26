@@ -1229,7 +1229,7 @@ mod tests {
             name: name.to_string(),
             currency: currency.to_string(),
             is_active: true,
-            account_type: "REGULAR".to_string(),
+            account_type: "SECURITIES".to_string(),
             group: None,
             is_default: false,
             created_at: Utc::now().naive_utc(),

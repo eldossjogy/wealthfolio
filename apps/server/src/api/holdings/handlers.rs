@@ -8,7 +8,7 @@ use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 use wealthfolio_core::portfolios::{AccountScope, ResolvedAccountScope};
 use wealthfolio_core::{
-    accounts::AccountServiceTrait,
+    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait},
     lots::AssetLotView,
     portfolio::{
         allocation::{AllocationHoldings, PortfolioAllocations},
@@ -43,21 +43,37 @@ fn resolve_scope(
         .map_err(crate::error::ApiError::from)
 }
 
+fn holdings_account_ids(
+    state: &AppState,
+    account_ids: &[String],
+) -> Result<Vec<String>, crate::error::ApiError> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, AccountPurpose::Holdings))
+        .map(|account| account.id)
+        .collect())
+}
+
 pub async fn get_holdings(
     State(state): State<Arc<AppState>>,
     Json(body): Json<FilterBody>,
 ) -> ApiResult<Json<Vec<Holding>>> {
     let base = state.base_currency.read().unwrap().clone();
     let resolved = resolve_scope(&body.filter, &state)?;
-    let holdings = if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    let holdings = if account_ids.is_empty() {
+        Vec::new()
+    } else if account_ids.len() == 1 {
         state
             .holdings_service
-            .get_holdings(&resolved.account_ids[0], &base)
+            .get_holdings(&account_ids[0], &base)
             .await?
     } else {
         state
             .holdings_service
-            .get_holdings_for_accounts(&resolved.account_ids, &base, &resolved.scope_id)
+            .get_holdings_for_accounts(&account_ids, &base, &resolved.scope_id)
             .await?
     };
     Ok(Json(holdings))
@@ -69,9 +85,13 @@ pub async fn get_holdings_for_account(
     Query(q): Query<AccountIdQuery>,
 ) -> ApiResult<Json<Vec<Holding>>> {
     let base = state.base_currency.read().unwrap().clone();
+    let account_ids = holdings_account_ids(&state, std::slice::from_ref(&q.account_id))?;
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let holdings = state
         .holdings_service
-        .get_holdings(&q.account_id, &base)
+        .get_holdings(&account_ids[0], &base)
         .await?;
     Ok(Json(holdings))
 }
@@ -82,10 +102,15 @@ pub async fn get_allocations_for_account(
     Query(q): Query<AccountIdQuery>,
 ) -> ApiResult<Json<PortfolioAllocations>> {
     let base = state.base_currency.read().unwrap().clone();
-    let allocations = state
-        .allocation_service
-        .get_portfolio_allocations(&q.account_id, &base)
-        .await?;
+    let account_ids = holdings_account_ids(&state, std::slice::from_ref(&q.account_id))?;
+    let allocations = if account_ids.len() == 1 {
+        state
+            .allocation_service
+            .get_portfolio_allocations(&account_ids[0], &base)
+            .await?
+    } else {
+        PortfolioAllocations::default()
+    };
     Ok(Json(allocations))
 }
 
@@ -95,10 +120,24 @@ pub async fn get_holdings_by_allocation_for_account(
     Query(q): Query<AllocationHoldingsQuery>,
 ) -> ApiResult<Json<AllocationHoldings>> {
     let base = state.base_currency.read().unwrap().clone();
-    let result = state
-        .allocation_service
-        .get_holdings_by_allocation(&q.account_id, &base, &q.taxonomy_id, &q.category_id)
-        .await?;
+    let account_ids = holdings_account_ids(&state, std::slice::from_ref(&q.account_id))?;
+    let result = if account_ids.len() == 1 {
+        state
+            .allocation_service
+            .get_holdings_by_allocation(&account_ids[0], &base, &q.taxonomy_id, &q.category_id)
+            .await?
+    } else {
+        state
+            .allocation_service
+            .get_holdings_by_allocation_for_accounts(
+                &[],
+                &base,
+                &q.taxonomy_id,
+                &q.category_id,
+                "empty",
+            )
+            .await?
+    };
     Ok(Json(result))
 }
 
@@ -123,6 +162,9 @@ pub async fn get_asset_holdings(
 
     let mut result = Vec::new();
     for account in accounts {
+        if !account_supports_purpose(&account.account_type, AccountPurpose::Holdings) {
+            continue;
+        }
         if let Ok(Some(holding)) = state
             .holdings_service
             .get_holding(&account.id, &q.asset_id, &base)
@@ -163,9 +205,13 @@ pub async fn get_historical_valuations(
                 .map_err(|e| anyhow::anyhow!("Invalid endDate: {}", e))
         })
         .transpose()?;
+    let account_ids = holdings_account_ids(&state, std::slice::from_ref(&q.account_id))?;
+    if account_ids.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
     let vals = state
         .valuation_service
-        .get_historical_valuations(&q.account_id, start, end)?;
+        .get_historical_valuations(&account_ids[0], start, end)?;
     Ok(Json(vals))
 }
 
@@ -188,16 +234,19 @@ pub async fn get_historical_valuations_for_scope(
         })
         .transpose()?;
     let resolved = resolve_scope(&body.filter, &state)?;
-    let vals = if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    let vals = if account_ids.is_empty() {
+        Vec::new()
+    } else if account_ids.len() == 1 {
         state
             .valuation_service
-            .get_historical_valuations(&resolved.account_ids[0], start, end)?
+            .get_historical_valuations(&account_ids[0], start, end)?
     } else {
         state
             .valuation_service
             .get_historical_valuations_for_accounts(
                 &resolved.scope_id,
-                &resolved.account_ids,
+                &account_ids,
                 &resolved.base_currency,
                 start,
                 end,
@@ -232,6 +281,7 @@ pub async fn get_latest_valuations(
             .map(|a| a.id)
             .collect();
     }
+    ids = holdings_account_ids(&state, &ids)?;
     if ids.is_empty() {
         return Ok(Json(vec![]));
     }
@@ -245,19 +295,16 @@ pub async fn get_portfolio_allocations(
 ) -> ApiResult<Json<PortfolioAllocations>> {
     let base = state.base_currency.read().unwrap().clone();
     let resolved = resolve_scope(&body.filter, &state)?;
-    let allocations = if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    let allocations = if account_ids.len() == 1 {
         state
             .allocation_service
-            .get_portfolio_allocations(&resolved.account_ids[0], &base)
+            .get_portfolio_allocations(&account_ids[0], &base)
             .await?
     } else {
         state
             .allocation_service
-            .get_portfolio_allocations_for_accounts(
-                &resolved.account_ids,
-                &base,
-                &resolved.scope_id,
-            )
+            .get_portfolio_allocations_for_accounts(&account_ids, &base, &resolved.scope_id)
             .await?
     };
     Ok(Json(allocations))
@@ -269,11 +316,12 @@ pub async fn get_holdings_by_allocation(
 ) -> ApiResult<Json<AllocationHoldings>> {
     let base = state.base_currency.read().unwrap().clone();
     let resolved = resolve_scope(&body.filter, &state)?;
-    let result = if resolved.account_ids.len() == 1 {
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+    let result = if account_ids.len() == 1 {
         state
             .allocation_service
             .get_holdings_by_allocation(
-                &resolved.account_ids[0],
+                &account_ids[0],
                 &base,
                 &body.taxonomy_id,
                 &body.category_id,
@@ -283,7 +331,7 @@ pub async fn get_holdings_by_allocation(
         state
             .allocation_service
             .get_holdings_by_allocation_for_accounts(
-                &resolved.account_ids,
+                &account_ids,
                 &base,
                 &body.taxonomy_id,
                 &body.category_id,

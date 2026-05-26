@@ -847,7 +847,7 @@ impl SnapshotService {
                 HashMap::with_capacity(accounts_to_process_today.len());
             let mut keyframes_today = Vec::new();
 
-            for (account_id, _account) in accounts_to_process_today {
+            for (account_id, account) in accounts_to_process_today {
                 let previous_holdings_snapshot = current_holdings_snapshots
                     .get(account_id)
                      .ok_or_else(|| {
@@ -880,11 +880,14 @@ impl SnapshotService {
                     current_holdings_snapshot = carried_forward_state;
                 } else {
                     // Activities occurred, call the calculator
-                    match self.holdings_calculator.calculate_next_holdings(
-                        previous_holdings_snapshot,
-                        &activities_today, // Pass the already fetched activities
-                        current_date,
-                    ) {
+                    match self
+                        .holdings_calculator
+                        .calculate_next_holdings_for_account_type(
+                            previous_holdings_snapshot,
+                            &activities_today, // Pass the already fetched activities
+                            current_date,
+                            Some(&account.account_type),
+                        ) {
                         Ok(calc_result) => {
                             // Collect any warnings from activity processing
                             if calc_result.has_warnings() {
