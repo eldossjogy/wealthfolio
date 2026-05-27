@@ -1,5 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -81,6 +89,16 @@ export function AllocationTargetsPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [newProfileTrigger, setNewProfileTrigger] = useState(0);
+  const [isEditorDirty, setIsEditorDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
+
+  function handleTabChange(tab: string) {
+    if (isEditorDirty && activeTab === "targets" && tab !== "targets") {
+      setPendingTab(tab);
+    } else {
+      setActiveTab(tab);
+    }
+  }
 
   // Reset profile selection when scope changes
   useEffect(() => {
@@ -179,7 +197,7 @@ export function AllocationTargetsPage() {
 
         {/* Tabs + selectors on same row */}
         <div className="mt-14">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="flex items-end justify-between border-b">
               <TabsList className="h-auto rounded-none bg-transparent p-0">
                 <TabsTrigger
@@ -312,6 +330,7 @@ export function AllocationTargetsPage() {
                     onProfileChange={(id) => setSelectedProfileId(id)}
                     newProfileTrigger={newProfileTrigger}
                     accountScope={accountScope}
+                    onDirtyChange={setIsEditorDirty}
                   />
                 )}
               </TabsContent>
@@ -327,6 +346,34 @@ export function AllocationTargetsPage() {
           </Tabs>
         </div>
       </div>
+
+      <AlertDialog
+        open={pendingTab !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingTab(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes in your profile. Leaving this tab will discard them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingTab(null)}>Stay</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setIsEditorDirty(false);
+                setActiveTab(pendingTab!);
+                setPendingTab(null);
+              }}
+            >
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

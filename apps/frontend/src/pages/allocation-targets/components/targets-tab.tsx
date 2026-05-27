@@ -30,6 +30,7 @@ interface TargetsTabProps {
   onProfileChange: (id: string) => void;
   newProfileTrigger?: number;
   accountScope: AccountScope;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function TargetsTab({
@@ -38,6 +39,7 @@ export function TargetsTab({
   onProfileChange,
   newProfileTrigger,
   accountScope,
+  onDirtyChange,
 }: TargetsTabProps) {
   const liveProfiles = profiles.filter((p) => p.status !== "archived");
 
@@ -113,10 +115,21 @@ export function TargetsTab({
     }
   }
 
+  function navigateAfterRemove(removedId: string) {
+    const remaining = liveProfiles.filter((p) => p.id !== removedId);
+    const fallback = remaining.find((p) => p.status === "active") ?? remaining[0] ?? null;
+    if (fallback) {
+      onProfileChange(fallback.id);
+      setMode({ kind: "edit", profileId: fallback.id, presetId: null });
+    } else {
+      setMode({ kind: "onboarding" });
+    }
+  }
+
   function handleEditorDelete() {
     if (!editingProfile) return;
     deleteProfile.mutate(editingProfile.id, {
-      onSuccess: () => setMode({ kind: "onboarding" }),
+      onSuccess: () => navigateAfterRemove(editingProfile.id),
     });
   }
 
@@ -219,10 +232,14 @@ export function TargetsTab({
       onCancel={handleEditorCancel}
       onArchive={
         editingProfile?.status === "active"
-          ? () => archiveProfile.mutate(editingProfile.id)
+          ? () =>
+              archiveProfile.mutate(editingProfile.id, {
+                onSuccess: () => navigateAfterRemove(editingProfile.id),
+              })
           : undefined
       }
       onDelete={editingProfile ? handleEditorDelete : undefined}
+      onDirtyChange={onDirtyChange}
     />
   );
 }

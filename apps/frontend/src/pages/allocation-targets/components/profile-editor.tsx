@@ -45,6 +45,7 @@ interface ProfileEditorProps {
   onCancel: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const TRIGGER_OPTIONS = [
@@ -122,6 +123,7 @@ export function ProfileEditor({
   onCancel,
   onArchive,
   onDelete,
+  onDirtyChange,
 }: ProfileEditorProps) {
   const topLevelCategories = useMemo(
     () => taxonomy.categories.filter((c) => !c.parentId),
@@ -132,10 +134,8 @@ export function ProfileEditor({
 
   const [name, setName] = useState(profile?.name ?? "");
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [scopeType, setScopeType] = useState<TargetScopeType>(
-    profile?.scopeType ?? defaultScopeType ?? "all",
-  );
-  const [scopeId, setScopeId] = useState<string | null>(profile?.scopeId ?? defaultScopeId ?? null);
+  const scopeType: TargetScopeType = profile?.scopeType ?? defaultScopeType ?? "all";
+  const scopeId: string | null = profile?.scopeId ?? defaultScopeId ?? null;
   const [driftBandPct, setDriftBandPct] = useState(profile ? profile.driftBandBps / 100 : 5);
   const [triggerType, setTriggerType] = useState<"threshold" | "manual">(
     (profile?.triggerType as "threshold" | "manual") ?? "threshold",
@@ -147,6 +147,11 @@ export function ProfileEditor({
   const [minTradeAmount, setMinTradeAmount] = useState(profile?.minTradeAmount ?? "0");
   const [wholeSharesOnly, setWholeSharesOnly] = useState(profile?.wholeSharesOnly ?? false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(initialPresetId ?? null);
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const [nodes, setNodes] = useState<NodeDraft[]>(() => {
     if (!profile) {
@@ -192,6 +197,7 @@ export function ProfileEditor({
   function handlePresetSelect(presetId: string) {
     setSelectedPreset(presetId);
     setNodes(buildInitialNodes(presetId, topLevelCategories, currentAllocation));
+    setIsDirty(true);
   }
 
   async function persistProfile(andActivate: boolean) {
@@ -238,6 +244,7 @@ export function ProfileEditor({
         await activateProfile.mutateAsync(profileId);
       }
 
+      setIsDirty(false);
       onSaved(profileId);
     } catch (err) {
       toast.error(andActivate ? "Failed to activate profile" : "Failed to save profile");
@@ -258,7 +265,10 @@ export function ProfileEditor({
               </div>
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setIsDirty(true);
+                }}
                 placeholder="Profile name…"
                 className="bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
               />
@@ -325,7 +335,11 @@ export function ProfileEditor({
                 disabled={!isValid || isSaving}
                 onClick={() => persistProfile(false)}
               >
-                {isSaving ? "Saving…" : "Save draft"}
+                {isSaving
+                  ? "Saving…"
+                  : profile?.status === "active"
+                    ? "Save changes"
+                    : "Save draft"}
               </Button>
               <Button
                 size="sm"
@@ -419,7 +433,10 @@ export function ProfileEditor({
               categories={topLevelCategories}
               nodes={nodes}
               currentAllocation={currentAllocation}
-              onChange={setNodes}
+              onChange={(n) => {
+                setNodes(n);
+                setIsDirty(true);
+              }}
             />
           </CardContent>
         </Card>
@@ -445,7 +462,10 @@ export function ProfileEditor({
                 max={10}
                 step={0.5}
                 value={driftBandPct}
-                onChange={(e) => setDriftBandPct(parseFloat(e.target.value))}
+                onChange={(e) => {
+                  setDriftBandPct(parseFloat(e.target.value));
+                  setIsDirty(true);
+                }}
                 className="accent-foreground w-full"
               />
               <div className="text-muted-foreground flex justify-between text-[10px]">
@@ -474,7 +494,10 @@ export function ProfileEditor({
                       name="trigger"
                       value={opt.value}
                       checked={triggerType === opt.value}
-                      onChange={() => setTriggerType(opt.value)}
+                      onChange={() => {
+                        setTriggerType(opt.value);
+                        setIsDirty(true);
+                      }}
                       className="mt-0.5"
                     />
                     <div className="flex-1">
@@ -510,7 +533,10 @@ export function ProfileEditor({
                       name="rebalanceTo"
                       value={opt.value}
                       checked={rebalanceTo === opt.value}
-                      onChange={() => setRebalanceTo(opt.value)}
+                      onChange={() => {
+                        setRebalanceTo(opt.value);
+                        setIsDirty(true);
+                      }}
                       className="mt-0.5"
                     />
                     <div className="flex-1">
@@ -530,7 +556,13 @@ export function ProfileEditor({
                   Sell overweight sleeves when rebalancing
                 </p>
               </div>
-              <Switch checked={allowSells} onCheckedChange={setAllowSells} />
+              <Switch
+                checked={allowSells}
+                onCheckedChange={(v) => {
+                  setAllowSells(v);
+                  setIsDirty(true);
+                }}
+              />
             </div>
 
             {/* Whole shares only */}
@@ -541,7 +573,13 @@ export function ProfileEditor({
                   Round trade quantities to whole units
                 </p>
               </div>
-              <Switch checked={wholeSharesOnly} onCheckedChange={setWholeSharesOnly} />
+              <Switch
+                checked={wholeSharesOnly}
+                onCheckedChange={(v) => {
+                  setWholeSharesOnly(v);
+                  setIsDirty(true);
+                }}
+              />
             </div>
 
             {/* Minimum trade amount */}
@@ -557,7 +595,10 @@ export function ProfileEditor({
                   min={0}
                   step={1}
                   value={minTradeAmount}
-                  onChange={(e) => setMinTradeAmount(e.target.value)}
+                  onChange={(e) => {
+                    setMinTradeAmount(e.target.value);
+                    setIsDirty(true);
+                  }}
                   className="w-20 bg-transparent text-right text-[13px] font-medium tabular-nums outline-none"
                 />
               </div>
