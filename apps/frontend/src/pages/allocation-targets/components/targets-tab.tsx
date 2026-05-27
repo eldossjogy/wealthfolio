@@ -39,8 +39,10 @@ export function TargetsTab({
   newProfileTrigger,
   accountScope,
 }: TargetsTabProps) {
+  const liveProfiles = profiles.filter((p) => p.status !== "archived");
+
   const [mode, setMode] = useState<EditorMode>(
-    profiles.length === 0
+    liveProfiles.length === 0
       ? { kind: "onboarding" }
       : { kind: "edit", profileId: selectedProfileId, presetId: null },
   );
@@ -103,7 +105,7 @@ export function TargetsTab({
   }
 
   function handleEditorCancel() {
-    if (profiles.length === 0) {
+    if (liveProfiles.length === 0) {
       setMode({ kind: "onboarding" });
     } else {
       setMode({ kind: "edit", profileId: selectedProfileId, presetId: null });
@@ -132,7 +134,7 @@ export function TargetsTab({
   if (mode.kind === "onboarding") {
     return (
       <div className="space-y-6">
-        {profiles.length > 0 && (
+        {liveProfiles.length > 0 && (
           <div className="flex items-center justify-between">
             <h2 className="text-foreground text-[13px] font-semibold">New profile</h2>
             <Button variant="ghost" size="sm" onClick={handleEditorCancel}>

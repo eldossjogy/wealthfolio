@@ -59,14 +59,13 @@ function KpiItem({
 }
 
 function filterProfilesByScope(profiles: TargetProfile[], scope: AccountScope): TargetProfile[] {
-  const visible = profiles.filter((p) => p.status !== "archived");
-  if (scope.type === "all") return visible.filter((p) => p.scopeType === "all");
+  if (scope.type === "all") return profiles.filter((p) => p.scopeType === "all");
   if (scope.type === "account")
-    return visible.filter((p) => p.scopeType === "account" && p.scopeId === scope.accountId);
+    return profiles.filter((p) => p.scopeType === "account" && p.scopeId === scope.accountId);
   if (scope.type === "portfolio")
-    return visible.filter((p) => p.scopeType === "portfolio" && p.scopeId === scope.portfolioId);
+    return profiles.filter((p) => p.scopeType === "portfolio" && p.scopeId === scope.portfolioId);
   // "accounts" (multi-account ad-hoc) → no dedicated profile scope type; show all-portfolio profiles
-  return visible.filter((p) => p.scopeType === "all");
+  return profiles.filter((p) => p.scopeType === "all");
 }
 
 function scopeKey(scope: AccountScope): string {
@@ -93,8 +92,14 @@ export function AllocationTargetsPage() {
     [profiles, accountScope],
   );
 
+  // Non-archived profiles drive empty-state checks and default selection
+  const scopedLiveProfiles = useMemo(
+    () => scopedProfiles.filter((p) => p.status !== "archived"),
+    [scopedProfiles],
+  );
+
   const scopedActiveProfile =
-    scopedProfiles.find((p) => p.status === "active") ?? scopedProfiles[0] ?? null;
+    scopedLiveProfiles.find((p) => p.status === "active") ?? scopedLiveProfiles[0] ?? null;
 
   const effectiveProfileId = selectedProfileId ?? scopedActiveProfile?.id ?? null;
   const effectiveProfile = profiles.find((p) => p.id === effectiveProfileId) ?? null;
@@ -224,13 +229,19 @@ export function AllocationTargetsPage() {
                         <DropdownMenuItem
                           key={p.id}
                           onSelect={() => setSelectedProfileId(p.id)}
-                          className={cn(effectiveProfileId === p.id && "font-medium")}
+                          className={cn(
+                            effectiveProfileId === p.id && "font-medium",
+                            p.status === "archived" && "opacity-50",
+                          )}
                         >
                           <span className="flex-1">{p.name}</span>
                           {p.status === "active" && (
                             <span className="text-[10px] text-green-600 dark:text-green-400">
                               Active
                             </span>
+                          )}
+                          {p.status === "archived" && (
+                            <span className="text-muted-foreground text-[10px]">Archived</span>
                           )}
                         </DropdownMenuItem>
                       ))}
@@ -253,7 +264,7 @@ export function AllocationTargetsPage() {
 
             <div className="px-6 pb-6 pt-10">
               <TabsContent value="overview" className="m-0">
-                {scopedProfiles.length === 0 && !isLoading ? (
+                {scopedLiveProfiles.length === 0 && !isLoading ? (
                   <EmptyPlaceholder
                     icon={<Icons.Target className="text-muted-foreground h-10 w-10" />}
                     title="No target profile yet"
