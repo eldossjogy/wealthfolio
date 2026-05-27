@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Button, Icons, Skeleton } from "@wealthfolio/ui";
 
 import { useTaxonomy } from "@/hooks/use-taxonomies";
@@ -31,6 +31,7 @@ interface TargetsTabProps {
   newProfileTrigger?: number;
   accountScope: AccountScope;
   onUnsavedChange?: (dirty: boolean) => void;
+  saveRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 export function TargetsTab({
@@ -40,6 +41,7 @@ export function TargetsTab({
   newProfileTrigger,
   accountScope,
   onUnsavedChange,
+  saveRef,
 }: TargetsTabProps) {
   const liveProfiles = profiles.filter((p) => p.status !== "archived");
 
@@ -240,6 +242,7 @@ export function TargetsTab({
       }
       onDelete={editingProfile ? handleEditorDelete : undefined}
       onUnsavedChange={onUnsavedChange}
+      saveRef={saveRef}
     />
   );
 }

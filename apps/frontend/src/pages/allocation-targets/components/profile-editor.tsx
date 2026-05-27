@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,6 +46,7 @@ interface ProfileEditorProps {
   onArchive?: () => void;
   onDelete?: () => void;
   onUnsavedChange?: (dirty: boolean) => void;
+  saveRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 const TRIGGER_OPTIONS = [
@@ -124,6 +125,7 @@ export function ProfileEditor({
   onArchive,
   onDelete,
   onUnsavedChange,
+  saveRef,
 }: ProfileEditorProps) {
   const topLevelCategories = useMemo(
     () => taxonomy.categories.filter((c) => !c.parentId),
@@ -251,6 +253,8 @@ export function ProfileEditor({
       console.error(err);
     }
   }
+
+  if (saveRef) saveRef.current = () => persistProfile(false);
 
   return (
     <div className="space-y-5">

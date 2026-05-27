@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -91,12 +91,22 @@ export function AllocationTargetsPage() {
   const [newProfileTrigger, setNewProfileTrigger] = useState(0);
   const [editorHasUnsavedChanges, setEditorHasUnsavedChanges] = useState(false);
   const [pendingTab, setPendingTab] = useState<string | null>(null);
+  const [navigateToTabOnSave, setNavigateToTabOnSave] = useState<string | null>(null);
+  const editorSaveRef = useRef<(() => void) | null>(null);
 
   function handleTabChange(tab: string) {
     if (editorHasUnsavedChanges && activeTab === "targets" && tab !== "targets") {
       setPendingTab(tab);
     } else {
       setActiveTab(tab);
+    }
+  }
+
+  function handleProfileChange(id: string) {
+    setSelectedProfileId(id);
+    if (navigateToTabOnSave) {
+      setActiveTab(navigateToTabOnSave);
+      setNavigateToTabOnSave(null);
     }
   }
 
@@ -327,10 +337,11 @@ export function AllocationTargetsPage() {
                     key={scopeKey(accountScope)}
                     profiles={scopedProfiles}
                     selectedProfileId={effectiveProfileId}
-                    onProfileChange={(id) => setSelectedProfileId(id)}
+                    onProfileChange={handleProfileChange}
                     newProfileTrigger={newProfileTrigger}
                     accountScope={accountScope}
                     onUnsavedChange={setEditorHasUnsavedChanges}
+                    saveRef={editorSaveRef}
                   />
                 )}
               </TabsContent>
@@ -363,6 +374,7 @@ export function AllocationTargetsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setPendingTab(null)}>Stay</AlertDialogCancel>
             <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
                 setEditorHasUnsavedChanges(false);
                 setActiveTab(pendingTab!);
@@ -370,6 +382,15 @@ export function AllocationTargetsPage() {
               }}
             >
               Discard changes
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                setNavigateToTabOnSave(pendingTab!);
+                setPendingTab(null);
+                editorSaveRef.current?.();
+              }}
+            >
+              Save
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
