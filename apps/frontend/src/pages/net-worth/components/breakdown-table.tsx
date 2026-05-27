@@ -1,42 +1,29 @@
-import { formatPercent } from "@/lib/utils";
+import { DashboardCard } from "@/components/dashboard-card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@wealthfolio/ui/components/ui/collapsible";
+import { Icons } from "@wealthfolio/ui/components/ui/icons";
+import { useState } from "react";
 import { CompactAmount } from "./compact-amount";
-import { SectionCard } from "./section-card";
-import { Sparkline } from "./sparkline";
+import { CompositionBar } from "./composition-bar";
 import {
   CARD_LABEL,
-  CATEGORY_COLORS,
+  CATEGORY_CSS_COLORS,
+  deriveChange,
+  formatChangePercent,
   seriesFor,
+  type Change,
   type ParsedHistoryPoint,
   type ParsedNetWorth,
+  type SelectedCategory,
 } from "./utils";
 
-// name | % | value | Δ | trend — % and trend collapse on small screens.
+// name | % | value | Δ. Fixed widths so columns line up across rows (each row is
+// its own grid). On mobile the % column and the Δ-percent collapse.
 const ROW_GRID =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] md:grid-cols-[minmax(0,1fr)_3rem_7rem_8rem_4.5rem] items-center gap-x-3 md:gap-x-4";
-
-interface Change {
-  amount: number;
-  percent: number;
-}
-
-/**
- * Change over the range from a value series. Liabilities are stored as positive
- * magnitudes, so a reduction is expressed as a positive (good) change.
- */
-function deriveChange(series: number[], isLiability: boolean): Change {
-  if (series.length < 2) return { amount: 0, percent: 0 };
-  const first = series[0];
-  const last = series[series.length - 1];
-  const amount = isLiability ? first - last : last - first;
-  const base = Math.abs(first);
-  return { amount, percent: base > 0 ? amount / base : 0 };
-}
-
-// Percent is a ratio (0.145 = 14.5%); drop decimals for very large swings.
-function formatChangePercent(percent: number): string {
-  const abs = Math.abs(percent);
-  return formatPercent(abs, { digits: abs >= 10 ? 0 : 1, signDisplay: "never" });
-}
+  "grid grid-cols-[minmax(0,1fr)_4.5rem_5rem] md:grid-cols-[minmax(0,1fr)_3rem_7rem_8rem] items-center gap-x-3 md:gap-x-4";
 
 function ChangeCell({ change, currency }: { change: Change; currency: string }) {
   const isZero = Math.abs(change.amount) < 0.005;
@@ -47,66 +34,71 @@ function ChangeCell({ change, currency }: { change: Change; currency: string }) 
       : "text-destructive";
   const sign = isZero ? "" : change.amount > 0 ? "+" : "-";
   return (
-    <div className={`flex items-baseline justify-end gap-1.5 ${color}`}>
-      <span className="text-sm tabular-nums">
+    <div className="flex items-baseline justify-end gap-2.5">
+      <span className={`text-xs tabular-nums md:text-sm ${color}`}>
         {sign}
         <CompactAmount value={Math.abs(change.amount)} currency={currency} />
       </span>
-      <span className="text-xs tabular-nums opacity-80">
-        {sign}
+      <span className="text-muted-foreground/60 hidden w-12 text-right text-sm tabular-nums md:block">
         {formatChangePercent(change.percent)}
       </span>
     </div>
   );
 }
 
-function trendColor(amount: number): string {
-  if (Math.abs(amount) < 0.005) return "var(--muted-foreground)";
-  return amount > 0 ? "var(--success)" : "var(--destructive)";
-}
-
 interface RowProps {
   name: string;
-  dotClass: string;
+  dotColor: string;
   value: number;
   percentOfSection: number;
-  series: number[];
   change: Change;
   currency: string;
   negative?: boolean;
+  onClick?: () => void;
 }
 
 function BreakdownRow({
   name,
-  dotClass,
+  dotColor,
   value,
   percentOfSection,
-  series,
   change,
   currency,
   negative,
+  onClick,
 }: RowProps) {
+  const interactive = onClick
+    ? "hover:bg-muted/40 cursor-pointer rounded-md transition-colors"
+    : "";
   return (
-    <div className={`${ROW_GRID} py-2`}>
+    <div
+      className={`${ROW_GRID} py-2 ${interactive}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="flex min-w-0 items-center gap-2.5">
-        <div className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
-        <span className="text-foreground/90 truncate text-sm">{name}</span>
+        <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} />
+        <span className="text-foreground truncate text-xs md:text-sm">{name}</span>
       </div>
-      <span className="text-muted-foreground/70 hidden text-right text-xs tabular-nums md:block">
+      <span className="text-muted-foreground/70 hidden text-right text-sm tabular-nums md:block">
         {percentOfSection.toFixed(1)}%
       </span>
-      <span className="text-foreground/90 justify-self-end text-sm tabular-nums">
+      <span className="text-foreground justify-self-end text-xs tabular-nums md:text-sm">
         {negative && value !== 0 ? "-" : ""}
         <CompactAmount value={value} currency={currency} />
       </span>
       <ChangeCell change={change} currency={currency} />
-      <div className="hidden justify-self-end md:block">
-        <Sparkline
-          data={series}
-          stroke={trendColor(change.amount)}
-          fill={trendColor(change.amount)}
-        />
-      </div>
     </div>
   );
 }
@@ -116,96 +108,156 @@ interface BreakdownTableProps {
   history: ParsedHistoryPoint[];
   currency: string;
   periodLabel: string;
+  onSelect: (selected: SelectedCategory) => void;
 }
 
-export function BreakdownTable({ data, history, currency, periodLabel }: BreakdownTableProps) {
+export function BreakdownTable({
+  data,
+  history,
+  currency,
+  periodLabel,
+  onSelect,
+}: BreakdownTableProps) {
   const hasLiabilities = data.liabilities.total > 0 || data.liabilities.breakdown.length > 0;
-  const netWorthSeries = history.map((point) => point.netWorth);
-  const netWorthChange = deriveChange(netWorthSeries, false);
+  const netWorthChange = deriveChange(
+    history.map((point) => point.netWorth),
+    false,
+  );
+  const [assetsOpen, setAssetsOpen] = useState(true);
+  const [liabilitiesOpen, setLiabilitiesOpen] = useState(true);
 
   return (
-    <SectionCard title="Breakdown" meta={`Trend = change over ${periodLabel}`}>
-      {/* Assets section header + total */}
-      <div className="border-border/60 flex items-center justify-between border-b pb-2">
-        <span className="text-sm font-semibold">Assets</span>
-        <span className="text-success text-sm font-semibold tabular-nums">
-          <CompactAmount value={data.assets.total} currency={currency} />
-        </span>
-      </div>
+    <DashboardCard title="Breakdown" meta={`Change over ${periodLabel}`}>
+      {/* Assets — collapsible */}
+      <Collapsible open={assetsOpen} onOpenChange={setAssetsOpen}>
+        <CollapsibleTrigger className="flex w-full items-center justify-between text-left">
+          <span className="flex items-center gap-1.5 text-sm font-semibold">
+            <Icons.ChevronRight
+              className={`text-muted-foreground h-3.5 w-3.5 transition-transform ${assetsOpen ? "rotate-90" : ""}`}
+            />
+            Assets
+          </span>
+          <span className="text-success text-sm font-semibold tabular-nums">
+            <CompactAmount value={data.assets.total} currency={currency} />
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          {/* Composition — proportion of assets (the rows below are its legend) */}
+          <div className="border-border/60 mb-1 mt-2.5 border-b pb-3">
+            <CompositionBar data={data} />
+          </div>
 
-      {/* Column labels */}
-      <div className={`${ROW_GRID} pt-2`}>
-        <span className={CARD_LABEL}>Category</span>
-        <span className={`${CARD_LABEL} hidden text-right md:block`}>%</span>
-        <span className={`${CARD_LABEL} justify-self-end`}>Value</span>
-        <span className={`${CARD_LABEL} justify-self-end`}>Δ {periodLabel}</span>
-        <span className={`${CARD_LABEL} hidden justify-self-end md:block`}>Trend</span>
-      </div>
+          {/* Column labels */}
+          <div className={`${ROW_GRID} pt-2`}>
+            <span className={CARD_LABEL}>Category</span>
+            <span className={`${CARD_LABEL} hidden text-right md:block`}>%</span>
+            <span className={`${CARD_LABEL} justify-self-end`}>Value</span>
+            <span className={`${CARD_LABEL} justify-self-end`}>Δ {periodLabel}</span>
+          </div>
 
-      <div className="divide-border/40 divide-y">
-        {data.assets.breakdown.map((item) => (
-          <BreakdownRow
-            key={item.category}
-            name={item.name}
-            dotClass={CATEGORY_COLORS[item.category] ?? "bg-muted-foreground"}
-            value={item.value}
-            percentOfSection={data.assets.total > 0 ? (item.value / data.assets.total) * 100 : 0}
-            series={seriesFor(history, item.category)}
-            change={deriveChange(seriesFor(history, item.category), false)}
-            currency={currency}
-          />
-        ))}
-      </div>
+          <div className="divide-border/40 divide-y">
+            {data.assets.breakdown.map((item) => (
+              <BreakdownRow
+                key={item.category}
+                name={item.name}
+                dotColor={CATEGORY_CSS_COLORS[item.category] ?? "var(--muted-foreground)"}
+                value={item.value}
+                percentOfSection={
+                  data.assets.total > 0 ? (item.value / data.assets.total) * 100 : 0
+                }
+                change={deriveChange(seriesFor(history, item.category), false)}
+                currency={currency}
+                onClick={() =>
+                  onSelect({
+                    key: item.category,
+                    name: item.name,
+                    value: item.value,
+                    isLiability: false,
+                    isInvestment: item.category === "investments",
+                    children: item.children ?? [],
+                  })
+                }
+              />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-      {/* Liabilities section */}
+      {/* Separator carrying the "−" operator (Assets − Liabilities), aligned to the icon column */}
       {hasLiabilities && (
-        <>
-          <div className="border-border/60 mt-2 flex items-center justify-between border-y py-2">
-            <span className="text-sm font-semibold">Liabilities</span>
+        <div className="my-3 flex items-center gap-1.5">
+          <span className="text-muted-foreground w-3.5 shrink-0 text-center text-sm font-normal">
+            −
+          </span>
+          <div className="border-border/60 flex-1 border-t" />
+        </div>
+      )}
+
+      {/* Liabilities — collapsible */}
+      {hasLiabilities && (
+        <Collapsible open={liabilitiesOpen} onOpenChange={setLiabilitiesOpen}>
+          <CollapsibleTrigger className="flex w-full items-center justify-between text-left">
+            <span className="flex items-center gap-1.5 text-sm font-semibold">
+              <Icons.ChevronRight
+                className={`text-muted-foreground h-3.5 w-3.5 transition-transform ${liabilitiesOpen ? "rotate-90" : ""}`}
+              />
+              Liabilities
+            </span>
             <span className="text-destructive text-sm font-semibold tabular-nums">
               -<CompactAmount value={data.liabilities.total} currency={currency} />
             </span>
-          </div>
-          <div className="divide-border/40 divide-y">
-            {data.liabilities.breakdown.map((item, index) => {
-              const key = item.assetId ?? `${item.category}-${index}`;
-              const series = item.assetId ? seriesFor(history, item.assetId) : [];
-              return (
-                <BreakdownRow
-                  key={key}
-                  name={item.name}
-                  dotClass={CATEGORY_COLORS.liabilities}
-                  value={item.value}
-                  negative
-                  percentOfSection={
-                    data.liabilities.total > 0 ? (item.value / data.liabilities.total) * 100 : 0
-                  }
-                  series={series}
-                  change={deriveChange(series, true)}
-                  currency={currency}
-                />
-              );
-            })}
-          </div>
-        </>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="divide-border/40 divide-y pt-1">
+              {data.liabilities.breakdown.map((item, index) => {
+                const key = item.assetId ?? `${item.category}-${index}`;
+                const series = item.assetId ? seriesFor(history, item.assetId) : [];
+                return (
+                  <BreakdownRow
+                    key={key}
+                    name={item.name}
+                    dotColor={CATEGORY_CSS_COLORS.liabilities}
+                    value={item.value}
+                    negative
+                    percentOfSection={
+                      data.liabilities.total > 0 ? (item.value / data.liabilities.total) * 100 : 0
+                    }
+                    change={deriveChange(series, true)}
+                    currency={currency}
+                    onClick={
+                      item.assetId
+                        ? () =>
+                            onSelect({
+                              key: item.assetId!,
+                              name: item.name,
+                              value: item.value,
+                              isLiability: true,
+                              isInvestment: false,
+                              children: [],
+                            })
+                        : undefined
+                    }
+                  />
+                );
+              })}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
-      {/* Net Worth total */}
-      <div className={`${ROW_GRID} bg-muted/30 -mx-4 mt-2 rounded-lg px-4 py-3 md:-mx-5 md:px-5`}>
-        <span className="text-sm font-bold">Net Worth</span>
+      {/* Net Worth total — label indented (chevron-sized spacer) to align with the
+          Assets/Liabilities section labels; value/Δ stay in the grid columns. */}
+      <div className={`${ROW_GRID} border-border/60 mt-3 border-t pt-3`}>
+        <span className="flex items-center gap-1.5 text-sm font-bold">
+          <span className="text-muted-foreground w-3.5 shrink-0 text-center font-normal">=</span>
+          Net Worth
+        </span>
         <span className="hidden md:block" />
         <span className="justify-self-end text-sm font-bold tabular-nums">
           <CompactAmount value={data.netWorth} currency={currency} />
         </span>
         <ChangeCell change={netWorthChange} currency={currency} />
-        <div className="hidden justify-self-end md:block">
-          <Sparkline
-            data={netWorthSeries}
-            stroke={trendColor(netWorthChange.amount)}
-            fill={trendColor(netWorthChange.amount)}
-          />
-        </div>
       </div>
-    </SectionCard>
+    </DashboardCard>
   );
 }

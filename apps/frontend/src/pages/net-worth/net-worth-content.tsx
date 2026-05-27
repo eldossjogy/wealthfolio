@@ -1,8 +1,12 @@
 import { useNetWorth, useNetWorthHistory } from "@/hooks/use-alternative-assets";
+import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
+import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { DateRange } from "@/lib/types";
+import type { CategoryAllocation, DateRange, TaxonomyAllocation } from "@/lib/types";
 import { formatDateISO } from "@/lib/utils";
 import Balance from "@/pages/dashboard/balance";
+import { AllocationDetailSheet } from "@/pages/holdings/components/allocation-detail-sheet";
+import { DashboardCard } from "@/components/dashboard-card";
 import {
   GainAmount,
   GainPercent,
@@ -22,10 +26,9 @@ import {
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { BreakdownTable } from "./components/breakdown-table";
-import { CompositionCard } from "./components/composition-card";
+import { CategoryDetailSheet } from "./components/category-detail-sheet";
 import { MomentumCard } from "./components/momentum-card";
 import {
-  CARD_GLASS,
   THEME_COLOR,
   THEME_COLOR_LIGHT,
   averageMonthlyChange,
@@ -33,6 +36,7 @@ import {
   computeVelocity,
   parseHistory,
   type ParsedNetWorth,
+  type SelectedCategory,
 } from "./components/utils";
 import { VelocityCard } from "./components/velocity-card";
 import { NetWorthChart } from "./net-worth-chart";
@@ -41,9 +45,31 @@ const DEFAULT_INTERVAL: TimePeriod = "ALL";
 const INTERVAL_STORAGE_KEY = "networth-interval";
 const MS_PER_DAY = 86_400_000;
 
+/**
+ * The Asset-Classes allocation counts account cash as a "Cash" class, but net
+ * worth tracks Cash as its own breakdown row. Drop the Cash class (and rescale
+ * the remaining percentages) so the Investments drawer reflects the investment
+ * portfolio and matches the Investments row value.
+ */
+function investmentAllocation(allocation?: TaxonomyAllocation): TaxonomyAllocation | undefined {
+  if (!allocation) return undefined;
+  const kept = allocation.categories.filter(
+    (category) => category.categoryName.toLowerCase() !== "cash",
+  );
+  const total = kept.reduce((sum, category) => sum + category.value, 0);
+  const rescale = (categories: CategoryAllocation[]): CategoryAllocation[] =>
+    categories.map((category) => ({
+      ...category,
+      percentage: total > 0 ? (category.value / total) * 100 : 0,
+      children: category.children ? rescale(category.children) : category.children,
+    }));
+  return { ...allocation, categories: rescale(kept) };
+}
+
 export function NetWorthContent() {
   const { settings } = useSettingsContext();
   const { data: netWorthData, isLoading, isError, error } = useNetWorth();
+  const isMobile = useIsMobileViewport();
 
   const [intervalCode] = usePersistentState<TimePeriod>(INTERVAL_STORAGE_KEY, DEFAULT_INTERVAL);
 
@@ -107,6 +133,12 @@ export function NetWorthContent() {
           name: item.name,
           value: parseFloat(item.value) || 0,
           assetId: item.assetId,
+          children: (item.children ?? []).map((child) => ({
+            category: child.category,
+            name: child.name,
+            value: parseFloat(child.value) || 0,
+            assetId: child.assetId,
+          })),
         })),
       },
       liabilities: {
@@ -148,6 +180,17 @@ export function NetWorthContent() {
   const hasStaleValuations = netWorthData && netWorthData.staleAssets.length > 0;
   const periodLabel = periodCode;
 
+  // Breakdown row → detail drawer. Investments open the existing asset-class
+  // allocation sheet; every other row opens the category detail sheet.
+  const [selected, setSelected] = useState<SelectedCategory | null>(null);
+  const { allocations } = usePortfolioAllocations({ type: "all" });
+  const investmentsAlloc = useMemo(
+    () => investmentAllocation(allocations?.assetClasses),
+    [allocations],
+  );
+  const investmentSheetOpen = !!selected && selected.isInvestment;
+  const categorySheetOpen = !!selected && !selected.isInvestment;
+
   if (isError && error) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center p-8">
@@ -174,6 +217,8 @@ export function NetWorthContent() {
                 targetValue={parsedData?.netWorth ?? 0}
                 currency={currency}
                 displayCurrency={true}
+                displayDecimal={false}
+                compact={isMobile}
               />
               {hasStaleValuations && (
                 <TooltipProvider>
@@ -274,12 +319,12 @@ export function NetWorthContent() {
         </div>
 
         {/* Content section */}
-        <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-20 md:px-6 md:pb-6 md:pt-20 lg:px-10 lg:pb-8 lg:pt-24">
+        <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-14 md:px-6 md:pb-6 md:pt-12 lg:px-10 lg:pb-8 lg:pt-14">
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-12">
             {/* Left column: Breakdown */}
             <div className="lg:col-span-2">
               {isLoading || isHistoryLoading ? (
-                <div className={CARD_GLASS}>
+                <DashboardCard title="Breakdown">
                   <div className="space-y-4">
                     {Array.from({ length: 5 }).map((_, i) => (
                       <div key={i} className="flex items-center justify-between">
@@ -288,13 +333,14 @@ export function NetWorthContent() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </DashboardCard>
               ) : parsedData ? (
                 <BreakdownTable
                   data={parsedData}
                   history={parsedHistory}
                   currency={currency}
                   periodLabel={periodLabel}
+                  onSelect={setSelected}
                 />
               ) : (
                 <div
@@ -315,8 +361,6 @@ export function NetWorthContent() {
 
             {/* Right column: insight cards */}
             <div className="space-y-6 lg:col-span-1">
-              {parsedData && <CompositionCard data={parsedData} />}
-
               {velocity && (
                 <VelocityCard
                   velocity={velocity}
@@ -368,6 +412,28 @@ export function NetWorthContent() {
           </div>
         </div>
       </div>
+
+      {/* Detail drawers — Investments reuses the asset-class allocation sheet;
+          all other rows open the category detail sheet. */}
+      <AllocationDetailSheet
+        isOpen={investmentSheetOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+        allocation={investmentsAlloc}
+        accountFilter={{ type: "all" }}
+        baseCurrency={currency}
+      />
+      <CategoryDetailSheet
+        open={categorySheetOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
+        selected={selected}
+        history={parsedHistory}
+        currency={currency}
+        periodLabel={periodLabel}
+      />
     </div>
   );
 }

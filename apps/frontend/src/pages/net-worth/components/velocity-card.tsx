@@ -1,42 +1,44 @@
+import { DashboardCard } from "@/components/dashboard-card";
 import { CompactAmount } from "./compact-amount";
-import { SectionCard } from "./section-card";
-import { CARD_LABEL, type Velocity } from "./utils";
+import { CARD_LABEL, toneClass, toneFill, type Velocity } from "./utils";
 
-function signClass(value: number): string {
-  if (Math.abs(value) < 0.005) return "text-muted-foreground/60";
-  return value > 0 ? "text-success" : "text-destructive";
-}
-
-function MetricBar({
+function DriverRow({
   label,
   value,
-  max,
+  months,
+  total,
   currency,
 }: {
   label: string;
   value: number;
-  max: number;
+  months: number;
+  total: number;
   currency: string;
 }) {
-  const width = max > 0 ? Math.min(100, (Math.abs(value) / max) * 100) : 0;
-  const positive = value >= 0;
-  const sign = Math.abs(value) < 0.005 ? "" : positive ? "+" : "-";
+  const perMonth = months > 0 ? value / months : value;
+  const share = total > 0 ? (Math.abs(value) / total) * 100 : 0;
+  const sign = Math.abs(value) < 0.005 ? "" : value > 0 ? "+" : "-";
   return (
-    <div>
-      <p className={CARD_LABEL}>{label}</p>
-      <p className={`text-sm font-semibold tabular-nums ${signClass(value)}`}>
-        {sign}
-        <CompactAmount value={Math.abs(value)} currency={currency} />
-      </p>
-      <div className="bg-muted/40 relative mt-1.5 h-1.5 w-full overflow-hidden rounded-full">
-        <div
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{
-            width: `${width}%`,
-            backgroundColor: positive ? "var(--success)" : "var(--destructive)",
-            opacity: 0.9,
-          }}
-        />
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-foreground/70 text-xs">{label}</span>
+        <span className={`text-sm font-semibold tabular-nums ${toneClass(value)}`}>
+          {sign}
+          <CompactAmount value={Math.abs(perMonth)} currency={currency} />
+          <span className="text-muted-foreground/50 font-normal">/mo</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <div className="bg-muted/40 h-1 flex-1 overflow-hidden rounded-full">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${share}%`, backgroundColor: toneFill(value) }}
+          />
+        </div>
+        <span className="text-muted-foreground/60 shrink-0 text-xs tabular-nums">
+          {Math.round(share)}% · {sign}
+          <CompactAmount value={Math.abs(value)} currency={currency} />
+        </span>
       </div>
     </div>
   );
@@ -44,7 +46,7 @@ function MetricBar({
 
 interface VelocityCardProps {
   velocity: Velocity;
-  /** Average monthly net worth change over the trailing year, for the multiple. */
+  /** Average monthly net worth change over the trailing year, for the pace multiple. */
   trailingYearMonthly?: number;
   currency: string;
   periodLabel: string;
@@ -56,34 +58,56 @@ export function VelocityCard({
   currency,
   periodLabel,
 }: VelocityCardProps) {
-  const { perMonth, marketGains, contributions, equityBuilt } = velocity;
-  const max = Math.max(Math.abs(marketGains), Math.abs(contributions), Math.abs(equityBuilt));
+  const { perMonth, netChange, months, marketGains, contributions, equityBuilt } = velocity;
+  const total = Math.abs(marketGains) + Math.abs(contributions) + Math.abs(equityBuilt);
   const multiple =
     trailingYearMonthly && Math.abs(trailingYearMonthly) > 0.005
       ? perMonth / trailingYearMonthly
       : null;
   const perMonthSign = Math.abs(perMonth) < 0.005 ? "" : perMonth > 0 ? "+" : "-";
+  const netSign = Math.abs(netChange) < 0.005 ? "" : netChange > 0 ? "+" : "-";
+  const monthsRounded = Math.max(1, Math.round(months));
 
   return (
-    <SectionCard title="Velocity" meta={periodLabel}>
-      <div className="flex items-baseline gap-1.5">
-        <span className={`text-2xl font-bold tabular-nums ${signClass(perMonth)}`}>
+    <DashboardCard title="Monthly pace" meta={periodLabel}>
+      <div className="flex items-baseline gap-0.5">
+        <span className={`text-lg font-bold tabular-nums ${toneClass(perMonth)}`}>
           {perMonthSign}
           <CompactAmount value={Math.abs(perMonth)} currency={currency} />
         </span>
-        <span className="text-muted-foreground text-sm">/ month</span>
+        <span className="text-muted-foreground text-sm">/mo</span>
       </div>
-      {multiple != null && (
-        <p className="text-muted-foreground mt-0.5 text-xs">
-          {multiple.toFixed(1)}× trailing-year average
-        </p>
-      )}
+      <p className="text-muted-foreground/80 mt-1 text-xs tabular-nums">
+        {netSign}
+        <CompactAmount value={Math.abs(netChange)} currency={currency} /> over {monthsRounded}{" "}
+        {monthsRounded === 1 ? "month" : "months"}
+        {multiple != null && ` · ${multiple.toFixed(1)}× trailing-12mo pace`}
+      </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
-        <MetricBar label="Market gains" value={marketGains} max={max} currency={currency} />
-        <MetricBar label="Contributions" value={contributions} max={max} currency={currency} />
-        <MetricBar label="Equity built" value={equityBuilt} max={max} currency={currency} />
+      <p className={`${CARD_LABEL} mb-3 mt-5`}>Drivers of {periodLabel} change</p>
+      <div className="space-y-3.5">
+        <DriverRow
+          label="Market returns"
+          value={marketGains}
+          months={months}
+          total={total}
+          currency={currency}
+        />
+        <DriverRow
+          label="Contributions"
+          value={contributions}
+          months={months}
+          total={total}
+          currency={currency}
+        />
+        <DriverRow
+          label="Equity built"
+          value={equityBuilt}
+          months={months}
+          total={total}
+          currency={currency}
+        />
       </div>
-    </SectionCard>
+    </DashboardCard>
   );
 }

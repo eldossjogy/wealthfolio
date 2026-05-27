@@ -1,36 +1,42 @@
 import type { NetWorthHistoryPoint } from "@/lib/types";
+import { formatPercent } from "@/lib/utils";
 
-// Goldish orange net-worth theme (matches the history chart).
+// Goldish orange net-worth theme (matches the history chart). Reserved for the
+// chart/brand; value numbers use semantic green/red tones (orange == warning).
 export const THEME_COLOR = "hsl(38 75% 50%)";
 export const THEME_COLOR_LIGHT = "hsl(38 75% 50% / 0.12)";
 
-// Card styles mirrored from the spending dashboard (glass + solid variants).
-export const CARD_GLASS =
-  "border-border/60 bg-card/80 rounded-xl border p-4 backdrop-blur-xl md:p-5";
-export const CARD_LABEL =
-  "text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-wide";
+/** Semantic text tone for a signed value: green gain, red loss, muted when flat. */
+export function toneClass(value: number): string {
+  if (Math.abs(value) < 0.005) return "text-muted-foreground/60";
+  return value > 0 ? "text-success" : "text-destructive";
+}
 
-// Tailwind dot classes per asset category.
-export const CATEGORY_COLORS: Record<string, string> = {
-  cash: "bg-chart-9",
-  investments: "bg-chart-1",
-  properties: "bg-chart-2",
-  vehicles: "bg-chart-3",
-  collectibles: "bg-chart-4",
-  preciousMetals: "bg-chart-5",
-  otherAssets: "bg-muted-foreground",
-  liabilities: "bg-destructive",
-};
+/** Semantic fill color for bars/meters: green for positive/zero, red for negative. */
+export function toneColor(value: number): string {
+  return value < -0.005 ? "var(--destructive)" : "var(--success)";
+}
 
-// CSS-variable colors per asset category (for inline styles / composition bar).
+/** Softened semantic fill for chart bars/areas (dimmer than the text tone). */
+export function toneFill(value: number): string {
+  const base = value < -0.005 ? "var(--destructive)" : "var(--success)";
+  return `color-mix(in srgb, ${base} 60%, transparent)`;
+}
+
+export const CARD_LABEL = "text-muted-foreground/70 text-xs font-semibold uppercase tracking-wide";
+
+// Muted, semantic category palette (tuned for the warm/cream theme). Used for
+// the composition bar, breakdown row dots, and the detail-sheet icons so they
+// stay consistent. Liabilities keep the semantic red.
+// NOTE: tuned for light mode — dark-mode variants would need theme-aware tokens.
 export const CATEGORY_CSS_COLORS: Record<string, string> = {
-  cash: "var(--chart-9)",
-  investments: "var(--chart-1)",
-  properties: "var(--chart-2)",
-  vehicles: "var(--chart-3)",
-  collectibles: "var(--chart-4)",
-  preciousMetals: "var(--chart-5)",
-  otherAssets: "var(--muted-foreground)",
+  properties: "#4b4137", // warm dark taupe / charcoal
+  investments: "#6f7544", // muted olive green
+  cash: "#d8c98f", // pale cream / light gold
+  vehicles: "#6d7c86", // muted slate
+  otherAssets: "#928d83", // medium warm gray
+  preciousMetals: "#b8923a", // soft gold
+  collectibles: "#8a6b49", // muted brown
   liabilities: "var(--destructive)",
 };
 
@@ -39,6 +45,18 @@ export interface BreakdownEntry {
   name: string;
   value: number;
   assetId?: string;
+  children?: BreakdownEntry[];
+}
+
+/** A breakdown row selected for the detail drawer. */
+export interface SelectedCategory {
+  /** History/breakdown key: the category key for assets, the assetId for liabilities. */
+  key: string;
+  name: string;
+  value: number;
+  isLiability: boolean;
+  isInvestment: boolean;
+  children: BreakdownEntry[];
 }
 
 export interface ParsedNetWorth {
@@ -91,6 +109,30 @@ export function seriesFor(history: ParsedHistoryPoint[], key: string): number[] 
   return history.map((point) => point.breakdown[key] ?? 0);
 }
 
+export interface Change {
+  amount: number;
+  percent: number;
+}
+
+/**
+ * Change over the range from a value series. Liabilities are stored as positive
+ * magnitudes, so a reduction is expressed as a positive (good) change.
+ */
+export function deriveChange(series: number[], isLiability: boolean): Change {
+  if (series.length < 2) return { amount: 0, percent: 0 };
+  const first = series[0];
+  const last = series[series.length - 1];
+  const amount = isLiability ? first - last : last - first;
+  const base = Math.abs(first);
+  return { amount, percent: base > 0 ? amount / base : 0 };
+}
+
+/** Percent is a ratio (0.145 = 14.5%); drop decimals for very large swings. */
+export function formatChangePercent(percent: number): string {
+  const abs = Math.abs(percent);
+  return formatPercent(abs, { digits: abs >= 10 ? 0 : 1, signDisplay: "never" });
+}
+
 const MS_PER_DAY = 86_400_000;
 const DAYS_PER_MONTH = 365.25 / 12;
 
@@ -114,6 +156,8 @@ export interface Velocity {
   contributions: number;
   equityBuilt: number;
   perMonth: number;
+  /** Number of months in the range (for per-month vs total displays). */
+  months: number;
 }
 
 /**
@@ -136,7 +180,14 @@ export function computeVelocity(history: ParsedHistoryPoint[]): Velocity | null 
   const months = daysBetween(first.date, last.date) / DAYS_PER_MONTH;
   const perMonth = months > 0 ? netChange / months : netChange;
 
-  return { netChange, marketGains: portfolioGain + altGain, contributions, equityBuilt, perMonth };
+  return {
+    netChange,
+    marketGains: portfolioGain + altGain,
+    contributions,
+    equityBuilt,
+    perMonth,
+    months,
+  };
 }
 
 /** Average monthly net worth change across a history span (for the trailing-year baseline). */

@@ -7,6 +7,9 @@ import { AlternativeAssetKind } from "@/lib/types";
 import SpendingTabContent from "@/features/spending/components/spending-tab-content";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
 import { Button, Icons } from "@wealthfolio/ui";
+import { HandCoinsIcon } from "@phosphor-icons/react/dist/csr/HandCoins";
+import { TrendUpIcon } from "@phosphor-icons/react/dist/csr/TrendUp";
+import { WalletIcon } from "@phosphor-icons/react/dist/csr/Wallet";
 import { Card, CardContent, CardHeader } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Suspense, useCallback, useMemo, useState } from "react";
@@ -103,7 +106,7 @@ export default function PortfolioPage() {
       {
         value: "investments",
         label: "Investments",
-        icon: Icons.TrendingUp,
+        icon: TrendUpIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
             <DashboardContent />
@@ -114,7 +117,7 @@ export default function PortfolioPage() {
       {
         value: "net-worth",
         label: "Net Worth",
-        icon: Icons.Wallet,
+        icon: WalletIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
             <NetWorthContent />
@@ -127,7 +130,7 @@ export default function PortfolioPage() {
       items.push({
         value: "spending",
         label: "Spending",
-        icon: Icons.HandCoins,
+        icon: HandCoinsIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
             <SpendingTabContent />
