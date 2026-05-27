@@ -376,35 +376,33 @@ export function NetWorthContent() {
 
               {/* Stale valuations warning */}
               {hasStaleValuations && (
-                <div className="border-warning/30 bg-warning/5 rounded-xl border p-4 md:p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="bg-warning/10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
-                      <Icons.AlertCircle className="text-warning h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">Update your valuations</p>
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        {netWorthData?.staleAssets.length} asset
-                        {netWorthData?.staleAssets.length !== 1 ? "s have" : " has"} not been
-                        updated in over 90 days.
-                      </p>
-                      <div className="mt-3 space-y-1.5">
-                        {netWorthData?.staleAssets.map((asset) => (
-                          <Link
-                            key={asset.assetId}
-                            to={`/holdings/${encodeURIComponent(asset.assetId)}?tab=history`}
-                            className="hover:bg-warning/10 flex items-center justify-between rounded-md px-2 py-1.5 transition-colors"
-                          >
-                            <span className="truncate text-xs font-medium">
-                              {asset.name ?? asset.assetId}
-                            </span>
-                            <span className="text-muted-foreground ml-2 shrink-0 text-xs">
-                              {asset.daysStale}d ago
-                            </span>
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
+                <div className="border-warning/10 bg-warning/10 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Icons.AlertCircle className="text-warning h-4 w-4 shrink-0" />
+                    <h3 className="text-foreground text-sm font-semibold">
+                      Update your valuations
+                    </h3>
+                    <span className="text-muted-foreground/70 ml-auto text-xs">
+                      {netWorthData?.staleAssets.length}{" "}
+                      {netWorthData?.staleAssets.length === 1 ? "asset" : "assets"}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground ml-6 text-xs">Not updated in over 90 days.</p>
+                  <div className="ml-6 mt-3 space-y-1.5">
+                    {netWorthData?.staleAssets.map((asset) => (
+                      <Link
+                        key={asset.assetId}
+                        to={`/holdings/${encodeURIComponent(asset.assetId)}?tab=history`}
+                        className="hover:bg-warning/10 -mx-2 flex items-center justify-between rounded-md px-2 py-1.5 transition-colors"
+                      >
+                        <span className="truncate text-xs font-medium">
+                          {asset.name ?? asset.assetId}
+                        </span>
+                        <span className="text-muted-foreground ml-2 shrink-0 text-xs">
+                          {asset.daysStale}d ago
+                        </span>
+                      </Link>
+                    ))}
                   </div>
                 </div>
               )}
