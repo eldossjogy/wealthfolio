@@ -1,5 +1,11 @@
 import { expect, Page, test } from "@playwright/test";
-import { BASE_URL, createAccount, loginIfNeeded, waitForSyncToast } from "./helpers";
+import {
+  BASE_URL,
+  createAccount,
+  gotoActivities,
+  loginIfNeeded,
+  waitForSyncToast,
+} from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -48,8 +54,7 @@ test.describe("Bulk Holdings (Add Existing Holdings)", () => {
     test.setTimeout(120000);
 
     // Navigate to activities
-    await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
+    await gotoActivities(page);
 
     // Open bulk holdings modal
     await page.getByRole("button", { name: "Add Activities" }).click();
@@ -158,8 +163,7 @@ test.describe("Bulk Holdings (Add Existing Holdings)", () => {
   test("3. Verify activities in activity table", async () => {
     test.setTimeout(30000);
 
-    await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
+    await gotoActivities(page);
 
     // Filter by account. The trigger is a combobox labelled with the current scope
     // ("All Accounts"); matching on its visible text is reliable since the combobox

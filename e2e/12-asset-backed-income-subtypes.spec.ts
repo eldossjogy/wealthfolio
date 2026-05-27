@@ -115,7 +115,7 @@ test.describe("Asset-backed income subtypes update holdings", () => {
 
   async function gotoActivities() {
     await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({
+    await expect(page.getByRole("button", { name: "Add Activities" })).toBeVisible({
       timeout: 10000,
     });
   }

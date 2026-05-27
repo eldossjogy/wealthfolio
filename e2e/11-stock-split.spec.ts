@@ -68,7 +68,9 @@ test.describe("Stock split adjusts holdings shares", () => {
 
   async function gotoActivities() {
     await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Add Activities" })).toBeVisible({
+      timeout: 10000,
+    });
   }
 
   async function gotoAccountPage() {
