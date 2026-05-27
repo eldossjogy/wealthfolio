@@ -458,7 +458,7 @@ const ParentRow = memo(function ParentRow({
         )}
         onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
       >
-        <td className={cn("px-3 py-2.5", indented && "pl-8")}>
+        <td className={cn("px-3 py-1.5", indented && "pl-8")}>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -488,7 +488,7 @@ const ParentRow = memo(function ParentRow({
             <span className="text-foreground text-sm font-medium">{node.name}</span>
           </div>
         </td>
-        <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
+        <td className="text-foreground/90 px-3 py-1.5 text-right text-xs tabular-nums">
           <span className="text-foreground font-medium">
             −<PrivacyAmount value={node.spent} currency={currency} />
           </span>
@@ -498,7 +498,7 @@ const ParentRow = memo(function ParentRow({
             </span>
           )}
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-1.5">
           {node.budgeted > 0 ? (
             <ProgressBar spent={node.spent} budget={node.budgeted} />
           ) : (
@@ -507,7 +507,7 @@ const ParentRow = memo(function ParentRow({
         </td>
         <td
           className={cn(
-            "px-3 py-2.5 text-right text-xs tabular-nums",
+            "px-3 py-1.5 text-right text-xs tabular-nums",
             delta === 0 || node.priorSpent === 0
               ? "text-muted-foreground/70"
               : delta > 0
