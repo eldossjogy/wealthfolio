@@ -97,16 +97,6 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     volatility: 10.5,
     weights: { "30": 25, "35": 25, "55": 20, "40": 10, "10": 10, "20": 10 },
   },
-  {
-    id: "gics_growth",
-    taxonomyId: "industries_gics",
-    name: "Growth",
-    description: "Overweight tech, comms & consumer discretionary",
-    risk: "Aggressive",
-    expectedReturn: 9.5,
-    volatility: 20.0,
-    weights: { "45": 35, "50": 20, "25": 20, "35": 15, "40": 10 },
-  },
 
   // ── Regions ──────────────────────────────────────────────────────────────────
   {
@@ -120,14 +110,14 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     weights: { R20: 63, R10: 17, R30: 17, R50: 2, R40: 1 },
   },
   {
-    id: "regions_developed",
+    id: "regions_ex_us",
     taxonomyId: "regions",
-    name: "Developed",
-    description: "Tilted toward developed markets only",
+    name: "Ex-US",
+    description: "International focus — minimize Americas exposure",
     risk: "Moderate",
-    expectedReturn: 6.5,
-    volatility: 12.0,
-    weights: { R20: 65, R10: 25, R30: 8, R50: 2, R40: 0 },
+    expectedReturn: 6.8,
+    volatility: 14.5,
+    weights: { R10: 42, R30: 38, R20: 10, R50: 8, R40: 2 },
   },
   {
     id: "regions_equal_weight",
@@ -138,15 +128,5 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     expectedReturn: 7.2,
     volatility: 16.0,
     weights: { R10: 20, R20: 20, R30: 20, R40: 20, R50: 20 },
-  },
-  {
-    id: "regions_emerging_tilt",
-    taxonomyId: "regions",
-    name: "Emerging Tilt",
-    description: "Overweight Asia, LatAm & Africa for growth potential",
-    risk: "Aggressive",
-    expectedReturn: 8.5,
-    volatility: 20.0,
-    weights: { R30: 45, R20: 25, R10: 15, R40: 10, R50: 5 },
   },
 ];

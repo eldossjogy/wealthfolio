@@ -23,7 +23,7 @@ import {
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { TargetProfile, TargetScopeType } from "@/lib/types";
+import type { PortfolioAllocations, TargetProfile, TargetScopeType } from "@/lib/types";
 import { useTaxonomies, useTaxonomy } from "@/hooks/use-taxonomies";
 import { useTargetNodes } from "../hooks/use-target-mutations";
 import { useSaveTargetNodes } from "../hooks/use-target-mutations";
@@ -40,7 +40,7 @@ import type { PortfolioStats } from "../hooks/use-portfolio-stats";
 interface ProfileEditorProps {
   profile: TargetProfile | null;
   initialPresetId?: string | null;
-  currentAllocation?: Record<string, number>;
+  portfolioAllocations?: PortfolioAllocations;
   baseCurrency: string;
   portfolioStats?: PortfolioStats | null;
   defaultScopeType?: TargetScopeType;
@@ -105,7 +105,7 @@ function buildInitialNodes(
 export function ProfileEditor({
   profile,
   initialPresetId,
-  currentAllocation = {},
+  portfolioAllocations,
   baseCurrency,
   portfolioStats,
   defaultScopeType,
@@ -125,6 +125,18 @@ export function ProfileEditor({
     () => taxonomy?.categories.filter((c) => !c.parentId) ?? [],
     [taxonomy],
   );
+
+  const currentAllocation = useMemo(() => {
+    if (!portfolioAllocations) return {};
+    const byTaxonomy: Record<string, typeof portfolioAllocations.assetClasses> = {
+      asset_classes: portfolioAllocations.assetClasses,
+      industries_gics: portfolioAllocations.sectors,
+      regions: portfolioAllocations.regions,
+    };
+    const cats = byTaxonomy[taxonomyId]?.categories ?? [];
+    const topLevel = cats.filter((c) => !c.children?.length || c.percentage > 0);
+    return Object.fromEntries(topLevel.map((c) => [c.categoryId, c.percentage]));
+  }, [portfolioAllocations, taxonomyId]);
 
   const { data: existingNodesData } = useTargetNodes(profile?.id ?? null);
 

@@ -62,9 +62,6 @@ export function TargetsTab({
 
   const currentCategories = allocations?.assetClasses?.categories ?? [];
   const topLevelCurrent = currentCategories.filter((c) => !c.children?.length || c.percentage > 0);
-  const currentAllocationMap = Object.fromEntries(
-    topLevelCurrent.map((c) => [c.categoryId, c.percentage]),
-  );
 
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
@@ -223,7 +220,7 @@ export function TargetsTab({
       key={mode.kind === "edit" ? (mode.profileId ?? "new") : "new"}
       profile={editingProfile}
       initialPresetId={mode.presetId}
-      currentAllocation={currentAllocationMap}
+      portfolioAllocations={allocations}
       baseCurrency={baseCurrency}
       portfolioStats={portfolioStats}
       defaultScopeType={defaultScope?.scopeType}
