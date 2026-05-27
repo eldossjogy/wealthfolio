@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button, Icons, Skeleton } from "@wealthfolio/ui";
+
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { useSettings } from "@/hooks/use-settings";
-import { useDeleteTargetProfile, useArchiveTargetProfile } from "../hooks/use-target-mutations";
-import type { TargetProfile } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { useArchiveTargetProfile } from "../hooks/use-target-mutations";
+import { usePortfolioStats } from "../hooks/use-portfolio-stats";
+import type { TargetProfile, AccountScope } from "@/lib/types";
 import { CurrentAllocationBar } from "./current-allocation-bar";
 import { ModelPresetPicker } from "./model-preset-picker";
 import { ProfileEditor } from "./profile-editor";
 
 type EditorMode =
-  | { kind: "none" }
   | { kind: "onboarding" }
   | { kind: "edit"; profileId: string | null; presetId: string | null };
 
@@ -19,11 +19,21 @@ interface TargetsTabProps {
   profiles: TargetProfile[];
   selectedProfileId: string | null;
   onProfileChange: (id: string) => void;
+  newProfileTrigger?: number;
+  accountScope: AccountScope;
 }
 
-export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: TargetsTabProps) {
+export function TargetsTab({
+  profiles,
+  selectedProfileId,
+  onProfileChange,
+  newProfileTrigger,
+  accountScope,
+}: TargetsTabProps) {
   const [mode, setMode] = useState<EditorMode>(
-    profiles.length === 0 ? { kind: "onboarding" } : { kind: "none" },
+    profiles.length === 0
+      ? { kind: "onboarding" }
+      : { kind: "edit", profileId: selectedProfileId, presetId: null },
   );
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
@@ -31,8 +41,8 @@ export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: Tar
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations({ type: "all" });
   const { data: settings } = useSettings();
 
-  const deleteProfile = useDeleteTargetProfile();
   const archiveProfile = useArchiveTargetProfile();
+  const { stats: portfolioStats } = usePortfolioStats(accountScope);
 
   const currentCategories = allocations?.assetClasses?.categories ?? [];
   const topLevelCurrent = currentCategories.filter((c) => !c.children?.length || c.percentage > 0);
@@ -42,7 +52,21 @@ export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: Tar
 
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
-  // Profile being edited
+  // Sync editor when selected profile changes from header dropdown
+  useEffect(() => {
+    if (selectedProfileId && mode.kind === "edit" && mode.profileId !== selectedProfileId) {
+      setMode({ kind: "edit", profileId: selectedProfileId, presetId: null });
+    }
+  }, [selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Trigger new profile flow from header dropdown "+ New profile"
+  useEffect(() => {
+    if (newProfileTrigger && newProfileTrigger > 0) {
+      setSelectedPreset(null);
+      setMode({ kind: "onboarding" });
+    }
+  }, [newProfileTrigger]);
+
   const editingProfile =
     mode.kind === "edit" && mode.profileId
       ? (profiles.find((p) => p.id === mode.profileId) ?? null)
@@ -63,17 +87,17 @@ export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: Tar
     setMode({ kind: "edit", profileId: null, presetId: "current" });
   }
 
-  function handleEditProfile(profileId: string) {
+  function handleEditorSaved(profileId: string) {
+    onProfileChange(profileId);
     setMode({ kind: "edit", profileId, presetId: null });
   }
 
-  function handleEditorSaved(profileId: string) {
-    onProfileChange(profileId);
-    setMode({ kind: "none" });
-  }
-
   function handleEditorCancel() {
-    setMode(profiles.length === 0 ? { kind: "onboarding" } : { kind: "none" });
+    if (profiles.length === 0) {
+      setMode({ kind: "onboarding" });
+    } else {
+      setMode({ kind: "edit", profileId: selectedProfileId, presetId: null });
+    }
   }
 
   if (taxonomyLoading || allocationsLoading) {
@@ -87,25 +111,20 @@ export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: Tar
 
   if (!taxonomy) return null;
 
-  // ── Editor mode ──────────────────────────────────────────────────────────────
-  if (mode.kind === "edit") {
-    return (
-      <ProfileEditor
-        profile={editingProfile}
-        taxonomy={taxonomy}
-        initialPresetId={mode.presetId}
-        currentAllocation={currentAllocationMap}
-        baseCurrency={baseCurrency}
-        onSaved={handleEditorSaved}
-        onCancel={handleEditorCancel}
-      />
-    );
-  }
-
-  // ── Onboarding (no profiles yet) ─────────────────────────────────────────────
+  // ── Onboarding (no profiles yet, or creating new) ────────────────────────────
   if (mode.kind === "onboarding") {
     return (
       <div className="space-y-6">
+        {profiles.length > 0 && (
+          <div className="flex items-center justify-between">
+            <h2 className="text-foreground text-[13px] font-semibold">New profile</h2>
+            <Button variant="ghost" size="sm" onClick={handleEditorCancel}>
+              <Icons.X className="mr-1.5 h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
+        )}
+
         {/* Hero */}
         <div className="grid grid-cols-1 gap-6 rounded-lg border p-6 md:grid-cols-2">
           <div>
@@ -161,77 +180,22 @@ export function TargetsTab({ profiles, selectedProfileId, onProfileChange }: Tar
     );
   }
 
-  // ── Profile list (profiles exist, none being edited) ─────────────────────────
+  // ── Editor ────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
-      {/* Profile list */}
-      <div className="space-y-2">
-        {profiles.map((p) => (
-          <div
-            key={p.id}
-            className={cn(
-              "flex items-center justify-between rounded-lg border px-4 py-3",
-              selectedProfileId === p.id && "border-foreground/30 bg-muted/30",
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <div>
-                <div className="text-foreground text-[13px] font-medium">{p.name}</div>
-                <div className="text-muted-foreground text-[11px]">
-                  Drift band ±{(p.driftBandBps / 100).toFixed(1)}% · {p.triggerType}
-                </div>
-              </div>
-              {p.status === "active" && (
-                <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                  Active
-                </span>
-              )}
-              {p.status === "draft" && (
-                <span className="text-muted-foreground bg-muted rounded-full px-1.5 py-0.5 text-[10px] font-medium">
-                  Draft
-                </span>
-              )}
-              {p.status === "archived" && (
-                <span className="text-muted-foreground bg-muted rounded-full px-1.5 py-0.5 text-[10px] font-medium opacity-60">
-                  Archived
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => handleEditProfile(p.id)}>
-                <Icons.Pencil className="h-4 w-4" />
-              </Button>
-              {p.status === "active" && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => archiveProfile.mutate(p.id)}
-                  disabled={archiveProfile.isPending}
-                >
-                  <Icons.FileArchive className="h-4 w-4" />
-                </Button>
-              )}
-              {p.status !== "active" && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => deleteProfile.mutate(p.id)}
-                  disabled={deleteProfile.isPending}
-                >
-                  <Icons.Trash className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add new profile */}
-      <Button variant="outline" size="sm" onClick={() => setMode({ kind: "onboarding" })}>
-        <Icons.PlusCircle className="mr-1.5 h-4 w-4" />
-        New profile
-      </Button>
-    </div>
+    <ProfileEditor
+      profile={editingProfile}
+      taxonomy={taxonomy}
+      initialPresetId={mode.presetId}
+      currentAllocation={currentAllocationMap}
+      baseCurrency={baseCurrency}
+      portfolioStats={portfolioStats}
+      onSaved={handleEditorSaved}
+      onCancel={handleEditorCancel}
+      onArchive={
+        editingProfile?.status === "active"
+          ? () => archiveProfile.mutate(editingProfile.id)
+          : undefined
+      }
+    />
   );
 }

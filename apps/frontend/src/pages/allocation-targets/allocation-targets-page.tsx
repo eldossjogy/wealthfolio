@@ -41,19 +41,19 @@ function KpiItem({
 }) {
   return (
     <div className="text-left">
-      <div className="text-muted-foreground text-[10px] uppercase tracking-wider">{label}</div>
+      <div className="text-muted-foreground text-[11px] uppercase tracking-wider">{label}</div>
       <div
         className={cn(
-          "mt-0.5 flex items-baseline gap-1.5 text-[18px] font-semibold tabular-nums leading-none",
+          "mt-0.5 flex items-baseline gap-1.5 text-[22px] font-semibold tabular-nums leading-none",
           tone === "warn" && "text-destructive",
           tone === "ok" && "text-green-700 dark:text-green-400",
           !tone && "text-foreground",
         )}
       >
         {value}
-        {inlineSub && <span className="text-[12px] font-medium opacity-80">{inlineSub}</span>}
+        {inlineSub && <span className="text-[14px] font-medium opacity-80">{inlineSub}</span>}
       </div>
-      {sub && <div className="text-muted-foreground text-[11px] tabular-nums">{sub}</div>}
+      {sub && <div className="text-muted-foreground text-[12px] tabular-nums">{sub}</div>}
     </div>
   );
 }
@@ -63,6 +63,7 @@ export function AllocationTargetsPage() {
   const { profiles, activeProfile, isLoading: profilesLoading } = useTargetProfiles();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
+  const [newProfileTrigger, setNewProfileTrigger] = useState(0);
 
   const effectiveProfileId = selectedProfileId ?? activeProfile?.id ?? null;
   const effectiveProfile = profiles.find((p) => p.id === effectiveProfileId) ?? null;
@@ -95,7 +96,7 @@ export function AllocationTargetsPage() {
           </div>
 
           {/* KPIs only */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-10">
             {driftReport ? (
               <>
                 <KpiItem
@@ -131,7 +132,7 @@ export function AllocationTargetsPage() {
                 <KpiItem label="Drift band" value={`±${bandPct}%`} />
               </>
             ) : isLoading ? (
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-10">
                 {[1, 2, 3, 4].map((i) => (
                   <Skeleton key={i} className="h-9 w-20" />
                 ))}
@@ -202,6 +203,16 @@ export function AllocationTargetsPage() {
                           )}
                         </DropdownMenuItem>
                       ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setActiveTab("targets");
+                          setNewProfileTrigger((n) => n + 1);
+                        }}
+                      >
+                        <Icons.PlusCircle className="mr-2 h-4 w-4" />
+                        New profile
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -250,6 +261,8 @@ export function AllocationTargetsPage() {
                   profiles={profiles}
                   selectedProfileId={effectiveProfileId}
                   onProfileChange={(id) => setSelectedProfileId(id)}
+                  newProfileTrigger={newProfileTrigger}
+                  accountScope={accountScope}
                 />
               </TabsContent>
 

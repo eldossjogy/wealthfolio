@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
+  Icons,
   Switch,
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ import {
 import { TargetNodeEditor, type NodeDraft } from "./target-node-editor";
 import { ModelPresetPicker } from "./model-preset-picker";
 import { BUILT_IN_PRESETS } from "./model-preset-picker";
+import type { PortfolioStats } from "../hooks/use-portfolio-stats";
 
 interface ProfileEditorProps {
   profile: TargetProfile | null;
@@ -27,8 +29,10 @@ interface ProfileEditorProps {
   initialPresetId?: string | null;
   currentAllocation?: Record<string, number>;
   baseCurrency: string;
+  portfolioStats?: PortfolioStats | null;
   onSaved: (profileId: string) => void;
   onCancel: () => void;
+  onArchive?: () => void;
 }
 
 const TRIGGER_OPTIONS = [
@@ -99,8 +103,10 @@ export function ProfileEditor({
   initialPresetId,
   currentAllocation = {},
   baseCurrency,
+  portfolioStats,
   onSaved,
   onCancel,
+  onArchive,
 }: ProfileEditorProps) {
   const topLevelCategories = useMemo(
     () => taxonomy.categories.filter((c) => !c.parentId),
@@ -210,95 +216,127 @@ export function ProfileEditor({
 
   return (
     <div className="space-y-5">
-      {/* Metadata bar */}
-      <div className="bg-muted/20 flex flex-wrap items-center gap-4 rounded-lg border px-4 py-3">
-        {/* Profile name */}
-        <div className="min-w-40 flex-1">
-          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
-            Profile
+      {/* Metadata bar + archive + model — grouped tightly */}
+      <div className="space-y-1">
+        <div className="space-y-1">
+          <div className="bg-muted/20 flex flex-wrap items-center gap-5 rounded-lg border px-5 py-4">
+            {/* Profile name */}
+            <div className="min-w-40">
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Profile
+              </div>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Profile name…"
+                className="bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
+              />
+            </div>
+
+            <div className="bg-border h-8 w-px" />
+
+            {/* Total weight */}
+            <div>
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Total weight
+              </div>
+              <span
+                className={cn(
+                  "text-[14px] font-semibold tabular-nums",
+                  totalBps === 10000 ? "text-green-700 dark:text-green-400" : "text-destructive",
+                )}
+              >
+                {(totalBps / 100).toFixed(1)}%{totalBps === 10000 && " ✓"}
+              </span>
+            </div>
+
+            <div className="bg-border h-8 w-px" />
+
+            {/* Drift band */}
+            <div>
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Drift band
+              </div>
+              <span className="text-foreground text-[14px] font-medium tabular-nums">
+                ±{driftBandPct.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="bg-border h-8 w-px" />
+
+            {/* Method */}
+            <div>
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Method
+              </div>
+              <span className="text-foreground text-[14px] font-medium capitalize">
+                {triggerType === "threshold" ? "Threshold" : "Manual"}
+              </span>
+            </div>
+
+            <div className="bg-border h-8 w-px" />
+
+            {/* Taxonomy (display only) */}
+            <div>
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Taxonomy
+              </div>
+              <span className="text-foreground text-[14px] font-medium">Asset classes</span>
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={onCancel}>
+                Discard
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!isValid || isSaving}
+                onClick={() => persistProfile(false)}
+              >
+                {isSaving ? "Saving…" : "Save draft"}
+              </Button>
+              <Button
+                size="sm"
+                disabled={!isValid || isActivating}
+                onClick={() => persistProfile(true)}
+              >
+                {isActivating ? "Activating…" : "Activate"}
+              </Button>
+            </div>
           </div>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Profile name…"
-            className="bg-transparent text-[14px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
+
+          {/* Archive action — below metadata bar, only for active profiles */}
+          {onArchive && profile?.status === "active" && (
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground text-[12px]"
+                onClick={onArchive}
+              >
+                <Icons.FileArchive className="mr-1.5 h-4 w-4" />
+                Archive profile
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Model presets */}
+        <div>
+          <div className="text-muted-foreground mb-0.5 pl-0.5 text-[11px] font-medium uppercase tracking-wider">
+            Model
+          </div>
+          <p className="text-muted-foreground mb-3 pl-0.5 text-[12px]">
+            Start from a known mix or roll your own
+          </p>
+          <ModelPresetPicker
+            selected={selectedPreset}
+            onSelect={handlePresetSelect}
+            currentCategories={currentCategoriesForPicker}
+            portfolioStats={portfolioStats}
           />
         </div>
-
-        <div className="bg-border h-7 w-px" />
-
-        {/* Taxonomy (display only) */}
-        <div>
-          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
-            Taxonomy
-          </div>
-          <span className="text-foreground text-[13px] font-medium">Asset classes</span>
-        </div>
-
-        <div className="bg-border h-7 w-px" />
-
-        {/* Drift band */}
-        <div>
-          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
-            Drift band
-          </div>
-          <span className="text-foreground text-[13px] font-medium tabular-nums">
-            ±{driftBandPct.toFixed(1)}%
-          </span>
-        </div>
-
-        <div className="bg-border h-7 w-px" />
-
-        {/* Total weight */}
-        <div>
-          <div className="text-muted-foreground mb-0.5 text-[10px] font-medium uppercase tracking-wider">
-            Total weight
-          </div>
-          <span
-            className={cn(
-              "text-[13px] font-semibold tabular-nums",
-              totalBps === 10000 ? "text-green-700 dark:text-green-400" : "text-destructive",
-            )}
-          >
-            {(totalBps / 100).toFixed(1)}%{totalBps === 10000 && " ✓"}
-          </span>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onCancel}>
-            Discard
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!isValid || isSaving}
-            onClick={() => persistProfile(false)}
-          >
-            {isSaving ? "Saving…" : "Save draft"}
-          </Button>
-          <Button
-            size="sm"
-            disabled={!isValid || isActivating}
-            onClick={() => persistProfile(true)}
-          >
-            {isActivating ? "Activating…" : "Activate"}
-          </Button>
-        </div>
-      </div>
-
-      {/* Model presets */}
-      <div>
-        <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
-          Model
-        </div>
-        <p className="text-muted-foreground mb-3 text-[12px]">
-          Start from a known mix or roll your own
-        </p>
-        <ModelPresetPicker
-          selected={selectedPreset}
-          onSelect={handlePresetSelect}
-          currentCategories={currentCategoriesForPicker}
-        />
       </div>
 
       {/* Target weights + Drift tolerance */}

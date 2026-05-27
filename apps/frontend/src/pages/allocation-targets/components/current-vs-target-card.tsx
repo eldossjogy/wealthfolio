@@ -65,7 +65,6 @@ export function CurrentVsTargetCard({ report }: CurrentVsTargetCardProps) {
             <div className="flex flex-1 flex-col overflow-hidden">
               {targetedRows.flatMap((row, i) => {
                 const isHovered = hoveredId === row.categoryId;
-                const dimmed = hoveredId !== null && !isHovered;
                 const rowColor = row.color || "#888888";
                 const rowEl = (
                   <div

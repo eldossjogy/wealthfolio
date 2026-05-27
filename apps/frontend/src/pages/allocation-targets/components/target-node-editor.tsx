@@ -7,6 +7,7 @@ export interface NodeDraft {
   categoryId: string;
   targetBps: number; // 0–10000
   isLocked: boolean;
+  isUserSet?: boolean; // user explicitly set this value — don't auto-redistribute it
 }
 
 interface TargetNodeEditorProps {
@@ -16,22 +17,23 @@ interface TargetNodeEditorProps {
   onChange: (nodes: NodeDraft[]) => void;
 }
 
+function isFixed(node: NodeDraft, changedId: string): boolean {
+  return node.categoryId === changedId || node.isLocked || !!node.isUserSet;
+}
+
 function redistribute(nodes: NodeDraft[], changedId: string, newBps: number): NodeDraft[] {
   const bps = Math.max(0, Math.min(10000, newBps));
-  const updated = nodes.map((n) => (n.categoryId === changedId ? { ...n, targetBps: bps } : n));
-
-  const fixedTotal = updated.reduce(
-    (s, n) => (n.categoryId === changedId || n.isLocked ? s + n.targetBps : s),
-    0,
+  const updated = nodes.map((n) =>
+    n.categoryId === changedId ? { ...n, targetBps: bps, isUserSet: true } : n,
   );
+
+  const fixedTotal = updated.reduce((s, n) => (isFixed(n, changedId) ? s + n.targetBps : s), 0);
   const remaining = 10000 - fixedTotal;
-  const flexible = updated.filter((n) => n.categoryId !== changedId && !n.isLocked);
+  const flexible = updated.filter((n) => !isFixed(n, changedId));
 
   if (flexible.length === 0) return updated;
   if (remaining <= 0) {
-    return updated.map((n) =>
-      n.categoryId !== changedId && !n.isLocked ? { ...n, targetBps: 0 } : n,
-    );
+    return updated.map((n) => (!isFixed(n, changedId) ? { ...n, targetBps: 0 } : n));
   }
 
   const flexTotal = flexible.reduce((s, n) => s + n.targetBps, 0);
@@ -40,16 +42,16 @@ function redistribute(nodes: NodeDraft[], changedId: string, newBps: number): No
     const perCat = Math.floor(remaining / flexible.length);
     let leftover = remaining - perCat * flexible.length;
     return updated.map((n) => {
-      if (n.categoryId === changedId || n.isLocked) return n;
+      if (isFixed(n, changedId)) return n;
       const extra = leftover-- > 0 ? 1 : 0;
       return { ...n, targetBps: perCat + extra };
     });
   }
 
-  // Proportional
+  // Proportional redistribution among flexible (non-fixed) nodes
   let distributed = 0;
   const result = updated.map((n) => {
-    if (n.categoryId === changedId || n.isLocked) return n;
+    if (isFixed(n, changedId)) return n;
     const share = Math.round((n.targetBps / flexTotal) * remaining);
     distributed += share;
     return { ...n, targetBps: share };
@@ -60,7 +62,7 @@ function redistribute(nodes: NodeDraft[], changedId: string, newBps: number): No
     let largestIdx = -1;
     let largestBps = -1;
     result.forEach((n, i) => {
-      if (n.categoryId !== changedId && !n.isLocked && n.targetBps > largestBps) {
+      if (!isFixed(n, changedId) && n.targetBps > largestBps) {
         largestBps = n.targetBps;
         largestIdx = i;
       }
@@ -74,6 +76,40 @@ function redistribute(nodes: NodeDraft[], changedId: string, newBps: number): No
   return result;
 }
 
+interface AllocationBarProps {
+  categories: TaxonomyCategory[];
+  getNodeBps: (id: string) => number;
+  totalBps: number;
+}
+
+function AllocationBar({ categories, getNodeBps, totalBps }: AllocationBarProps) {
+  const total = totalBps || 10000;
+  return (
+    <div className="mb-4 flex h-9 w-full overflow-hidden rounded-md">
+      {categories.map((cat) => {
+        const bps = getNodeBps(cat.id);
+        if (bps === 0) return null;
+        const pct = bps / 100;
+        const widthPct = (bps / total) * 100;
+        return (
+          <div
+            key={cat.id}
+            className="relative flex items-center justify-center overflow-hidden"
+            style={{ width: `${widthPct}%`, background: cat.color }}
+            title={`${cat.name} ${pct.toFixed(0)}%`}
+          >
+            {widthPct > 8 && (
+              <span className="truncate px-1 text-[11px] font-medium text-white drop-shadow-sm">
+                {widthPct > 14 ? cat.name : cat.name.split(" ")[0]}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function TargetNodeEditor({
   categories,
   nodes,
@@ -82,12 +118,17 @@ export function TargetNodeEditor({
 }: TargetNodeEditorProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [liveBps, setLiveBps] = useState<number | null>(null);
 
-  const totalBps = nodes.reduce((s, n) => s + n.targetBps, 0);
+  // Preview nodes: redistribute live while user is typing, so other rows update in real-time
+  const previewNodes =
+    editingId !== null && liveBps !== null ? redistribute(nodes, editingId, liveBps) : nodes;
+
+  const totalBps = previewNodes.reduce((s, n) => s + n.targetBps, 0);
   const isValid = totalBps === 10000;
 
   function getNodeBps(categoryId: string): number {
-    return nodes.find((n) => n.categoryId === categoryId)?.targetBps ?? 0;
+    return previewNodes.find((n) => n.categoryId === categoryId)?.targetBps ?? 0;
   }
   function getIsLocked(categoryId: string): boolean {
     return nodes.find((n) => n.categoryId === categoryId)?.isLocked ?? false;
@@ -96,6 +137,7 @@ export function TargetNodeEditor({
   function startEdit(categoryId: string) {
     if (getIsLocked(categoryId)) return;
     setEditingId(categoryId);
+    setLiveBps(null);
     setEditValue((getNodeBps(categoryId) / 100).toFixed(1));
   }
 
@@ -104,6 +146,7 @@ export function TargetNodeEditor({
     const bps = isNaN(pct) ? 0 : Math.round(Math.min(100, Math.max(0, pct)) * 100);
     onChange(redistribute(nodes, categoryId, bps));
     setEditingId(null);
+    setLiveBps(null);
   }
 
   function toggleLock(categoryId: string) {
@@ -112,21 +155,9 @@ export function TargetNodeEditor({
 
   return (
     <div className="space-y-1">
-      {/* Allocation bar */}
+      {/* Labeled allocation bar */}
       {totalBps > 0 && (
-        <div className="mb-3 flex h-2 w-full overflow-hidden rounded-full">
-          {categories.map((cat) => {
-            const bps = getNodeBps(cat.id);
-            if (bps === 0) return null;
-            return (
-              <div
-                key={cat.id}
-                style={{ width: `${bps / 100}%`, background: cat.color }}
-                title={`${cat.name} ${(bps / 100).toFixed(0)}%`}
-              />
-            );
-          })}
-        </div>
+        <AllocationBar categories={categories} getNodeBps={getNodeBps} totalBps={totalBps} />
       )}
 
       {/* Column headers */}
@@ -176,11 +207,20 @@ export function TargetNodeEditor({
                   step={1}
                   value={editValue}
                   autoFocus
-                  onChange={(e) => setEditValue(e.target.value)}
+                  onChange={(e) => {
+                    setEditValue(e.target.value);
+                    const pct = parseFloat(e.target.value);
+                    if (!isNaN(pct)) {
+                      setLiveBps(Math.round(Math.min(100, Math.max(0, pct)) * 100));
+                    }
+                  }}
                   onBlur={() => commitEdit(cat.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") commitEdit(cat.id);
-                    if (e.key === "Escape") setEditingId(null);
+                    if (e.key === "Escape") {
+                      setEditingId(null);
+                      setLiveBps(null);
+                    }
                   }}
                   className="border-primary bg-background focus:ring-primary w-12 rounded border px-1.5 py-1 text-right text-[13px] tabular-nums [appearance:textfield] focus:outline-none focus:ring-1 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
@@ -216,9 +256,9 @@ export function TargetNodeEditor({
               title={isLocked ? "Unlock" : "Lock"}
             >
               {isLocked ? (
-                <Icons.Pin className="h-3.5 w-3.5" />
+                <Icons.Lock className="h-3.5 w-3.5" />
               ) : (
-                <Icons.PinOff className="h-3.5 w-3.5" />
+                <Icons.LockOpen className="h-3.5 w-3.5" />
               )}
             </button>
           </div>
