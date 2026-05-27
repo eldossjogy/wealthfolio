@@ -82,12 +82,13 @@ export function ModelPresetPicker({
           type="button"
           onClick={() => onSelect(preset.id)}
           className={cn(
-            "min-h-50 flex flex-col rounded-lg border px-4 py-5 text-left transition-colors",
+            "min-h-50 group relative flex flex-col overflow-hidden rounded-lg border px-4 py-5 text-left transition-colors",
             selected === preset.id
               ? "border-foreground bg-muted/40"
               : "hover:border-muted-foreground/40 border-border",
           )}
         >
+          <div className="bg-foreground/0 group-hover:bg-foreground/[0.04] pointer-events-none absolute inset-0 transition-colors" />
           <div className="flex items-start justify-between gap-1">
             <span className="text-foreground text-[15px] font-semibold leading-tight">
               {preset.name}
