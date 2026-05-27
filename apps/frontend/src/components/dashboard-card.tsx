@@ -8,6 +8,8 @@ interface DashboardCardProps {
   action?: ReactNode;
   /** Convenience: right-aligned uppercase meta text (e.g. "vs prior 6M"). */
   meta?: string;
+  /** Whether the body has padding. Set false for full-bleed content (e.g. lists). */
+  padded?: boolean;
   /** Extra classes for the card body. */
   className?: string;
   children: ReactNode;
@@ -23,6 +25,7 @@ export function DashboardCard({
   subtitle,
   action,
   meta,
+  padded = true,
   className,
   children,
 }: DashboardCardProps) {
@@ -43,7 +46,7 @@ export function DashboardCard({
           ) : null)}
       </div>
       <div
-        className={`border-border/40 bg-card/70 rounded-xl border p-3 backdrop-blur-xl md:p-4 ${className ?? ""}`}
+        className={`border-border/40 bg-card/70 rounded-xl border backdrop-blur-xl ${padded ? "p-3 md:p-4" : ""} ${className ?? ""}`}
       >
         {children}
       </div>
