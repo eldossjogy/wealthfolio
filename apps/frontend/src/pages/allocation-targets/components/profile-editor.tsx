@@ -14,6 +14,10 @@ import {
   CardHeader,
   CardTitle,
   CardDescription,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Icons,
   Skeleton,
 } from "@wealthfolio/ui";
@@ -343,17 +347,25 @@ export function ProfileEditor({
               <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
                 Taxonomy
               </div>
-              <select
-                value={taxonomyId}
-                onChange={(e) => handleTaxonomyChange(e.target.value)}
-                className="text-foreground bg-transparent text-[14px] font-medium outline-none"
-              >
-                {(taxonomies ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="text-foreground flex items-center gap-1 text-[14px] font-medium outline-none">
+                    {taxonomies?.find((t) => t.id === taxonomyId)?.name ?? taxonomyId}
+                    <Icons.ChevronDown className="text-muted-foreground h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {(taxonomies ?? []).map((t) => (
+                    <DropdownMenuItem
+                      key={t.id}
+                      onSelect={() => handleTaxonomyChange(t.id)}
+                      className={cn(taxonomyId === t.id && "font-medium")}
+                    >
+                      {t.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
