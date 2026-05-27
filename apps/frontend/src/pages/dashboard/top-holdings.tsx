@@ -1,5 +1,5 @@
+import { DashboardCard } from "@/components/dashboard-card";
 import { TickerAvatar } from "@/components/ticker-avatar";
-import { Card, CardContent, CardHeader, CardTitle } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { HoldingType, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
 import { parseOccSymbol } from "@/lib/occ-symbol";
@@ -146,63 +146,45 @@ function StackedAvatars({ holdings, totalRemaining, onClick }: StackedAvatarsPro
 
 function TopHoldingsSkeleton() {
   return (
-    <Card className="w-full border-0 bg-transparent shadow-none">
-      <CardHeader className="py-2">
-        <CardTitle className="text-md">Top Holdings</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Card className="shadow-xs w-full">
-          <CardContent className="px-4 pb-2 pt-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="border-border border-b py-3 last:border-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="h-9 w-9 rounded-full" />
-                    <div className="flex flex-col gap-1.5">
-                      <Skeleton className="h-3.5 w-12" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1.5">
-                    <Skeleton className="h-3.5 w-24" />
-                    <div className="flex items-center gap-2">
-                      <Skeleton className="h-3 w-16" />
-                      <Skeleton className="h-5 w-[60px] rounded-md" />
-                    </div>
-                  </div>
-                </div>
+    <DashboardCard title="Holdings" elevated>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="border-border border-b py-3 last:border-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-9 w-9 rounded-full" />
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-12" />
+                <Skeleton className="h-3 w-16" />
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      </CardContent>
-    </Card>
+            </div>
+            <div className="flex flex-col items-end gap-1.5">
+              <Skeleton className="h-3.5 w-24" />
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-5 w-[60px] rounded-md" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </DashboardCard>
   );
 }
 
 function TopHoldingsEmptyState() {
   return (
-    <Card className="w-full border-0 bg-transparent p-0 shadow-none">
-      <CardHeader className="px-0 py-2">
-        <CardTitle className="text-md">Top Holdings</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Card className="border-border/50 bg-success/10 shadow-xs w-full">
-          <CardContent className="px-4 py-6">
-            <div className="text-center">
-              <p className="text-sm">No holdings yet.</p>
-              <Link
-                to="/activities/manage"
-                className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
-              >
-                Add your first transaction
-                <Icons.ChevronRight className="h-3 w-3" />
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </CardContent>
-    </Card>
+    <DashboardCard title="Holdings" elevated>
+      <div className="py-2 text-center">
+        <p className="text-sm">No holdings yet.</p>
+        <Link
+          to="/activities/manage"
+          className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+        >
+          Add your first transaction
+          <Icons.ChevronRight className="h-3 w-3" />
+        </Link>
+      </div>
+    </DashboardCard>
   );
 }
 
@@ -265,9 +247,10 @@ export function TopHoldings({ holdings, isLoading, baseCurrency }: TopHoldingsPr
   }
 
   return (
-    <Card className="w-full border-0 bg-transparent p-0 shadow-none">
-      <CardHeader className="flex flex-row items-center justify-between px-0 py-2">
-        <CardTitle className="text-md">Holdings</CardTitle>
+    <DashboardCard
+      title="Holdings"
+      elevated
+      action={
         <div className="flex items-center gap-1">
           <Popover>
             <PopoverTrigger asChild>
@@ -365,35 +348,30 @@ export function TopHoldings({ holdings, isLoading, baseCurrency }: TopHoldingsPr
             <Icons.ChevronRight className="ml-1 h-3 w-3" />
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Card className="shadow-xs w-full">
-          <CardContent className="px-4 pb-2 pt-4">
-            {topHoldings.map((holding) => {
-              const assetId = holding.instrument?.id ?? holding.id;
-              return (
-                <HoldingRow
-                  key={holding.id}
-                  holding={holding}
-                  baseCurrency={baseCurrency}
-                  isHidden={isBalanceHidden}
-                  showTotalReturn={showTotalReturn}
-                  showName={displayMode === "name"}
-                  onClick={() => navigate(`/holdings/${encodeURIComponent(assetId)}`)}
-                />
-              );
-            })}
-            {hasRemainingHoldings && (
-              <StackedAvatars
-                holdings={remainingHoldings}
-                totalRemaining={remainingHoldings.length}
-                onClick={() => navigate("/holdings")}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </CardContent>
-    </Card>
+      }
+    >
+      {topHoldings.map((holding) => {
+        const assetId = holding.instrument?.id ?? holding.id;
+        return (
+          <HoldingRow
+            key={holding.id}
+            holding={holding}
+            baseCurrency={baseCurrency}
+            isHidden={isBalanceHidden}
+            showTotalReturn={showTotalReturn}
+            showName={displayMode === "name"}
+            onClick={() => navigate(`/holdings/${encodeURIComponent(assetId)}`)}
+          />
+        );
+      })}
+      {hasRemainingHoldings && (
+        <StackedAvatars
+          holdings={remainingHoldings}
+          totalRemaining={remainingHoldings.length}
+          onClick={() => navigate("/holdings")}
+        />
+      )}
+    </DashboardCard>
   );
 }
 

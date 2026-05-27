@@ -10,6 +10,8 @@ interface DashboardCardProps {
   meta?: string;
   /** Whether the body has padding. Set false for full-bleed content (e.g. lists). */
   padded?: boolean;
+  /** Higher opacity + subtle shadow, for cards on low-contrast backgrounds. */
+  elevated?: boolean;
   /** Extra classes for the card body. */
   className?: string;
   children: ReactNode;
@@ -26,6 +28,7 @@ export function DashboardCard({
   action,
   meta,
   padded = true,
+  elevated = false,
   className,
   children,
 }: DashboardCardProps) {
@@ -46,7 +49,7 @@ export function DashboardCard({
           ) : null)}
       </div>
       <div
-        className={`border-border/40 bg-card/70 rounded-xl border backdrop-blur-xl ${padded ? "p-3 md:p-4" : ""} ${className ?? ""}`}
+        className={`border-border/40 rounded-xl border backdrop-blur-xl ${elevated ? "bg-card/90 shadow-xs" : "bg-card/70"} ${padded ? "p-3 md:p-4" : ""} ${className ?? ""}`}
       >
         {children}
       </div>
