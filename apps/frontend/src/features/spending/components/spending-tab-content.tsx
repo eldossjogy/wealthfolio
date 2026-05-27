@@ -11,6 +11,7 @@ import {
   XAxis,
 } from "recharts";
 
+import { DashboardCard } from "@/components/dashboard-card";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
@@ -701,9 +702,10 @@ export default function SpendingTabContent() {
         <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-24 md:px-6 md:pb-6 md:pt-20 lg:px-10 lg:pb-8 lg:pt-24">
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-20">
             <div className="space-y-6 lg:col-span-2">
-              <div className="mb-4 mt-8 w-full lg:mt-0">
-                <div className="flex items-center justify-between pb-2">
-                  <h2 className="text-md font-semibold tracking-tight">Where it went</h2>
+              <DashboardCard
+                title="Where it went"
+                className="overflow-hidden"
+                action={
                   <div className="flex items-center gap-3">
                     <SegmentedToggle
                       ariaLabel="Where it went view"
@@ -721,7 +723,8 @@ export default function SpendingTabContent() {
                       View all →
                     </Link>
                   </div>
-                </div>
+                }
+              >
                 {isLoading ? (
                   <Skeleton className="h-[260px] w-full rounded-lg" />
                 ) : whereItWentView === "map" ? (
@@ -740,7 +743,7 @@ export default function SpendingTabContent() {
                     groupRows={budget?.computed.groupRows ?? []}
                   />
                 )}
-              </div>
+              </DashboardCard>
 
               <RecentActivityCard
                 activities={activities}
@@ -776,7 +779,7 @@ export default function SpendingTabContent() {
                     {insights.map((ins, i) => (
                       <div key={i} className="flex gap-2 text-xs">
                         <span
-                          className="w-3 shrink-0 text-base font-bold leading-none"
+                          className="w-4 shrink-0 text-base font-bold leading-none"
                           style={{
                             color: ins.icon === "!" ? "#C28B47" : theme.deep,
                           }}
@@ -792,7 +795,7 @@ export default function SpendingTabContent() {
                   </div>
                   <Link
                     to="/spending/insights?stage=changed"
-                    className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+                    className="text-muted-foreground hover:text-foreground ml-6 mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
                   >
                     See trends
                     <Icons.ChevronRight className="h-3 w-3" />
@@ -913,7 +916,7 @@ function CategoryTreemapMono({
 
   if (rows.length === 0 || total <= 0) {
     return (
-      <div className="border-border bg-card/40 rounded-lg border p-8 text-center">
+      <div className="py-6 text-center">
         <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
       </div>
     );
@@ -1170,7 +1173,7 @@ function CategoryRankedBar({
 
   if (rows.length === 0 || total <= 0) {
     return (
-      <div className="border-border bg-card/40 rounded-lg border p-8 text-center">
+      <div className="py-6 text-center">
         <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
       </div>
     );
@@ -1258,7 +1261,7 @@ function CategoryRankedBar({
     const orderedBuckets = Array.from(buckets.values()).filter((b) => b.total > 0);
 
     return (
-      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border p-4 backdrop-blur-xl md:p-5">
+      <div>
         {StackedBar}
         <div className="mt-3 space-y-2">
           {orderedBuckets.map((bucket) => (
