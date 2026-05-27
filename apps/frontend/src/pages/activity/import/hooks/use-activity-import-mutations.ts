@@ -2,6 +2,7 @@ import { QueryKeys } from "@/lib/query-keys";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { logger, importActivities } from "@/adapters";
 import { invalidateSpendingCaches } from "@/features/spending/lib/invalidation";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import type { ImportActivitiesResult, ActivityImport } from "@/lib/types";
 
@@ -22,6 +23,7 @@ export function useActivityImportMutations({
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] }),
         queryClient.invalidateQueries({ queryKey: [QueryKeys.IMPORT_RUNS] }),
       ]);
+      invalidatePerformanceCaches(queryClient);
       invalidateSpendingCaches(queryClient);
 
       // Call the provided onSuccess callback if it exists

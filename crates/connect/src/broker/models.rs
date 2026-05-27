@@ -59,6 +59,14 @@ pub struct BrokerAccount {
     /// Display name for the account
     pub name: Option<String>,
 
+    /// Wealthfolio Connect provider ("snaptrade", "plaid")
+    #[serde(default)]
+    pub provider: Option<String>,
+
+    /// Normalized connection category ("investment", "spending")
+    #[serde(default)]
+    pub category: Option<String>,
+
     /// Account number from the broker (may be masked) - NOW NULLABLE
     #[serde(alias = "number")]
     pub account_number: Option<String>,
@@ -156,6 +164,14 @@ pub struct BrokerConnection {
     /// The brokerage information
     pub brokerage: Option<BrokerConnectionBrokerage>,
 
+    /// Wealthfolio Connect provider ("snaptrade", "plaid")
+    #[serde(default)]
+    pub provider: Option<String>,
+
+    /// Normalized connection category ("investment", "spending")
+    #[serde(default)]
+    pub category: Option<String>,
+
     /// Connection type (e.g., "read", "trade")
     #[serde(rename = "type")]
     pub connection_type: Option<String>,
@@ -240,6 +256,50 @@ pub struct PaginatedUniversalActivity {
     #[serde(default)]
     #[serde(alias = "paginationDetails", alias = "page")]
     pub pagination: Option<PaginationDetails>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySyncRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovedProviderActivity {
+    #[serde(default)]
+    pub source_system: Option<String>,
+    pub source_record_id: String,
+    #[serde(default)]
+    pub provider_account_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySyncResponse {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub source_system: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    #[serde(default)]
+    pub activities: Vec<AccountUniversalActivity>,
+    #[serde(default)]
+    pub removed_activities: Vec<RemovedProviderActivity>,
+    #[serde(default)]
+    pub checkpoint: Option<serde_json::Value>,
+    #[serde(default)]
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -696,6 +756,8 @@ impl BrokerAccount {
     pub fn to_meta_json(&self) -> Option<String> {
         let meta = serde_json::json!({
             "institution_name": self.institution_name,
+            "provider": self.provider,
+            "category": self.category,
             "brokerage_authorization": self.brokerage_authorization,
             "created_date": self.created_date,
             "status": self.status,
@@ -749,13 +811,23 @@ fn map_broker_account_type(raw: &str) -> String {
             "CRYPTOCURRENCY".to_string()
         }
         "MARGIN" | "MARGIN_ACCOUNT" => "SECURITIES".to_string(),
-        "CASH" | "CASH_ACCOUNT" => "CASH".to_string(),
-        "CREDIT_CARD" | "CREDIT CARD" | "CREDITCARD" | "CARD" => "CREDIT_CARD".to_string(),
+        "CASH" | "CASH_ACCOUNT" | "CHECKING" | "SAVINGS" | "DEPOSITORY" | "BANK"
+        | "BANK_ACCOUNT" => "CASH".to_string(),
+        "CREDIT" | "CREDIT_CARD" | "CREDIT CARD" | "CREDITCARD" | "CARD" => {
+            "CREDIT_CARD".to_string()
+        }
         "INVESTMENT" | "BROKERAGE" | "INDIVIDUAL" | "JOINT" | "JOINT_ACCOUNT" | "CORPORATE"
         | "BUSINESS" | "TRUST" => "SECURITIES".to_string(),
 
         // Default fallback
         _ if raw.contains("CREDIT") && raw.contains("CARD") => "CREDIT_CARD".to_string(),
+        _ if raw.contains("CHECKING")
+            || raw.contains("SAVINGS")
+            || raw.contains("DEPOSITORY")
+            || raw.contains("BANK_ACCOUNT") =>
+        {
+            "CASH".to_string()
+        }
         _ if raw.contains("CRYPTO") => "CRYPTOCURRENCY".to_string(),
         _ if raw.contains("RRSP")
             || raw.contains("TFSA")
@@ -803,6 +875,9 @@ mod tests {
         assert_eq!(map_broker_account_type("credit_card"), "CREDIT_CARD");
         assert_eq!(map_broker_account_type("Credit Card"), "CREDIT_CARD");
         assert_eq!(map_broker_account_type("card"), "CREDIT_CARD");
+        assert_eq!(map_broker_account_type("checking"), "CASH");
+        assert_eq!(map_broker_account_type("savings"), "CASH");
+        assert_eq!(map_broker_account_type("depository"), "CASH");
         assert_eq!(map_broker_account_type("crypto"), "CRYPTOCURRENCY");
         assert_eq!(map_broker_account_type("TFSA"), "SECURITIES");
         assert_eq!(map_broker_account_type("RRSP"), "SECURITIES");

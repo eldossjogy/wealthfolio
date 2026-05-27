@@ -7,8 +7,8 @@ use std::sync::Arc;
 use super::mapping;
 use super::models::{
     AccountUniversalActivity, BrokerAccount, BrokerConnection, HoldingsBalance, HoldingsDiff,
-    HoldingsOptionPosition, HoldingsPosition, NewAccountInfo, SyncAccountsResponse,
-    SyncConnectionsResponse,
+    HoldingsOptionPosition, HoldingsPosition, NewAccountInfo, RemovedProviderActivity,
+    SyncAccountsResponse, SyncConnectionsResponse,
 };
 use super::traits::{BrokerSyncServiceTrait, PlatformRepositoryTrait};
 use crate::broker_ingest::{
@@ -127,6 +127,11 @@ impl BrokerSyncService {
         self.event_sink = event_sink;
         self
     }
+
+    fn provider_for_account(&self, account_id: &str) -> Result<String> {
+        let account = self.account_service.get_account(account_id)?;
+        Ok(normalize_provider_id(account.provider.as_deref()))
+    }
 }
 
 #[async_trait]
@@ -158,6 +163,12 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 // Check if platform already exists
                 let existing = self.platform_repository.get_by_id(&platform_id)?;
 
+                let platform_kind = if connection.category.as_deref() == Some("spending") {
+                    "BANK"
+                } else {
+                    "BROKERAGE"
+                };
+
                 let platform = Platform {
                     id: platform_id.clone(),
                     name: brokerage.display_name.clone().or(brokerage.name.clone()),
@@ -166,7 +177,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                         platform_id.to_lowercase().replace('_', "")
                     ),
                     external_id: brokerage.id.clone(),
-                    kind: "BROKERAGE".to_string(),
+                    kind: platform_kind.to_string(),
                     website_url: None,
                     logo_url: brokerage
                         .aws_s3_square_logo_url
@@ -209,7 +220,11 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         let existing_accounts = self.account_service.get_all_accounts()?;
         let provider_account_id_map: std::collections::HashMap<String, Account> = existing_accounts
             .into_iter()
-            .filter_map(|a| a.provider_account_id.clone().map(|id| (id, a)))
+            .filter_map(|a| {
+                a.provider_account_id
+                    .clone()
+                    .map(|id| (provider_account_lookup_key(a.provider.as_deref(), &id), a))
+            })
             .collect();
 
         for broker_account in &broker_accounts {
@@ -225,9 +240,12 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                     continue;
                 }
             };
+            let broker_provider_id = normalize_provider_id(broker_account.provider.as_deref());
+            let provider_account_key =
+                provider_account_lookup_key(Some(&broker_provider_id), &provider_account_id);
 
             // Check if account already exists by provider_account_id
-            if let Some(_existing) = provider_account_id_map.get(&provider_account_id) {
+            if let Some(_existing) = provider_account_id_map.get(&provider_account_key) {
                 // Account exists - for now we skip updates to preserve user customizations
                 // In the future, we might want to update certain fields selectively
                 debug!(
@@ -245,6 +263,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
 
             let account_type = broker_account.get_account_type();
             let tracking_mode = default_tracking_mode_for_broker_account_type(&account_type);
+            let provider = normalize_provider_source_system(Some(&broker_provider_id));
 
             // Create new broker account with tracking mode matching the canonical account type.
             let new_account = NewAccount {
@@ -258,7 +277,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 platform_id,
                 account_number: broker_account.account_number.clone(),
                 meta: broker_account.to_meta_json(),
-                provider: Some("SNAPTRADE".to_string()),
+                provider: Some(provider),
                 provider_account_id: Some(provider_account_id.clone()),
                 is_archived: false,
                 tracking_mode,
@@ -326,8 +345,9 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
     }
 
     async fn mark_activity_sync_attempt(&self, account_id: String) -> Result<()> {
+        let provider = self.provider_for_account(&account_id)?;
         self.brokers_sync_state_repository
-            .upsert_attempt(account_id, DEFAULT_BROKERAGE_PROVIDER.to_string())
+            .upsert_attempt(account_id, provider)
             .await
     }
 
@@ -539,18 +559,84 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         ))
     }
 
+    async fn remove_account_activities(
+        &self,
+        account_id: String,
+        removed_activities: Vec<RemovedProviderActivity>,
+    ) -> Result<usize> {
+        if removed_activities.is_empty() {
+            return Ok(0);
+        }
+
+        let removed_identities: HashSet<(String, String)> = removed_activities
+            .into_iter()
+            .filter_map(|removed| {
+                let source_record_id = removed.source_record_id.trim().to_string();
+                if source_record_id.is_empty() {
+                    return None;
+                }
+                let source_system = removed
+                    .source_system
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.to_ascii_uppercase())
+                    .unwrap_or_default();
+                Some((source_system, source_record_id))
+            })
+            .collect();
+
+        if removed_identities.is_empty() {
+            return Ok(0);
+        }
+
+        let existing = self
+            .activity_repository
+            .get_activities_by_account_id(&account_id)?;
+        let mut deleted = 0;
+
+        for activity in existing {
+            if activity.is_user_modified {
+                continue;
+            }
+
+            let Some(source_record_id) = activity.source_record_id.as_deref() else {
+                continue;
+            };
+            let source_system = activity
+                .source_system
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_ascii_uppercase())
+                .unwrap_or_default();
+
+            if removed_identities.contains(&(source_system, source_record_id.to_string())) {
+                self.activity_repository
+                    .delete_activity(activity.id.clone())
+                    .await?;
+                deleted += 1;
+            }
+        }
+
+        Ok(deleted)
+    }
+
     async fn finalize_activity_sync_success(
         &self,
         account_id: String,
         last_synced_date: String,
         import_run_id: Option<String>,
+        checkpoint: Option<serde_json::Value>,
     ) -> Result<()> {
+        let provider = self.provider_for_account(&account_id)?;
         self.brokers_sync_state_repository
             .upsert_success(
                 account_id,
-                DEFAULT_BROKERAGE_PROVIDER.to_string(),
+                provider,
                 last_synced_date,
                 import_run_id,
+                checkpoint,
             )
             .await
     }
@@ -561,13 +647,9 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         error: String,
         import_run_id: Option<String>,
     ) -> Result<()> {
+        let provider = self.provider_for_account(&account_id)?;
         self.brokers_sync_state_repository
-            .upsert_failure(
-                account_id,
-                DEFAULT_BROKERAGE_PROVIDER.to_string(),
-                error,
-                import_run_id,
-            )
+            .upsert_failure(account_id, provider, error, import_run_id)
             .await
     }
 
@@ -577,13 +659,9 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         warning: String,
         import_run_id: Option<String>,
     ) -> Result<()> {
+        let provider = self.provider_for_account(&account_id)?;
         self.brokers_sync_state_repository
-            .upsert_needs_review(
-                account_id,
-                DEFAULT_BROKERAGE_PROVIDER.to_string(),
-                warning,
-                import_run_id,
-            )
+            .upsert_needs_review(account_id, provider, warning, import_run_id)
             .await
     }
 
@@ -607,9 +685,10 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
     }
 
     async fn create_import_run(&self, account_id: &str, mode: ImportRunMode) -> Result<ImportRun> {
+        let provider = self.provider_for_account(account_id)?;
         let import_run = ImportRun::new(
             account_id.to_string(),
-            DEFAULT_BROKERAGE_PROVIDER.to_string(),
+            provider,
             ImportRunType::Sync,
             mode,
             ReviewMode::Never,
@@ -1466,11 +1545,34 @@ fn map_broker_symbol_type(code: Option<&str>, is_crypto_fallback: bool) -> Instr
 }
 
 fn default_tracking_mode_for_broker_account_type(account_type: &str) -> TrackingMode {
-    if account_type == account_types::CREDIT_CARD {
+    if matches!(
+        account_type,
+        account_types::CREDIT_CARD | account_types::CASH
+    ) {
         TrackingMode::Transactions
     } else {
         TrackingMode::Holdings
     }
+}
+
+fn normalize_provider_id(provider: Option<&str>) -> String {
+    provider
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_else(|| DEFAULT_BROKERAGE_PROVIDER.to_string())
+}
+
+fn normalize_provider_source_system(provider: Option<&str>) -> String {
+    normalize_provider_id(provider).to_ascii_uppercase()
+}
+
+fn provider_account_lookup_key(provider: Option<&str>, provider_account_id: &str) -> String {
+    format!(
+        "{}:{}",
+        normalize_provider_id(provider),
+        provider_account_id
+    )
 }
 
 #[cfg(test)]
@@ -1484,6 +1586,7 @@ mod tests {
 
     use super::{
         default_tracking_mode_for_broker_account_type, normalize_holdings_money, BrokerSyncService,
+        provider_account_lookup_key,
     };
     use wealthfolio_core::accounts::{account_types, TrackingMode};
     use wealthfolio_core::assets::{AssetSpec, InstrumentType};
@@ -1602,14 +1705,38 @@ mod tests {
     }
 
     #[test]
-    fn broker_credit_cards_default_to_transaction_tracking() {
+    fn broker_spending_accounts_default_to_transaction_tracking() {
         assert_eq!(
             default_tracking_mode_for_broker_account_type(account_types::CREDIT_CARD),
             TrackingMode::Transactions
         );
         assert_eq!(
+            default_tracking_mode_for_broker_account_type(account_types::CASH),
+            TrackingMode::Transactions
+        );
+        assert_eq!(
             default_tracking_mode_for_broker_account_type(account_types::SECURITIES),
             TrackingMode::Holdings
+        );
+    }
+
+    #[test]
+    fn provider_account_lookup_key_is_provider_scoped() {
+        assert_eq!(
+            provider_account_lookup_key(Some("PLAID"), "account_1"),
+            "plaid:account_1"
+        );
+        assert_eq!(
+            provider_account_lookup_key(Some("snaptrade"), "account_1"),
+            "snaptrade:account_1"
+        );
+        assert_ne!(
+            provider_account_lookup_key(Some("plaid"), "account_1"),
+            provider_account_lookup_key(Some("snaptrade"), "account_1")
+        );
+        assert_eq!(
+            provider_account_lookup_key(None, "legacy_account_1"),
+            "snaptrade:legacy_account_1"
         );
     }
 

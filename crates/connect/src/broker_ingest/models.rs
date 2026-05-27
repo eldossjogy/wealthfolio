@@ -244,6 +244,7 @@ pub trait BrokerSyncStateRepositoryTrait: Send + Sync {
         provider: String,
         last_synced_date: String,
         import_run_id: Option<String>,
+        checkpoint_json: Option<Value>,
     ) -> Result<()>;
     async fn upsert_failure(
         &self,

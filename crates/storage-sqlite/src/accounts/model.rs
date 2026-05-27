@@ -4,7 +4,11 @@ use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use wealthfolio_core::accounts::{Account, AccountUpdate, NewAccount, TrackingMode};
+use wealthfolio_core::accounts::{
+    Account, AccountAccountingSettings, AccountUpdate, CostBasisMethod, CostBasisProfile,
+    LotSelectionStrategy, NewAccount, PoolingScope, TrackingMode,
+};
+use wealthfolio_core::errors::Result;
 
 /// Database model for accounts
 #[derive(
@@ -43,6 +47,29 @@ pub struct AccountDB {
     pub tracking_mode: String,
 }
 
+/// Database model for account accounting settings.
+#[derive(Queryable, Identifiable, Insertable, Selectable, PartialEq, Debug, Clone)]
+#[diesel(table_name = crate::schema::account_accounting_settings)]
+#[diesel(primary_key(account_id))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct AccountAccountingSettingsDB {
+    pub account_id: String,
+    pub cost_basis_method: String,
+    pub cost_basis_profile: String,
+    pub pooling_scope: String,
+    pub lot_selection_strategy: Option<String>,
+    pub settings_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl AccountAccountingSettingsDB {
+    pub fn default_for_account(account_id: &str) -> Self {
+        let settings = AccountAccountingSettings::default_for_account(account_id.to_string());
+        Self::from(&settings)
+    }
+}
+
 // Conversion implementations
 impl From<AccountDB> for Account {
     fn from(db: AccountDB) -> Self {
@@ -68,6 +95,47 @@ impl From<AccountDB> for Account {
             provider_account_id: db.provider_account_id,
             is_archived: db.is_archived,
             tracking_mode,
+        }
+    }
+}
+
+impl TryFrom<AccountAccountingSettingsDB> for AccountAccountingSettings {
+    type Error = wealthfolio_core::Error;
+
+    fn try_from(db: AccountAccountingSettingsDB) -> Result<Self> {
+        let lot_selection_strategy = db
+            .lot_selection_strategy
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(LotSelectionStrategy::from_code)
+            .transpose()?;
+
+        Ok(Self {
+            account_id: db.account_id,
+            cost_basis_method: CostBasisMethod::from_code(&db.cost_basis_method)?,
+            cost_basis_profile: CostBasisProfile::from_code(&db.cost_basis_profile)?,
+            pooling_scope: PoolingScope::from_code(&db.pooling_scope)?,
+            lot_selection_strategy,
+            settings_json: db.settings_json,
+            created_at: db.created_at,
+            updated_at: db.updated_at,
+        })
+    }
+}
+
+impl From<&AccountAccountingSettings> for AccountAccountingSettingsDB {
+    fn from(domain: &AccountAccountingSettings) -> Self {
+        Self {
+            account_id: domain.account_id.clone(),
+            cost_basis_method: domain.cost_basis_method.as_str().to_string(),
+            cost_basis_profile: domain.cost_basis_profile.as_str().to_string(),
+            pooling_scope: domain.pooling_scope.as_str().to_string(),
+            lot_selection_strategy: domain
+                .lot_selection_strategy
+                .map(|strategy| strategy.as_str().to_string()),
+            settings_json: domain.settings_json.clone(),
+            created_at: domain.created_at.clone(),
+            updated_at: domain.updated_at.clone(),
         }
     }
 }

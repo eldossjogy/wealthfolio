@@ -5,6 +5,7 @@ use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use diesel::prelude::*;
 use diesel::r2d2::{self, Pool};
 use diesel::sqlite::SqliteConnection;
+use serde_json::Value;
 use std::sync::Arc;
 
 use wealthfolio_connect::broker_ingest::{
@@ -183,9 +184,11 @@ impl BrokerSyncStateRepository {
         provider: String,
         last_synced_date: String,
         import_run_id: Option<String>,
+        checkpoint_json: Option<Value>,
     ) -> Result<()> {
         let cursor_str = parse_sync_cursor(&last_synced_date)?;
-
+        let checkpoint_json =
+            checkpoint_json.map(|value| serde_json::to_string(&value).unwrap_or_default());
         self.writer
             .exec(move |conn| {
                 let now = Utc::now();
@@ -204,6 +207,7 @@ impl BrokerSyncStateRepository {
                         diesel::update(brokers_sync_state::table.find((&account_id, &provider)))
                             .set((
                                 brokers_sync_state::last_successful_at.eq(&cursor_str),
+                                brokers_sync_state::checkpoint_json.eq(&checkpoint_json),
                                 brokers_sync_state::sync_status.eq("IDLE"),
                                 brokers_sync_state::last_error.eq::<Option<String>>(None),
                                 brokers_sync_state::last_run_id.eq(&import_run_id),
@@ -217,7 +221,7 @@ impl BrokerSyncStateRepository {
                         let new_state = BrokerSyncStateDB {
                             account_id,
                             provider,
-                            checkpoint_json: None,
+                            checkpoint_json,
                             last_attempted_at: Some(now_str.clone()),
                             last_successful_at: Some(cursor_str),
                             last_error: None,
@@ -411,6 +415,7 @@ impl ConnectBrokerSyncStateRepositoryTrait for BrokerSyncStateRepository {
         provider: String,
         last_synced_date: String,
         import_run_id: Option<String>,
+        checkpoint_json: Option<Value>,
     ) -> Result<()> {
         BrokerSyncStateRepository::upsert_success(
             self,
@@ -418,6 +423,7 @@ impl ConnectBrokerSyncStateRepositoryTrait for BrokerSyncStateRepository {
             provider,
             last_synced_date,
             import_run_id,
+            checkpoint_json,
         )
         .await
     }

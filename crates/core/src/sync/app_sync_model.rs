@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Canonical list of local tables that participate in app-side device sync.
 /// Order matters: parent tables before children (FK dependencies).
-pub const APP_SYNC_TABLES: [&str; 32] = [
+pub const APP_SYNC_TABLES: &[&str] = &[
     // Base tables (no FK deps)
     "platforms",
     "assets",
@@ -58,6 +58,9 @@ pub const APP_SYNC_TABLES: [&str; 32] = [
     "ai_thread_tags",
     // No FK deps (account_id has no FK constraint)
     "holdings_snapshots",
+    // Derived transaction lot read models. Parent rows before disposal slices.
+    "lots",
+    "lot_disposals",
     // No FK deps
     "portfolios",
     // Depends on: portfolios, accounts

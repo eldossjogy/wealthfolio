@@ -115,6 +115,9 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         let local_cursor = local_activity_state
             .as_ref()
             .and_then(|state| state.last_successful_at.as_ref());
+        let local_checkpoint = local_activity_state
+            .as_ref()
+            .and_then(|state| state.checkpoint_json.clone());
 
         let activity_waterline = match resolve_activity_readiness(provider_activity_status) {
             Ok(ProviderReadiness::Ready(date)) => {
@@ -130,6 +133,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                             job.account_id.clone(),
                             cursor.to_rfc3339(),
                             None,
+                            local_checkpoint,
                         )
                         .await
                     {
@@ -351,6 +355,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                 &job.account_id,
                 &job.account_name,
                 &job.broker_account_id,
+                &job.provider,
                 query_window.start_date.as_deref(),
                 Some(query_window.end_date.as_str()),
                 result.activity_import_run_id.clone(),
@@ -395,7 +400,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             skipped: 0,
             warnings: outcome.needs_review,
             errors: 0,
-            removed: 0,
+            removed: outcome.removed,
             assets_created: outcome.assets_created,
         };
 
@@ -413,6 +418,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                     job.account_id.clone(),
                     query_window.end_date.clone(),
                     result.activity_import_run_id.clone(),
+                    outcome.checkpoint.clone(),
                 )
                 .await
                 .is_err();
@@ -487,13 +493,13 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             SyncStatus::Complete
         };
         self.progress_reporter.report_progress(
-            SyncProgressPayload::new(&job.account_id, &job.account_name, status)
-                .with_activities_fetched(outcome.fetched as usize)
-                .with_message(format!(
-                    "Synced {} activities ({} need review)",
-                    outcome.inserted, outcome.needs_review
-                )),
-        );
+                SyncProgressPayload::new(&job.account_id, &job.account_name, status)
+                    .with_activities_fetched(outcome.fetched as usize)
+                    .with_message(format!(
+                        "Synced {} activities, removed {} ({} need review)",
+                        outcome.inserted, outcome.removed, outcome.needs_review
+                    )),
+            );
 
         result.summary.accounts_synced += 1;
     }

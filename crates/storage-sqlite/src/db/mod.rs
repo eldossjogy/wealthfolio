@@ -156,6 +156,155 @@ pub fn get_db_path(input: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use diesel::prelude::*;
+    use diesel::sql_types::BigInt;
+
+    #[derive(QueryableByName)]
+    struct CountRow {
+        #[diesel(sql_type = BigInt)]
+        count: i64,
+    }
+
+    fn count(conn: &mut SqliteConnection, sql: &str) -> i64 {
+        diesel::sql_query(sql)
+            .get_result::<CountRow>(conn)
+            .unwrap()
+            .count
+    }
+
+    #[test]
+    fn lot_disposals_migration_adds_accounting_settings_and_clears_generated_data() {
+        let mut conn = SqliteConnection::establish(":memory:").unwrap();
+        conn.batch_execute(
+            "
+            PRAGMA foreign_keys = ON;
+
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL
+            );
+
+            CREATE TABLE assets (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            CREATE TABLE activities (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            CREATE TABLE lots (
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT NOT NULL,
+                asset_id TEXT NOT NULL,
+                open_date TEXT NOT NULL,
+                open_activity_id TEXT NULL,
+                original_quantity TEXT NOT NULL,
+                cost_per_unit TEXT NOT NULL,
+                original_cost_basis TEXT NOT NULL,
+                remaining_cost_basis TEXT NOT NULL,
+                fee_allocated TEXT NOT NULL,
+                remaining_quantity TEXT NOT NULL,
+                split_ratio TEXT NOT NULL,
+                is_closed INTEGER NOT NULL,
+                close_date TEXT NULL,
+                close_activity_id TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE daily_account_valuation (
+                id TEXT PRIMARY KEY NOT NULL
+            );
+
+            CREATE TABLE holdings_snapshots (
+                id TEXT PRIMARY KEY NOT NULL,
+                source TEXT NOT NULL
+            );
+
+            INSERT INTO accounts (id, name) VALUES ('acc1', 'Account');
+            INSERT INTO assets (id) VALUES ('asset1');
+            INSERT INTO activities (id) VALUES ('activity1');
+            INSERT INTO lots (
+                id, account_id, asset_id, open_date, original_quantity,
+                cost_per_unit, original_cost_basis, remaining_cost_basis,
+                fee_allocated, remaining_quantity, split_ratio, is_closed,
+                created_at, updated_at
+            ) VALUES (
+                'lot1', 'acc1', 'asset1', '2026-01-01', '1',
+                '10', '10', '10', '0', '1', '1', 0,
+                '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+            );
+            INSERT INTO daily_account_valuation (id) VALUES ('valuation1');
+            INSERT INTO holdings_snapshots (id, source) VALUES ('snapshot1', 'CALCULATED');
+            INSERT INTO holdings_snapshots (id, source) VALUES ('snapshot2', 'MANUAL_ENTRY');
+            ",
+        )
+        .unwrap();
+
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-05-26-000001_lot_disposals/up.sql"
+        ))
+        .unwrap();
+
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM account_accounting_settings
+                 WHERE account_id = 'acc1'
+                   AND cost_basis_method = 'FIFO'
+                   AND cost_basis_profile = 'GENERIC'
+                   AND pooling_scope = 'ACCOUNT'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM pragma_table_info('lots')
+                 WHERE name = 'cost_basis_method'"
+            ),
+            1
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM pragma_table_info('lot_disposals')
+                 WHERE name = 'cost_basis_method' AND dflt_value = '''FIFO'''"
+            ),
+            1
+        );
+        assert_eq!(count(&mut conn, "SELECT COUNT(*) AS count FROM lots"), 0);
+        assert_eq!(
+            count(&mut conn, "SELECT COUNT(*) AS count FROM lot_disposals"),
+            0
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM daily_account_valuation"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots WHERE source = 'CALCULATED'"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM holdings_snapshots"
+            ),
+            1
+        );
+    }
+}
+
 fn create_backup_filename(timestamp: chrono::DateTime<Local>) -> String {
     format!(
         "{}{}{}",
