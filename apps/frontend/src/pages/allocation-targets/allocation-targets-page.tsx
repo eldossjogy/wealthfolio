@@ -59,13 +59,14 @@ function KpiItem({
 }
 
 function filterProfilesByScope(profiles: TargetProfile[], scope: AccountScope): TargetProfile[] {
-  if (scope.type === "all") return profiles.filter((p) => p.scopeType === "all");
+  const visible = profiles.filter((p) => p.status !== "archived");
+  if (scope.type === "all") return visible.filter((p) => p.scopeType === "all");
   if (scope.type === "account")
-    return profiles.filter((p) => p.scopeType === "account" && p.scopeId === scope.accountId);
+    return visible.filter((p) => p.scopeType === "account" && p.scopeId === scope.accountId);
   if (scope.type === "portfolio")
-    return profiles.filter((p) => p.scopeType === "portfolio" && p.scopeId === scope.portfolioId);
+    return visible.filter((p) => p.scopeType === "portfolio" && p.scopeId === scope.portfolioId);
   // "accounts" (multi-account ad-hoc) → no dedicated profile scope type; show all-portfolio profiles
-  return profiles.filter((p) => p.scopeType === "all");
+  return visible.filter((p) => p.scopeType === "all");
 }
 
 function scopeKey(scope: AccountScope): string {

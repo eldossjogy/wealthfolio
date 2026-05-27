@@ -18,6 +18,7 @@ import {
   Switch,
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import type { TargetProfile, TaxonomyWithCategories, TargetScopeType } from "@/lib/types";
 import { useAccounts } from "@/hooks/use-accounts";
 import { usePortfolios } from "@/hooks/use-portfolios";
@@ -147,6 +148,8 @@ export function ProfileEditor({
     (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band",
   );
   const [allowSells, setAllowSells] = useState(profile?.allowSells ?? false);
+  const [minTradeAmount, setMinTradeAmount] = useState(profile?.minTradeAmount ?? "0");
+  const [wholeSharesOnly, setWholeSharesOnly] = useState(profile?.wholeSharesOnly ?? false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(initialPresetId ?? null);
 
   const [nodes, setNodes] = useState<NodeDraft[]>(() => {
@@ -208,47 +211,52 @@ export function ProfileEditor({
   }
 
   async function persistProfile(andActivate: boolean) {
-    const input = {
-      name: name.trim(),
-      scopeType,
-      scopeId: scopeType === "all" ? null : scopeId,
-      taxonomyId: "asset_classes",
-      baseCurrency,
-      triggerType,
-      driftBandBps: Math.round(driftBandPct * 100),
-      rebalanceTo,
-      allowSells,
-      minTradeAmount: "0",
-      wholeSharesOnly: false,
-    };
+    try {
+      const input = {
+        name: name.trim(),
+        scopeType,
+        scopeId: scopeType === "all" ? null : scopeId,
+        taxonomyId: "asset_classes",
+        baseCurrency,
+        triggerType,
+        driftBandBps: Math.round(driftBandPct * 100),
+        rebalanceTo,
+        allowSells,
+        minTradeAmount: minTradeAmount || "0",
+        wholeSharesOnly,
+      };
 
-    let profileId: string;
-    if (profile) {
-      const updated = await updateProfile.mutateAsync({ id: profile.id, input });
-      profileId = updated.id;
-    } else {
-      const created = await createProfile.mutateAsync(input);
-      profileId = created.id;
+      let profileId: string;
+      if (profile) {
+        const updated = await updateProfile.mutateAsync({ id: profile.id, input });
+        profileId = updated.id;
+      } else {
+        const created = await createProfile.mutateAsync(input);
+        profileId = created.id;
+      }
+
+      await saveNodes.mutateAsync({
+        profileId,
+        nodes: nodes
+          .filter((n) => n.targetBps > 0)
+          .map((n) => ({
+            profileId,
+            categoryId: n.categoryId,
+            targetBps: n.targetBps,
+            isLocked: n.isLocked,
+            isRequired: true,
+          })),
+      });
+
+      if (andActivate) {
+        await activateProfile.mutateAsync(profileId);
+      }
+
+      onSaved(profileId);
+    } catch (err) {
+      toast.error(andActivate ? "Failed to activate profile" : "Failed to save profile");
+      console.error(err);
     }
-
-    await saveNodes.mutateAsync({
-      profileId,
-      nodes: nodes
-        .filter((n) => n.targetBps > 0)
-        .map((n) => ({
-          profileId,
-          categoryId: n.categoryId,
-          targetBps: n.targetBps,
-          isLocked: n.isLocked,
-          isRequired: true,
-        })),
-    });
-
-    if (andActivate) {
-      await activateProfile.mutateAsync(profileId);
-    }
-
-    onSaved(profileId);
   }
 
   return (
@@ -575,6 +583,36 @@ export function ProfileEditor({
                 </p>
               </div>
               <Switch checked={allowSells} onCheckedChange={setAllowSells} />
+            </div>
+
+            {/* Whole shares only */}
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <p className="text-[13px] font-medium">Whole shares only</p>
+                <p className="text-muted-foreground text-[12px]">
+                  Round trade quantities to whole units
+                </p>
+              </div>
+              <Switch checked={wholeSharesOnly} onCheckedChange={setWholeSharesOnly} />
+            </div>
+
+            {/* Minimum trade amount */}
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <p className="text-[13px] font-medium">Min. trade amount</p>
+                <p className="text-muted-foreground text-[12px]">Skip trades below this value</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground text-[13px]">{baseCurrency}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={minTradeAmount}
+                  onChange={(e) => setMinTradeAmount(e.target.value)}
+                  className="w-20 bg-transparent text-right text-[13px] font-medium tabular-nums outline-none"
+                />
+              </div>
             </div>
           </CardContent>
         </Card>

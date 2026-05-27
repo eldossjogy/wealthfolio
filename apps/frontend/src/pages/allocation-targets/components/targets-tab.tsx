@@ -191,6 +191,7 @@ export function TargetsTab({
             selected={selectedPreset}
             onSelect={handlePresetSelect}
             currentCategories={topLevelCurrent}
+            portfolioStats={portfolioStats}
           />
         </div>
       </div>
