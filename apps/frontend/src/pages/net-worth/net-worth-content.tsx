@@ -2,7 +2,7 @@ import { useNetWorth, useNetWorthHistory } from "@/hooks/use-alternative-assets"
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { CategoryAllocation, DateRange, TaxonomyAllocation } from "@/lib/types";
+import type { DateRange } from "@/lib/types";
 import { formatDateISO } from "@/lib/utils";
 import Balance from "@/pages/dashboard/balance";
 import { AllocationDetailSheet } from "@/pages/holdings/components/allocation-detail-sheet";
@@ -34,6 +34,7 @@ import {
   averageMonthlyChange,
   computeMomentum,
   computeVelocity,
+  investmentAllocation,
   parseHistory,
   type ParsedNetWorth,
   type SelectedCategory,
@@ -44,27 +45,6 @@ import { NetWorthChart } from "./net-worth-chart";
 const DEFAULT_INTERVAL: TimePeriod = "ALL";
 const INTERVAL_STORAGE_KEY = "networth-interval";
 const MS_PER_DAY = 86_400_000;
-
-/**
- * The Asset-Classes allocation counts account cash as a "Cash" class, but net
- * worth tracks Cash as its own breakdown row. Drop the Cash class (and rescale
- * the remaining percentages) so the Investments drawer reflects the investment
- * portfolio and matches the Investments row value.
- */
-function investmentAllocation(allocation?: TaxonomyAllocation): TaxonomyAllocation | undefined {
-  if (!allocation) return undefined;
-  const kept = allocation.categories.filter(
-    (category) => category.categoryName.toLowerCase() !== "cash",
-  );
-  const total = kept.reduce((sum, category) => sum + category.value, 0);
-  const rescale = (categories: CategoryAllocation[]): CategoryAllocation[] =>
-    categories.map((category) => ({
-      ...category,
-      percentage: total > 0 ? (category.value / total) * 100 : 0,
-      children: category.children ? rescale(category.children) : category.children,
-    }));
-  return { ...allocation, categories: rescale(kept) };
-}
 
 export function NetWorthContent() {
   const { settings } = useSettingsContext();
@@ -89,16 +69,18 @@ export function NetWorthContent() {
   }, [dateRange]);
 
   // Extended range covering an equal prior window (for Momentum) and the trailing
-  // year (for the Velocity multiple), so both come from one extra query.
+  // year (for the Velocity multiple), so both come from one extra query. ALL has
+  // no meaningful equal prior window, so avoid asking the backend for decades of
+  // extra daily history.
   const longHistoryDates = useMemo(() => {
-    if (!dateRange?.from) return null;
+    if (!dateRange?.from || periodCode === "ALL") return null;
     const end = dateRange.to ?? new Date();
     const rangeMs = end.getTime() - dateRange.from.getTime();
     const priorStart = new Date(dateRange.from.getTime() - rangeMs);
     const yearStart = new Date(end.getTime() - 366 * MS_PER_DAY);
     const start = priorStart < yearStart ? priorStart : yearStart;
     return { startDate: formatDateISO(start), endDate: formatDateISO(end) };
-  }, [dateRange]);
+  }, [dateRange, periodCode]);
 
   const { data: historyData, isLoading: isHistoryLoading } = useNetWorthHistory({
     startDate: historyDates?.startDate ?? "",
@@ -158,13 +140,14 @@ export function NetWorthContent() {
 
   const velocity = useMemo(() => computeVelocity(parsedHistory), [parsedHistory]);
   const trailingYearMonthly = useMemo(() => {
+    if (periodCode === "ALL") return undefined;
     const cutoff = formatDateISO(new Date(Date.now() - 366 * MS_PER_DAY));
     return averageMonthlyChange(longHistory.filter((point) => point.date >= cutoff));
-  }, [longHistory]);
+  }, [longHistory, periodCode]);
   const momentum = useMemo(() => {
-    if (!historyDates) return null;
+    if (!historyDates || periodCode === "ALL") return null;
     return computeMomentum(longHistory, historyDates.startDate, historyDates.endDate);
-  }, [longHistory, historyDates]);
+  }, [longHistory, historyDates, periodCode]);
 
   // Net worth change over the selected range (simple delta).
   const { gainLossAmount, gainLossPercent } = useMemo(() => {

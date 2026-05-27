@@ -1500,6 +1500,12 @@ fn test_history_basic_portfolio_with_alt_assets() {
     assert_eq!(history[0].total_liabilities, dec!(300000));
     assert_eq!(history[0].net_worth, dec!(300000));
     assert_eq!(history[0].net_contribution, dec!(95000));
+    assert_eq!(history[0].breakdown.get("investments"), Some(&dec!(100000)));
+    assert_eq!(history[0].breakdown.get("properties"), Some(&dec!(500000)));
+    assert_eq!(
+        history[0].breakdown.get("LIAB-mortgage"),
+        Some(&dec!(300000))
+    );
 
     // Day 5: Portfolio 104K + Property 505K - Liability 298K = 311K
     let last = &history[4];
@@ -1509,6 +1515,9 @@ fn test_history_basic_portfolio_with_alt_assets() {
     assert_eq!(last.total_liabilities, dec!(298000));
     assert_eq!(last.net_worth, dec!(311000));
     assert_eq!(last.net_contribution, dec!(96000));
+    assert_eq!(last.breakdown.get("investments"), Some(&dec!(104000)));
+    assert_eq!(last.breakdown.get("properties"), Some(&dec!(505000)));
+    assert_eq!(last.breakdown.get("LIAB-mortgage"), Some(&dec!(298000)));
 
     // Verify gain calculation would work correctly:
     // Portfolio gain = (104000 - 96000) - (100000 - 95000) = 8000 - 5000 = 3000
@@ -1581,6 +1590,11 @@ fn test_history_credit_card_balance_is_split_to_liabilities() {
     assert_eq!(history[0].total_assets, dec!(100000));
     assert_eq!(history[0].total_liabilities, dec!(1250));
     assert_eq!(history[0].net_worth, dec!(98750));
+    assert_eq!(history[0].breakdown.get("investments"), Some(&dec!(100000)));
+    assert_eq!(
+        history[0].breakdown.get("CREDIT_CARD:card1"),
+        Some(&dec!(1250))
+    );
 }
 
 #[test]
@@ -1727,6 +1741,12 @@ fn test_history_mixed_securities_cash_and_credit_card() {
     assert_eq!(history[0].total_assets, dec!(105000));
     assert_eq!(history[0].total_liabilities, dec!(1250));
     assert_eq!(history[0].net_worth, dec!(103750));
+    assert_eq!(history[0].breakdown.get("investments"), Some(&dec!(100000)));
+    assert_eq!(history[0].breakdown.get("cash"), Some(&dec!(5000)));
+    assert_eq!(
+        history[0].breakdown.get("CREDIT_CARD:card1"),
+        Some(&dec!(1250))
+    );
 }
 
 #[test]
@@ -2076,6 +2096,16 @@ fn test_history_multiple_alt_assets() {
     assert_eq!(history[0].alternative_assets_value, dec!(505000)); // 500K + 5K
     assert_eq!(history[0].total_liabilities, dec!(200000));
     assert_eq!(history[0].net_worth, dec!(315000));
+    assert_eq!(history[0].breakdown.get("investments"), Some(&dec!(10000)));
+    assert_eq!(history[0].breakdown.get("properties"), Some(&dec!(500000)));
+    assert_eq!(
+        history[0].breakdown.get("preciousMetals"),
+        Some(&dec!(5000))
+    );
+    assert_eq!(
+        history[0].breakdown.get("LIAB-mortgage"),
+        Some(&dec!(200000))
+    );
 
     // Day 2: 10K + 500K + 5.5K - 200K = 315.5K (gold updated, property forward-filled)
     assert_eq!(history[1].alternative_assets_value, dec!(505500)); // 500K + 5.5K
@@ -2084,6 +2114,11 @@ fn test_history_multiple_alt_assets() {
     // Day 3: 10K + 510K + 5.5K - 200K = 325.5K (property updated, gold forward-filled)
     assert_eq!(history[2].alternative_assets_value, dec!(515500)); // 510K + 5.5K
     assert_eq!(history[2].net_worth, dec!(325500));
+    assert_eq!(history[2].breakdown.get("properties"), Some(&dec!(510000)));
+    assert_eq!(
+        history[2].breakdown.get("preciousMetals"),
+        Some(&dec!(5500))
+    );
 }
 
 // ============================================================================

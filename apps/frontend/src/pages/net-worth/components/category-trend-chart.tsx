@@ -1,4 +1,5 @@
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
+import { useId } from "react";
 
 interface CategoryTrendChartProps {
   data: { date: string; value: number }[];
@@ -8,6 +9,8 @@ interface CategoryTrendChartProps {
 
 /** Compact single-series area chart of a category's value over the range. */
 export function CategoryTrendChart({ data, color }: CategoryTrendChartProps) {
+  const gradientId = `category-trend-gradient-${useId().replace(/:/g, "")}`;
+
   if (data.length < 2) {
     return (
       <div className="text-muted-foreground/60 flex h-32 items-center justify-center text-xs">
@@ -21,7 +24,7 @@ export function CategoryTrendChart({ data, color }: CategoryTrendChartProps) {
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
           <defs>
-            <linearGradient id="category-trend-gradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.22} />
               <stop offset="100%" stopColor={color} stopOpacity={0} />
             </linearGradient>
@@ -32,7 +35,7 @@ export function CategoryTrendChart({ data, color }: CategoryTrendChartProps) {
             dataKey="value"
             stroke={color}
             strokeWidth={1.8}
-            fill="url(#category-trend-gradient)"
+            fill={`url(#${gradientId})`}
             dot={false}
             isAnimationActive={false}
           />

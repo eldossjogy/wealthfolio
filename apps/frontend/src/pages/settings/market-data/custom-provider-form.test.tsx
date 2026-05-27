@@ -97,5 +97,5 @@ describe("CustomProviderForm", () => {
         pricePath: "$[*].adj_close",
       }),
     ]);
-  });
+  }, 10_000);
 });

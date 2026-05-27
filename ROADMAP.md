@@ -75,15 +75,15 @@ easy-to-use tool to track their investments and goals.
 - [x] Addons catalog/marketplace for community addons
 - [x] Custom Market Data providers
 
-### Phase 5: Budgeting and Spend Tracking
+### Phase 7: Budgeting and Spend Tracking
 
-- [ ] Budgeting and Sprend tracking Module
+- [ ] Budgeting and Spend tracking Module
 
-### Phase 7:
+### Phase 8: Platform Expansion
 
 - [ ] MCP and CLI for agents
 - [ ] Create and manage multiple portfolios
-- [ ] Potrolio Allocation and Rebalancing
+- [ ] Portfolio Allocation and Rebalancing
 - [ ] Android Mobile app
 - [ ] SSO in self-hosted version
 

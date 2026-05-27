@@ -1,4 +1,4 @@
-import type { NetWorthHistoryPoint } from "@/lib/types";
+import type { CategoryAllocation, NetWorthHistoryPoint, TaxonomyAllocation } from "@/lib/types";
 import { formatPercent } from "@/lib/utils";
 
 // Goldish orange net-worth theme (matches the history chart). Reserved for the
@@ -63,6 +63,29 @@ export interface ParsedNetWorth {
   netWorth: number;
   assets: { total: number; breakdown: BreakdownEntry[] };
   liabilities: { total: number; breakdown: BreakdownEntry[] };
+}
+
+/**
+ * The Asset-Classes allocation counts account cash as a "Cash" class, but net
+ * worth tracks Cash as its own breakdown row. Drop the Cash class (and rescale
+ * the remaining percentages) so the Investments drawer reflects the investment
+ * portfolio and matches the Investments row value.
+ */
+export function investmentAllocation(
+  allocation?: TaxonomyAllocation,
+): TaxonomyAllocation | undefined {
+  if (!allocation) return undefined;
+  const kept = allocation.categories.filter(
+    (category) => category.categoryName.toLowerCase() !== "cash",
+  );
+  const total = kept.reduce((sum, category) => sum + category.value, 0);
+  const rescale = (categories: CategoryAllocation[]): CategoryAllocation[] =>
+    categories.map((category) => ({
+      ...category,
+      percentage: total > 0 ? (category.value / total) * 100 : 0,
+      children: category.children ? rescale(category.children) : category.children,
+    }));
+  return { ...allocation, categories: rescale(kept) };
 }
 
 export interface ParsedHistoryPoint {

@@ -33,6 +33,7 @@ export function CompositionBar({ data, className }: { data: ParsedNetWorth; clas
                 className="h-full transition-opacity hover:opacity-80"
                 style={{
                   width: `${item.percentage}%`,
+                  minWidth: "2px",
                   backgroundColor: CATEGORY_CSS_COLORS[item.category] ?? "var(--muted-foreground)",
                   marginLeft: index > 0 ? "1px" : 0,
                 }}
