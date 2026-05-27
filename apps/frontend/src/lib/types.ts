@@ -1329,6 +1329,8 @@ export interface BreakdownItem {
   value: string;
   /** Optional: asset ID for individual items */
   assetId?: string;
+  /** Individual items rolled up into this category, for drill-down. */
+  children?: BreakdownItem[];
 }
 
 /**
@@ -1396,6 +1398,14 @@ export interface NetWorthHistoryPoint {
   // For gain calculation
   /** Cumulative net contributions (deposits - withdrawals) from portfolio as decimal string */
   netContribution: string;
+
+  /**
+   * Per-category / per-liability values at this date as decimal strings.
+   * Keys mirror the point-in-time breakdown: asset category keys (`cash`,
+   * `investments`, `properties`, ...) for aggregated asset categories, and the
+   * individual liability id (matching `BreakdownItem.assetId`) for each liability.
+   */
+  breakdown: Record<string, string>;
 
   /** Currency */
   currency: string;

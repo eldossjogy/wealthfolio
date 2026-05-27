@@ -183,13 +183,29 @@ impl NetWorthService {
 
     /// Build assets section from valuations.
     fn build_assets_section(valuations: &[ValuationInfo]) -> AssetsSection {
-        // Aggregate by category
+        // Aggregate by category, collecting individual items for drill-down.
         let mut category_totals: HashMap<AssetCategory, Decimal> = HashMap::new();
+        let mut category_children: HashMap<AssetCategory, Vec<BreakdownItem>> = HashMap::new();
 
         for val in valuations {
-            if val.category != AssetCategory::Liability {
-                *category_totals.entry(val.category).or_insert(Decimal::ZERO) +=
-                    val.market_value_base;
+            if val.category == AssetCategory::Liability {
+                continue;
+            }
+            *category_totals.entry(val.category).or_insert(Decimal::ZERO) += val.market_value_base;
+
+            // Skip per-item children for investments — they can be hundreds of
+            // holdings, and the dedicated allocation view handles that drill-down.
+            if val.category != AssetCategory::Investment {
+                category_children
+                    .entry(val.category)
+                    .or_default()
+                    .push(BreakdownItem {
+                        category: Self::category_key(val.category).to_string(),
+                        name: val.name.clone().unwrap_or_else(|| val.asset_id.clone()),
+                        value: val.market_value_base,
+                        asset_id: Some(val.asset_id.clone()),
+                        children: Vec::new(),
+                    });
             }
         }
 
@@ -197,11 +213,16 @@ impl NetWorthService {
         let mut breakdown: Vec<BreakdownItem> = category_totals
             .into_iter()
             .filter(|(_, value)| *value > Decimal::ZERO)
-            .map(|(category, value)| BreakdownItem {
-                category: Self::category_key(category).to_string(),
-                name: Self::category_display_name(category).to_string(),
-                value,
-                asset_id: None,
+            .map(|(category, value)| {
+                let mut children = category_children.remove(&category).unwrap_or_default();
+                children.sort_by_key(|c| std::cmp::Reverse(c.value));
+                BreakdownItem {
+                    category: Self::category_key(category).to_string(),
+                    name: Self::category_display_name(category).to_string(),
+                    value,
+                    asset_id: None,
+                    children,
+                }
             })
             .collect();
 
@@ -225,6 +246,7 @@ impl NetWorthService {
                 name: v.name.clone().unwrap_or_else(|| v.asset_id.clone()),
                 value: v.market_value_base,
                 asset_id: Some(v.asset_id.clone()),
+                children: Vec::new(),
             })
             .collect();
 
@@ -470,9 +492,11 @@ impl NetWorthServiceTrait for NetWorthService {
                 let cash_base =
                     self.convert_cash_balance_to_base(amount, currency, &base_currency, date);
 
+                // Name by account (with currency suffix) so the Cash drill-down
+                // lists each account distinctly instead of repeating "Cash (USD)".
                 let (asset_id, name, market_value_base, category) = (
                     format!("CASH:{}:{}", account.id, currency),
-                    Some(format!("Cash ({})", currency)),
+                    Some(format!("{} ({})", account.name, currency)),
                     cash_base.round_dp(DECIMAL_PRECISION),
                     AssetCategory::Cash,
                 );
@@ -603,6 +627,10 @@ impl NetWorthServiceTrait for NetWorthService {
         struct PortfolioState {
             value: Decimal,
             net_contribution: Decimal,
+            // Category split for breakdown: cash balances vs investment market value.
+            // Mirrors the point-in-time path (cash -> Cash, positions -> Investments).
+            cash: Decimal,
+            investments: Decimal,
         }
 
         let mut portfolio_by_date: BTreeMap<NaiveDate, PortfolioState> = BTreeMap::new();
@@ -624,9 +652,13 @@ impl NetWorthServiceTrait for NetWorthService {
                     .or_insert_with(|| PortfolioState {
                         value: Decimal::ZERO,
                         net_contribution: Decimal::ZERO,
+                        cash: Decimal::ZERO,
+                        investments: Decimal::ZERO,
                     });
                 entry.value += val.total_value_base;
                 entry.net_contribution += val.net_contribution_base;
+                entry.cash += val.cash_balance_base;
+                entry.investments += val.investment_market_value_base;
             }
         }
         let first_portfolio_date = portfolio_by_date.keys().next().copied();
@@ -830,10 +862,18 @@ impl NetWorthServiceTrait for NetWorthService {
         // =====================================================================
         // 7. Build history with forward-fill (Rule 2)
         // =====================================================================
+        // Map each alternative asset id to its breakdown category (e.g. Property, Vehicle).
+        let alt_category_map: HashMap<String, AssetCategory> = alternative_assets
+            .iter()
+            .map(|a| (a.id.clone(), Self::categorize_by_asset_kind(&a.kind)))
+            .collect();
+
         // Current state for forward-fill
         let mut current_portfolio = PortfolioState {
             value: Decimal::ZERO,
             net_contribution: Decimal::ZERO,
+            cash: Decimal::ZERO,
+            investments: Decimal::ZERO,
         };
         let mut portfolio_initialized = false;
 
@@ -895,6 +935,44 @@ impl NetWorthServiceTrait for NetWorthService {
             let total_liabilities = liabilities_value + credit_card_liabilities_value;
             let net_worth = total_assets - total_liabilities;
 
+            // Build per-category / per-liability breakdown for this date. Asset
+            // categories are aggregated; liabilities are kept per-id so each
+            // liability row can be charted individually (keys match the
+            // point-in-time breakdown's category / asset_id).
+            let mut breakdown: BTreeMap<String, Decimal> = BTreeMap::new();
+            let cash_total = current_portfolio.cash + credit_card_assets_value;
+            if !cash_total.is_zero() {
+                breakdown.insert(
+                    Self::category_key(AssetCategory::Cash).to_string(),
+                    cash_total,
+                );
+            }
+            if !current_portfolio.investments.is_zero() {
+                breakdown.insert(
+                    Self::category_key(AssetCategory::Investment).to_string(),
+                    current_portfolio.investments,
+                );
+            }
+            for (symbol, value) in &current_asset_values {
+                if asset_symbols.contains(symbol) {
+                    if let Some(category) = alt_category_map.get(symbol) {
+                        *breakdown
+                            .entry(Self::category_key(*category).to_string())
+                            .or_insert(Decimal::ZERO) += *value;
+                    }
+                } else if liability_symbols.contains(symbol) {
+                    breakdown.insert(symbol.clone(), *value);
+                }
+            }
+            for (account_id, value) in &current_credit_card_liabilities {
+                if !value.is_zero() {
+                    breakdown.insert(format!("CREDIT_CARD:{}", account_id), *value);
+                }
+            }
+            for value in breakdown.values_mut() {
+                *value = value.round_dp(DECIMAL_PRECISION);
+            }
+
             history.push(NetWorthHistoryPoint {
                 date,
                 portfolio_value: current_portfolio.value.round_dp(DECIMAL_PRECISION),
@@ -905,6 +983,7 @@ impl NetWorthServiceTrait for NetWorthService {
                 net_contribution: current_portfolio
                     .net_contribution
                     .round_dp(DECIMAL_PRECISION),
+                breakdown,
                 currency: base_currency.clone(),
             });
         }

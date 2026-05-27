@@ -1,6 +1,7 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 
-import { Switch } from "@wealthfolio/ui";
+import { Icons, Switch } from "@wealthfolio/ui";
 
 import {
   useSpendingSettings,
@@ -195,6 +196,28 @@ export function ModuleCard() {
               sublineClassName="truncate"
             />
           </div>
+        )}
+
+        {/* Categorization rules live in the Automation section at the bottom of
+            the page — easy to scroll past. When tracking is on but no rules
+            exist yet, surface a direct jump-link from the hero card so users
+            don't miss the auto-tagging setup. */}
+        {enabled && !rulesUnavailable && ruleCount === 0 && (
+          <Link
+            to="/settings/spending/rules"
+            className="border-warning/30 bg-warning/15 hover:bg-warning/25 group mt-6 flex items-center justify-between gap-3 rounded-md border px-3.5 py-2.5 transition-colors"
+          >
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Icons.Sparkles className="text-warning h-4 w-4 shrink-0" aria-hidden />
+              <span className="text-background/90 truncate text-xs sm:text-sm">
+                No categorization rules yet — auto-tag transactions by name pattern.
+              </span>
+            </div>
+            <span className="text-background/70 group-hover:text-background flex shrink-0 items-center gap-1 text-xs font-medium uppercase tracking-widest">
+              <span className="hidden sm:inline">Set up rules</span>
+              <Icons.ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+            </span>
+          </Link>
         )}
       </div>
     </section>

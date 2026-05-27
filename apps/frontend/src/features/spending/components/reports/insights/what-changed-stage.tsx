@@ -678,16 +678,16 @@ function ComparisonTable({
   const hidePct = periodState.kind === "no_prior_period";
 
   return (
-    <div className="border-border/60 bg-card/40 overflow-hidden rounded-2xl border backdrop-blur-xl">
+    <div className="border-border/60 bg-card/40 overflow-x-auto rounded-2xl border backdrop-blur-xl">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-border/40 text-muted-foreground/70 border-b text-[10px] font-semibold uppercase tracking-[0.12em]">
-            <th className="px-4 py-3 text-left">Category</th>
-            <th className="px-3 py-3 text-right">{labels.current}</th>
-            <th className="px-3 py-3 text-right">{labels.prior}</th>
-            <th className="px-3 py-3 text-right">Δ $</th>
-            <th className="px-3 py-3 text-right">Impact</th>
-            {!hidePct && <th className="px-4 py-3 text-right">Δ %</th>}
+            <th className="px-3 py-3 text-left md:px-4">Category</th>
+            <th className="px-2 py-3 text-right md:px-3">{labels.current}</th>
+            <th className="px-2 py-3 text-right md:px-3">{labels.prior}</th>
+            <th className="px-2 py-3 text-right md:px-3">Δ $</th>
+            <th className="hidden px-3 py-3 text-right md:table-cell">Impact</th>
+            {!hidePct && <th className="hidden px-4 py-3 text-right md:table-cell">Δ %</th>}
           </tr>
         </thead>
         <tbody>
@@ -729,23 +729,23 @@ const ComparisonRow = memo(function ComparisonRow({
       )}
       onClick={clickable ? () => onCategoryClick?.(row.id) : undefined}
     >
-      <td className="px-4 py-2.5">
+      <td className="px-3 py-2.5 md:px-4">
         <div className="flex items-center gap-2">
           <span
             className="block h-1.5 w-1.5 shrink-0 rounded-full"
             style={{ backgroundColor: color }}
           />
-          <span className="text-foreground text-sm">{row.name}</span>
+          <span className="text-foreground text-xs md:text-sm">{row.name}</span>
         </div>
       </td>
-      <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
+      <td className="text-foreground/90 px-2 py-2.5 text-right text-[11px] tabular-nums md:px-3 md:text-xs">
         {row.current === 0 ? (
           <span className="text-muted-foreground/60">—</span>
         ) : (
           <PrivacyAmount value={row.current} currency={currency} />
         )}
       </td>
-      <td className="text-muted-foreground/80 px-3 py-2.5 text-right text-xs tabular-nums">
+      <td className="text-muted-foreground/80 px-2 py-2.5 text-right text-[11px] tabular-nums md:px-3 md:text-xs">
         {row.prior === 0 ? (
           <span className="text-muted-foreground/60">—</span>
         ) : (
@@ -754,7 +754,7 @@ const ComparisonRow = memo(function ComparisonRow({
       </td>
       <td
         className={cn(
-          "px-3 py-2.5 text-right text-xs font-medium tabular-nums",
+          "px-2 py-2.5 text-right text-[11px] font-medium tabular-nums md:px-3 md:text-xs",
           row.delta === 0 ? "text-muted-foreground/70" : isUp ? "text-destructive" : "text-success",
         )}
       >
@@ -767,13 +767,13 @@ const ComparisonRow = memo(function ComparisonRow({
           </>
         )}
       </td>
-      <td className="text-muted-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
+      <td className="text-muted-foreground/90 hidden px-3 py-2.5 text-right text-xs tabular-nums md:table-cell">
         {impactPct == null || impactPct === 0 ? "—" : `${impactPct}%`}
       </td>
       {!hidePct && (
         <td
           className={cn(
-            "px-4 py-2.5 text-right text-xs font-medium tabular-nums",
+            "hidden px-4 py-2.5 text-right text-xs font-medium tabular-nums md:table-cell",
             !row.showPct || row.pct == null
               ? "text-muted-foreground/70"
               : row.pct >= 0

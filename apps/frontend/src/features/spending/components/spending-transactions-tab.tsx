@@ -15,6 +15,7 @@ import type { DateRange } from "react-day-picker";
 import { createActivity, deleteActivity } from "@/adapters";
 import { generateId } from "@/lib/id";
 import { useAccounts } from "@/hooks/use-accounts";
+import { useIsMobileViewport } from "@/hooks/use-platform";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { QueryKeys } from "@/lib/query-keys";
@@ -37,6 +38,7 @@ import {
 import { CashActivityForm } from "./cash-activity-form";
 import type { AmountRange } from "./amount-range-filter";
 import { DeleteTransactionsDialog, type DeletePreview } from "./delete-transactions-dialog";
+import { TransactionCard } from "./transaction-card";
 import { TransactionRow } from "./transaction-row";
 import { TransactionsBulkBar } from "./transactions-bulk-bar";
 import { TransactionsFilterBar, type FilterOption } from "./transactions-filter-bar";
@@ -622,6 +624,50 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     useImperativeHandle(ref, () => ({ openAddForm }), [openAddForm]);
 
     const isRefreshing = isFetching && !isFetchingNextPage;
+    const isMobile = useIsMobileViewport();
+
+    const loadMoreButton = hasNextPage ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => fetchNextPage()}
+        disabled={isFetchingNextPage}
+      >
+        {isFetchingNextPage ? (
+          <>
+            <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            Loading…
+          </>
+        ) : (
+          `Load more (${totalCount - rows.length} remaining)`
+        )}
+      </Button>
+    ) : null;
+
+    const renderRows = () =>
+      rows.map((r) => {
+        const eventId = r.activity.eventId ?? null;
+        const ev = eventId ? eventsById.get(eventId) : null;
+        const eventTypeColor = ev ? (eventTypeById.get(ev.eventTypeId)?.color ?? null) : null;
+        const RowComponent = isMobile ? TransactionCard : TransactionRow;
+        return (
+          <RowComponent
+            key={r.activity.id}
+            row={r}
+            account={accountById.get(r.activity.accountId)}
+            event={ev ?? null}
+            eventTypeColor={eventTypeColor}
+            isSelected={selectedRowIds.has(r.activity.id)}
+            onToggleSelect={handleToggleRow}
+            onAssignCategory={handleAssignCategory}
+            onClearCategory={handleClearCategory}
+            onSetEvent={handleSetEvent}
+            onEdit={handleEditRow}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDeleteRow}
+          />
+        );
+      });
 
     const editingActivityForForm = useMemo(() => {
       if (!editingActivity) return undefined;
@@ -718,6 +764,27 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
               </Button>
             )}
           </EmptyPlaceholder>
+        ) : isMobile ? (
+          <div className="space-y-2">
+            {rows.length > 1 && (
+              <div className="flex items-center gap-2 px-1">
+                <Checkbox
+                  checked={
+                    allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false
+                  }
+                  onCheckedChange={toggleSelectAllVisible}
+                  aria-label={
+                    allVisibleSelected
+                      ? "Deselect all visible transactions"
+                      : "Select all visible transactions"
+                  }
+                />
+                <span className="text-muted-foreground text-xs">Select all</span>
+              </div>
+            )}
+            {renderRows()}
+            {loadMoreButton && <div className="flex justify-center pt-1">{loadMoreButton}</div>}
+          </div>
         ) : (
           <div className="rounded-md border">
             <Table>
@@ -746,51 +813,12 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {rows.map((r) => {
-                  const eventId = r.activity.eventId ?? null;
-                  const ev = eventId ? eventsById.get(eventId) : null;
-                  const eventTypeColor = ev
-                    ? (eventTypeById.get(ev.eventTypeId)?.color ?? null)
-                    : null;
-                  return (
-                    <TransactionRow
-                      key={r.activity.id}
-                      row={r}
-                      account={accountById.get(r.activity.accountId)}
-                      event={ev ?? null}
-                      eventTypeColor={eventTypeColor}
-                      isSelected={selectedRowIds.has(r.activity.id)}
-                      onToggleSelect={handleToggleRow}
-                      onAssignCategory={handleAssignCategory}
-                      onClearCategory={handleClearCategory}
-                      onSetEvent={handleSetEvent}
-                      onEdit={handleEditRow}
-                      onDuplicate={handleDuplicate}
-                      onDelete={handleDeleteRow}
-                    />
-                  );
-                })}
-              </TableBody>
+              <TableBody>{renderRows()}</TableBody>
             </Table>
 
-            {hasNextPage && (
+            {loadMoreButton && (
               <div className="border-border flex items-center justify-center border-t p-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => fetchNextPage()}
-                  disabled={isFetchingNextPage}
-                >
-                  {isFetchingNextPage ? (
-                    <>
-                      <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                      Loading…
-                    </>
-                  ) : (
-                    `Load more (${totalCount - rows.length} remaining)`
-                  )}
-                </Button>
+                {loadMoreButton}
               </div>
             )}
           </div>

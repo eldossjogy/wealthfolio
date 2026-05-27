@@ -458,7 +458,7 @@ const ParentRow = memo(function ParentRow({
         )}
         onClick={clickable ? () => onCategoryClick?.(node.id) : undefined}
       >
-        <td className={cn("px-3 py-2.5", indented && "pl-8")}>
+        <td className="px-3 py-2.5">
           <div className="flex items-center gap-2">
             <button
               type="button"

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { DashboardCard } from "@/components/dashboard-card";
 import { QueryKeys } from "@/lib/query-keys";
 import type { Activity } from "@/lib/types";
 import { cn, formatDateISO } from "@/lib/utils";
@@ -103,9 +104,11 @@ export function RecentActivityCard({
   };
 
   return (
-    <div className="w-full">
-      <div className="flex items-baseline justify-between pb-2">
-        <h2 className="text-md font-semibold tracking-tight">Recent activity</h2>
+    <DashboardCard
+      title="Recent activity"
+      padded={false}
+      className="overflow-hidden"
+      action={
         <Link
           to={
             uncategorizedCount > 0
@@ -116,79 +119,76 @@ export function RecentActivityCard({
         >
           {uncategorizedCount > 0 ? `View all · ${uncategorizedCount} to tag →` : "View all →"}
         </Link>
-      </div>
-      <div className="border-border/60 bg-card/40 overflow-hidden rounded-xl border backdrop-blur-xl">
-        {recent.length === 0 ? (
-          <div className="text-muted-foreground px-4 py-6 text-center text-xs md:px-5">
-            No recent activity.
-          </div>
-        ) : (
-          grouped.map(([dateKey, items], gi) => (
-            <div
-              key={dateKey}
-              className={cn("px-4 py-3 md:px-5", gi > 0 && "border-border/60 border-t")}
-            >
-              <div className="text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-wide">
-                {dayLabel(dateKey)}
-              </div>
-              {items.map((a) => {
-                const payee = (a.notes ?? "").trim();
-                const spendingAmount = getActivitySpendingAmount(
-                  a,
-                  accountTypeById?.get(a.accountId),
-                );
-                const isOutflow = spendingAmount > 0;
-                const amount =
-                  spendingAmount === 0
-                    ? parseFloat(a.amount ?? "0") || 0
-                    : Math.abs(spendingAmount);
-                const badge = badgeByActivityId.get(a.id);
-                const needsReview = a.needsReview || (isOutflow && !badge);
-
-                return (
-                  // Single transaction row → activities page filtered to this
-                  // payee (or status=uncategorized when there's no payee +
-                  // it's flagged for review). Matches the clickable behavior
-                  // of every neighboring spending widget (ranked bar rows,
-                  // treemap cells, budget rings) so this row no longer feels
-                  // like a dead row sandwiched between live ones.
-                  <Link
-                    key={a.id}
-                    to={
-                      needsReview && !payee
-                        ? "/activities?tab=spending&status=uncategorized"
-                        : payee
-                          ? `/activities?tab=spending&q=${encodeURIComponent(payee)}`
-                          : "/activities?tab=spending"
-                    }
-                    className="hover:bg-muted/40 flex items-center gap-2.5 rounded-md py-1.5 transition-colors"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-foreground/90 truncate text-xs font-medium">
-                        {payee || <span className="text-muted-foreground italic">No payee</span>}
-                      </div>
-                    </div>
-                    {badge ? (
-                      <CategoryBadge name={badge.name} color={badge.color} icon={badge.icon} />
-                    ) : needsReview ? (
-                      <ReviewPill label="Uncategorized" />
-                    ) : null}
-                    <div
-                      className={cn(
-                        "shrink-0 text-xs font-semibold tabular-nums",
-                        isOutflow ? "text-foreground" : "text-success",
-                      )}
-                    >
-                      {isOutflow ? "−" : "+"}
-                      <PrivacyAmount value={amount} currency={currency} />
-                    </div>
-                  </Link>
-                );
-              })}
+      }
+    >
+      {recent.length === 0 ? (
+        <div className="text-muted-foreground px-4 py-6 text-center text-xs md:px-5">
+          No recent activity.
+        </div>
+      ) : (
+        grouped.map(([dateKey, items], gi) => (
+          <div
+            key={dateKey}
+            className={cn("px-4 py-3 md:px-5", gi > 0 && "border-border/60 border-t")}
+          >
+            <div className="text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-wide">
+              {dayLabel(dateKey)}
             </div>
-          ))
-        )}
-      </div>
-    </div>
+            {items.map((a) => {
+              const payee = (a.notes ?? "").trim();
+              const spendingAmount = getActivitySpendingAmount(
+                a,
+                accountTypeById?.get(a.accountId),
+              );
+              const isOutflow = spendingAmount > 0;
+              const amount =
+                spendingAmount === 0 ? parseFloat(a.amount ?? "0") || 0 : Math.abs(spendingAmount);
+              const badge = badgeByActivityId.get(a.id);
+              const needsReview = a.needsReview || (isOutflow && !badge);
+
+              return (
+                // Single transaction row → activities page filtered to this
+                // payee (or status=uncategorized when there's no payee +
+                // it's flagged for review). Matches the clickable behavior
+                // of every neighboring spending widget (ranked bar rows,
+                // treemap cells, budget rings) so this row no longer feels
+                // like a dead row sandwiched between live ones.
+                <Link
+                  key={a.id}
+                  to={
+                    needsReview && !payee
+                      ? "/activities?tab=spending&status=uncategorized"
+                      : payee
+                        ? `/activities?tab=spending&q=${encodeURIComponent(payee)}`
+                        : "/activities?tab=spending"
+                  }
+                  className="hover:bg-muted/40 flex items-center gap-2.5 rounded-md py-1.5 transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-foreground/90 truncate text-xs font-medium">
+                      {payee || <span className="text-muted-foreground italic">No payee</span>}
+                    </div>
+                  </div>
+                  {badge ? (
+                    <CategoryBadge name={badge.name} color={badge.color} icon={badge.icon} />
+                  ) : needsReview ? (
+                    <ReviewPill label="Uncategorized" />
+                  ) : null}
+                  <div
+                    className={cn(
+                      "shrink-0 text-xs font-semibold tabular-nums",
+                      isOutflow ? "text-foreground" : "text-success",
+                    )}
+                  >
+                    {isOutflow ? "−" : "+"}
+                    <PrivacyAmount value={amount} currency={currency} />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        ))
+      )}
+    </DashboardCard>
   );
 }

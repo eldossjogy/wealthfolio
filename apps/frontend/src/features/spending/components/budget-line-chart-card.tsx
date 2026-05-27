@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
+import { DashboardCard } from "@/components/dashboard-card";
 import { cn } from "@/lib/utils";
 import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@wealthfolio/ui";
 
@@ -158,19 +159,21 @@ export function BudgetLineChartCard({
 
   if (target <= 0) {
     return (
-      <div className="w-full">
-        <BudgetCardHeader monthLabel={monthMeta.shortLabel} />
-        <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center backdrop-blur-xl md:p-5">
-          <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
-          <Link
-            to="/settings/spending/setup"
-            className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
-          >
-            Set a budget
-            <Icons.ChevronRight className="h-3 w-3" />
-          </Link>
-        </div>
-      </div>
+      <DashboardCard
+        title="Monthly budget"
+        subtitle={monthMeta.shortLabel}
+        action={<BudgetManageLink />}
+        className="text-center"
+      >
+        <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
+        <Link
+          to="/settings/spending/setup"
+          className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+        >
+          Set a budget
+          <Icons.ChevronRight className="h-3 w-3" />
+        </Link>
+      </DashboardCard>
     );
   }
 
@@ -209,200 +212,192 @@ export function BudgetLineChartCard({
 
   const pillLeftPctRaw = (endX / chartW) * 100;
   const pillLeftPct = Math.min(78, Math.max(8, pillLeftPctRaw - 4));
+  // Near the right edge, anchor the badge to the endpoint and grow leftward so
+  // it never overflows the card.
+  const pillFlip = pillLeftPctRaw > 55;
   const pillTopPx = Math.max(0, endY - 28);
 
   return (
-    <div className="w-full">
-      <BudgetCardHeader monthLabel={monthLabel} />
-      <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 shrink-0" style={{ color: a.accent }} />
-          <span className="text-foreground text-sm font-semibold">{a.label}</span>
-          <span className="text-muted-foreground/70 ml-auto text-xs tabular-nums">
-            Day {dayOfMonth} / {daysInMonth}
-          </span>
-        </div>
-
-        <div className="mt-3">
-          {willOverspend && forecastDelta > target * 0.05 ? (
-            <>
-              <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
-                <PrivacyAmount value={forecast} currency={currency} />{" "}
-                <span className="text-muted-foreground/70 text-base font-medium">forecast</span>
-              </div>
-              <div className="text-destructive mt-0.5 inline-flex items-center gap-1 text-xs font-semibold tabular-nums">
-                <Icons.ArrowUp className="h-3 w-3" />
-                <PrivacyAmount value={forecastDelta} currency={currency} /> over budget
-              </div>
-              <div className="text-muted-foreground/80 mt-0.5 text-xs tabular-nums">
-                <PrivacyAmount value={remaining} currency={currency} /> left today · of{" "}
-                <PrivacyAmount value={target} currency={currency} /> budgeted this month
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
-                <PrivacyAmount value={isOver ? overBy : remaining} currency={currency} />{" "}
-                <span className="text-muted-foreground/70 text-base font-medium">
-                  {isOver ? "over" : "left"}
-                </span>
-              </div>
-              <div className="text-muted-foreground/80 text-xs tabular-nums">
-                of <PrivacyAmount value={target} currency={currency} /> budgeted this month
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="relative mt-4 w-full">
-          <svg
-            viewBox={`0 0 ${chartW} ${chartH}`}
-            preserveAspectRatio="none"
-            className="block h-[110px] w-full"
-          >
-            <line
-              x1={paceX1}
-              y1={paceY1}
-              x2={paceX2}
-              y2={paceY2}
-              stroke="var(--muted-foreground)"
-              strokeOpacity={0.35}
-              strokeDasharray="3 4"
-              strokeWidth={1.25}
-              vectorEffect="non-scaling-stroke"
-            />
-            {actualPath && (
-              <path
-                d={actualPath}
-                fill="none"
-                stroke={a.lineColor}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
-            {cumulative.length > 0 && (
-              <>
-                <circle cx={endX} cy={endY} r={4.5} fill={a.lineColor} />
-                <circle cx={endX} cy={endY} r={2} fill="white" />
-              </>
-            )}
-          </svg>
-          {cumulative.length > 0 && (
-            <div
-              className="absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums shadow-sm"
-              style={{
-                left: `${pillLeftPct}%`,
-                top: `${pillTopPx}px`,
-                backgroundColor: a.pillBg,
-                color: "white",
-              }}
-            >
-              {gapLabel}
-            </div>
-          )}
-        </div>
-        <div className="text-muted-foreground/70 mt-1 flex justify-between text-[10px] tabular-nums">
-          <span>Day 1</span>
-          <span>Day {daysInMonth}</span>
-        </div>
-
-        <div className="border-border mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
-          <div>
-            <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
-              Spent so far
-            </div>
-            <div className="text-foreground text-sm font-semibold tabular-nums">
-              <PrivacyAmount value={spent} currency={currency} />
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
-              Forecast
-            </div>
-            <div
-              className={cn(
-                "text-sm font-semibold tabular-nums",
-                forecastReliable
-                  ? willOverspend
-                    ? "text-destructive"
-                    : "text-foreground"
-                  : "text-muted-foreground/60",
-              )}
-            >
-              {forecastReliable ? <PrivacyAmount value={forecast} currency={currency} /> : "—"}
-            </div>
-            <div className="text-muted-foreground/60 text-[10px]">
-              {forecastReliable
-                ? haveHistory
-                  ? "vs 90-day avg"
-                  : "at current pace"
-                : "more data needed"}
-            </div>
-          </div>
-        </div>
-
-        <div className="border-border mt-5 border-t pt-4">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-muted-foreground/80 text-[11px] font-semibold uppercase tracking-wide">
-              By category
-            </span>
-            <Link
-              to="/spending/budget"
-              className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
-            >
-              Manage →
-            </Link>
-          </div>
-          {rings.length === 0 ? (
-            <div className="text-muted-foreground py-2 text-center text-xs">
-              No category budgets set yet.{" "}
-              <Link
-                to="/settings/spending/setup"
-                className="hover:text-foreground underline-offset-4 hover:underline"
-              >
-                Set one
-              </Link>
-            </div>
-          ) : (
-            <div
-              className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1"
-              style={{
-                maskImage: "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
-                WebkitMaskImage:
-                  "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
-              }}
-            >
-              {rings.map((r) => (
-                <BudgetRing key={r.id} ring={r} currency={currency} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BudgetCardHeader({ monthLabel }: { monthLabel: string }) {
-  return (
-    <div className="flex items-center justify-between pb-2">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-md font-semibold tracking-tight">Monthly budget</h2>
-        <span className="text-muted-foreground/60 text-[11px] font-medium uppercase tracking-wide">
-          {monthLabel}
+    <DashboardCard title="Monthly budget" subtitle={monthLabel} action={<BudgetManageLink />}>
+      <div className="flex items-center gap-2">
+        <Icon className="h-4 w-4 shrink-0" style={{ color: a.accent }} />
+        <span className="text-foreground text-sm font-semibold">{a.label}</span>
+        <span className="text-muted-foreground/70 ml-auto text-xs tabular-nums">
+          Day {dayOfMonth} / {daysInMonth}
         </span>
       </div>
-      <Link
-        to="/spending/budget"
-        className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
-      >
-        Manage →
-      </Link>
-    </div>
+
+      <div className="mt-3">
+        {willOverspend && forecastDelta > target * 0.05 ? (
+          <>
+            <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
+              <PrivacyAmount value={forecast} currency={currency} />{" "}
+              <span className="text-muted-foreground/70 text-base font-medium">forecast</span>
+            </div>
+            <div className="text-destructive mt-0.5 inline-flex items-center gap-1 text-xs font-semibold tabular-nums">
+              <Icons.ArrowUp className="h-3 w-3" />
+              <PrivacyAmount value={forecastDelta} currency={currency} /> over budget
+            </div>
+            <div className="text-muted-foreground/80 mt-0.5 text-xs tabular-nums">
+              <PrivacyAmount value={remaining} currency={currency} /> left today · of{" "}
+              <PrivacyAmount value={target} currency={currency} /> budgeted this month
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-foreground text-2xl font-bold tabular-nums tracking-tight">
+              <PrivacyAmount value={isOver ? overBy : remaining} currency={currency} />{" "}
+              <span className="text-muted-foreground/70 text-base font-medium">
+                {isOver ? "over" : "left"}
+              </span>
+            </div>
+            <div className="text-muted-foreground/80 text-xs tabular-nums">
+              of <PrivacyAmount value={target} currency={currency} /> budgeted this month
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="relative mt-4 w-full">
+        <svg
+          viewBox={`0 0 ${chartW} ${chartH}`}
+          preserveAspectRatio="none"
+          className="block h-[110px] w-full"
+        >
+          <line
+            x1={paceX1}
+            y1={paceY1}
+            x2={paceX2}
+            y2={paceY2}
+            stroke="var(--muted-foreground)"
+            strokeOpacity={0.35}
+            strokeDasharray="3 4"
+            strokeWidth={1.25}
+            vectorEffect="non-scaling-stroke"
+          />
+          {actualPath && (
+            <path
+              d={actualPath}
+              fill="none"
+              stroke={a.lineColor}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+          {cumulative.length > 0 && (
+            <>
+              <circle cx={endX} cy={endY} r={4.5} fill={a.lineColor} />
+              <circle cx={endX} cy={endY} r={2} fill="white" />
+            </>
+          )}
+        </svg>
+        {cumulative.length > 0 && (
+          <div
+            className="absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums shadow-sm"
+            style={{
+              left: `${pillFlip ? pillLeftPctRaw : pillLeftPct}%`,
+              top: `${pillTopPx}px`,
+              transform: pillFlip ? "translateX(calc(-100% - 6px))" : undefined,
+              backgroundColor: a.pillBg,
+              color: "white",
+            }}
+          >
+            {gapLabel}
+          </div>
+        )}
+      </div>
+      <div className="text-muted-foreground/70 mt-1 flex justify-between text-[10px] tabular-nums">
+        <span>Day 1</span>
+        <span>Day {daysInMonth}</span>
+      </div>
+
+      <div className="border-border mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
+        <div>
+          <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
+            Spent so far
+          </div>
+          <div className="text-foreground text-sm font-semibold tabular-nums">
+            <PrivacyAmount value={spent} currency={currency} />
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-muted-foreground/70 text-[11px] uppercase tracking-wide">
+            Forecast
+          </div>
+          <div
+            className={cn(
+              "text-sm font-semibold tabular-nums",
+              forecastReliable
+                ? willOverspend
+                  ? "text-destructive"
+                  : "text-foreground"
+                : "text-muted-foreground/60",
+            )}
+          >
+            {forecastReliable ? <PrivacyAmount value={forecast} currency={currency} /> : "—"}
+          </div>
+          <div className="text-muted-foreground/60 text-[10px]">
+            {forecastReliable
+              ? haveHistory
+                ? "vs 90-day avg"
+                : "at current pace"
+              : "more data needed"}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-border mt-5 border-t pt-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-muted-foreground/80 text-[11px] font-semibold uppercase tracking-wide">
+            By category
+          </span>
+          <Link
+            to="/spending/budget"
+            className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+          >
+            Manage →
+          </Link>
+        </div>
+        {rings.length === 0 ? (
+          <div className="text-muted-foreground py-2 text-center text-xs">
+            No category budgets set yet.{" "}
+            <Link
+              to="/settings/spending/setup"
+              className="hover:text-foreground underline-offset-4 hover:underline"
+            >
+              Set one
+            </Link>
+          </div>
+        ) : (
+          <div
+            data-no-swipe-drag
+            className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1"
+            style={{
+              maskImage: "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, black calc(100% - 32px), transparent 100%)",
+            }}
+          >
+            {rings.map((r) => (
+              <BudgetRing key={r.id} ring={r} currency={currency} />
+            ))}
+          </div>
+        )}
+      </div>
+    </DashboardCard>
   );
 }
+
+const BudgetManageLink = () => (
+  <Link
+    to="/spending/budget"
+    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+  >
+    Manage →
+  </Link>
+);
 
 function BudgetRing({
   ring,

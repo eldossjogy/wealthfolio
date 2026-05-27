@@ -389,10 +389,7 @@ function buildClosedNarrative({
   return (
     <div className="flex flex-col gap-1.5">
       <div
-        className={cn(
-          "font-serif text-lg font-medium leading-tight tracking-tight md:text-xl",
-          colorClass,
-        )}
+        className={cn("text-xl font-semibold tabular-nums tracking-tight md:text-2xl", colorClass)}
       >
         {isBalanceHidden ? "••••" : formatCompactAmount(spent, currency)} spent
       </div>
@@ -473,7 +470,7 @@ const SpentThisPeriodCard: FC<SpentThisPeriodCardProps> = ({
     <div className={CARD_CLASS}>
       <div className={LABEL_CLASS}>{periodLabel}</div>
       <div className="mt-2 flex items-baseline justify-between gap-2">
-        <div className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
+        <div className="text-foreground text-xl font-semibold tabular-nums tracking-tight md:text-2xl">
           <PrivacyAmount value={spent} currency={currency} />
         </div>
         {deltaPct != null && (
@@ -636,7 +633,12 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
         <div className={LABEL_CLASS}>NET CASHFLOW</div>
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-2">
-        <div className={cn("text-2xl font-semibold tabular-nums tracking-tight", netToneClass)}>
+        <div
+          className={cn(
+            "text-xl font-semibold tabular-nums tracking-tight md:text-2xl",
+            netToneClass,
+          )}
+        >
           {totals.net >= 0 ? "+" : "−"}
           <PrivacyAmount value={Math.abs(totals.net)} currency={currency} />
         </div>
@@ -798,7 +800,7 @@ function BreakdownCanvas({
             Where {periodLabel} went — tap any category to see subcategories.
           </p>
         </div>
-        <div className="text-muted-foreground/80 inline-flex items-center gap-1.5 text-xs">
+        <div className="text-muted-foreground/80 hidden items-center gap-1.5 text-xs md:inline-flex">
           <span>Sort by</span>
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -824,7 +826,10 @@ function BreakdownCanvas({
         </div>
       </header>
 
-      <div className="-mx-2 mb-3 flex gap-2 overflow-x-auto px-2 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
+      <div
+        data-no-swipe-drag
+        className="-mx-2 mb-3 flex touch-pan-x gap-2 overflow-x-auto overscroll-x-contain px-2 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden"
+      >
         {filterChips.map((chip) => {
           const active = filter === chip.id;
           return (

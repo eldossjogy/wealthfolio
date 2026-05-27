@@ -128,7 +128,7 @@ function MobileNavigation({
             )}
             <span className="relative z-10 flex items-center gap-1.5">
               {IconComponent && <IconComponent className="size-4" />}
-              {isActive && <span>{item.label}</span>}
+              {isActive && <span className="whitespace-nowrap">{item.label}</span>}
             </span>
           </button>
         );

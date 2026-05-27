@@ -6,13 +6,21 @@ import { useNavigationMode } from "@/pages/layouts/navigation/navigation-mode-co
 import { AlternativeAssetKind } from "@/lib/types";
 import SpendingTabContent from "@/features/spending/components/spending-tab-content";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
-import { Button, Icons } from "@wealthfolio/ui";
+import { Button, Icons, type Icon } from "@wealthfolio/ui";
+import { HandCoinsIcon } from "@phosphor-icons/react/dist/csr/HandCoins";
+import { TrendUpIcon } from "@phosphor-icons/react/dist/csr/TrendUp";
+import { WalletIcon } from "@phosphor-icons/react/dist/csr/Wallet";
 import { Card, CardContent, CardHeader } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { NetWorthContent } from "../net-worth/net-worth-content";
 import { DashboardActions } from "./dashboard-actions";
 import { DashboardContent } from "./dashboard-content";
+
+// Tab icons rendered as duotone Phosphor glyphs
+const InvestmentsTabIcon: Icon = (props) => <TrendUpIcon weight="duotone" {...props} />;
+const NetWorthTabIcon: Icon = (props) => <WalletIcon weight="duotone" {...props} />;
+const SpendingTabIcon: Icon = (props) => <HandCoinsIcon weight="duotone" {...props} />;
 
 // Loading skeleton
 const PageLoader = () => (
@@ -103,7 +111,7 @@ export default function PortfolioPage() {
       {
         value: "investments",
         label: "Investments",
-        icon: Icons.TrendingUp,
+        icon: InvestmentsTabIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
             <DashboardContent />
@@ -114,10 +122,10 @@ export default function PortfolioPage() {
       {
         value: "net-worth",
         label: "Net Worth",
-        icon: Icons.Wallet,
+        icon: NetWorthTabIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
-            <NetWorthContent onAddAsset={handleAddAsset} onAddLiability={handleAddLiability} />
+            <NetWorthContent />
           </Suspense>
         ),
         actions: netWorthActions,
@@ -127,7 +135,7 @@ export default function PortfolioPage() {
       items.push({
         value: "spending",
         label: "Spending",
-        icon: Icons.HandCoins,
+        icon: SpendingTabIcon,
         content: (
           <Suspense fallback={<PageLoader />}>
             <SpendingTabContent />
