@@ -166,6 +166,10 @@ export function ProfileEditor({
   const persistedProfileId = useRef<string | null>(profile?.id ?? null);
   const nodesInitialized = useRef(false);
   const taxonomyUserChanged = useRef(false);
+  // Nodes to restore when user switches back to the profile's saved taxonomy
+  const pendingRestore = useRef<
+    { categoryId: string; targetBps: number; isLocked: boolean }[] | null
+  >(null);
 
   // Initialize nodes for existing profiles once node data arrives
   useEffect(() => {
@@ -187,18 +191,37 @@ export function ProfileEditor({
     setNodes(buildInitialNodes(initialPresetId ?? null, topLevelCategories, currentAllocation));
   }, [taxonomy]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset nodes when user explicitly changes taxonomy
+  // Reset nodes when user explicitly changes taxonomy; restore if returning to saved taxonomy
   useEffect(() => {
     if (!taxonomyUserChanged.current || !taxonomy) return;
-    setNodes(topLevelCategories.map((c) => ({ categoryId: c.id, targetBps: 0, isLocked: false })));
-    setSelectedPreset(null);
+    if (pendingRestore.current) {
+      setNodes(pendingRestore.current);
+      pendingRestore.current = null;
+    } else {
+      setNodes(
+        topLevelCategories.map((c) => ({ categoryId: c.id, targetBps: 0, isLocked: false })),
+      );
+      setSelectedPreset(null);
+    }
   }, [taxonomyId, taxonomy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleTaxonomyChange(newId: string) {
+    const savedTaxonomyId = profile?.taxonomyId ?? "asset_classes";
     taxonomyUserChanged.current = true;
-    nodesInitialized.current = false;
     setTaxonomyId(newId);
-    setHasUnsavedChanges(true);
+    if (newId === savedTaxonomyId && existingNodesData) {
+      // Returning to the saved taxonomy — queue a restore and clear dirty
+      pendingRestore.current = existingNodesData.map((n) => ({
+        categoryId: n.categoryId,
+        targetBps: n.targetBps,
+        isLocked: n.isLocked,
+      }));
+      setHasUnsavedChanges(false);
+    } else {
+      nodesInitialized.current = false;
+      pendingRestore.current = null;
+      setHasUnsavedChanges(true);
+    }
   }
 
   const createProfile = useCreateTargetProfile();

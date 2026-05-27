@@ -22,23 +22,10 @@ const RISK_BADGE: Record<string, string> = {
 function PresetBar({ weights, colorMap }: PresetBarProps) {
   const nonZero = Object.entries(weights).filter(([, pct]) => pct > 0);
   return (
-    <div className="space-y-3">
-      <div className="flex h-3.5 w-full overflow-hidden rounded-sm">
-        {nonZero.map(([key, pct]) => (
-          <div key={key} style={{ width: `${pct}%`, background: colorMap[key] ?? "#878580" }} />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-        {nonZero.map(([key, pct]) => (
-          <span key={key} className="text-muted-foreground flex items-center gap-0.5 text-[10px]">
-            <span
-              className="inline-block h-2 w-1.5 rounded-full"
-              style={{ background: colorMap[key] ?? "#878580" }}
-            />
-            {pct}%
-          </span>
-        ))}
-      </div>
+    <div className="flex h-3.5 w-full overflow-hidden rounded-sm">
+      {nonZero.map(([key, pct]) => (
+        <div key={key} style={{ width: `${pct}%`, background: colorMap[key] ?? "#878580" }} />
+      ))}
     </div>
   );
 }
