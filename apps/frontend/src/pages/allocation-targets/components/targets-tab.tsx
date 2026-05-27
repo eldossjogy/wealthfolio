@@ -64,9 +64,10 @@ export function TargetsTab({
 
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
-  // Sync editor when selected profile changes from header dropdown
+  // Sync editor when selected profile changes from header dropdown (including archived)
   useEffect(() => {
-    if (selectedProfileId && mode.kind === "edit" && mode.profileId !== selectedProfileId) {
+    if (!selectedProfileId) return;
+    if (mode.kind !== "edit" || mode.profileId !== selectedProfileId) {
       setMode({ kind: "edit", profileId: selectedProfileId, presetId: null });
     }
   }, [selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -205,6 +206,7 @@ export function TargetsTab({
 
   return (
     <ProfileEditor
+      key={mode.kind === "edit" ? (mode.profileId ?? "new") : "new"}
       profile={editingProfile}
       taxonomy={taxonomy}
       initialPresetId={mode.presetId}

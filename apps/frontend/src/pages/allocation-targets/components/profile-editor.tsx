@@ -20,8 +20,6 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { TargetProfile, TaxonomyWithCategories, TargetScopeType } from "@/lib/types";
-import { useAccounts } from "@/hooks/use-accounts";
-import { usePortfolios } from "@/hooks/use-portfolios";
 import { useTargetNodes } from "../hooks/use-target-mutations";
 import { useSaveTargetNodes } from "../hooks/use-target-mutations";
 import {
@@ -130,8 +128,6 @@ export function ProfileEditor({
     [taxonomy.categories],
   );
 
-  const { accounts } = useAccounts();
-  const { data: portfolios = [] } = usePortfolios();
   const { data: existingNodesData } = useTargetNodes(profile?.id ?? null);
 
   const [name, setName] = useState(profile?.name ?? "");
@@ -159,6 +155,8 @@ export function ProfileEditor({
     return [];
   });
 
+  // Tracks the persisted profile ID so Activate after Save draft updates instead of creating
+  const persistedProfileId = useRef<string | null>(profile?.id ?? null);
   const nodesInitialized = useRef(false);
   useEffect(() => {
     if (!profile || nodesInitialized.current || !existingNodesData) return;
@@ -196,20 +194,6 @@ export function ProfileEditor({
     setNodes(buildInitialNodes(presetId, topLevelCategories, currentAllocation));
   }
 
-  function handleScopeChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value;
-    if (val === "all") {
-      setScopeType("all");
-      setScopeId(null);
-    } else if (val.startsWith("portfolio:")) {
-      setScopeType("portfolio");
-      setScopeId(val.slice("portfolio:".length));
-    } else {
-      setScopeType("account");
-      setScopeId(val.slice("account:".length));
-    }
-  }
-
   async function persistProfile(andActivate: boolean) {
     try {
       const input = {
@@ -227,12 +211,14 @@ export function ProfileEditor({
       };
 
       let profileId: string;
-      if (profile) {
-        const updated = await updateProfile.mutateAsync({ id: profile.id, input });
+      const persistedId = persistedProfileId.current;
+      if (persistedId) {
+        const updated = await updateProfile.mutateAsync({ id: persistedId, input });
         profileId = updated.id;
       } else {
         const created = await createProfile.mutateAsync(input);
         profileId = created.id;
+        persistedProfileId.current = profileId;
       }
 
       await saveNodes.mutateAsync({
@@ -276,44 +262,6 @@ export function ProfileEditor({
                 placeholder="Profile name…"
                 className="bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
               />
-            </div>
-
-            <div className="bg-border h-8 w-px" />
-
-            {/* Scope */}
-            <div className="min-w-32">
-              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
-                Scope
-              </div>
-              <select
-                value={
-                  scopeType === "all"
-                    ? "all"
-                    : scopeType === "portfolio"
-                      ? `portfolio:${scopeId}`
-                      : `account:${scopeId}`
-                }
-                onChange={handleScopeChange}
-                className="max-w-44 cursor-pointer bg-transparent text-[14px] font-medium outline-none"
-              >
-                <option value="all">All accounts</option>
-                {portfolios.length > 0 && (
-                  <optgroup label="Portfolios">
-                    {portfolios.map((p) => (
-                      <option key={p.id} value={`portfolio:${p.id}`}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                <optgroup label="Accounts">
-                  {accounts.map((a) => (
-                    <option key={a.id} value={`account:${a.id}`}>
-                      {a.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
             </div>
 
             <div className="bg-border h-8 w-px" />

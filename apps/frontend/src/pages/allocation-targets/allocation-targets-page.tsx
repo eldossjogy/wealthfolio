@@ -299,14 +299,21 @@ export function AllocationTargetsPage() {
               </TabsContent>
 
               <TabsContent value="targets" className="m-0">
-                <TargetsTab
-                  key={scopeKey(accountScope)}
-                  profiles={scopedProfiles}
-                  selectedProfileId={effectiveProfileId}
-                  onProfileChange={(id) => setSelectedProfileId(id)}
-                  newProfileTrigger={newProfileTrigger}
-                  accountScope={accountScope}
-                />
+                {profilesLoading ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-40 w-full" />
+                    <Skeleton className="h-32 w-full" />
+                  </div>
+                ) : (
+                  <TargetsTab
+                    key={scopeKey(accountScope)}
+                    profiles={scopedProfiles}
+                    selectedProfileId={effectiveProfileId}
+                    onProfileChange={(id) => setSelectedProfileId(id)}
+                    newProfileTrigger={newProfileTrigger}
+                    accountScope={accountScope}
+                  />
+                )}
               </TabsContent>
 
               <TabsContent value="rebalance" className="m-0">
