@@ -334,7 +334,7 @@ export function ProfileEditor({
                 Discard
               </Button>
               <Button
-                variant="outline"
+                variant={profile?.status === "active" ? "default" : "outline"}
                 size="sm"
                 disabled={!isValid || isSaving}
                 onClick={() => persistProfile(false)}
@@ -346,6 +346,7 @@ export function ProfileEditor({
                     : "Save draft"}
               </Button>
               <Button
+                variant={profile?.status === "active" ? "outline" : "default"}
                 size="sm"
                 disabled={!isValid || isActivating}
                 onClick={() => persistProfile(true)}

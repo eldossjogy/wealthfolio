@@ -46,9 +46,11 @@ export function TargetsTab({
   const liveProfiles = profiles.filter((p) => p.status !== "archived");
 
   const [mode, setMode] = useState<EditorMode>(
-    liveProfiles.length === 0
-      ? { kind: "onboarding" }
-      : { kind: "edit", profileId: selectedProfileId, presetId: null },
+    selectedProfileId
+      ? { kind: "edit", profileId: selectedProfileId, presetId: null }
+      : liveProfiles.length === 0
+        ? { kind: "onboarding" }
+        : { kind: "edit", profileId: liveProfiles[0].id, presetId: null },
   );
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
