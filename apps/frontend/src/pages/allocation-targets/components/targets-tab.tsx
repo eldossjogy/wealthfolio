@@ -47,7 +47,7 @@ export function TargetsTab({
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
   const { data: taxonomy, isLoading: taxonomyLoading } = useTaxonomy("asset_classes");
-  const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations({ type: "all" });
+  const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountScope);
   const { data: settings } = useSettings();
 
   const archiveProfile = useArchiveTargetProfile();
