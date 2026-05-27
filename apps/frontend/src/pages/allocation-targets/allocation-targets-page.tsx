@@ -89,11 +89,11 @@ export function AllocationTargetsPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [newProfileTrigger, setNewProfileTrigger] = useState(0);
-  const [isEditorDirty, setIsEditorDirty] = useState(false);
+  const [editorHasUnsavedChanges, setEditorHasUnsavedChanges] = useState(false);
   const [pendingTab, setPendingTab] = useState<string | null>(null);
 
   function handleTabChange(tab: string) {
-    if (isEditorDirty && activeTab === "targets" && tab !== "targets") {
+    if (editorHasUnsavedChanges && activeTab === "targets" && tab !== "targets") {
       setPendingTab(tab);
     } else {
       setActiveTab(tab);
@@ -330,7 +330,7 @@ export function AllocationTargetsPage() {
                     onProfileChange={(id) => setSelectedProfileId(id)}
                     newProfileTrigger={newProfileTrigger}
                     accountScope={accountScope}
-                    onDirtyChange={setIsEditorDirty}
+                    onUnsavedChange={setEditorHasUnsavedChanges}
                   />
                 )}
               </TabsContent>
@@ -364,7 +364,7 @@ export function AllocationTargetsPage() {
             <AlertDialogCancel onClick={() => setPendingTab(null)}>Stay</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                setIsEditorDirty(false);
+                setEditorHasUnsavedChanges(false);
                 setActiveTab(pendingTab!);
                 setPendingTab(null);
               }}

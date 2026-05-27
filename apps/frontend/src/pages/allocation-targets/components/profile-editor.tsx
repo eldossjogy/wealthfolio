@@ -45,7 +45,7 @@ interface ProfileEditorProps {
   onCancel: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
-  onDirtyChange?: (dirty: boolean) => void;
+  onUnsavedChange?: (dirty: boolean) => void;
 }
 
 const TRIGGER_OPTIONS = [
@@ -123,7 +123,7 @@ export function ProfileEditor({
   onCancel,
   onArchive,
   onDelete,
-  onDirtyChange,
+  onUnsavedChange,
 }: ProfileEditorProps) {
   const topLevelCategories = useMemo(
     () => taxonomy.categories.filter((c) => !c.parentId),
@@ -147,11 +147,11 @@ export function ProfileEditor({
   const [minTradeAmount, setMinTradeAmount] = useState(profile?.minTradeAmount ?? "0");
   const [wholeSharesOnly, setWholeSharesOnly] = useState(profile?.wholeSharesOnly ?? false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(initialPresetId ?? null);
-  const [isDirty, setIsDirty] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   useEffect(() => {
-    onDirtyChange?.(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onUnsavedChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onUnsavedChange]);
 
   const [nodes, setNodes] = useState<NodeDraft[]>(() => {
     if (!profile) {
@@ -197,7 +197,7 @@ export function ProfileEditor({
   function handlePresetSelect(presetId: string) {
     setSelectedPreset(presetId);
     setNodes(buildInitialNodes(presetId, topLevelCategories, currentAllocation));
-    setIsDirty(true);
+    setHasUnsavedChanges(true);
   }
 
   async function persistProfile(andActivate: boolean) {
@@ -244,7 +244,7 @@ export function ProfileEditor({
         await activateProfile.mutateAsync(profileId);
       }
 
-      setIsDirty(false);
+      setHasUnsavedChanges(false);
       onSaved(profileId);
     } catch (err) {
       toast.error(andActivate ? "Failed to activate profile" : "Failed to save profile");
@@ -267,7 +267,7 @@ export function ProfileEditor({
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
-                  setIsDirty(true);
+                  setHasUnsavedChanges(true);
                 }}
                 placeholder="Profile name…"
                 className="bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
@@ -435,7 +435,7 @@ export function ProfileEditor({
               currentAllocation={currentAllocation}
               onChange={(n) => {
                 setNodes(n);
-                setIsDirty(true);
+                setHasUnsavedChanges(true);
               }}
             />
           </CardContent>
@@ -464,7 +464,7 @@ export function ProfileEditor({
                 value={driftBandPct}
                 onChange={(e) => {
                   setDriftBandPct(parseFloat(e.target.value));
-                  setIsDirty(true);
+                  setHasUnsavedChanges(true);
                 }}
                 className="accent-foreground w-full"
               />
@@ -496,7 +496,7 @@ export function ProfileEditor({
                       checked={triggerType === opt.value}
                       onChange={() => {
                         setTriggerType(opt.value);
-                        setIsDirty(true);
+                        setHasUnsavedChanges(true);
                       }}
                       className="mt-0.5"
                     />
@@ -535,7 +535,7 @@ export function ProfileEditor({
                       checked={rebalanceTo === opt.value}
                       onChange={() => {
                         setRebalanceTo(opt.value);
-                        setIsDirty(true);
+                        setHasUnsavedChanges(true);
                       }}
                       className="mt-0.5"
                     />
@@ -560,7 +560,7 @@ export function ProfileEditor({
                 checked={allowSells}
                 onCheckedChange={(v) => {
                   setAllowSells(v);
-                  setIsDirty(true);
+                  setHasUnsavedChanges(true);
                 }}
               />
             </div>
@@ -577,7 +577,7 @@ export function ProfileEditor({
                 checked={wholeSharesOnly}
                 onCheckedChange={(v) => {
                   setWholeSharesOnly(v);
-                  setIsDirty(true);
+                  setHasUnsavedChanges(true);
                 }}
               />
             </div>
@@ -597,7 +597,7 @@ export function ProfileEditor({
                   value={minTradeAmount}
                   onChange={(e) => {
                     setMinTradeAmount(e.target.value);
-                    setIsDirty(true);
+                    setHasUnsavedChanges(true);
                   }}
                   className="w-20 bg-transparent text-right text-[13px] font-medium tabular-nums outline-none"
                 />

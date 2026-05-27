@@ -30,7 +30,7 @@ interface TargetsTabProps {
   onProfileChange: (id: string) => void;
   newProfileTrigger?: number;
   accountScope: AccountScope;
-  onDirtyChange?: (dirty: boolean) => void;
+  onUnsavedChange?: (dirty: boolean) => void;
 }
 
 export function TargetsTab({
@@ -39,7 +39,7 @@ export function TargetsTab({
   onProfileChange,
   newProfileTrigger,
   accountScope,
-  onDirtyChange,
+  onUnsavedChange,
 }: TargetsTabProps) {
   const liveProfiles = profiles.filter((p) => p.status !== "archived");
 
@@ -239,7 +239,7 @@ export function TargetsTab({
           : undefined
       }
       onDelete={editingProfile ? handleEditorDelete : undefined}
-      onDirtyChange={onDirtyChange}
+      onUnsavedChange={onUnsavedChange}
     />
   );
 }
