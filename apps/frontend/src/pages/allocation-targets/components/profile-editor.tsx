@@ -1,5 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   Card,
   CardContent,
@@ -10,7 +18,9 @@ import {
   Switch,
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
-import type { TargetProfile, TaxonomyWithCategories } from "@/lib/types";
+import type { TargetProfile, TaxonomyWithCategories, TargetScopeType } from "@/lib/types";
+import { useAccounts } from "@/hooks/use-accounts";
+import { usePortfolios } from "@/hooks/use-portfolios";
 import { useTargetNodes } from "../hooks/use-target-mutations";
 import { useSaveTargetNodes } from "../hooks/use-target-mutations";
 import {
@@ -20,7 +30,7 @@ import {
 } from "../hooks/use-target-mutations";
 import { TargetNodeEditor, type NodeDraft } from "./target-node-editor";
 import { ModelPresetPicker } from "./model-preset-picker";
-import { BUILT_IN_PRESETS } from "./model-preset-picker";
+import { BUILT_IN_PRESETS } from "./model-preset-data";
 import type { PortfolioStats } from "../hooks/use-portfolio-stats";
 
 interface ProfileEditorProps {
@@ -30,9 +40,12 @@ interface ProfileEditorProps {
   currentAllocation?: Record<string, number>;
   baseCurrency: string;
   portfolioStats?: PortfolioStats | null;
+  defaultScopeType?: TargetScopeType;
+  defaultScopeId?: string | null;
   onSaved: (profileId: string) => void;
   onCancel: () => void;
   onArchive?: () => void;
+  onDelete?: () => void;
 }
 
 const TRIGGER_OPTIONS = [
@@ -104,18 +117,28 @@ export function ProfileEditor({
   currentAllocation = {},
   baseCurrency,
   portfolioStats,
+  defaultScopeType,
+  defaultScopeId,
   onSaved,
   onCancel,
   onArchive,
+  onDelete,
 }: ProfileEditorProps) {
   const topLevelCategories = useMemo(
     () => taxonomy.categories.filter((c) => !c.parentId),
     [taxonomy.categories],
   );
 
+  const { accounts } = useAccounts();
+  const { data: portfolios = [] } = usePortfolios();
   const { data: existingNodesData } = useTargetNodes(profile?.id ?? null);
 
   const [name, setName] = useState(profile?.name ?? "");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [scopeType, setScopeType] = useState<TargetScopeType>(
+    profile?.scopeType ?? defaultScopeType ?? "all",
+  );
+  const [scopeId, setScopeId] = useState<string | null>(profile?.scopeId ?? defaultScopeId ?? null);
   const [driftBandPct, setDriftBandPct] = useState(profile ? profile.driftBandBps / 100 : 5);
   const [triggerType, setTriggerType] = useState<"threshold" | "manual">(
     (profile?.triggerType as "threshold" | "manual") ?? "threshold",
@@ -170,11 +193,25 @@ export function ProfileEditor({
     setNodes(buildInitialNodes(presetId, topLevelCategories, currentAllocation));
   }
 
+  function handleScopeChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const val = e.target.value;
+    if (val === "all") {
+      setScopeType("all");
+      setScopeId(null);
+    } else if (val.startsWith("portfolio:")) {
+      setScopeType("portfolio");
+      setScopeId(val.slice("portfolio:".length));
+    } else {
+      setScopeType("account");
+      setScopeId(val.slice("account:".length));
+    }
+  }
+
   async function persistProfile(andActivate: boolean) {
     const input = {
       name: name.trim(),
-      scopeType: "all" as const,
-      scopeId: null,
+      scopeType,
+      scopeId: scopeType === "all" ? null : scopeId,
       taxonomyId: "asset_classes",
       baseCurrency,
       triggerType,
@@ -231,6 +268,44 @@ export function ProfileEditor({
                 placeholder="Profile name…"
                 className="bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:opacity-50"
               />
+            </div>
+
+            <div className="bg-border h-8 w-px" />
+
+            {/* Scope */}
+            <div className="min-w-32">
+              <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
+                Scope
+              </div>
+              <select
+                value={
+                  scopeType === "all"
+                    ? "all"
+                    : scopeType === "portfolio"
+                      ? `portfolio:${scopeId}`
+                      : `account:${scopeId}`
+                }
+                onChange={handleScopeChange}
+                className="max-w-44 cursor-pointer bg-transparent text-[14px] font-medium outline-none"
+              >
+                <option value="all">All accounts</option>
+                {portfolios.length > 0 && (
+                  <optgroup label="Portfolios">
+                    {portfolios.map((p) => (
+                      <option key={p.id} value={`portfolio:${p.id}`}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Accounts">
+                  {accounts.map((a) => (
+                    <option key={a.id} value={`account:${a.id}`}>
+                      {a.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
             </div>
 
             <div className="bg-border h-8 w-px" />
@@ -306,20 +381,54 @@ export function ProfileEditor({
             </div>
           </div>
 
-          {/* Archive action — below metadata bar, only for active profiles */}
-          {onArchive && profile?.status === "active" && (
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground text-[12px]"
-                onClick={onArchive}
-              >
-                <Icons.FileArchive className="mr-1.5 h-4 w-4" />
-                Archive profile
-              </Button>
+          {/* Archive / delete actions — below metadata bar */}
+          {(onArchive && profile?.status === "active") || onDelete ? (
+            <div className="flex justify-end gap-1">
+              {onArchive && profile?.status === "active" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground text-[12px]"
+                  onClick={onArchive}
+                >
+                  <Icons.FileArchive className="mr-1.5 h-4 w-4" />
+                  Archive profile
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive/60 hover:text-destructive text-[12px]"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Icons.Trash2 className="mr-1.5 h-4 w-4" />
+                  Delete profile
+                </Button>
+              )}
             </div>
-          )}
+          ) : null}
+
+          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete profile?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete &ldquo;{name}&rdquo; and all its target weights. This
+                  action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={onDelete}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
 
         {/* Model presets */}

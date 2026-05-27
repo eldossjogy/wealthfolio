@@ -4,9 +4,9 @@ import { Button, Icons, Skeleton } from "@wealthfolio/ui";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { useSettings } from "@/hooks/use-settings";
-import { useArchiveTargetProfile } from "../hooks/use-target-mutations";
+import { useArchiveTargetProfile, useDeleteTargetProfile } from "../hooks/use-target-mutations";
 import { usePortfolioStats } from "../hooks/use-portfolio-stats";
-import type { TargetProfile, AccountScope } from "@/lib/types";
+import type { TargetProfile, AccountScope, TargetScopeType } from "@/lib/types";
 import { CurrentAllocationBar } from "./current-allocation-bar";
 import { ModelPresetPicker } from "./model-preset-picker";
 import { ProfileEditor } from "./profile-editor";
@@ -14,6 +14,15 @@ import { ProfileEditor } from "./profile-editor";
 type EditorMode =
   | { kind: "onboarding" }
   | { kind: "edit"; profileId: string | null; presetId: string | null };
+
+function defaultScopeFromAccountScope(scope: AccountScope): {
+  scopeType: TargetScopeType;
+  scopeId: string | null;
+} {
+  if (scope.type === "account") return { scopeType: "account", scopeId: scope.accountId };
+  if (scope.type === "portfolio") return { scopeType: "portfolio", scopeId: scope.portfolioId };
+  return { scopeType: "all", scopeId: null };
+}
 
 interface TargetsTabProps {
   profiles: TargetProfile[];
@@ -42,6 +51,7 @@ export function TargetsTab({
   const { data: settings } = useSettings();
 
   const archiveProfile = useArchiveTargetProfile();
+  const deleteProfile = useDeleteTargetProfile();
   const { stats: portfolioStats } = usePortfolioStats(accountScope);
 
   const currentCategories = allocations?.assetClasses?.categories ?? [];
@@ -98,6 +108,13 @@ export function TargetsTab({
     } else {
       setMode({ kind: "edit", profileId: selectedProfileId, presetId: null });
     }
+  }
+
+  function handleEditorDelete() {
+    if (!editingProfile) return;
+    deleteProfile.mutate(editingProfile.id, {
+      onSuccess: () => setMode({ kind: "onboarding" }),
+    });
   }
 
   if (taxonomyLoading || allocationsLoading) {
@@ -181,6 +198,8 @@ export function TargetsTab({
   }
 
   // ── Editor ────────────────────────────────────────────────────────────────────
+  const defaultScope = editingProfile ? null : defaultScopeFromAccountScope(accountScope);
+
   return (
     <ProfileEditor
       profile={editingProfile}
@@ -189,6 +208,8 @@ export function TargetsTab({
       currentAllocation={currentAllocationMap}
       baseCurrency={baseCurrency}
       portfolioStats={portfolioStats}
+      defaultScopeType={defaultScope?.scopeType}
+      defaultScopeId={defaultScope?.scopeId}
       onSaved={handleEditorSaved}
       onCancel={handleEditorCancel}
       onArchive={
@@ -196,6 +217,7 @@ export function TargetsTab({
           ? () => archiveProfile.mutate(editingProfile.id)
           : undefined
       }
+      onDelete={editingProfile ? handleEditorDelete : undefined}
     />
   );
 }

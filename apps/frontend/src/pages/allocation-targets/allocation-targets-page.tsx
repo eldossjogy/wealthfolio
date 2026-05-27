@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Button,
   DropdownMenu,
@@ -17,7 +17,7 @@ import {
 } from "@wealthfolio/ui";
 import { AccountScopeSelector } from "@/components/account-filter-selector";
 import { cn, formatAmount } from "@/lib/utils";
-import type { AccountScope } from "@/lib/types";
+import type { AccountScope, TargetProfile } from "@/lib/types";
 import { useTargetProfiles } from "./hooks/use-target-profiles";
 import { useTargetDrift } from "./hooks/use-target-drift";
 import { useYtdPerformance } from "./hooks/use-ytd-performance";
@@ -58,14 +58,44 @@ function KpiItem({
   );
 }
 
+function filterProfilesByScope(profiles: TargetProfile[], scope: AccountScope): TargetProfile[] {
+  if (scope.type === "all") return profiles.filter((p) => p.scopeType === "all");
+  if (scope.type === "account")
+    return profiles.filter((p) => p.scopeType === "account" && p.scopeId === scope.accountId);
+  if (scope.type === "portfolio")
+    return profiles.filter((p) => p.scopeType === "portfolio" && p.scopeId === scope.portfolioId);
+  // "accounts" (multi-account ad-hoc) → no dedicated profile scope type; show all-portfolio profiles
+  return profiles.filter((p) => p.scopeType === "all");
+}
+
+function scopeKey(scope: AccountScope): string {
+  if (scope.type === "all") return "all";
+  if (scope.type === "account") return `account:${scope.accountId}`;
+  if (scope.type === "portfolio") return `portfolio:${scope.portfolioId}`;
+  return `accounts:${[...scope.accountIds].sort().join(",")}`;
+}
+
 export function AllocationTargetsPage() {
   const [accountScope, setAccountScope] = useState<AccountScope>(DEFAULT_SCOPE);
-  const { profiles, activeProfile, isLoading: profilesLoading } = useTargetProfiles();
+  const { profiles, isLoading: profilesLoading } = useTargetProfiles();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [newProfileTrigger, setNewProfileTrigger] = useState(0);
 
-  const effectiveProfileId = selectedProfileId ?? activeProfile?.id ?? null;
+  // Reset profile selection when scope changes
+  useEffect(() => {
+    setSelectedProfileId(null);
+  }, [accountScope]);
+
+  const scopedProfiles = useMemo(
+    () => filterProfilesByScope(profiles, accountScope),
+    [profiles, accountScope],
+  );
+
+  const scopedActiveProfile =
+    scopedProfiles.find((p) => p.status === "active") ?? scopedProfiles[0] ?? null;
+
+  const effectiveProfileId = selectedProfileId ?? scopedActiveProfile?.id ?? null;
   const effectiveProfile = profiles.find((p) => p.id === effectiveProfileId) ?? null;
 
   const { driftReport, isLoading: driftLoading } = useTargetDrift(effectiveProfileId, accountScope);
@@ -168,7 +198,7 @@ export function AllocationTargetsPage() {
 
               {/* Profile + scope selectors aligned with tabs */}
               <div className="flex items-center gap-2 pb-2">
-                {profiles.length > 0 && (
+                {scopedProfiles.length > 0 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -189,7 +219,7 @@ export function AllocationTargetsPage() {
                     <DropdownMenuContent align="end" className="w-52">
                       <DropdownMenuLabel>Target profiles</DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      {profiles.map((p) => (
+                      {scopedProfiles.map((p) => (
                         <DropdownMenuItem
                           key={p.id}
                           onSelect={() => setSelectedProfileId(p.id)}
@@ -222,7 +252,7 @@ export function AllocationTargetsPage() {
 
             <div className="px-6 pb-6 pt-10">
               <TabsContent value="overview" className="m-0">
-                {profiles.length === 0 && !isLoading ? (
+                {scopedProfiles.length === 0 && !isLoading ? (
                   <EmptyPlaceholder
                     icon={<Icons.Target className="text-muted-foreground h-10 w-10" />}
                     title="No target profile yet"
@@ -258,7 +288,8 @@ export function AllocationTargetsPage() {
 
               <TabsContent value="targets" className="m-0">
                 <TargetsTab
-                  profiles={profiles}
+                  key={scopeKey(accountScope)}
+                  profiles={scopedProfiles}
                   selectedProfileId={effectiveProfileId}
                   onProfileChange={(id) => setSelectedProfileId(id)}
                   newProfileTrigger={newProfileTrigger}

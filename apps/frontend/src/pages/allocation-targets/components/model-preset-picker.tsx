@@ -1,47 +1,11 @@
 import { cn } from "@/lib/utils";
 import type { CategoryAllocation } from "@/lib/types";
 import type { PortfolioStats } from "../hooks/use-portfolio-stats";
+import type { ModelPreset } from "./model-preset-data";
+import { BUILT_IN_PRESETS } from "./model-preset-data";
 
-export interface ModelPreset {
-  id: string;
-  name: string;
-  description: string;
-  risk: string;
-  expectedReturn?: number; // % annualized, historical estimate
-  volatility?: number; // % annualized std dev, historical estimate
-  // weights keyed by asset_classes category key (e.g. EQUITY, FIXED_INCOME, CASH...)
-  weights: Record<string, number>; // 0-100
-}
-
-export const BUILT_IN_PRESETS: ModelPreset[] = [
-  {
-    id: "three_fund",
-    name: "Three-Fund",
-    description: "Bogleheads classic — US stocks, international & bonds",
-    risk: "Moderate",
-    expectedReturn: 7.0,
-    volatility: 11.0,
-    weights: { EQUITY: 60, FIXED_INCOME: 30, CASH: 10 },
-  },
-  {
-    id: "sixty_forty",
-    name: "60 / 40",
-    description: "The benchmark — balanced stocks & bonds",
-    risk: "Moderate",
-    expectedReturn: 6.4,
-    volatility: 10.1,
-    weights: { EQUITY: 60, FIXED_INCOME: 40 },
-  },
-  {
-    id: "all_weather",
-    name: "All Weather",
-    description: "Ray Dalio — diversified across all market regimes",
-    risk: "Conservative",
-    expectedReturn: 5.6,
-    volatility: 7.8,
-    weights: { EQUITY: 30, FIXED_INCOME: 55, COMMODITIES: 7, CASH: 8 },
-  },
-];
+export type { ModelPreset };
+export { BUILT_IN_PRESETS };
 
 interface PresetBarProps {
   weights: Record<string, number>;
@@ -118,7 +82,7 @@ export function ModelPresetPicker({
           type="button"
           onClick={() => onSelect(preset.id)}
           className={cn(
-            "flex min-h-[200px] flex-col rounded-lg border px-4 py-5 text-left transition-colors",
+            "min-h-50 flex flex-col rounded-lg border px-4 py-5 text-left transition-colors",
             selected === preset.id
               ? "border-foreground bg-muted/40"
               : "hover:border-muted-foreground/40 border-border",
