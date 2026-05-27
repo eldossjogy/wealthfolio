@@ -44,6 +44,7 @@ function PresetBar({ weights, colorMap }: PresetBarProps) {
 }
 
 interface ModelPresetPickerProps {
+  taxonomyId: string;
   selected: string | null;
   onSelect: (presetId: string) => void;
   currentCategories: CategoryAllocation[];
@@ -51,6 +52,7 @@ interface ModelPresetPickerProps {
 }
 
 export function ModelPresetPicker({
+  taxonomyId,
   selected,
   onSelect,
   currentCategories,
@@ -64,6 +66,7 @@ export function ModelPresetPicker({
 
   const currentPreset: ModelPreset = {
     id: "current",
+    taxonomyId,
     name: "Current allocation",
     description: "Start from what you hold today",
     risk: "From holdings",
@@ -72,7 +75,8 @@ export function ModelPresetPicker({
     weights: currentWeights,
   };
 
-  const allPresets = [...BUILT_IN_PRESETS, currentPreset];
+  const taxonomyPresets = BUILT_IN_PRESETS.filter((p) => p.taxonomyId === taxonomyId);
+  const allPresets = [...taxonomyPresets, currentPreset];
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

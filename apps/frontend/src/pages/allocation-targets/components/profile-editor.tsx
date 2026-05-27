@@ -15,11 +15,12 @@ import {
   CardTitle,
   CardDescription,
   Icons,
-  Switch,
+  Skeleton,
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { TargetProfile, TaxonomyWithCategories, TargetScopeType } from "@/lib/types";
+import type { TargetProfile, TargetScopeType } from "@/lib/types";
+import { useTaxonomies, useTaxonomy } from "@/hooks/use-taxonomies";
 import { useTargetNodes } from "../hooks/use-target-mutations";
 import { useSaveTargetNodes } from "../hooks/use-target-mutations";
 import {
@@ -34,7 +35,6 @@ import type { PortfolioStats } from "../hooks/use-portfolio-stats";
 
 interface ProfileEditorProps {
   profile: TargetProfile | null;
-  taxonomy: TaxonomyWithCategories;
   initialPresetId?: string | null;
   currentAllocation?: Record<string, number>;
   baseCurrency: string;
@@ -61,19 +61,6 @@ const TRIGGER_OPTIONS = [
     label: "Manual",
     description: "Only rebalance when you trigger it",
     badge: "Simple",
-  },
-] as const;
-
-const REBALANCE_TO_OPTIONS = [
-  {
-    value: "nearest_band",
-    label: "Nearest band",
-    description: "Minimum trades to come back in band",
-  },
-  {
-    value: "exact_target",
-    label: "Exact target",
-    description: "Aim for precise target percentages",
   },
 ] as const;
 
@@ -113,7 +100,6 @@ function buildInitialNodes(
 
 export function ProfileEditor({
   profile,
-  taxonomy,
   initialPresetId,
   currentAllocation = {},
   baseCurrency,
@@ -127,9 +113,13 @@ export function ProfileEditor({
   onUnsavedChange,
   saveRef,
 }: ProfileEditorProps) {
+  const [taxonomyId, setTaxonomyId] = useState(profile?.taxonomyId ?? "asset_classes");
+  const { data: taxonomies } = useTaxonomies();
+  const { data: taxonomy, isLoading: taxonomyLoading } = useTaxonomy(taxonomyId);
+
   const topLevelCategories = useMemo(
-    () => taxonomy.categories.filter((c) => !c.parentId),
-    [taxonomy.categories],
+    () => taxonomy?.categories.filter((c) => !c.parentId) ?? [],
+    [taxonomy],
   );
 
   const { data: existingNodesData } = useTargetNodes(profile?.id ?? null);
@@ -142,12 +132,11 @@ export function ProfileEditor({
   const [triggerType, setTriggerType] = useState<"threshold" | "manual">(
     (profile?.triggerType as "threshold" | "manual") ?? "threshold",
   );
-  const [rebalanceTo, setRebalanceTo] = useState<"nearest_band" | "exact_target">(
-    (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band",
-  );
-  const [allowSells, setAllowSells] = useState(profile?.allowSells ?? false);
-  const [minTradeAmount, setMinTradeAmount] = useState(profile?.minTradeAmount ?? "0");
-  const [wholeSharesOnly, setWholeSharesOnly] = useState(profile?.wholeSharesOnly ?? false);
+  const rebalanceTo: "nearest_band" | "exact_target" =
+    (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band";
+  const allowSells = profile?.allowSells ?? false;
+  const minTradeAmount = profile?.minTradeAmount ?? "0";
+  const wholeSharesOnly = profile?.wholeSharesOnly ?? false;
   const [selectedPreset, setSelectedPreset] = useState<string | null>(initialPresetId ?? null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
@@ -155,16 +144,14 @@ export function ProfileEditor({
     onUnsavedChange?.(hasUnsavedChanges);
   }, [hasUnsavedChanges, onUnsavedChange]);
 
-  const [nodes, setNodes] = useState<NodeDraft[]>(() => {
-    if (!profile) {
-      return buildInitialNodes(initialPresetId ?? null, topLevelCategories, currentAllocation);
-    }
-    return [];
-  });
+  const [nodes, setNodes] = useState<NodeDraft[]>([]);
 
   // Tracks the persisted profile ID so Activate after Save draft updates instead of creating
   const persistedProfileId = useRef<string | null>(profile?.id ?? null);
   const nodesInitialized = useRef(false);
+  const taxonomyUserChanged = useRef(false);
+
+  // Initialize nodes for existing profiles once node data arrives
   useEffect(() => {
     if (!profile || nodesInitialized.current || !existingNodesData) return;
     nodesInitialized.current = true;
@@ -176,6 +163,27 @@ export function ProfileEditor({
       })),
     );
   }, [profile, existingNodesData]);
+
+  // Initialize nodes for new profiles once taxonomy loads
+  useEffect(() => {
+    if (profile || nodesInitialized.current || !taxonomy) return;
+    nodesInitialized.current = true;
+    setNodes(buildInitialNodes(initialPresetId ?? null, topLevelCategories, currentAllocation));
+  }, [taxonomy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset nodes when user explicitly changes taxonomy
+  useEffect(() => {
+    if (!taxonomyUserChanged.current || !taxonomy) return;
+    setNodes(topLevelCategories.map((c) => ({ categoryId: c.id, targetBps: 0, isLocked: false })));
+    setSelectedPreset(null);
+  }, [taxonomyId, taxonomy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleTaxonomyChange(newId: string) {
+    taxonomyUserChanged.current = true;
+    nodesInitialized.current = false;
+    setTaxonomyId(newId);
+    setHasUnsavedChanges(true);
+  }
 
   const createProfile = useCreateTargetProfile();
   const updateProfile = useUpdateTargetProfile();
@@ -208,7 +216,7 @@ export function ProfileEditor({
         name: name.trim(),
         scopeType,
         scopeId: scopeType === "all" ? null : scopeId,
-        taxonomyId: "asset_classes",
+        taxonomyId,
         baseCurrency,
         triggerType,
         driftBandBps: Math.round(driftBandPct * 100),
@@ -255,6 +263,15 @@ export function ProfileEditor({
   }
 
   if (saveRef) saveRef.current = () => persistProfile(false);
+
+  if (taxonomyLoading || !taxonomy) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -321,12 +338,22 @@ export function ProfileEditor({
 
             <div className="bg-border h-8 w-px" />
 
-            {/* Taxonomy (display only) */}
+            {/* Taxonomy selector */}
             <div>
               <div className="text-muted-foreground mb-0.5 text-[11px] font-medium uppercase tracking-wider">
                 Taxonomy
               </div>
-              <span className="text-foreground text-[14px] font-medium">Asset classes</span>
+              <select
+                value={taxonomyId}
+                onChange={(e) => handleTaxonomyChange(e.target.value)}
+                className="text-foreground bg-transparent text-[14px] font-medium outline-none"
+              >
+                {(taxonomies ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
@@ -406,21 +433,24 @@ export function ProfileEditor({
           </AlertDialog>
         </div>
 
-        {/* Model presets */}
-        <div>
-          <div className="text-muted-foreground mb-0.5 pl-0.5 text-[11px] font-medium uppercase tracking-wider">
-            Model
+        {/* Model presets — shown for taxonomies that have built-in presets */}
+        {BUILT_IN_PRESETS.some((p) => p.taxonomyId === taxonomyId) && (
+          <div>
+            <div className="text-muted-foreground mb-0.5 pl-0.5 text-[11px] font-medium uppercase tracking-wider">
+              Model
+            </div>
+            <p className="text-muted-foreground mb-3 pl-0.5 text-[12px]">
+              Start from a known mix or roll your own
+            </p>
+            <ModelPresetPicker
+              taxonomyId={taxonomyId}
+              selected={selectedPreset}
+              onSelect={handlePresetSelect}
+              currentCategories={currentCategoriesForPicker}
+              portfolioStats={portfolioStats}
+            />
           </div>
-          <p className="text-muted-foreground mb-3 pl-0.5 text-[12px]">
-            Start from a known mix or roll your own
-          </p>
-          <ModelPresetPicker
-            selected={selectedPreset}
-            onSelect={handlePresetSelect}
-            currentCategories={currentCategoriesForPicker}
-            portfolioStats={portfolioStats}
-          />
-        </div>
+        )}
       </div>
 
       {/* Target weights + Drift tolerance */}
@@ -446,43 +476,49 @@ export function ProfileEditor({
           </CardContent>
         </Card>
 
-        {/* Drift tolerance */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Drift tolerance</CardTitle>
-            <CardDescription>How far a sleeve can wander before flagging</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {/* Band slider */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] font-medium">Tolerance band</span>
-                <span className="text-foreground text-[13px] font-semibold tabular-nums">
-                  ±{driftBandPct.toFixed(1)}%
-                </span>
+        <div className="space-y-5">
+          {/* Drift tolerance */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Drift tolerance</CardTitle>
+              <CardDescription>How far a sleeve can wander before flagging</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] font-medium">Tolerance band</span>
+                  <span className="text-foreground text-[13px] font-semibold tabular-nums">
+                    ±{driftBandPct.toFixed(1)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                  value={driftBandPct}
+                  onChange={(e) => {
+                    setDriftBandPct(parseFloat(e.target.value));
+                    setHasUnsavedChanges(true);
+                  }}
+                  className="accent-foreground w-full"
+                />
+                <div className="text-muted-foreground flex justify-between text-[10px]">
+                  <span>Tight (1%)</span>
+                  <span>Standard (5%)</span>
+                  <span>Loose (10%)</span>
+                </div>
               </div>
-              <input
-                type="range"
-                min={0.5}
-                max={10}
-                step={0.5}
-                value={driftBandPct}
-                onChange={(e) => {
-                  setDriftBandPct(parseFloat(e.target.value));
-                  setHasUnsavedChanges(true);
-                }}
-                className="accent-foreground w-full"
-              />
-              <div className="text-muted-foreground flex justify-between text-[10px]">
-                <span>Tight (1%)</span>
-                <span>Standard (5%)</span>
-                <span>Loose (10%)</span>
-              </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            {/* Rebalance method */}
-            <div className="space-y-2">
-              <span className="text-[13px] font-medium">Rebalance method</span>
+          {/* Rebalance method */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Rebalance method</CardTitle>
+              <CardDescription>When to act on drift</CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-1.5">
                 {TRIGGER_OPTIONS.map((opt) => (
                   <label
@@ -517,99 +553,9 @@ export function ProfileEditor({
                   </label>
                 ))}
               </div>
-            </div>
-
-            {/* Rebalance to */}
-            <div className="space-y-2">
-              <span className="text-[13px] font-medium">Rebalance to</span>
-              <div className="space-y-1.5">
-                {REBALANCE_TO_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className={cn(
-                      "flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors",
-                      rebalanceTo === opt.value
-                        ? "border-foreground bg-muted/30"
-                        : "hover:border-muted-foreground/40 border-border",
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="rebalanceTo"
-                      value={opt.value}
-                      checked={rebalanceTo === opt.value}
-                      onChange={() => {
-                        setRebalanceTo(opt.value);
-                        setHasUnsavedChanges(true);
-                      }}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1">
-                      <span className="text-[13px] font-medium">{opt.label}</span>
-                      <p className="text-muted-foreground mt-0.5 text-[12px]">{opt.description}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Allow sells */}
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <p className="text-[13px] font-medium">Allow sells</p>
-                <p className="text-muted-foreground text-[12px]">
-                  Sell overweight sleeves when rebalancing
-                </p>
-              </div>
-              <Switch
-                checked={allowSells}
-                onCheckedChange={(v) => {
-                  setAllowSells(v);
-                  setHasUnsavedChanges(true);
-                }}
-              />
-            </div>
-
-            {/* Whole shares only */}
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <p className="text-[13px] font-medium">Whole shares only</p>
-                <p className="text-muted-foreground text-[12px]">
-                  Round trade quantities to whole units
-                </p>
-              </div>
-              <Switch
-                checked={wholeSharesOnly}
-                onCheckedChange={(v) => {
-                  setWholeSharesOnly(v);
-                  setHasUnsavedChanges(true);
-                }}
-              />
-            </div>
-
-            {/* Minimum trade amount */}
-            <div className="flex items-center justify-between rounded-md border p-3">
-              <div>
-                <p className="text-[13px] font-medium">Min. trade amount</p>
-                <p className="text-muted-foreground text-[12px]">Skip trades below this value</p>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-muted-foreground text-[13px]">{baseCurrency}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={minTradeAmount}
-                  onChange={(e) => {
-                    setMinTradeAmount(e.target.value);
-                    setHasUnsavedChanges(true);
-                  }}
-                  className="w-20 bg-transparent text-right text-[13px] font-medium tabular-nums outline-none"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

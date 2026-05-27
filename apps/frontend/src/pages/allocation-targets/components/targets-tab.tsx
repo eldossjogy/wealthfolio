@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Button, Icons, Skeleton } from "@wealthfolio/ui";
 
-import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { useSettings } from "@/hooks/use-settings";
 import { useArchiveTargetProfile, useDeleteTargetProfile } from "../hooks/use-target-mutations";
@@ -54,7 +53,6 @@ export function TargetsTab({
   );
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
-  const { data: taxonomy, isLoading: taxonomyLoading } = useTaxonomy("asset_classes");
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountScope);
   const { data: settings } = useSettings();
 
@@ -137,7 +135,7 @@ export function TargetsTab({
     });
   }
 
-  if (taxonomyLoading || allocationsLoading) {
+  if (allocationsLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-40 w-full" />
@@ -145,8 +143,6 @@ export function TargetsTab({
       </div>
     );
   }
-
-  if (!taxonomy) return null;
 
   // ── Onboarding (no profiles yet, or creating new) ────────────────────────────
   if (mode.kind === "onboarding") {
@@ -208,6 +204,7 @@ export function TargetsTab({
             Pick one — you can edit weights after.
           </p>
           <ModelPresetPicker
+            taxonomyId="asset_classes"
             selected={selectedPreset}
             onSelect={handlePresetSelect}
             currentCategories={topLevelCurrent}
@@ -225,7 +222,6 @@ export function TargetsTab({
     <ProfileEditor
       key={mode.kind === "edit" ? (mode.profileId ?? "new") : "new"}
       profile={editingProfile}
-      taxonomy={taxonomy}
       initialPresetId={mode.presetId}
       currentAllocation={currentAllocationMap}
       baseCurrency={baseCurrency}
