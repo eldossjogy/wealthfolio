@@ -125,6 +125,21 @@ pub struct BreakdownItem {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<BreakdownItem>,
+}
+
+/// Map a core breakdown item (Decimal values) to its string DTO, recursively.
+fn map_breakdown_item(
+    item: wealthfolio_core::portfolio::net_worth::BreakdownItem,
+) -> BreakdownItem {
+    BreakdownItem {
+        category: item.category,
+        name: item.name,
+        value: item.value.to_string(),
+        asset_id: item.asset_id,
+        children: item.children.into_iter().map(map_breakdown_item).collect(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -450,12 +465,7 @@ pub async fn get_net_worth(
                 .assets
                 .breakdown
                 .into_iter()
-                .map(|item| BreakdownItem {
-                    category: item.category,
-                    name: item.name,
-                    value: item.value.to_string(),
-                    asset_id: item.asset_id,
-                })
+                .map(map_breakdown_item)
                 .collect(),
         },
         liabilities: LiabilitiesSection {
@@ -464,12 +474,7 @@ pub async fn get_net_worth(
                 .liabilities
                 .breakdown
                 .into_iter()
-                .map(|item| BreakdownItem {
-                    category: item.category,
-                    name: item.name,
-                    value: item.value.to_string(),
-                    asset_id: item.asset_id,
-                })
+                .map(map_breakdown_item)
                 .collect(),
         },
         net_worth: core_response.net_worth.to_string(),

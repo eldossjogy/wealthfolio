@@ -61,6 +61,10 @@ pub struct BreakdownItem {
     /// Optional: asset ID for individual items (liabilities, specific holdings)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
+    /// Individual items rolled up into this category, for drill-down. Empty for
+    /// leaf items and for the Investments category (use allocation drill-down).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<BreakdownItem>,
 }
 
 /// Assets section of the balance sheet.

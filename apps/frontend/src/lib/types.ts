@@ -1329,6 +1329,8 @@ export interface BreakdownItem {
   value: string;
   /** Optional: asset ID for individual items */
   assetId?: string;
+  /** Individual items rolled up into this category, for drill-down. */
+  children?: BreakdownItem[];
 }
 
 /**

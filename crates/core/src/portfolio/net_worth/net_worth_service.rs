@@ -183,13 +183,29 @@ impl NetWorthService {
 
     /// Build assets section from valuations.
     fn build_assets_section(valuations: &[ValuationInfo]) -> AssetsSection {
-        // Aggregate by category
+        // Aggregate by category, collecting individual items for drill-down.
         let mut category_totals: HashMap<AssetCategory, Decimal> = HashMap::new();
+        let mut category_children: HashMap<AssetCategory, Vec<BreakdownItem>> = HashMap::new();
 
         for val in valuations {
-            if val.category != AssetCategory::Liability {
-                *category_totals.entry(val.category).or_insert(Decimal::ZERO) +=
-                    val.market_value_base;
+            if val.category == AssetCategory::Liability {
+                continue;
+            }
+            *category_totals.entry(val.category).or_insert(Decimal::ZERO) += val.market_value_base;
+
+            // Skip per-item children for investments — they can be hundreds of
+            // holdings, and the dedicated allocation view handles that drill-down.
+            if val.category != AssetCategory::Investment {
+                category_children
+                    .entry(val.category)
+                    .or_default()
+                    .push(BreakdownItem {
+                        category: Self::category_key(val.category).to_string(),
+                        name: val.name.clone().unwrap_or_else(|| val.asset_id.clone()),
+                        value: val.market_value_base,
+                        asset_id: Some(val.asset_id.clone()),
+                        children: Vec::new(),
+                    });
             }
         }
 
@@ -197,11 +213,16 @@ impl NetWorthService {
         let mut breakdown: Vec<BreakdownItem> = category_totals
             .into_iter()
             .filter(|(_, value)| *value > Decimal::ZERO)
-            .map(|(category, value)| BreakdownItem {
-                category: Self::category_key(category).to_string(),
-                name: Self::category_display_name(category).to_string(),
-                value,
-                asset_id: None,
+            .map(|(category, value)| {
+                let mut children = category_children.remove(&category).unwrap_or_default();
+                children.sort_by_key(|c| std::cmp::Reverse(c.value));
+                BreakdownItem {
+                    category: Self::category_key(category).to_string(),
+                    name: Self::category_display_name(category).to_string(),
+                    value,
+                    asset_id: None,
+                    children,
+                }
             })
             .collect();
 
@@ -225,6 +246,7 @@ impl NetWorthService {
                 name: v.name.clone().unwrap_or_else(|| v.asset_id.clone()),
                 value: v.market_value_base,
                 asset_id: Some(v.asset_id.clone()),
+                children: Vec::new(),
             })
             .collect();
 
@@ -470,9 +492,11 @@ impl NetWorthServiceTrait for NetWorthService {
                 let cash_base =
                     self.convert_cash_balance_to_base(amount, currency, &base_currency, date);
 
+                // Name by account (with currency suffix) so the Cash drill-down
+                // lists each account distinctly instead of repeating "Cash (USD)".
                 let (asset_id, name, market_value_base, category) = (
                     format!("CASH:{}:{}", account.id, currency),
-                    Some(format!("Cash ({})", currency)),
+                    Some(format!("{} ({})", account.name, currency)),
                     cash_base.round_dp(DECIMAL_PRECISION),
                     AssetCategory::Cash,
                 );
