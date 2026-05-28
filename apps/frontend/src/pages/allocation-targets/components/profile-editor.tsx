@@ -23,7 +23,13 @@ import {
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { PortfolioAllocations, TargetProfile, TargetScopeType } from "@/lib/types";
+import type {
+  PortfolioAllocations,
+  ReviewFrequency,
+  TargetProfile,
+  TargetScopeType,
+  TriggerType,
+} from "@/lib/types";
 import { useTaxonomies, useTaxonomy } from "@/hooks/use-taxonomies";
 import { useTargetNodes } from "../hooks/use-target-mutations";
 import { useSaveTargetNodes } from "../hooks/use-target-mutations";
@@ -53,7 +59,12 @@ interface ProfileEditorProps {
   saveRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-const TRIGGER_OPTIONS = [
+const TRIGGER_OPTIONS: {
+  value: TriggerType;
+  label: string;
+  description: string;
+  badge: string;
+}[] = [
   {
     value: "threshold",
     label: "Threshold",
@@ -61,12 +72,31 @@ const TRIGGER_OPTIONS = [
     badge: "Recommended",
   },
   {
+    value: "calendar",
+    label: "Calendar",
+    description: "Review on a fixed schedule",
+    badge: "Periodic",
+  },
+  {
+    value: "combined",
+    label: "Combined",
+    description: "Threshold or schedule — whichever fires first",
+    badge: "Flexible",
+  },
+  {
     value: "manual",
     label: "Manual",
     description: "Only rebalance when you trigger it",
     badge: "Simple",
   },
-] as const;
+];
+
+const REVIEW_FREQUENCY_OPTIONS: { value: ReviewFrequency; label: string }[] = [
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "semi_annual", label: "Semi-annual" },
+  { value: "annual", label: "Annual" },
+];
 
 function buildInitialNodes(
   presetId: string | null | undefined,
@@ -147,8 +177,9 @@ export function ProfileEditor({
   const scopeType: TargetScopeType = profile?.scopeType ?? defaultScopeType ?? "all";
   const scopeId: string | null = profile?.scopeId ?? defaultScopeId ?? null;
   const [driftBandPct, setDriftBandPct] = useState(profile ? profile.driftBandBps / 100 : 5);
-  const [triggerType, setTriggerType] = useState<"threshold" | "manual">(
-    (profile?.triggerType as "threshold" | "manual") ?? "threshold",
+  const [triggerType, setTriggerType] = useState<TriggerType>(profile?.triggerType ?? "threshold");
+  const [reviewFrequency, setReviewFrequency] = useState<ReviewFrequency | null>(
+    profile?.reviewFrequency ?? null,
   );
   const rebalanceTo: "nearest_band" | "exact_target" =
     (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band";
@@ -232,7 +263,9 @@ export function ProfileEditor({
   const saveNodes = useSaveTargetNodes();
 
   const totalBps = nodes.reduce((s, n) => s + n.targetBps, 0);
-  const isValid = name.trim().length > 0 && totalBps === 10000;
+  const needsFrequency = triggerType === "calendar" || triggerType === "combined";
+  const isValid =
+    name.trim().length > 0 && totalBps === 10000 && (!needsFrequency || reviewFrequency != null);
   const isSaving = createProfile.isPending || updateProfile.isPending || saveNodes.isPending;
   const isActivating = isSaving || activateProfile.isPending;
 
@@ -253,6 +286,7 @@ export function ProfileEditor({
 
   async function persistProfile(andActivate: boolean) {
     try {
+      const needsFrequency = triggerType === "calendar" || triggerType === "combined";
       const input = {
         name: name.trim(),
         scopeType,
@@ -261,6 +295,8 @@ export function ProfileEditor({
         baseCurrency,
         triggerType,
         driftBandBps: Math.round(driftBandPct * 100),
+        reviewFrequency: needsFrequency ? reviewFrequency : null,
+        nextReviewDate: null,
         rebalanceTo,
         allowSells,
         minTradeAmount: minTradeAmount || "0",
@@ -373,7 +409,7 @@ export function ProfileEditor({
                 Method
               </div>
               <span className="text-foreground text-[14px] font-medium capitalize">
-                {triggerType === "threshold" ? "Threshold" : "Manual"}
+                {TRIGGER_OPTIONS.find((o) => o.value === triggerType)?.label ?? triggerType}
               </span>
             </div>
 
@@ -602,6 +638,33 @@ export function ProfileEditor({
                   </label>
                 ))}
               </div>
+              {(triggerType === "calendar" || triggerType === "combined") && (
+                <div className="mt-3 space-y-1">
+                  <div className="text-muted-foreground text-[11px] font-medium uppercase tracking-wider">
+                    Review frequency
+                  </div>
+                  <div className="flex gap-2">
+                    {REVIEW_FREQUENCY_OPTIONS.map((f) => (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => {
+                          setReviewFrequency(f.value);
+                          setHasUnsavedChanges(true);
+                        }}
+                        className={cn(
+                          "rounded-md border px-3 py-1.5 text-[12px] font-medium transition-colors",
+                          reviewFrequency === f.value
+                            ? "border-foreground bg-muted/30"
+                            : "border-border hover:border-muted-foreground/40",
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

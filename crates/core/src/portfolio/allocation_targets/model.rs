@@ -68,6 +68,8 @@ impl TryFrom<&str> for ScopeType {
 pub enum TriggerType {
     Manual,
     Threshold,
+    Calendar,
+    Combined,
 }
 
 impl TriggerType {
@@ -75,6 +77,8 @@ impl TriggerType {
         match self {
             Self::Manual => "manual",
             Self::Threshold => "threshold",
+            Self::Calendar => "calendar",
+            Self::Combined => "combined",
         }
     }
 }
@@ -85,7 +89,42 @@ impl TryFrom<&str> for TriggerType {
         match s {
             "manual" => Ok(Self::Manual),
             "threshold" => Ok(Self::Threshold),
+            "calendar" => Ok(Self::Calendar),
+            "combined" => Ok(Self::Combined),
             _ => Err(format!("unknown trigger type: {s}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewFrequency {
+    Monthly,
+    Quarterly,
+    SemiAnnual,
+    Annual,
+}
+
+impl ReviewFrequency {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Monthly => "monthly",
+            Self::Quarterly => "quarterly",
+            Self::SemiAnnual => "semi_annual",
+            Self::Annual => "annual",
+        }
+    }
+}
+
+impl TryFrom<&str> for ReviewFrequency {
+    type Error = String;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "monthly" => Ok(Self::Monthly),
+            "quarterly" => Ok(Self::Quarterly),
+            "semi_annual" => Ok(Self::SemiAnnual),
+            "annual" => Ok(Self::Annual),
+            _ => Err(format!("unknown review frequency: {s}")),
         }
     }
 }
@@ -131,6 +170,8 @@ pub struct TargetProfile {
     pub base_currency: String,
     pub trigger_type: TriggerType,
     pub drift_band_bps: i32,
+    pub review_frequency: Option<ReviewFrequency>,
+    pub next_review_date: Option<String>,
     pub rebalance_to: RebalanceTo,
     pub allow_sells: bool,
     pub min_trade_amount: String,
@@ -149,6 +190,8 @@ pub struct NewTargetProfile {
     pub base_currency: String,
     pub trigger_type: TriggerType,
     pub drift_band_bps: i32,
+    pub review_frequency: Option<ReviewFrequency>,
+    pub next_review_date: Option<String>,
     pub rebalance_to: RebalanceTo,
     pub allow_sells: bool,
     pub min_trade_amount: String,

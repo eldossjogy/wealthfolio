@@ -696,6 +696,8 @@ diesel::table! {
         base_currency -> Text,
         trigger_type -> Text,
         drift_band_bps -> Integer,
+        review_frequency -> Nullable<Text>,
+        next_review_date -> Nullable<Text>,
         rebalance_to -> Text,
         allow_sells -> Integer,
         min_trade_amount -> Text,

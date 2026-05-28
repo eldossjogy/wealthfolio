@@ -1,6 +1,7 @@
 use diesel::prelude::*;
 use wealthfolio_core::portfolio::allocation_targets::{
-    ProfileStatus, RebalanceTo, ScopeType, TargetAllocationNode, TargetProfile, TriggerType,
+    ProfileStatus, RebalanceTo, ReviewFrequency, ScopeType, TargetAllocationNode, TargetProfile,
+    TriggerType,
 };
 
 #[derive(Debug, Clone, Queryable, Insertable, AsChangeset)]
@@ -15,6 +16,8 @@ pub struct TargetProfileDB {
     pub base_currency: String,
     pub trigger_type: String,
     pub drift_band_bps: i32,
+    pub review_frequency: Option<String>,
+    pub next_review_date: Option<String>,
     pub rebalance_to: String,
     pub allow_sells: i32,
     pub min_trade_amount: String,
@@ -35,6 +38,8 @@ impl From<TargetProfile> for TargetProfileDB {
             base_currency: p.base_currency,
             trigger_type: p.trigger_type.as_str().to_string(),
             drift_band_bps: p.drift_band_bps,
+            review_frequency: p.review_frequency.map(|f| f.as_str().to_string()),
+            next_review_date: p.next_review_date,
             rebalance_to: p.rebalance_to.as_str().to_string(),
             allow_sells: p.allow_sells as i32,
             min_trade_amount: p.min_trade_amount,
@@ -58,6 +63,12 @@ impl TryFrom<TargetProfileDB> for TargetProfile {
             base_currency: db.base_currency,
             trigger_type: TriggerType::try_from(db.trigger_type.as_str())?,
             drift_band_bps: db.drift_band_bps,
+            review_frequency: db
+                .review_frequency
+                .as_deref()
+                .map(ReviewFrequency::try_from)
+                .transpose()?,
+            next_review_date: db.next_review_date,
             rebalance_to: RebalanceTo::try_from(db.rebalance_to.as_str())?,
             allow_sells: db.allow_sells != 0,
             min_trade_amount: db.min_trade_amount,

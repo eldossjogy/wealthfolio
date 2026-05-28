@@ -79,7 +79,7 @@ export function ModelPresetPicker({
               : "hover:border-muted-foreground/40 border-border",
           )}
         >
-          <div className="bg-foreground/0 group-hover:bg-foreground/[0.04] pointer-events-none absolute inset-0 transition-colors" />
+          <div className="bg-foreground/0 group-hover:bg-foreground/4 pointer-events-none absolute inset-0 transition-colors" />
           <div className="flex items-start justify-between gap-1">
             <span className="text-foreground text-[15px] font-semibold leading-tight">
               {preset.name}
@@ -93,7 +93,7 @@ export function ModelPresetPicker({
               {preset.risk}
             </span>
           </div>
-          <p className="text-muted-foreground mt-1 min-h-[2.5rem] text-[11px] leading-relaxed">
+          <p className="text-muted-foreground mt-1 min-h-10 text-[11px] leading-relaxed">
             {preset.description}
           </p>
           <div className="mt-auto space-y-3 pt-8">

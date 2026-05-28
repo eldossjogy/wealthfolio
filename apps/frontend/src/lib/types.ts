@@ -2258,7 +2258,8 @@ export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
 
 export type ProfileStatus = "draft" | "active" | "archived";
 export type TargetScopeType = "all" | "portfolio" | "account";
-export type TriggerType = "manual" | "threshold";
+export type TriggerType = "manual" | "threshold" | "calendar" | "combined";
+export type ReviewFrequency = "monthly" | "quarterly" | "semi_annual" | "annual";
 export type RebalanceTo = "nearest_band" | "exact_target";
 export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
 
@@ -2272,6 +2273,8 @@ export interface TargetProfile {
   baseCurrency: string;
   triggerType: TriggerType;
   driftBandBps: number;
+  reviewFrequency?: ReviewFrequency | null;
+  nextReviewDate?: string | null;
   rebalanceTo: RebalanceTo;
   allowSells: boolean;
   minTradeAmount: string;
@@ -2288,6 +2291,8 @@ export interface NewTargetProfile {
   baseCurrency: string;
   triggerType: TriggerType;
   driftBandBps: number;
+  reviewFrequency?: ReviewFrequency | null;
+  nextReviewDate?: string | null;
   rebalanceTo: RebalanceTo;
   allowSells: boolean;
   minTradeAmount: string;

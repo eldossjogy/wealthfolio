@@ -2,7 +2,7 @@ use crate::errors::{Error as CoreError, Result as CoreResult, ValidationError};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use super::model::{NewTargetAllocationNode, NewTargetProfile, ScopeType};
+use super::model::{NewTargetAllocationNode, NewTargetProfile, ScopeType, TriggerType};
 
 fn invalid(msg: &str) -> CoreError {
     CoreError::Validation(ValidationError::InvalidInput(msg.to_string()))
@@ -19,6 +19,15 @@ pub fn validate_new_profile(input: &NewTargetProfile) -> CoreResult<()> {
     }
     if input.drift_band_bps < 0 || input.drift_band_bps > 10000 {
         return Err(invalid("drift_band_bps must be between 0 and 10000"));
+    }
+    if matches!(
+        input.trigger_type,
+        TriggerType::Calendar | TriggerType::Combined
+    ) && input.review_frequency.is_none()
+    {
+        return Err(invalid(
+            "review_frequency is required for calendar and combined triggers",
+        ));
     }
     let min_trade = Decimal::from_str(&input.min_trade_amount)
         .map_err(|_| invalid("min_trade_amount must be a valid decimal"))?;
