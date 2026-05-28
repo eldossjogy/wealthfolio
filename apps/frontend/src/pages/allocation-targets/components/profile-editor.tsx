@@ -181,8 +181,7 @@ export function ProfileEditor({
   const [reviewFrequency, setReviewFrequency] = useState<ReviewFrequency | null>(
     profile?.reviewFrequency ?? null,
   );
-  const rebalanceTo: "nearest_band" | "exact_target" =
-    (profile?.rebalanceTo as "nearest_band" | "exact_target") ?? "nearest_band";
+  const rebalanceTo: "nearest_band" | "exact_target" = profile?.rebalanceTo ?? "nearest_band";
   const allowSells = profile?.allowSells ?? false;
   const minTradeAmount = profile?.minTradeAmount ?? "0";
   const wholeSharesOnly = profile?.wholeSharesOnly ?? false;
