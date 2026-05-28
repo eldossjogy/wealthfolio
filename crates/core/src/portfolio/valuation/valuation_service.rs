@@ -11,7 +11,9 @@ use crate::portfolio::performance::{
 };
 use crate::portfolio::snapshot::{Position, SnapshotServiceTrait};
 use crate::portfolio::valuation::valuation_calculator::calculate_valuation;
-use crate::portfolio::valuation::valuation_model::{DailyAccountValuation, NegativeBalanceInfo};
+use crate::portfolio::valuation::valuation_model::{
+    DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo,
+};
 use crate::portfolio::valuation::ValuationRepositoryTrait;
 use crate::quotes::QuoteServiceTrait;
 use crate::utils::time_utils;
@@ -83,6 +85,23 @@ pub trait ValuationServiceTrait: Send + Sync {
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
     ) -> CoreResult<Vec<DailyAccountValuation>>;
+
+    /// Loads real-account valuation histories in an account-keyed shape.
+    fn get_historical_valuations_by_account(
+        &self,
+        account_ids: &[String],
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<HashMap<String, Vec<DailyAccountValuation>>> {
+        let mut histories = HashMap::with_capacity(account_ids.len());
+        for account_id in account_ids {
+            histories.insert(
+                account_id.clone(),
+                self.get_historical_valuations(account_id, start_date_opt, end_date_opt)?,
+            );
+        }
+        Ok(histories)
+    }
 
     /// Loads the latest valuation history record for a list of accounts.
     ///
@@ -297,6 +316,7 @@ impl ValuationService {
                         net_contribution_base: rust_decimal::Decimal::ZERO,
                         external_inflow_base: rust_decimal::Decimal::ZERO,
                         external_outflow_base: rust_decimal::Decimal::ZERO,
+                        external_flow_source: ExternalFlowSource::Unknown,
                         performance_eligible_value_base: rust_decimal::Decimal::ZERO,
                         calculated_at: valuation.calculated_at,
                     });
@@ -311,6 +331,12 @@ impl ValuationService {
             entry.total_value_base += valuation.total_value_base;
             entry.cost_basis_base += valuation.cost_basis_base;
             entry.net_contribution_base += valuation.net_contribution_base;
+            entry.external_inflow_base += valuation.external_inflow_base;
+            entry.external_outflow_base += valuation.external_outflow_base;
+            entry.external_flow_source = Self::combine_external_flow_sources(
+                entry.external_flow_source,
+                valuation.external_flow_source,
+            );
             entry.performance_eligible_value_base += valuation.performance_eligible_value_base;
             entry.calculated_at = entry.calculated_at.max(valuation.calculated_at);
         }
@@ -416,6 +442,18 @@ impl ValuationService {
         }
     }
 
+    fn combine_external_flow_sources(
+        current: ExternalFlowSource,
+        next: ExternalFlowSource,
+    ) -> ExternalFlowSource {
+        match (current, next) {
+            (ExternalFlowSource::Unknown, source) => source,
+            (source, ExternalFlowSource::Unknown) => source,
+            (left, right) if left == right => left,
+            _ => ExternalFlowSource::Mixed,
+        }
+    }
+
     fn set_external_flows_from_net_contribution_base(values: &mut [DailyAccountValuation]) {
         if values.is_empty() {
             return;
@@ -424,13 +462,25 @@ impl ValuationService {
         values.sort_by_key(|valuation| valuation.valuation_date);
         values[0].external_inflow_base = rust_decimal::Decimal::ZERO;
         values[0].external_outflow_base = rust_decimal::Decimal::ZERO;
+        values[0].external_flow_source = ExternalFlowSource::NetContributionFallback;
 
         for index in 1..values.len() {
+            if values[index].external_flow_source.is_explicit_gross()
+                || !values[index].external_inflow_base.is_zero()
+                || !values[index].external_outflow_base.is_zero()
+            {
+                if values[index].external_flow_source == ExternalFlowSource::Unknown {
+                    values[index].external_flow_source = ExternalFlowSource::StoredGross;
+                }
+                continue;
+            }
+
             let delta =
                 values[index].net_contribution_base - values[index - 1].net_contribution_base;
             let (inflow, outflow) = Self::split_external_flow(delta);
             values[index].external_inflow_base = inflow;
             values[index].external_outflow_base = outflow;
+            values[index].external_flow_source = ExternalFlowSource::NetContributionFallback;
         }
     }
 
@@ -445,23 +495,39 @@ impl ValuationService {
         values.sort_by_key(|valuation| valuation.valuation_date);
         values[0].external_inflow_base = Decimal::ZERO;
         values[0].external_outflow_base = Decimal::ZERO;
+        values[0].external_flow_source = ExternalFlowSource::ActivityDerived;
 
         for index in 1..values.len() {
             let delta =
                 values[index].net_contribution_base - values[index - 1].net_contribution_base;
             if let Some((inflow, outflow)) = flows_by_date.get(&values[index].valuation_date) {
-                let classified_net_flow = *inflow - *outflow;
-                let residual_net_flow = delta - classified_net_flow;
-                let (residual_inflow, residual_outflow) =
-                    Self::split_external_flow(residual_net_flow);
-                values[index].external_inflow_base = *inflow + residual_inflow;
-                values[index].external_outflow_base = *outflow + residual_outflow;
+                values[index].external_inflow_base = *inflow;
+                values[index].external_outflow_base = *outflow;
+                values[index].external_flow_source = ExternalFlowSource::ActivityDerived;
+                continue;
+            }
+
+            if values[index].external_flow_source.is_explicit_gross()
+                || !values[index].external_inflow_base.is_zero()
+                || !values[index].external_outflow_base.is_zero()
+            {
+                if values[index].external_flow_source == ExternalFlowSource::Unknown {
+                    values[index].external_flow_source = ExternalFlowSource::StoredGross;
+                }
+                continue;
+            }
+
+            if delta.is_zero() {
+                values[index].external_inflow_base = Decimal::ZERO;
+                values[index].external_outflow_base = Decimal::ZERO;
+                values[index].external_flow_source = ExternalFlowSource::ActivityDerived;
                 continue;
             }
 
             let (inflow, outflow) = Self::split_external_flow(delta);
             values[index].external_inflow_base = inflow;
             values[index].external_outflow_base = outflow;
+            values[index].external_flow_source = ExternalFlowSource::NetContributionFallback;
         }
     }
 
@@ -483,16 +549,16 @@ impl ValuationService {
         activity: &Activity,
         base_currency: &str,
         activity_date: NaiveDate,
-    ) -> Decimal {
+    ) -> CoreResult<Decimal> {
         let amount = Self::activity_flow_amount(activity);
         if amount.is_zero() {
-            return Decimal::ZERO;
+            return Ok(Decimal::ZERO);
         }
 
         let activity_currency = normalize_currency_code(&activity.currency);
         let base_currency = normalize_currency_code(base_currency);
         if activity_currency == base_currency {
-            return amount;
+            return Ok(amount);
         }
 
         match self.fx_service.convert_currency_for_date(
@@ -501,14 +567,13 @@ impl ValuationService {
             base_currency,
             activity_date,
         ) {
-            Ok(converted) => converted,
-            Err(err) => {
-                warn!(
-                    "Failed to convert external flow {} {}->{} on {} for activity {}: {}. Flow omitted.",
+            Ok(converted) => Ok(converted),
+            Err(err) => Err(CoreError::Calculation(CalculatorError::Calculation(
+                format!(
+                    "Failed to convert external flow {} {}->{} on {} for activity {}: {}",
                     amount, activity_currency, base_currency, activity_date, activity.id, err
-                );
-                Decimal::ZERO
-            }
+                ),
+            ))),
         }
     }
 
@@ -583,7 +648,7 @@ impl ValuationService {
             }
 
             let amount_base =
-                self.activity_flow_amount_base(activity, base_currency, activity_date);
+                self.activity_flow_amount_base(activity, base_currency, activity_date)?;
             if amount_base.is_zero() {
                 continue;
             }
@@ -864,7 +929,19 @@ impl ValuationServiceTrait for ValuationService {
             ))));
         }
 
-        Self::set_external_flows_from_net_contribution_base(&mut newly_calculated_valuations);
+        if let Some(flows_by_date) = self.scoped_external_flows_by_date(
+            &[account_id.to_string()],
+            &base_curr,
+            Some(actual_calculation_start_date),
+            Some(calculation_end_date),
+        )? {
+            Self::set_external_flows_from_activity_map_or_net_contribution_base(
+                &mut newly_calculated_valuations,
+                &flows_by_date,
+            );
+        } else {
+            Self::set_external_flows_from_net_contribution_base(&mut newly_calculated_valuations);
+        }
 
         if let Some(anchor_date) = incremental_anchor_date {
             newly_calculated_valuations.retain(|valuation| valuation.valuation_date != anchor_date);
@@ -986,6 +1063,30 @@ impl ValuationServiceTrait for ValuationService {
         Ok(aggregate)
     }
 
+    fn get_historical_valuations_by_account(
+        &self,
+        account_ids: &[String],
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<HashMap<String, Vec<DailyAccountValuation>>> {
+        let records = self
+            .valuation_repository
+            .get_historical_valuations_for_accounts(account_ids, start_date_opt, end_date_opt)?;
+
+        let mut histories = HashMap::with_capacity(account_ids.len());
+        for account_id in account_ids {
+            histories.insert(account_id.clone(), Vec::new());
+        }
+        for record in records {
+            histories
+                .entry(record.account_id.clone())
+                .or_default()
+                .push(record);
+        }
+
+        Ok(histories)
+    }
+
     fn get_latest_valuations(
         &self,
         account_ids: &[String],
@@ -1050,6 +1151,13 @@ mod tests {
             net_contribution_base,
             external_inflow_base,
             external_outflow_base,
+            external_flow_source: if external_inflow_base.is_zero()
+                && external_outflow_base.is_zero()
+            {
+                ExternalFlowSource::Unknown
+            } else {
+                ExternalFlowSource::StoredGross
+            },
             performance_eligible_value_base: total_value_base,
             calculated_at: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
         }
@@ -1083,7 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn scoped_aggregation_sums_base_values_and_recomputes_external_flows() {
+    fn scoped_aggregation_sums_base_values_and_preserves_child_gross_flows() {
         let histories = vec![
             vec![
                 valuation(
@@ -1155,8 +1263,8 @@ mod tests {
         assert_eq!(aggregate[0].total_value, dec!(100));
         assert_eq!(aggregate[0].total_value_base, dec!(100));
         assert_eq!(aggregate[1].net_contribution_base, dec!(100));
-        assert_eq!(aggregate[1].external_inflow_base, Decimal::ZERO);
-        assert_eq!(aggregate[1].external_outflow_base, Decimal::ZERO);
+        assert_eq!(aggregate[1].external_inflow_base, dec!(50));
+        assert_eq!(aggregate[1].external_outflow_base, dec!(50));
         assert_eq!(aggregate[2].net_contribution_base, dec!(120));
         assert_eq!(aggregate[2].external_inflow_base, dec!(20));
         assert_eq!(aggregate[2].external_outflow_base, Decimal::ZERO);
@@ -1219,10 +1327,80 @@ mod tests {
         assert_eq!(aggregate[1].net_contribution_base, dec!(100));
         assert_eq!(aggregate[1].external_inflow_base, dec!(100));
         assert_eq!(aggregate[1].external_outflow_base, dec!(100));
+        assert_eq!(
+            aggregate[1].external_flow_source,
+            ExternalFlowSource::ActivityDerived
+        );
     }
 
     #[test]
-    fn scoped_aggregation_adds_residual_snapshot_flow_on_activity_flow_date() {
+    fn net_contribution_fallback_marks_source_even_for_zero_net_flow() {
+        let mut values = vec![
+            valuation(
+                "a1",
+                "2026-05-01",
+                dec!(100),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation(
+                "a1",
+                "2026-05-02",
+                dec!(110),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+        ];
+
+        ValuationService::set_external_flows_from_net_contribution_base(&mut values);
+
+        assert_eq!(values[1].external_inflow_base, Decimal::ZERO);
+        assert_eq!(values[1].external_outflow_base, Decimal::ZERO);
+        assert_eq!(
+            values[1].external_flow_source,
+            ExternalFlowSource::NetContributionFallback
+        );
+    }
+
+    #[test]
+    fn activity_flow_map_marks_zero_flow_days_as_activity_derived() {
+        let mut values = vec![
+            valuation(
+                "a1",
+                "2026-05-01",
+                dec!(100),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+            valuation(
+                "a1",
+                "2026-05-02",
+                dec!(110),
+                dec!(100),
+                Decimal::ZERO,
+                Decimal::ZERO,
+            ),
+        ];
+        let flows_by_date = HashMap::new();
+
+        ValuationService::set_external_flows_from_activity_map_or_net_contribution_base(
+            &mut values,
+            &flows_by_date,
+        );
+
+        assert_eq!(values[1].external_inflow_base, Decimal::ZERO);
+        assert_eq!(values[1].external_outflow_base, Decimal::ZERO);
+        assert_eq!(
+            values[1].external_flow_source,
+            ExternalFlowSource::ActivityDerived
+        );
+    }
+
+    #[test]
+    fn scoped_aggregation_does_not_add_residual_snapshot_flow_on_activity_flow_date() {
         let histories = vec![
             vec![
                 valuation(
@@ -1276,7 +1454,7 @@ mod tests {
         .expect("mixed scoped histories should aggregate");
 
         assert_eq!(aggregate[1].net_contribution_base, dec!(1200));
-        assert_eq!(aggregate[1].external_inflow_base, dec!(200));
+        assert_eq!(aggregate[1].external_inflow_base, dec!(100));
         assert_eq!(aggregate[1].external_outflow_base, Decimal::ZERO);
     }
 

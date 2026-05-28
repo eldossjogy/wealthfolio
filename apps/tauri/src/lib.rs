@@ -329,14 +329,14 @@ pub fn run() {
     // Single-instance must be the first plugin registered (per Tauri docs).
     // With the "deep-link" feature, it automatically forwards deep link URLs
     // to the existing instance's on_open_url handler instead of spawning a new process.
-    #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-        // Focus the existing window when a second instance is attempted
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
-    }));
+    // #[cfg(desktop)]
+    // let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    //     // Focus the existing window when a second instance is attempted
+    //     if let Some(window) = app.get_webview_window("main") {
+    //         let _ = window.unminimize();
+    //         let _ = window.set_focus();
+    //     }
+    // }));
 
     let builder = builder
         .plugin(
@@ -511,6 +511,7 @@ pub fn run() {
             commands::portfolio::recalculate_portfolio,
             commands::portfolio::calculate_performance_summary,
             commands::portfolio::calculate_performance_history,
+            commands::portfolio::get_performance_summaries,
             commands::portfolio::save_manual_holdings,
             commands::portfolio::import_holdings_csv,
             commands::portfolio::check_holdings_import,

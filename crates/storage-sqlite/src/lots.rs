@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 use wealthfolio_core::assets::Asset;
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::lots::{
-    AssetLotSource, AssetLotView, LotClosure, LotRecord, LotRepositoryTrait,
+    AssetLotSource, AssetLotView, LotClosure, LotDisposal, LotRecord, LotRepositoryTrait,
 };
 use wealthfolio_core::portfolio::snapshot::Position;
 
@@ -37,7 +37,14 @@ struct LotRecordDB {
     cost_per_unit: String,
     original_cost_basis: String,
     remaining_cost_basis: String,
+    original_cost_basis_base: String,
+    remaining_cost_basis_base: String,
     fee_allocated: String,
+    fee_allocated_base: String,
+    currency: String,
+    base_currency: String,
+    fx_rate_to_base: String,
+    cost_basis_method: String,
     remaining_quantity: String,
     split_ratio: String,
     is_closed: i32,
@@ -45,6 +52,30 @@ struct LotRecordDB {
     close_activity_id: Option<String>,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Queryable, Selectable, Insertable)]
+#[diesel(table_name = crate::schema::lot_disposals)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+struct LotDisposalDB {
+    id: String,
+    lot_id: String,
+    account_id: String,
+    asset_id: String,
+    disposal_activity_id: String,
+    disposal_date: String,
+    quantity: String,
+    proceeds: String,
+    cost_basis: String,
+    realized_pnl: String,
+    proceeds_base: String,
+    cost_basis_base: String,
+    realized_pnl_base: String,
+    currency: String,
+    base_currency: String,
+    fx_rate_to_base: String,
+    cost_basis_method: String,
+    created_at: String,
 }
 
 #[derive(Debug, QueryableByName)]
@@ -74,7 +105,14 @@ impl From<LotRecordDB> for LotRecord {
             cost_per_unit: r.cost_per_unit,
             original_cost_basis: r.original_cost_basis,
             remaining_cost_basis: r.remaining_cost_basis,
+            original_cost_basis_base: r.original_cost_basis_base,
+            remaining_cost_basis_base: r.remaining_cost_basis_base,
             fee_allocated: r.fee_allocated,
+            fee_allocated_base: r.fee_allocated_base,
+            currency: r.currency,
+            base_currency: r.base_currency,
+            fx_rate_to_base: r.fx_rate_to_base,
+            cost_basis_method: r.cost_basis_method,
             split_ratio: r.split_ratio,
             is_closed: r.is_closed != 0,
             close_date: r.close_date,
@@ -97,7 +135,14 @@ impl From<&LotRecord> for LotRecordDB {
             cost_per_unit: r.cost_per_unit.clone(),
             original_cost_basis: r.original_cost_basis.clone(),
             remaining_cost_basis: r.remaining_cost_basis.clone(),
+            original_cost_basis_base: r.original_cost_basis_base.clone(),
+            remaining_cost_basis_base: r.remaining_cost_basis_base.clone(),
             fee_allocated: r.fee_allocated.clone(),
+            fee_allocated_base: r.fee_allocated_base.clone(),
+            currency: r.currency.clone(),
+            base_currency: r.base_currency.clone(),
+            fx_rate_to_base: r.fx_rate_to_base.clone(),
+            cost_basis_method: r.cost_basis_method.clone(),
             remaining_quantity: r.remaining_quantity.clone(),
             split_ratio: r.split_ratio.clone(),
             is_closed: r.is_closed as i32,
@@ -105,6 +150,56 @@ impl From<&LotRecord> for LotRecordDB {
             close_activity_id: r.close_activity_id.clone(),
             created_at: r.created_at.clone(),
             updated_at: r.updated_at.clone(),
+        }
+    }
+}
+
+impl From<&LotDisposal> for LotDisposalDB {
+    fn from(d: &LotDisposal) -> Self {
+        Self {
+            id: d.id.clone(),
+            lot_id: d.lot_id.clone(),
+            account_id: d.account_id.clone(),
+            asset_id: d.asset_id.clone(),
+            disposal_activity_id: d.disposal_activity_id.clone(),
+            disposal_date: d.disposal_date.clone(),
+            quantity: d.quantity.clone(),
+            proceeds: d.proceeds.clone(),
+            cost_basis: d.cost_basis.clone(),
+            realized_pnl: d.realized_pnl.clone(),
+            proceeds_base: d.proceeds_base.clone(),
+            cost_basis_base: d.cost_basis_base.clone(),
+            realized_pnl_base: d.realized_pnl_base.clone(),
+            currency: d.currency.clone(),
+            base_currency: d.base_currency.clone(),
+            fx_rate_to_base: d.fx_rate_to_base.clone(),
+            cost_basis_method: d.cost_basis_method.clone(),
+            created_at: d.created_at.clone(),
+        }
+    }
+}
+
+impl From<LotDisposalDB> for LotDisposal {
+    fn from(d: LotDisposalDB) -> Self {
+        Self {
+            id: d.id,
+            lot_id: d.lot_id,
+            account_id: d.account_id,
+            asset_id: d.asset_id,
+            disposal_activity_id: d.disposal_activity_id,
+            disposal_date: d.disposal_date,
+            quantity: d.quantity,
+            proceeds: d.proceeds,
+            cost_basis: d.cost_basis,
+            realized_pnl: d.realized_pnl,
+            proceeds_base: d.proceeds_base,
+            cost_basis_base: d.cost_basis_base,
+            realized_pnl_base: d.realized_pnl_base,
+            currency: d.currency,
+            base_currency: d.base_currency,
+            fx_rate_to_base: d.fx_rate_to_base,
+            cost_basis_method: d.cost_basis_method,
+            created_at: d.created_at,
         }
     }
 }
@@ -261,6 +356,7 @@ impl LotRepositoryTrait for LotsRepository {
                 .collect()
         };
         let contract_multiplier = load_asset_contract_multiplier(&mut conn, asset_id)?;
+        let disposal_totals = load_lot_disposal_totals_by_lot(&mut conn, asset_id)?;
 
         let mut rows: Vec<AssetLotView> = transaction_rows
             .into_iter()
@@ -269,7 +365,8 @@ impl LotRepositoryTrait for LotsRepository {
                     .get(&row.account_id)
                     .cloned()
                     .unwrap_or_else(|| row.account_id.clone());
-                transaction_lot_view_row(row, account_name, contract_multiplier)
+                let totals = disposal_totals.get(&row.id);
+                transaction_lot_view_row(row, account_name, contract_multiplier, totals)
             })
             .collect();
 
@@ -349,7 +446,18 @@ impl LotRepositoryTrait for LotsRepository {
                                 .eq(diesel::upsert::excluded(dsl::original_cost_basis)),
                             dsl::remaining_cost_basis
                                 .eq(diesel::upsert::excluded(dsl::remaining_cost_basis)),
+                            dsl::original_cost_basis_base
+                                .eq(diesel::upsert::excluded(dsl::original_cost_basis_base)),
+                            dsl::remaining_cost_basis_base
+                                .eq(diesel::upsert::excluded(dsl::remaining_cost_basis_base)),
                             dsl::fee_allocated.eq(diesel::upsert::excluded(dsl::fee_allocated)),
+                            dsl::fee_allocated_base
+                                .eq(diesel::upsert::excluded(dsl::fee_allocated_base)),
+                            dsl::currency.eq(diesel::upsert::excluded(dsl::currency)),
+                            dsl::base_currency.eq(diesel::upsert::excluded(dsl::base_currency)),
+                            dsl::fx_rate_to_base.eq(diesel::upsert::excluded(dsl::fx_rate_to_base)),
+                            dsl::cost_basis_method
+                                .eq(diesel::upsert::excluded(dsl::cost_basis_method)),
                             dsl::split_ratio.eq(diesel::upsert::excluded(dsl::split_ratio)),
                             dsl::is_closed.eq(diesel::upsert::excluded(dsl::is_closed)),
                             dsl::close_date.eq(diesel::upsert::excluded(dsl::close_date)),
@@ -379,11 +487,18 @@ impl LotRepositoryTrait for LotsRepository {
                         remaining_quantity: "0".to_string(),
                         cost_per_unit: closure.cost_per_unit.clone(),
                         original_cost_basis: closure.original_cost_basis.clone(),
+                        original_cost_basis_base: closure.original_cost_basis_base.clone(),
                         // Closure means the lot was fully consumed in one pass — no
                         // remaining basis. The disposed amount is captured in the
                         // separate disposal record (when lot_disposals lands).
                         remaining_cost_basis: "0".to_string(),
+                        remaining_cost_basis_base: "0".to_string(),
                         fee_allocated: closure.fee_allocated.clone(),
+                        fee_allocated_base: closure.fee_allocated_base.clone(),
+                        currency: closure.currency.clone(),
+                        base_currency: closure.base_currency.clone(),
+                        fx_rate_to_base: closure.fx_rate_to_base.clone(),
+                        cost_basis_method: closure.cost_basis_method.clone(),
                         split_ratio: closure.split_ratio.clone(),
                         is_closed: 1,
                         close_date: Some(closure.close_date.clone()),
@@ -420,7 +535,17 @@ impl LotRepositoryTrait for LotsRepository {
                             // disposed amount lives in the (forthcoming)
                             // lot_disposals overlay rather than on the lot.
                             dsl::remaining_cost_basis.eq("0"),
+                            dsl::original_cost_basis_base
+                                .eq(diesel::upsert::excluded(dsl::original_cost_basis_base)),
+                            dsl::remaining_cost_basis_base.eq("0"),
                             dsl::fee_allocated.eq(diesel::upsert::excluded(dsl::fee_allocated)),
+                            dsl::fee_allocated_base
+                                .eq(diesel::upsert::excluded(dsl::fee_allocated_base)),
+                            dsl::currency.eq(diesel::upsert::excluded(dsl::currency)),
+                            dsl::base_currency.eq(diesel::upsert::excluded(dsl::base_currency)),
+                            dsl::fx_rate_to_base.eq(diesel::upsert::excluded(dsl::fx_rate_to_base)),
+                            dsl::cost_basis_method
+                                .eq(diesel::upsert::excluded(dsl::cost_basis_method)),
                             dsl::split_ratio.eq(diesel::upsert::excluded(dsl::split_ratio)),
                             dsl::is_closed.eq(1),
                             dsl::close_date.eq(diesel::upsert::excluded(dsl::close_date)),
@@ -509,6 +634,64 @@ impl LotRepositoryTrait for LotsRepository {
             .await
     }
 
+    async fn sync_lot_disposals_for_account(
+        &self,
+        account_id: &str,
+        affected_activity_ids: &[String],
+        disposals: &[LotDisposal],
+        replace_all: bool,
+    ) -> Result<()> {
+        use crate::schema::lot_disposals::dsl;
+
+        let account_id = account_id.to_string();
+        let affected_activity_ids = affected_activity_ids.to_vec();
+        let db_disposals: Vec<LotDisposalDB> = disposals.iter().map(LotDisposalDB::from).collect();
+
+        self.writer
+            .exec(move |conn| {
+                if replace_all {
+                    diesel::delete(dsl::lot_disposals.filter(dsl::account_id.eq(&account_id)))
+                        .execute(conn)
+                        .map_err(StorageError::from)?;
+                } else if !affected_activity_ids.is_empty() {
+                    diesel::delete(
+                        dsl::lot_disposals
+                            .filter(dsl::account_id.eq(&account_id))
+                            .filter(dsl::disposal_activity_id.eq_any(&affected_activity_ids)),
+                    )
+                    .execute(conn)
+                    .map_err(StorageError::from)?;
+                }
+
+                if !db_disposals.is_empty() {
+                    diesel::insert_into(dsl::lot_disposals)
+                        .values(&db_disposals)
+                        .execute(conn)
+                        .map_err(StorageError::from)?;
+                }
+
+                Ok(())
+            })
+            .await
+    }
+
+    async fn get_lot_disposals_for_account(&self, account_id: &str) -> Result<Vec<LotDisposal>> {
+        use crate::schema::lot_disposals::dsl;
+
+        let mut conn = get_connection(&self.pool)?;
+        let rows: Vec<LotDisposalDB> = dsl::lot_disposals
+            .filter(dsl::account_id.eq(account_id))
+            .order((
+                dsl::disposal_date.asc(),
+                dsl::disposal_activity_id.asc(),
+                dsl::id.asc(),
+            ))
+            .load(&mut conn)
+            .map_err(StorageError::from)?;
+
+        Ok(rows.into_iter().map(LotDisposal::from).collect())
+    }
+
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>> {
         // Quantities are stored as TEXT for Decimal precision, so SUM() in
         // SQLite would force a lossy REAL cast. Fetch only the columns we
@@ -566,14 +749,50 @@ fn parse_nonzero_ratio(value: &str) -> Decimal {
     }
 }
 
+#[derive(Default)]
+struct LotDisposalTotals {
+    proceeds: Decimal,
+    cost_basis: Decimal,
+    realized_pnl: Decimal,
+    realized_pnl_base: Decimal,
+}
+
+fn load_lot_disposal_totals_by_lot(
+    conn: &mut SqliteConnection,
+    asset_id: &str,
+) -> Result<HashMap<String, LotDisposalTotals>> {
+    use crate::schema::lot_disposals::dsl;
+
+    let rows: Vec<LotDisposalDB> = dsl::lot_disposals
+        .filter(dsl::asset_id.eq(asset_id))
+        .load(conn)
+        .map_err(StorageError::from)?;
+
+    let mut totals = HashMap::<String, LotDisposalTotals>::new();
+    for row in rows {
+        let entry = totals.entry(row.lot_id).or_default();
+        entry.proceeds += parse_decimal(&row.proceeds);
+        entry.cost_basis += parse_decimal(&row.cost_basis);
+        entry.realized_pnl += parse_decimal(&row.realized_pnl);
+        entry.realized_pnl_base += parse_decimal(&row.realized_pnl_base);
+    }
+
+    Ok(totals)
+}
+
 fn transaction_lot_view_row(
     row: LotRecordDB,
     account_name: String,
     contract_multiplier: Decimal,
+    disposal_totals: Option<&LotDisposalTotals>,
 ) -> AssetLotView {
     let split_ratio = parse_nonzero_ratio(&row.split_ratio);
     let remaining_quantity = parse_decimal(&row.remaining_quantity);
     let original_quantity = parse_decimal(&row.original_quantity);
+    let disposal_proceeds = disposal_totals.map(|totals| totals.proceeds);
+    let disposal_cost_basis = disposal_totals.map(|totals| totals.cost_basis);
+    let realized_pnl = disposal_totals.map(|totals| totals.realized_pnl);
+    let realized_pnl_base = disposal_totals.map(|totals| totals.realized_pnl_base);
 
     AssetLotView {
         id: row.id,
@@ -585,14 +804,20 @@ fn transaction_lot_view_row(
         original_quantity,
         remaining_quantity,
         cost_basis: parse_decimal(&row.remaining_cost_basis),
+        cost_basis_base: Some(parse_decimal(&row.remaining_cost_basis_base)),
         unit_cost: parse_decimal(&row.cost_per_unit),
         fees: parse_decimal(&row.fee_allocated),
+        fx_rate_to_base: Some(parse_decimal(&row.fx_rate_to_base)),
         split_ratio,
         contract_multiplier,
         acquisition_date: Some(row.open_date),
         snapshot_date: None,
         is_closed: row.is_closed != 0,
         close_date: row.close_date,
+        disposal_proceeds,
+        disposal_cost_basis,
+        realized_pnl,
+        realized_pnl_base,
     }
 }
 
@@ -617,14 +842,20 @@ fn snapshot_position_view_row(
         original_quantity: quantity,
         remaining_quantity: quantity,
         cost_basis: total_cost_basis,
+        cost_basis_base: None,
         unit_cost: average_cost,
         fees: Decimal::ZERO,
+        fx_rate_to_base: None,
         split_ratio: Decimal::ONE,
         contract_multiplier,
         acquisition_date: None,
         snapshot_date: Some(snapshot.snapshot_date.clone()),
         is_closed: false,
         close_date: None,
+        disposal_proceeds: None,
+        disposal_cost_basis: None,
+        realized_pnl: None,
+        realized_pnl_base: None,
     }
 }
 
@@ -991,7 +1222,14 @@ mod tests {
             cost_per_unit: "150".to_string(),
             original_cost_basis: "15000".to_string(),
             remaining_cost_basis: "15000".to_string(),
+            original_cost_basis_base: "15000".to_string(),
+            remaining_cost_basis_base: "15000".to_string(),
             fee_allocated: "0".to_string(),
+            fee_allocated_base: "0".to_string(),
+            currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: "1".to_string(),
+            cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
             is_closed: false,
             close_date: None,
@@ -1291,7 +1529,14 @@ mod tests {
             original_quantity: "100".to_string(),
             cost_per_unit: "150".to_string(),
             original_cost_basis: "15010".to_string(),
+            original_cost_basis_base: "15010".to_string(),
+            remaining_cost_basis_base: "0".to_string(),
             fee_allocated: "10".to_string(),
+            fee_allocated_base: "10".to_string(),
+            currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: "1".to_string(),
+            cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
         };
         repo.sync_lots_for_account("acc1", &[], &[closure_v1])
@@ -1315,7 +1560,14 @@ mod tests {
             original_quantity: "100".to_string(),
             cost_per_unit: "200".to_string(),
             original_cost_basis: "20025".to_string(),
+            original_cost_basis_base: "20025".to_string(),
+            remaining_cost_basis_base: "0".to_string(),
             fee_allocated: "25".to_string(),
+            fee_allocated_base: "25".to_string(),
+            currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: "1".to_string(),
+            cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
         };
         repo.sync_lots_for_account("acc1", &[], &[closure_v2])

@@ -220,7 +220,7 @@ mod tests {
     use rust_decimal::Decimal;
     use wealthfolio_core::{
         accounts::{Account, TrackingMode},
-        valuation::DailyAccountValuation,
+        valuation::{DailyAccountValuation, ExternalFlowSource},
     };
 
     #[tokio::test]
@@ -353,6 +353,7 @@ mod tests {
             net_contribution_base: Decimal::ZERO,
             external_inflow_base: Decimal::ZERO,
             external_outflow_base: Decimal::ZERO,
+            external_flow_source: ExternalFlowSource::Unknown,
             performance_eligible_value_base: Decimal::ZERO,
             calculated_at: Utc::now(),
         }

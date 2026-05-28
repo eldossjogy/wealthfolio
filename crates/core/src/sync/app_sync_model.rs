@@ -19,6 +19,8 @@ pub const APP_SYNC_TABLES: &[&str] = &[
     // Depends on: platforms
     "accounts",
     // Depends on: accounts
+    "account_accounting_settings",
+    // Depends on: accounts
     "import_runs",
     // Depends on: accounts, assets, import_runs
     "activities",

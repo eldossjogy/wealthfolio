@@ -3875,6 +3875,21 @@ mod tests {
             .get("AAPL")
             .expect("Position should exist");
         assert_eq!(position.quantity, dec!(5)); // 10 - 5 = 5 remaining
+
+        let disposals = calculator.take_lot_disposals("acc_sell_cad_usd", "FIFO");
+        assert_eq!(disposals.len(), 1);
+        let disposal = &disposals[0];
+        assert_eq!(disposal.currency, "USD");
+        assert_eq!(Decimal::from_str(&disposal.proceeds).unwrap(), dec!(653.35));
+        assert_eq!(Decimal::from_str(&disposal.cost_basis).unwrap(), dec!(500));
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl).unwrap(),
+            dec!(153.35)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl_base).unwrap(),
+            Decimal::ZERO
+        );
     }
 
     #[test]
@@ -4436,6 +4451,86 @@ mod tests {
         );
         assert_eq!(after_sell.cash_balances.get("EUR"), Some(&expected_eur),);
         assert_eq!(after_sell.cash_total_account_currency, expected_eur,);
+    }
+
+    #[test]
+    fn lot_disposal_base_pnl_uses_acquisition_and_disposal_fx_rates() {
+        let buy_date_str = "2024-01-10";
+        let sell_date_str = "2024-02-10";
+        let buy_date = NaiveDate::from_str(buy_date_str).unwrap();
+        let sell_date = NaiveDate::from_str(sell_date_str).unwrap();
+
+        let mut fx_service = MockFxService::new();
+        fx_service.add_bidirectional_rate("USD", "CAD", buy_date, dec!(1.30));
+        fx_service.add_bidirectional_rate("USD", "CAD", sell_date, dec!(1.40));
+        let calculator = create_calculator(
+            Arc::new(fx_service),
+            Arc::new(RwLock::new("CAD".to_string())),
+        );
+
+        let mut prev = create_initial_snapshot("acc_1", "CAD", "2024-01-09");
+        prev.cash_balances.insert("CAD".to_string(), dec!(5000));
+        prev.cash_total_account_currency = dec!(5000);
+        prev.cash_total_base_currency = dec!(5000);
+
+        let buy = create_activity_with_fx_rate(
+            "buy_fx_lot",
+            ActivityType::Buy,
+            "AAPL",
+            dec!(10),
+            dec!(100),
+            dec!(5),
+            "USD",
+            buy_date_str,
+            Some(dec!(1.30)),
+        );
+        let after_buy = calculator
+            .calculate_next_holdings(&prev, &[buy], buy_date)
+            .unwrap()
+            .snapshot;
+
+        let sell = create_activity_with_fx_rate(
+            "sell_fx_lot",
+            ActivityType::Sell,
+            "AAPL",
+            dec!(10),
+            dec!(120),
+            Decimal::ZERO,
+            "USD",
+            sell_date_str,
+            Some(dec!(1.40)),
+        );
+        let _after_sell = calculator
+            .calculate_next_holdings(&after_buy, &[sell], sell_date)
+            .unwrap()
+            .snapshot;
+
+        let disposals = calculator.take_lot_disposals("acc_1", "FIFO");
+        assert_eq!(disposals.len(), 1);
+        let disposal = &disposals[0];
+        assert_eq!(disposal.cost_basis_method, "FIFO");
+        assert_eq!(
+            Decimal::from_str(&disposal.proceeds_base).unwrap(),
+            dec!(1680)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.cost_basis_base).unwrap(),
+            dec!(1306.50)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl_base).unwrap(),
+            dec!(373.50)
+        );
+        for amount in [
+            &disposal.proceeds_base,
+            &disposal.cost_basis_base,
+            &disposal.realized_pnl_base,
+        ] {
+            let decimal_places = amount
+                .split_once('.')
+                .map_or(0, |(_, decimals)| decimals.len());
+            assert!(decimal_places <= crate::constants::DECIMAL_PRECISION as usize);
+        }
     }
 
     #[test]

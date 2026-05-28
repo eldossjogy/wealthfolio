@@ -119,6 +119,8 @@ enum SyncRowFilter {
     SpendingSettingsOverwriteRisk,
     UserTaxonomies,
     SyncableTaxonomyCategories,
+    UserSyncableLots,
+    UserSyncableLotDisposals,
     UserModifiedBudgetGroups,
     UserModifiedBudgetGroupAssignments,
     UserModifiedSpendingEventTypes,
@@ -140,6 +142,51 @@ impl SyncRowFilter {
                  OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
                  OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
                      AND (source_record_id IS NULL OR TRIM(source_record_id) = ''))"
+            }
+            Self::UserSyncableLots => {
+                "account_id IN (SELECT id FROM accounts) \
+                 AND (open_activity_id IS NULL OR open_activity_id IN ( \
+                    SELECT id FROM activities WHERE \
+                        is_user_modified = 1 \
+                        OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                        OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                            AND (source_record_id IS NULL OR TRIM(source_record_id) = '')) \
+                 )) \
+                 AND (close_activity_id IS NULL OR close_activity_id IN ( \
+                    SELECT id FROM activities WHERE \
+                        is_user_modified = 1 \
+                        OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                        OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                            AND (source_record_id IS NULL OR TRIM(source_record_id) = '')) \
+                 ))"
+            }
+            Self::UserSyncableLotDisposals => {
+                "account_id IN (SELECT id FROM accounts) \
+                 AND disposal_activity_id IN ( \
+                    SELECT id FROM activities WHERE \
+                        is_user_modified = 1 \
+                        OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                        OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                            AND (source_record_id IS NULL OR TRIM(source_record_id) = '')) \
+                 ) \
+                 AND lot_id IN ( \
+                    SELECT id FROM lots WHERE \
+                        account_id IN (SELECT id FROM accounts) \
+                        AND (open_activity_id IS NULL OR open_activity_id IN ( \
+                            SELECT id FROM activities WHERE \
+                                is_user_modified = 1 \
+                                OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                                OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                                    AND (source_record_id IS NULL OR TRIM(source_record_id) = '')) \
+                        )) \
+                        AND (close_activity_id IS NULL OR close_activity_id IN ( \
+                            SELECT id FROM activities WHERE \
+                                is_user_modified = 1 \
+                                OR UPPER(COALESCE(source_system, '')) IN ('MANUAL', 'CSV') \
+                                OR ((import_run_id IS NULL OR TRIM(import_run_id) = '') \
+                                    AND (source_record_id IS NULL OR TRIM(source_record_id) = '')) \
+                        )) \
+                 )"
             }
             Self::UserImportTemplates => "UPPER(scope) != 'SYSTEM'",
             Self::SpendingSettings => "setting_key IN ('spending.enabled', 'spending.account_ids')",
@@ -589,6 +636,14 @@ const SYNC_TABLE_SNAPSHOT_FILTERS: &[SyncTableFilterSpec] = &[
     SyncTableFilterSpec {
         table: "activities",
         filter: SyncRowFilter::UserSyncableActivities,
+    },
+    SyncTableFilterSpec {
+        table: "lots",
+        filter: SyncRowFilter::UserSyncableLots,
+    },
+    SyncTableFilterSpec {
+        table: "lot_disposals",
+        filter: SyncRowFilter::UserSyncableLotDisposals,
     },
     // Only the spending module's app_settings keys participate in sync.
     SyncTableFilterSpec {

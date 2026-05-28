@@ -197,12 +197,15 @@ where
     let mut matches = candidates.iter().filter(|candidate| {
         activity_local_date(candidate) == activity_date && transfer_match(activity, candidate)
     });
-    let first = matches.next()?;
-    if matches.next().is_none() {
-        Some(first.account_id.clone())
-    } else {
-        None
+    if let Some(first) = matches.next() {
+        return if matches.next().is_none() {
+            Some(first.account_id.clone())
+        } else {
+            None
+        };
     }
+
+    None
 }
 
 /// Classify flow for portfolio-level performance.
@@ -449,6 +452,29 @@ mod tests {
         assert_eq!(
             infer_paired_transfer_account_id(&transfer_out, &candidates, local_date),
             Some("account-2".to_string())
+        );
+    }
+
+    #[test]
+    fn unlinked_multi_currency_transfer_pair_is_not_inferred_without_reliable_match() {
+        let mut transfer_out = create_test_activity("TRANSFER_OUT");
+        transfer_out.id = "out".to_string();
+        transfer_out.activity_date = Utc.with_ymd_and_hms(2026, 5, 2, 12, 0, 0).unwrap();
+        transfer_out.currency = "CAD".to_string();
+        transfer_out.amount = Some(rust_decimal::Decimal::from(140));
+
+        let mut transfer_in = create_test_activity("TRANSFER_IN");
+        transfer_in.id = "in".to_string();
+        transfer_in.account_id = "account-2".to_string();
+        transfer_in.activity_date = transfer_out.activity_date;
+        transfer_in.currency = "USD".to_string();
+        transfer_in.amount = Some(rust_decimal::Decimal::from(100));
+
+        let candidates = vec![transfer_out.clone(), transfer_in];
+
+        assert_eq!(
+            infer_paired_transfer_account_id(&transfer_out, &candidates, local_date),
+            None
         );
     }
 

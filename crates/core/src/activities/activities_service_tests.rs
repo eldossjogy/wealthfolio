@@ -17,8 +17,8 @@ mod tests {
         AccountStateSnapshot, SnapshotRecalcMode, SnapshotServiceTrait,
     };
     use crate::portfolio::valuation::{
-        DailyAccountValuation, NegativeBalanceInfo, ValuationRepositoryTrait, ValuationService,
-        ValuationServiceTrait,
+        DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo, ValuationRepositoryTrait,
+        ValuationService, ValuationServiceTrait,
     };
     use crate::quotes::service::ProviderInfo;
     use crate::quotes::{
@@ -1421,11 +1421,21 @@ mod tests {
 
         fn get_historical_valuations(
             &self,
-            _account_id: &str,
-            _start_date: Option<NaiveDate>,
-            _end_date: Option<NaiveDate>,
+            account_id: &str,
+            start_date: Option<NaiveDate>,
+            end_date: Option<NaiveDate>,
         ) -> Result<Vec<DailyAccountValuation>> {
-            unimplemented!()
+            let mut rows: Vec<_> = self
+                .valuations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|valuation| valuation.account_id == account_id)
+                .filter(|valuation| Self::in_range(valuation, start_date, end_date))
+                .cloned()
+                .collect();
+            Self::sort_valuations(&mut rows);
+            Ok(rows)
         }
 
         fn get_historical_valuations_for_accounts(
@@ -1630,6 +1640,7 @@ mod tests {
             net_contribution_base: net_contribution,
             external_inflow_base: Decimal::ZERO,
             external_outflow_base: Decimal::ZERO,
+            external_flow_source: ExternalFlowSource::Unknown,
             performance_eligible_value_base: total_value,
             calculated_at: DateTime::<Utc>::from_timestamp(0, 0).unwrap(),
         }
@@ -6436,11 +6447,9 @@ mod tests {
             .await
             .expect("performance should use imported activity flows");
 
-        assert_eq!(performance.cumulative_twr, Some(dec!(0.1)));
-        assert_eq!(performance.cumulative_modified_dietz, Some(dec!(0.1)));
-        assert_eq!(performance.period_return, Some(dec!(0.1)));
-        assert_eq!(performance.period_gain, dec!(100));
-        assert_eq!(performance.returns.last().unwrap().value, dec!(0.1));
+        assert_eq!(performance.returns.twr, Some(dec!(0.1)));
+        assert_eq!(performance.attribution.unrealized_pnl_change, dec!(100));
+        assert_eq!(performance.series.last().unwrap().value, dec!(0.1));
     }
 
     #[tokio::test]

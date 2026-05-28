@@ -21,9 +21,7 @@ pub struct TotalReturn {
 pub enum ReturnMethod {
     #[default]
     TimeWeighted,
-    MoneyWeighted,
-    ModifiedDietz,
-    SimpleReturn,
+    ValueReturn,
     SymbolPriceBased,
     NotApplicable,
 }
@@ -34,50 +32,122 @@ pub struct ReturnData {
     pub value: Decimal,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct PerformanceMetrics {
+pub struct PerformanceScopeDescriptor {
     pub id: String,
-    pub returns: Vec<ReturnData>,
-    pub period_start_date: Option<NaiveDate>,
-    pub period_end_date: Option<NaiveDate>,
     pub currency: String,
-    /// Period gain in dollars (SOTA: change in unrealized P&L for HOLDINGS mode)
-    pub period_gain: Decimal,
-    /// Period return percentage (SOTA formula for HOLDINGS mode).
-    /// None when period return cannot be computed (e.g. start_value ≤ 0).
-    pub period_return: Option<Decimal>,
-    /// Time-weighted return (None for HOLDINGS mode - requires cash flow tracking)
-    pub cumulative_twr: Option<Decimal>,
-    /// Legacy field for backward compatibility
-    pub gain_loss_amount: Option<Decimal>,
-    /// Annualized TWR (None for HOLDINGS mode)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformancePeriod {
+    pub start_date: Option<NaiveDate>,
+    pub end_date: Option<NaiveDate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceReturns {
+    pub twr: Option<Decimal>,
     pub annualized_twr: Option<Decimal>,
-    pub simple_return: Decimal,
-    pub annualized_simple_return: Decimal,
-    /// Modified Dietz return (None for HOLDINGS mode - requires cash flow tracking)
-    pub cumulative_modified_dietz: Option<Decimal>,
-    /// Annualized Modified Dietz (None for HOLDINGS mode)
-    pub annualized_modified_dietz: Option<Decimal>,
-    /// Legacy alias for Modified Dietz
-    pub cumulative_mwr: Option<Decimal>,
-    /// Legacy alias for annualized Modified Dietz
-    pub annualized_mwr: Option<Decimal>,
-    pub volatility: Decimal,
-    pub max_drawdown: Decimal,
-    /// Indicates if this is a HOLDINGS mode account (no cash flow tracking)
+    pub irr: Option<Decimal>,
+    pub annualized_irr: Option<Decimal>,
+    pub value_return: Option<Decimal>,
+    pub annualized_value_return: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceAttribution {
+    pub contributions: Decimal,
+    pub distributions: Decimal,
+    pub income: Decimal,
+    pub realized_pnl: Decimal,
+    pub unrealized_pnl_change: Decimal,
+    pub fx_effect: Decimal,
+    pub fees: Decimal,
+    pub taxes: Decimal,
+    pub residual: Decimal,
+}
+
+impl Default for PerformanceAttribution {
+    fn default() -> Self {
+        Self {
+            contributions: Decimal::ZERO,
+            distributions: Decimal::ZERO,
+            income: Decimal::ZERO,
+            realized_pnl: Decimal::ZERO,
+            unrealized_pnl_change: Decimal::ZERO,
+            fx_effect: Decimal::ZERO,
+            fees: Decimal::ZERO,
+            taxes: Decimal::ZERO,
+            residual: Decimal::ZERO,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceRisk {
+    pub volatility: Option<Decimal>,
+    pub max_drawdown: Option<Decimal>,
+    pub peak_date: Option<NaiveDate>,
+    pub trough_date: Option<NaiveDate>,
+    pub recovery_date: Option<NaiveDate>,
+    pub drawdown_duration_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DataQualityStatus {
+    Ok,
+    Partial,
+    NoData,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceDataQuality {
+    pub status: DataQualityStatus,
+    pub warnings: Vec<String>,
+    pub not_applicable_reasons: Vec<String>,
+}
+
+impl PerformanceDataQuality {
+    pub fn ok() -> Self {
+        Self {
+            status: DataQualityStatus::Ok,
+            warnings: Vec::new(),
+            not_applicable_reasons: Vec::new(),
+        }
+    }
+
+    pub fn no_data(reason: impl Into<String>) -> Self {
+        Self {
+            status: DataQualityStatus::NoData,
+            warnings: Vec::new(),
+            not_applicable_reasons: vec![reason.into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceResult {
+    pub scope: PerformanceScopeDescriptor,
+    pub period: PerformancePeriod,
+    pub mode: ReturnMethod,
+    pub returns: PerformanceReturns,
+    pub attribution: PerformanceAttribution,
+    pub risk: PerformanceRisk,
+    pub data_quality: PerformanceDataQuality,
+    pub series: Vec<ReturnData>,
     #[serde(default)]
     pub is_holdings_mode: bool,
-    /// Method used for the headline period return.
-    #[serde(default)]
-    pub return_method: ReturnMethod,
-    /// True when a scoped performance result combines transaction-mode and
-    /// holdings-mode accounts.
     #[serde(default)]
     pub is_mixed_tracking_mode: bool,
-    /// User-facing caveats for scoped methods that cannot expose every metric.
-    #[serde(default)]
-    pub warnings: Vec<String>,
 }
 
 // This struct now only holds the calculated performance metrics.
@@ -91,7 +161,5 @@ pub struct SimplePerformanceMetrics {
     pub total_value: Option<Decimal>,
     pub total_gain_loss_amount: Option<Decimal>,
     pub cumulative_return_percent: Option<Decimal>,
-    pub day_gain_loss_amount: Option<Decimal>,
-    pub day_return_percent_mod_dietz: Option<Decimal>,
     pub portfolio_weight: Option<Decimal>,
 }

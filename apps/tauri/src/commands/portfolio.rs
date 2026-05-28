@@ -19,7 +19,11 @@ use wealthfolio_core::{
     holdings::Holding,
     income::IncomeSummary,
     lots::AssetLotView,
-    performance::{PerformanceMetrics, ReturnMethod, SimplePerformanceMetrics},
+    performance::{
+        DataQualityStatus, PerformanceAttribution, PerformanceDataQuality, PerformancePeriod,
+        PerformanceResult, PerformanceReturns, PerformanceRisk, PerformanceScopeDescriptor,
+        ReturnMethod, SimplePerformanceMetrics,
+    },
     portfolio::snapshot::{
         CashBalanceInput, ManualHoldingInput, ManualSnapshotRequest, ManualSnapshotService,
         SnapshotSource,
@@ -46,6 +50,12 @@ pub struct AccountScopeInput {
     pub account_id: Option<String>,
     pub portfolio_id: Option<String>,
     pub account_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceSummaryScopeInput {
+    pub account_ids: Vec<String>,
 }
 
 impl AccountScopeInput {
@@ -75,6 +85,13 @@ impl AccountScopeInput {
             other => Err(format!("unknown filter type: '{other}'")),
         }
     }
+}
+
+fn performance_summary_scope_key(account_ids: &[String]) -> String {
+    let mut sorted = account_ids.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    format!("accounts:{}", sorted.join(","))
 }
 
 fn account_tracking_modes(
@@ -114,7 +131,9 @@ fn performance_account_ids(
         .map_err(|e| e.to_string())?
         .into_iter()
         .filter(|account| {
-            account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            account.is_active
+                && !account.is_archived
+                && account_supports_purpose(&account.account_type, AccountPurpose::Performance)
         })
         .map(|account| account.id)
         .collect())
@@ -499,15 +518,7 @@ pub async fn calculate_accounts_simple_performance(
     );
 
     let ids_to_process: Vec<String> = if account_ids.is_empty() {
-        debug!("Input account_ids is empty, fetching active accounts.");
-        state
-            .account_service()
-            .get_active_accounts()
-            .map_err(|e| format!("Failed to fetch active accounts: {}", e))?
-            .into_iter()
-            .filter(|acc| account_supports_purpose(&acc.account_type, AccountPurpose::Performance))
-            .map(|acc| acc.id)
-            .collect()
+        Vec::new()
     } else {
         let requested = state
             .account_service()
@@ -515,7 +526,11 @@ pub async fn calculate_accounts_simple_performance(
             .map_err(|e| format!("Failed to fetch accounts: {}", e))?;
         requested
             .into_iter()
-            .filter(|acc| account_supports_purpose(&acc.account_type, AccountPurpose::Performance))
+            .filter(|acc| {
+                acc.is_active
+                    && !acc.is_archived
+                    && account_supports_purpose(&acc.account_type, AccountPurpose::Performance)
+            })
             .map(|acc| acc.id)
             .collect()
     };
@@ -542,7 +557,7 @@ pub async fn calculate_performance_history(
     end_date: Option<String>,
     tracking_mode: Option<String>,
     filter: Option<AccountScopeInput>,
-) -> Result<PerformanceMetrics, String> {
+) -> Result<PerformanceResult, String> {
     debug!(
         "Calculating performance for type: {}, id: {}, start: {:?}, end: {:?}, tracking_mode: {:?}",
         item_type, item_id, start_date, end_date, tracking_mode
@@ -579,15 +594,22 @@ pub async fn calculate_performance_history(
             .map_err(|e| e.to_string())?;
         let account_ids = performance_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
         if account_ids.is_empty() {
-            return Ok(empty_performance_metrics(
+            let mut result = empty_performance_metrics(
                 &resolved.scope_id,
                 resolved.base_currency.clone(),
                 start_date_opt,
                 end_date_opt,
-            ));
+            );
+            if !resolved.account_ids.is_empty() {
+                result.data_quality.warnings.push(
+                    "Requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                        .to_string(),
+                );
+            }
+            return Ok(result);
         }
         let tracking_modes = account_tracking_modes(state.inner().as_ref(), &account_ids)?;
-        state
+        let mut result = state
             .performance_service()
             .calculate_performance_history_for_accounts(
                 &resolved.scope_id,
@@ -598,14 +620,25 @@ pub async fn calculate_performance_history(
                 end_date_opt,
             )
             .await
-            .map_err(|e| format!("Failed to calculate performance: {}", e))
+            .map_err(|e| format!("Failed to calculate performance: {}", e))?;
+        if account_ids.len() != resolved.account_ids.len() {
+            result.data_quality.warnings.push(
+                "Some requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                    .to_string(),
+            );
+            result.data_quality.status = DataQualityStatus::Partial;
+        }
+        Ok(result)
     } else {
-        if item_type == "account" {
+        let authoritative_tracking_mode = if item_type == "account" {
             let account = state
                 .account_service()
                 .get_account(&item_id)
                 .map_err(|e| format!("Failed to fetch account: {}", e))?;
-            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            if !account.is_active
+                || account.is_archived
+                || !account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            {
                 return Ok(empty_performance_metrics(
                     &item_id,
                     account.currency,
@@ -613,7 +646,10 @@ pub async fn calculate_performance_history(
                     end_date_opt,
                 ));
             }
-        }
+            Some(account.tracking_mode)
+        } else {
+            tracking_mode_opt
+        };
 
         state
             .performance_service()
@@ -622,7 +658,7 @@ pub async fn calculate_performance_history(
                 &item_id,
                 start_date_opt,
                 end_date_opt,
-                tracking_mode_opt,
+                authoritative_tracking_mode,
             )
             .await
             .map_err(|e| format!("Failed to calculate performance: {}", e))
@@ -634,30 +670,44 @@ fn empty_performance_metrics(
     currency: String,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
-) -> PerformanceMetrics {
-    PerformanceMetrics {
-        id: id.to_string(),
-        returns: Vec::new(),
-        period_start_date: start_date,
-        period_end_date: end_date,
-        currency,
-        period_gain: Decimal::ZERO,
-        period_return: Some(Decimal::ZERO),
-        cumulative_twr: Some(Decimal::ZERO),
-        gain_loss_amount: None,
-        annualized_twr: Some(Decimal::ZERO),
-        simple_return: Decimal::ZERO,
-        annualized_simple_return: Decimal::ZERO,
-        cumulative_modified_dietz: Some(Decimal::ZERO),
-        annualized_modified_dietz: Some(Decimal::ZERO),
-        cumulative_mwr: Some(Decimal::ZERO),
-        annualized_mwr: Some(Decimal::ZERO),
-        volatility: Decimal::ZERO,
-        max_drawdown: Decimal::ZERO,
+) -> PerformanceResult {
+    PerformanceResult {
+        scope: PerformanceScopeDescriptor {
+            id: id.to_string(),
+            currency,
+        },
+        period: PerformancePeriod {
+            start_date,
+            end_date,
+        },
+        mode: ReturnMethod::NotApplicable,
+        returns: PerformanceReturns {
+            twr: None,
+            annualized_twr: None,
+            irr: None,
+            annualized_irr: None,
+            value_return: None,
+            annualized_value_return: None,
+        },
+        attribution: PerformanceAttribution::default(),
+        risk: PerformanceRisk {
+            volatility: None,
+            max_drawdown: None,
+            peak_date: None,
+            trough_date: None,
+            recovery_date: None,
+            drawdown_duration_days: None,
+        },
+        data_quality: PerformanceDataQuality {
+            status: DataQualityStatus::NoData,
+            warnings: Vec::new(),
+            not_applicable_reasons: vec![
+                "Performance unavailable for this account type.".to_string()
+            ],
+        },
+        series: Vec::new(),
         is_holdings_mode: false,
-        return_method: ReturnMethod::NotApplicable,
         is_mixed_tracking_mode: false,
-        warnings: Vec::new(),
     }
 }
 
@@ -673,7 +723,7 @@ pub async fn calculate_performance_summary(
     end_date: Option<String>,
     tracking_mode: Option<String>,
     filter: Option<AccountScopeInput>,
-) -> Result<PerformanceMetrics, String> {
+) -> Result<PerformanceResult, String> {
     debug!(
         "Calculating performance summary for type: {}, id: {}, start: {:?}, end: {:?}, tracking_mode: {:?}",
         item_type, item_id, start_date, end_date, tracking_mode
@@ -710,15 +760,22 @@ pub async fn calculate_performance_summary(
             .map_err(|e| e.to_string())?;
         let account_ids = performance_account_ids(state.inner().as_ref(), &resolved.account_ids)?;
         if account_ids.is_empty() {
-            return Ok(empty_performance_metrics(
+            let mut result = empty_performance_metrics(
                 &resolved.scope_id,
                 resolved.base_currency.clone(),
                 start_date_opt,
                 end_date_opt,
-            ));
+            );
+            if !resolved.account_ids.is_empty() {
+                result.data_quality.warnings.push(
+                    "Requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                        .to_string(),
+                );
+            }
+            return Ok(result);
         }
         let tracking_modes = account_tracking_modes(state.inner().as_ref(), &account_ids)?;
-        state
+        let mut result = state
             .performance_service()
             .calculate_performance_summary_for_accounts(
                 &resolved.scope_id,
@@ -729,14 +786,25 @@ pub async fn calculate_performance_summary(
                 end_date_opt,
             )
             .await
-            .map_err(|e| format!("Failed to calculate performance: {}", e))
+            .map_err(|e| format!("Failed to calculate performance: {}", e))?;
+        if account_ids.len() != resolved.account_ids.len() {
+            result.data_quality.warnings.push(
+                "Some requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                    .to_string(),
+            );
+            result.data_quality.status = DataQualityStatus::Partial;
+        }
+        Ok(result)
     } else {
-        if item_type == "account" {
+        let authoritative_tracking_mode = if item_type == "account" {
             let account = state
                 .account_service()
                 .get_account(&item_id)
                 .map_err(|e| format!("Failed to fetch account: {}", e))?;
-            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            if !account.is_active
+                || account.is_archived
+                || !account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            {
                 return Ok(empty_performance_metrics(
                     &item_id,
                     account.currency,
@@ -744,7 +812,10 @@ pub async fn calculate_performance_summary(
                     end_date_opt,
                 ));
             }
-        }
+            Some(account.tracking_mode)
+        } else {
+            tracking_mode_opt
+        };
 
         state
             .performance_service()
@@ -753,11 +824,83 @@ pub async fn calculate_performance_summary(
                 &item_id,
                 start_date_opt,
                 end_date_opt,
-                tracking_mode_opt,
+                authoritative_tracking_mode,
             )
             .await
             .map_err(|e| format!("Failed to calculate performance: {}", e))
     }
+}
+
+#[tauri::command]
+pub async fn get_performance_summaries(
+    state: State<'_, Arc<ServiceContext>>,
+    scopes: Vec<PerformanceSummaryScopeInput>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<HashMap<String, PerformanceResult>, String> {
+    let start_date_opt: Option<chrono::NaiveDate> = start_date
+        .map(|date_str| {
+            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                .map_err(|e| format!("Invalid start date format '{}': {}", date_str, e))
+        })
+        .transpose()?;
+
+    let end_date_opt: Option<chrono::NaiveDate> = end_date
+        .map(|date_str| {
+            chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                .map_err(|e| format!("Invalid end date format '{}': {}", date_str, e))
+        })
+        .transpose()?;
+
+    let base_currency = state.get_base_currency();
+    let mut results = HashMap::new();
+
+    for scope in scopes {
+        let key = performance_summary_scope_key(&scope.account_ids);
+        let account_ids = performance_account_ids(state.inner().as_ref(), &scope.account_ids)?;
+
+        if account_ids.is_empty() {
+            let mut result = empty_performance_metrics(
+                &key,
+                base_currency.clone(),
+                start_date_opt,
+                end_date_opt,
+            );
+            if !scope.account_ids.is_empty() {
+                result.data_quality.warnings.push(
+                    "Requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                        .to_string(),
+                );
+            }
+            results.insert(key.clone(), result);
+            continue;
+        }
+
+        let mut result = state
+            .performance_service()
+            .calculate_performance_summary_for_accounts(
+                &key,
+                &account_ids,
+                &base_currency,
+                &account_tracking_modes(state.inner().as_ref(), &account_ids)?,
+                start_date_opt,
+                end_date_opt,
+            )
+            .await
+            .map_err(|e| format!("Failed to calculate performance summary: {}", e))?;
+
+        if account_ids.len() != scope.account_ids.len() {
+            result.data_quality.warnings.push(
+                "Some requested accounts were excluded because they are inactive, archived, or not eligible for performance."
+                    .to_string(),
+            );
+            result.data_quality.status = DataQualityStatus::Partial;
+        }
+
+        results.insert(key, result);
+    }
+
+    Ok(results)
 }
 
 /// Input for a single holding when saving manual holdings

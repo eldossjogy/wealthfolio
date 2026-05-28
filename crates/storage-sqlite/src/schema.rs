@@ -226,6 +226,7 @@ diesel::table! {
         net_contribution_base -> Text,
         external_inflow_base -> Text,
         external_outflow_base -> Text,
+        external_flow_source -> Text,
         performance_eligible_value_base -> Text,
         calculated_at -> Text,
     }
