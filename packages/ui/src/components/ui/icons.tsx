@@ -730,15 +730,17 @@ const IconsInternal = {
     </g>
   ),
 
-  SellDot: ({ cx, cy}: IconProps) => {
-    return (<g transform={`translate(${cx}, ${cy})`}>
-      <circle r={14} fill="#3b82f6" opacity={0.15} />
-      <circle r={10} fill="#3b82f6" />
-      <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
-        S
-      </text>
-    </g>
-  )},
+  SellDot: ({ cx, cy }: IconProps) => {
+    return (
+      <g transform={`translate(${cx}, ${cy})`}>
+        <circle r={14} fill="#3b82f6" opacity={0.15} />
+        <circle r={10} fill="#3b82f6" />
+        <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
+          S
+        </text>
+      </g>
+    );
+  },
 };
 
 /**
