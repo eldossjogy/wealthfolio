@@ -18,6 +18,7 @@ interface PerformanceChartProps {
     id: string;
     name: string;
     returns: ReturnData[];
+    isReference?: boolean;
   }[];
 }
 
@@ -130,7 +131,8 @@ export function PerformanceChart({ data }: PerformanceChartProps) {
                 type="linear"
                 dataKey={series.id}
                 stroke={PERFORMANCE_CHART_COLORS[seriesIndex % PERFORMANCE_CHART_COLORS.length]}
-                strokeWidth={2}
+                strokeWidth={series.isReference ? 1.75 : 2}
+                strokeDasharray={series.isReference ? "5 5" : undefined}
                 dot={false}
                 name={series.name}
               />

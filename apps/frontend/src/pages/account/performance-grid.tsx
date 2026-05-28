@@ -1,26 +1,28 @@
 import {
   HOLDINGS_MODE_MAX_DRAWDOWN_INFO,
   HOLDINGS_MODE_VOLATILITY_INFO,
+  IRR_RETURN_INFO,
   MAX_DRAWDOWN_INFO,
   MetricDisplay,
-  MODIFIED_DIETZ_RETURN_INFO,
   TIME_WEIGHTED_RETURN_INFO,
+  VALUE_RETURN_INFO,
   VOLATILITY_INFO,
 } from "@/components/metric-display";
 import { Card, CardContent } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Icons } from "@wealthfolio/ui";
 import { Alert, AlertDescription } from "@wealthfolio/ui/components/ui/alert";
-import { PerformanceMetrics } from "@/lib/types";
+import { PerformanceResult } from "@/lib/types";
+import { performancePeriodPnl } from "@/lib/performance";
 import { cn } from "@/lib/utils";
 import React from "react";
 
 export interface PerformanceGridProps {
-  performance?: PerformanceMetrics | null;
+  performance?: PerformanceResult | null;
   isLoading?: boolean;
   performanceError?: string;
   className?: string;
-  /** If true, shows only Volatility/MaxDrawdown and hides flow-adjusted returns. */
+  /** If true, shows holdings-mode return cards instead of transaction return cards. */
   isHoldingsMode?: boolean;
 }
 
@@ -68,27 +70,20 @@ export const PerformanceGrid: React.FC<PerformanceGridProps> = ({
     );
   }
 
-  // Destructure performance metrics, providing default 0 for potentially missing values
-  // Note: Use nullish coalescing since destructuring defaults only apply to undefined, not null
-  const {
-    cumulativeTwr,
-    annualizedTwr,
-    cumulativeModifiedDietz,
-    annualizedModifiedDietz,
-    cumulativeMwr,
-    annualizedMwr,
-    volatility = 0,
-    maxDrawdown = 0,
-  } = performance;
-
-  // Convert null to undefined for optional props that may be null from the API
-  const twrValue = cumulativeTwr ?? undefined;
-  const twrAnnualized = annualizedTwr ?? undefined;
-  const modifiedDietzValue = cumulativeModifiedDietz ?? cumulativeMwr ?? undefined;
-  const modifiedDietzAnnualized = annualizedModifiedDietz ?? annualizedMwr ?? undefined;
+  const twrValue = performance.returns.twr ?? undefined;
+  const twrAnnualized = performance.returns.annualizedTwr ?? undefined;
+  const irrValue = performance.returns.irr ?? undefined;
+  const irrAnnualized = performance.returns.annualizedIrr ?? undefined;
+  const valueReturn = performance.returns.valueReturn ?? undefined;
+  const periodPnl = performancePeriodPnl(performance) ?? undefined;
+  const volatility = performance.risk.volatility ?? undefined;
+  const maxDrawdown = performance.risk.maxDrawdown ?? undefined;
+  const notApplicableReasons = performance.dataQuality.notApplicableReasons ?? [];
+  const reasonFor = (needle: string) =>
+    notApplicableReasons.find((reason) => reason.toLowerCase().includes(needle.toLowerCase()));
 
   // For HOLDINGS mode accounts:
-  // - TWR/Modified Dietz are NOT available (require cash flow tracking)
+  // - TWR/IRR are NOT available (require cash flow tracking)
   // - Volatility and Max Drawdown ARE available (computed from equity curve)
   if (isHoldingsMode) {
     return (
@@ -97,15 +92,35 @@ export const PerformanceGrid: React.FC<PerformanceGridProps> = ({
           <CardContent className="p-0">
             <div className="grid grid-cols-2 gap-5">
               <MetricDisplay
+                label="Value Return"
+                value={valueReturn}
+                emptyReason={reasonFor("value return")}
+                infoText={VALUE_RETURN_INFO}
+                isPercentage={true}
+                className="border-muted/30 bg-muted/30 rounded-md border"
+              />
+              <MetricDisplay
+                label="Total P&L"
+                value={periodPnl}
+                emptyReason={reasonFor("P&L") ?? reasonFor("performance")}
+                infoText="Total profit or loss over the selected period."
+                isPercentage={false}
+                currency={performance.scope.currency}
+                className="border-muted/30 bg-muted/30 rounded-md border"
+              />
+              <MetricDisplay
                 label="Volatility"
                 value={volatility}
+                emptyReason={reasonFor("volatility")}
                 infoText={HOLDINGS_MODE_VOLATILITY_INFO}
-                isPercentage={false}
+                isPercentage={true}
+                tone="neutral"
                 className="border-muted/30 bg-muted/30 rounded-md border"
               />
               <MetricDisplay
                 label="Max Drawdown"
-                value={maxDrawdown * -1}
+                value={maxDrawdown}
+                emptyReason={reasonFor("drawdown")}
                 infoText={HOLDINGS_MODE_MAX_DRAWDOWN_INFO}
                 isPercentage={true}
                 className="border-muted/30 bg-muted/30 rounded-md border"
@@ -126,28 +141,33 @@ export const PerformanceGrid: React.FC<PerformanceGridProps> = ({
               label="Time Weighted Return"
               value={twrValue}
               annualizedValue={twrAnnualized}
+              emptyReason={reasonFor("TWR")}
               infoText={TIME_WEIGHTED_RETURN_INFO}
               isPercentage={true}
               className="border-muted/30 bg-muted/30 rounded-md border"
             />
             <MetricDisplay
-              label="Modified Dietz"
-              value={modifiedDietzValue}
-              annualizedValue={modifiedDietzAnnualized}
-              infoText={MODIFIED_DIETZ_RETURN_INFO}
+              label="IRR"
+              value={irrValue}
+              annualizedValue={irrAnnualized}
+              emptyReason={reasonFor("IRR")}
+              infoText={IRR_RETURN_INFO}
               isPercentage={true}
               className="border-muted/30 bg-muted/30 rounded-md border"
             />
             <MetricDisplay
               label="Volatility"
               value={volatility}
+              emptyReason={reasonFor("volatility")}
               infoText={VOLATILITY_INFO}
-              isPercentage={false}
+              isPercentage={true}
+              tone="neutral"
               className="border-muted/30 bg-muted/30 rounded-md border"
             />
             <MetricDisplay
               label="Max Drawdown"
-              value={maxDrawdown * -1}
+              value={maxDrawdown}
+              emptyReason={reasonFor("drawdown")}
               infoText={MAX_DRAWDOWN_INFO}
               isPercentage={true}
               className="border-muted/30 bg-muted/30 rounded-md border"

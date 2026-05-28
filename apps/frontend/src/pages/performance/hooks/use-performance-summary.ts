@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { PerformanceMetrics } from "@/lib/types";
+import { PerformanceResult } from "@/lib/types";
 import { calculatePerformanceSummary } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
 
@@ -26,7 +26,7 @@ export const usePerformanceSummary = ({
   startDate,
   endDate,
 }: UsePerformanceSummaryParams) => {
-  return useQuery<PerformanceMetrics, Error>({
+  return useQuery<PerformanceResult, Error>({
     // Unique query key based on the function and its parameters
     queryKey: [QueryKeys.PERFORMANCE_SUMMARY, itemId, { startDate, endDate }],
 

@@ -4,7 +4,6 @@ import { format, isValid, parse, parseISO } from "date-fns";
 import { twMerge } from "tailwind-merge";
 import { getQuoteUnitCurrency } from "@wealthfolio/ui/lib/currencies";
 import { DECIMAL_PRECISION, DISPLAY_DECIMAL_PRECISION } from "./constants";
-import { AccountValuation } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -378,57 +377,6 @@ export function safeDivide(numerator: number, denominator: number): number {
     return 0;
   }
   return numerator / denominator;
-}
-
-export function calculatePerformanceMetrics(
-  history: AccountValuation[] | null | undefined,
-  isAllTime = false,
-): { gainLossAmount: number; simpleReturn: number } {
-  if (!history?.length) return { gainLossAmount: 0, simpleReturn: 0 };
-
-  const first = history[0];
-  const last = history[history.length - 1];
-
-  const valueFor = (valuation: AccountValuation) => Number(valuation.totalValueBase);
-  const contributionFor = (valuation: AccountValuation) => Number(valuation.netContributionBase);
-
-  const ncFlow = contributionFor(last) - contributionFor(first);
-  const mvGain = valueFor(last) - valueFor(first);
-  const gain$ = mvGain - ncFlow; // profit / loss
-
-  // ── all‑time ROI ────────────────────────────────────────────────
-  if (isAllTime) {
-    const totalNC = contributionFor(last);
-    const gain = valueFor(last) - totalNC;
-
-    return {
-      gainLossAmount: gain,
-      simpleReturn: totalNC !== 0 ? gain / totalNC : 0,
-    };
-  }
-
-  // ── period Perf: daily time‑weighted return (TWR) ───────────────
-  let twr = 1;
-  for (let i = 1; i < history.length; i++) {
-    const prev = history[i - 1];
-    const curr = history[i];
-
-    const cf = contributionFor(curr) - contributionFor(prev); // deposit(+)/withdraw(-)
-    const mv0 = valueFor(prev);
-    if (mv0 === 0) {
-      continue; // skip day zero if portfolio just opened
-    }
-
-    const dailyReturn = (valueFor(curr) - cf) / mv0;
-    twr *= dailyReturn;
-  }
-
-  const result = {
-    gainLossAmount: gain$,
-    simpleReturn: twr - 1, // e.g. 0.034 -> 3.4 %
-  };
-
-  return result;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { AccountValuation, PerformanceMetrics } from "@/lib/types";
+import { AccountValuation, PerformanceResult } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import { PerformanceGrid } from "@/pages/account/performance-grid";
 import {
@@ -80,7 +80,7 @@ const EditableBalance: React.FC<EditableBalanceProps> = ({ account, initialBalan
 
 interface AccountMetricsProps {
   valuation?: AccountValuation | null;
-  performance?: PerformanceMetrics | null;
+  performance?: PerformanceResult | null;
   className?: string;
   isLoading?: boolean;
   isPerformanceLoading?: boolean;
@@ -88,7 +88,7 @@ interface AccountMetricsProps {
   /** If true, hides the inline balance edit (HOLDINGS mode accounts should use the Update Holdings sheet) */
   hideBalanceEdit?: boolean;
   balanceLabel?: string;
-  /** If true, shows only Volatility/MaxDrawdown and hides flow-adjusted returns. */
+  /** If true, shows holdings-mode return cards instead of transaction return cards. */
   isHoldingsMode?: boolean;
 }
 
@@ -194,8 +194,9 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
         },
       ];
 
-  const formattedStartDate = performance ? formatDate(performance.periodStartDate || "") : "";
-  const formattedEndDate = performance ? formatDate(performance.periodEndDate || "") : "";
+  const formattedStartDate = performance ? formatDate(performance.period.startDate || "") : "";
+  const formattedEndDate = performance ? formatDate(performance.period.endDate || "") : "";
+  const hasPerformancePeriod = Boolean(formattedStartDate && formattedEndDate);
   const lastUpdated = valuation?.calculatedAt ? formatDate(valuation.calculatedAt) : null;
 
   return (
@@ -240,7 +241,7 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
         ) : isHoldingsMode ? (
           <>
             <p className="text-muted-foreground m-0 p-0 text-xs">
-              Flow-adjusted returns require transaction tracking.
+              TWR and IRR require transaction tracking.
             </p>
             {lastUpdated && (
               <p className="text-muted-foreground m-0 p-0 text-xs">Last updated: {lastUpdated}</p>
@@ -248,7 +249,11 @@ const AccountMetrics: React.FC<AccountMetricsProps> = ({
           </>
         ) : (
           <p className="text-muted-foreground m-0 p-0 text-xs">
-            From {formattedStartDate} to {formattedEndDate}
+            {hasPerformancePeriod
+              ? `From ${formattedStartDate} to ${formattedEndDate}`
+              : lastUpdated
+                ? `Last updated: ${lastUpdated}`
+                : ""}
           </p>
         )}
       </CardFooter>
