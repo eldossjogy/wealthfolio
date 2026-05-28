@@ -87,9 +87,17 @@ interface AssetDetailData {
   portfolioPercent: number;
   todaysReturn: number | null;
   todaysReturnPercent: number | null;
-  totalReturn: number;
-  totalReturnPercent: number;
+  unrealizedPnl: number | null;
+  unrealizedPnlPercent: number | null;
+  realizedPnl: number | null;
+  realizedPnlPercent: number | null;
+  income: number | null;
+  fxEffect: number | null;
+  priceReturnPercent: number | null;
+  totalPnl: number | null;
+  totalPnlPercent: number | null;
   currency: string;
+  baseCurrency: string;
   quoteCurrency: string | null;
   quote: {
     open: number;
@@ -424,11 +432,28 @@ export const AssetProfilePage = () => {
   >({
     queryKey: ["activities", "byAsset", assetId],
     queryFn: async () => {
-      const response = await searchActivities(0, 200, { symbol: assetId }, "", {
-        id: "date",
-        desc: true,
-      });
-      return response.data;
+      const pageSize = 500;
+      const activities: ActivityDetails[] = [];
+      let page = 0;
+
+      while (true) {
+        const response = await searchActivities(page, pageSize, { symbol: assetId }, "", {
+          id: "date",
+          desc: true,
+        });
+        activities.push(...response.data);
+
+        if (
+          activities.length >= response.meta.totalRowCount ||
+          response.data.length === 0 ||
+          response.data.length < pageSize
+        ) {
+          break;
+        }
+        page += 1;
+      }
+
+      return activities;
     },
     enabled: !!assetId && !isAssetProfileLoading,
   });
@@ -508,15 +533,24 @@ export const AssetProfilePage = () => {
       totalGainPercent,
       calculatedAt,
     };
-  }, [holding, assetProfile, quote, assetId]);
+  }, [holding, assetProfile, quote, assetId, baseCurrency]);
 
   const symbolHolding = useMemo((): AssetDetailData | null => {
-    if (!holding) return null;
+    const instrument = holding?.instrument;
+    const asset = assetProfile;
+    const hasAssetHistory = assetLots.length > 0 || assetActivities.length > 0 || quote != null;
+    if (!holding && !hasAssetHistory) return null;
+
+    const displayCurrency =
+      holding?.localCurrency ??
+      quote?.currency ??
+      instrument?.currency ??
+      asset?.quoteCcy ??
+      baseCurrency;
+    const quantity = Number(holding?.quantity ?? 0);
 
     const averageCostPrice =
-      holding.costBasis?.local && holding.quantity !== 0
-        ? holding.costBasis.local / holding.quantity
-        : 0;
+      holding?.costBasis?.local && quantity !== 0 ? Number(holding.costBasis.local) / quantity : 0;
 
     const quoteData = quote
       ? {
@@ -532,26 +566,105 @@ export const AssetProfilePage = () => {
         }
       : null;
 
-    const todaysReturn = holding.dayChange?.local;
-    const todaysReturnPercent = holding.dayChangePct;
+    const todaysReturn = holding?.dayChange?.local;
+    const todaysReturnPercent = holding?.dayChangePct;
+    const priceReturnPercent =
+      quoteHistory && quoteHistory.length >= 2
+        ? (() => {
+            const ordered = [...quoteHistory].sort(
+              (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+            );
+            const first = ordered[0]?.close;
+            const last = ordered.at(-1)?.close;
+            return first && last != null && first !== 0 ? Number(last / first - 1) : null;
+          })()
+        : null;
+    const incomeActivities = assetActivities.filter((activity) =>
+      ["DIVIDEND", "INTEREST", "INCOME"].includes(activity.activityType),
+    );
+    const hasNonDisplayIncome = incomeActivities.some(
+      (activity) => activity.currency !== displayCurrency,
+    );
+    const income = hasNonDisplayIncome
+      ? null
+      : incomeActivities.reduce((sum, activity) => {
+          const amount = Number(activity.amount ?? 0);
+          return Number.isFinite(amount) ? sum + amount : sum;
+        }, 0);
+    const realizedLots = assetLots.filter(
+      (lot) => lot.source === "TRANSACTION_LOT" && lot.realizedPnl != null,
+    );
+    const realizedPnlFromLots = realizedLots.reduce(
+      (sum, lot) => sum + Number(lot.realizedPnl ?? 0),
+      0,
+    );
+    const realizedCostBasisFromLots = realizedLots.reduce(
+      (sum, lot) => sum + Number(lot.disposalCostBasis ?? 0),
+      0,
+    );
+    const realizedPnl =
+      holding?.realizedGain?.local != null
+        ? Number(holding.realizedGain.local)
+        : realizedLots.length > 0
+          ? realizedPnlFromLots
+          : null;
+    const realizedPnlPercent =
+      holding?.realizedGainPct != null
+        ? Number(holding.realizedGainPct)
+        : realizedLots.length > 0 && realizedCostBasisFromLots > 0
+          ? realizedPnlFromLots / realizedCostBasisFromLots
+          : null;
+    const acquisitionCostBasisBase = assetLots
+      .filter(
+        (lot) => lot.source === "TRANSACTION_LOT" && !lot.isClosed && lot.costBasisBase != null,
+      )
+      .reduce((sum, lot) => sum + Number(lot.costBasisBase ?? 0), 0);
+    const fxEffect =
+      acquisitionCostBasisBase > 0 && holding?.costBasis?.base != null
+        ? Number(holding.costBasis.base) - acquisitionCostBasisBase
+        : null;
+    const totalPnl =
+      holding?.totalGain?.local != null ? Number(holding.totalGain.local) : realizedPnl;
+    const totalPnlPercent =
+      holding?.totalGainPct != null ? Number(holding.totalGainPct) : realizedPnlPercent;
 
     return {
-      numShares: Number(holding.quantity),
-      marketValue: Number(holding.marketValue.local ?? 0),
-      costBasis: Number(holding.costBasis?.local ?? 0),
+      numShares: quantity,
+      marketValue: Number(holding?.marketValue.local ?? 0),
+      costBasis: Number(holding?.costBasis?.local ?? 0),
       averagePrice: Number(averageCostPrice),
-      portfolioPercent: Number(holding.weight ?? 0),
+      portfolioPercent: Number(holding?.weight ?? 0),
       todaysReturn: todaysReturn != null ? Number(todaysReturn) : null,
       todaysReturnPercent: todaysReturnPercent != null ? Number(todaysReturnPercent) : null,
-      totalReturn: Number(holding.totalGain?.local ?? 0),
-      totalReturnPercent: Number(holding.totalGainPct ?? 0),
-      currency: holding.localCurrency ?? holding.instrument?.currency ?? baseCurrency,
+      unrealizedPnl:
+        holding?.unrealizedGain?.local != null ? Number(holding.unrealizedGain.local) : null,
+      unrealizedPnlPercent:
+        holding?.unrealizedGainPct != null ? Number(holding.unrealizedGainPct) : null,
+      realizedPnl,
+      realizedPnlPercent,
+      income,
+      fxEffect,
+      priceReturnPercent,
+      totalPnl,
+      totalPnlPercent,
+      currency: displayCurrency,
+      baseCurrency: holding?.baseCurrency ?? baseCurrency,
       quoteCurrency: quoteData?.quoteCurrency ?? null,
       quote: quoteData?.quote ?? null,
       bondSpec: bondSpec ?? null,
       optionSpec: optionSpec ?? null,
     };
-  }, [holding, quote, bondSpec, optionSpec]);
+  }, [
+    holding,
+    quote,
+    quoteHistory,
+    assetActivities,
+    assetLots,
+    assetProfile,
+    bondSpec,
+    optionSpec,
+    baseCurrency,
+  ]);
 
   // Top toggle is only used for alternative assets (Overview | Values).
   const altToggleItems = useMemo(
@@ -668,9 +781,9 @@ export const AssetProfilePage = () => {
       />
     );
 
-    const noopEdit = () => {};
-    const noopDelete = () => {};
-    const noopDuplicate = async () => {};
+    const noopEdit = () => undefined;
+    const noopDelete = () => undefined;
+    const noopDuplicate = () => Promise.resolve();
 
     const activitiesContent = isMobile ? (
       <ActivityTableMobile
@@ -685,7 +798,7 @@ export const AssetProfilePage = () => {
         activities={assetActivities}
         isLoading={isActivitiesLoading}
         sorting={[{ id: "date", desc: true }]}
-        onSortingChange={() => {}}
+        onSortingChange={() => undefined}
         handleEdit={noopEdit}
         handleDelete={noopDelete}
       />

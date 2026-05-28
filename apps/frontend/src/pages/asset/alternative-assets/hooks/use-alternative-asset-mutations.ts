@@ -9,6 +9,7 @@ import {
   unlinkLiability,
 } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import { logger } from "@/adapters";
 import type {
   CreateAlternativeAssetRequest,
@@ -34,6 +35,7 @@ export function useAlternativeAssetMutations(options: UseAlternativeAssetMutatio
     queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH_HISTORY] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.ALTERNATIVE_HOLDINGS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSET_DATA] });
+    invalidatePerformanceCaches(queryClient);
   };
 
   const createMutation = useMutation({

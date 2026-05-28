@@ -53,7 +53,7 @@ export const OnboardingStep1: React.FC = () => {
 
           {/* Limit & Note - softened */}
           <div className="text-muted-foreground/70 relative mt-auto space-y-2 text-xs">
-            <p>Limit: No cashflow-adjusted performance.</p>
+            <p>Limit: No transaction-based TWR/IRR.</p>
             <p>Note: Requires maintaining holdings/positions.</p>
           </div>
         </Card>

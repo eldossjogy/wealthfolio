@@ -1,12 +1,15 @@
+import { calculatePerformanceSummary } from "@/adapters";
 import { HistoryChart } from "@/components/history-chart";
 import { useHapticFeedback } from "@/hooks";
 import { useHoldings } from "@/hooks/use-holdings";
 import { useValuationHistory } from "@/hooks/use-valuation-history";
-import { HoldingType, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
+import { HoldingType, isAlternativeAssetKind } from "@/lib/constants";
+import { performanceHeadlineReturn, performancePeriodPnl } from "@/lib/performance";
+import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 import { DateRange, TimePeriod } from "@/lib/types";
-import { calculatePerformanceMetrics } from "@/lib/utils";
 import { PortfolioUpdateTrigger } from "@/pages/dashboard/portfolio-update-trigger";
+import { useQuery } from "@tanstack/react-query";
 import type { TimePeriod as UITimePeriod } from "@wealthfolio/ui";
 import {
   GainAmount,
@@ -15,7 +18,10 @@ import {
   IntervalSelector,
   usePersistentState,
 } from "@wealthfolio/ui";
+import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
+import { format } from "date-fns";
 import { useMemo, useState } from "react";
 import { AccountsSummary } from "./accounts-summary";
 import Balance from "./balance";
@@ -48,7 +54,7 @@ export function DashboardContent() {
       // Exclude cash holdings from display
       if (h.holdingType === HoldingType.CASH) return false;
       // Exclude alternative assets from display
-      if (h.assetKind && isAlternativeAssetKind(h.assetKind as AssetKind)) return false;
+      if (h.assetKind && isAlternativeAssetKind(h.assetKind)) return false;
       return true;
     });
   }, [allHoldings]);
@@ -58,7 +64,7 @@ export function DashboardContent() {
     if (!allHoldings) return 0;
     return allHoldings
       .filter((h) => {
-        return !(h.assetKind && isAlternativeAssetKind(h.assetKind as AssetKind));
+        return !(h.assetKind && isAlternativeAssetKind(h.assetKind));
       })
       .reduce((acc, holding) => acc + (holding.marketValue?.base ?? 0), 0);
   }, [allHoldings]);
@@ -68,10 +74,31 @@ export function DashboardContent() {
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
-  // Calculate gainLossAmount and simpleReturn from valuationHistory
-  const { gainLossAmount, simpleReturn } = useMemo(() => {
-    return calculatePerformanceMetrics(valuationHistory, isAllTime);
-  }, [valuationHistory, isAllTime]);
+  const startDate =
+    !isAllTime && dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
+  const endDate = !isAllTime && dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
+  const datesReady = isAllTime || (!!startDate && !!endDate);
+
+  const { data: portfolioPerformance, isLoading: isPortfolioPerformanceLoading } = useQuery({
+    queryKey: [QueryKeys.PERFORMANCE_SUMMARY, "dashboard", "all", startDate, endDate],
+    queryFn: () =>
+      calculatePerformanceSummary({
+        itemType: "account",
+        itemId: "portfolio:all",
+        startDate,
+        endDate,
+        filter: { type: "all" },
+      }),
+    enabled: datesReady,
+    staleTime: 30 * 1000,
+    retry: false,
+  });
+
+  const gainLossAmount = performancePeriodPnl(portfolioPerformance);
+  const simpleReturn = performanceHeadlineReturn(portfolioPerformance);
+  const performanceMessages = (portfolioPerformance?.dataQuality.warnings ?? []).filter(
+    (message) => !message.toLowerCase().startsWith("volatility is annualized"),
+  );
 
   const currentValuation = useMemo(() => {
     return valuationHistory && valuationHistory.length > 0
@@ -116,7 +143,7 @@ export function DashboardContent() {
                 displayCurrency={true}
               />
               <div className="text-md flex space-x-3">
-                {isValuationHistoryLoading && !valuationHistory ? (
+                {isPortfolioPerformanceLoading ? (
                   <div className="flex items-center gap-3 pt-1">
                     <Skeleton className="h-4 w-24" />
                     <div className="border-secondary my-1 border-r pr-2" />
@@ -124,18 +151,46 @@ export function DashboardContent() {
                   </div>
                 ) : (
                   <>
-                    <GainAmount
-                      className="lg:text-md text-sm font-light"
-                      value={gainLossAmount}
-                      currency={baseCurrency}
-                      displayCurrency={false}
-                    ></GainAmount>
+                    {gainLossAmount == null ? (
+                      <span className="text-muted-foreground lg:text-md text-sm font-light">
+                        N/A
+                      </span>
+                    ) : (
+                      <GainAmount
+                        className="lg:text-md text-sm font-light"
+                        value={gainLossAmount}
+                        currency={baseCurrency}
+                        displayCurrency={false}
+                      />
+                    )}
                     <div className="border-secondary my-1 border-r pr-2" />
-                    <GainPercent
-                      className="lg:text-md text-sm font-light"
-                      value={simpleReturn}
-                      animated={true}
-                    ></GainPercent>
+                    {simpleReturn == null ? (
+                      <span className="text-muted-foreground lg:text-md text-sm font-light">
+                        N/A
+                      </span>
+                    ) : (
+                      <GainPercent
+                        className="lg:text-md text-sm font-light"
+                        value={simpleReturn}
+                        animated={true}
+                      />
+                    )}
+                    {performanceMessages.length > 0 && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex cursor-help items-center">
+                            <Icons.AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-80">
+                          <div className="space-y-1">
+                            {performanceMessages.slice(0, 3).map((message) => (
+                              <p key={message}>{message}</p>
+                            ))}
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
                   </>
                 )}
                 {selectedIntervalDescription && (

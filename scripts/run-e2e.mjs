@@ -46,6 +46,14 @@ const spawnCommand = (command, args, extraEnv = {}) =>
     env: { ...process.env, ...extraEnv },
   });
 
+const devServerPort = (() => {
+  try {
+    return new URL(DEV_SERVER_URL).port || "1420";
+  } catch {
+    return "1420";
+  }
+})();
+
 const runPlaywrightTests = (extraArgs = []) =>
   new Promise((resolve, reject) => {
     const tests = spawnCommand("pnpm", ["exec", "playwright", "test", ...extraArgs]);
@@ -67,6 +75,7 @@ const run = async () => {
     WEALTHFOLIO_FIXTURE_DIR: QUOTE_FIXTURE_DIR,
     WEALTHFOLIO_FIXTURE_AS_OF: process.env.WEALTHFOLIO_FIXTURE_AS_OF || "2026-05-12",
     RUST_LOG: process.env.WF_E2E_RUST_LOG || DEFAULT_RUST_LOG,
+    VITE_DEV_PORT: devServerPort,
   });
 
   const cleanup = async () => {

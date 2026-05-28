@@ -95,7 +95,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
       if (typeof startValue === "number" && typeof endValue === "number") {
         return {
           ganAmount: endValue - startValue,
-          percentage: isValidStartValue ? (endValue - startValue) / startValue : 0,
+          percentage: isValidStartValue ? (endValue - startValue) / startValue : null,
           calculatedAt: lastFilteredDate,
         };
       }
@@ -115,7 +115,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
       percentage:
         isValidStartValue && typeof endValue === "number"
           ? (endValue - startValue) / startValue
-          : 0,
+          : null,
       calculatedAt: lastFilteredDate,
     };
   }, [filteredData, selectedIntervalCode, quoteHistory, totalGainAmount, totalGainPercent]);
@@ -156,7 +156,8 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
                       currency={currency}
                       isHidden={isBalanceHidden}
                     />{" "}
-                    ({formatPercent(percentage)}) {selectedIntervalDesc}
+                    ({percentage == null ? "N/A" : formatPercent(percentage)}){" "}
+                    {selectedIntervalDesc}
                   </p>
                 </div>
               </HoverCardTrigger>
