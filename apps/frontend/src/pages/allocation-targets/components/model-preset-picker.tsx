@@ -93,7 +93,7 @@ export function ModelPresetPicker({
               {preset.risk}
             </span>
           </div>
-          <p className="text-muted-foreground mt-1 text-[11px] leading-relaxed">
+          <p className="text-muted-foreground mt-1 min-h-[2.5rem] text-[11px] leading-relaxed">
             {preset.description}
           </p>
           <div className="mt-auto space-y-3 pt-8">

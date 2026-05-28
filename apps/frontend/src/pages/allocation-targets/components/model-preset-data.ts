@@ -98,6 +98,32 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     weights: { "30": 25, "35": 25, "55": 20, "40": 10, "10": 10, "20": 10 },
   },
 
+  // ── Risk Category ────────────────────────────────────────────────────────────
+  {
+    id: "risk_conservative",
+    taxonomyId: "risk_category",
+    name: "Conservative",
+    description: "Heavy low-risk base, minimal high-risk exposure",
+    risk: "Conservative",
+    weights: { LOW: 70, MEDIUM: 25, HIGH: 5 },
+  },
+  {
+    id: "risk_balanced",
+    taxonomyId: "risk_category",
+    name: "Balanced",
+    description: "Even split between low and medium risk",
+    risk: "Moderate",
+    weights: { LOW: 30, MEDIUM: 50, HIGH: 20 },
+  },
+  {
+    id: "risk_aggressive",
+    taxonomyId: "risk_category",
+    name: "Aggressive",
+    description: "Growth-oriented — majority in medium and high risk",
+    risk: "Aggressive",
+    weights: { LOW: 10, MEDIUM: 30, HIGH: 60 },
+  },
+
   // ── Regions ──────────────────────────────────────────────────────────────────
   {
     id: "regions_global_cap",
