@@ -3,7 +3,8 @@ use log::debug;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::errors::Result as CoreResult;
+use crate::errors::{Error as CoreError, Result as CoreResult, ValidationError};
+use crate::taxonomies::TaxonomyServiceTrait;
 
 use super::model::{
     NewTargetAllocationNode, NewTargetProfile, ProfileStatus, TargetAllocationNode, TargetProfile,
@@ -62,11 +63,18 @@ pub trait TargetProfileServiceTrait: Send + Sync {
 
 pub struct TargetProfileService {
     repository: Arc<dyn TargetProfileRepositoryTrait>,
+    taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
 }
 
 impl TargetProfileService {
-    pub fn new(repository: Arc<dyn TargetProfileRepositoryTrait>) -> Self {
-        Self { repository }
+    pub fn new(
+        repository: Arc<dyn TargetProfileRepositoryTrait>,
+        taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+    ) -> Self {
+        Self {
+            repository,
+            taxonomy_service,
+        }
     }
 
     fn now() -> String {
@@ -108,15 +116,8 @@ impl TargetProfileServiceTrait for TargetProfileService {
             scope_type: input.scope_type,
             scope_id: input.scope_id,
             taxonomy_id: input.taxonomy_id,
-            base_currency: input.base_currency,
             trigger_type: input.trigger_type,
             drift_band_bps: input.drift_band_bps,
-            review_frequency: input.review_frequency,
-            next_review_date: input.next_review_date,
-            rebalance_to: input.rebalance_to,
-            allow_sells: input.allow_sells,
-            min_trade_amount: input.min_trade_amount,
-            whole_shares_only: input.whole_shares_only,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -139,15 +140,8 @@ impl TargetProfileServiceTrait for TargetProfileService {
             scope_type: input.scope_type,
             scope_id: input.scope_id,
             taxonomy_id: input.taxonomy_id,
-            base_currency: input.base_currency,
             trigger_type: input.trigger_type,
             drift_band_bps: input.drift_band_bps,
-            review_frequency: input.review_frequency,
-            next_review_date: input.next_review_date,
-            rebalance_to: input.rebalance_to,
-            allow_sells: input.allow_sells,
-            min_trade_amount: input.min_trade_amount,
-            whole_shares_only: input.whole_shares_only,
             created_at: existing.created_at,
             updated_at: Self::now(),
         };
@@ -216,13 +210,35 @@ impl TargetProfileServiceTrait for TargetProfileService {
         nodes: Vec<NewTargetAllocationNode>,
     ) -> CoreResult<Vec<TargetAllocationNode>> {
         validate_nodes_sum(&nodes)?;
+
+        let profile = self.repository.get_profile(profile_id)?.ok_or_else(|| {
+            CoreError::Database(crate::errors::DatabaseError::NotFound(format!(
+                "TargetProfile {} not found",
+                profile_id
+            )))
+        })?;
+        if let Some(taxonomy) = self.taxonomy_service.get_taxonomy(&profile.taxonomy_id)? {
+            let valid_ids: std::collections::HashSet<&str> =
+                taxonomy.categories.iter().map(|c| c.id.as_str()).collect();
+            for node in &nodes {
+                if !valid_ids.contains(node.category_id.as_str()) {
+                    return Err(CoreError::Validation(ValidationError::InvalidInput(
+                        format!(
+                            "category_id '{}' does not belong to taxonomy '{}'",
+                            node.category_id, profile.taxonomy_id
+                        ),
+                    )));
+                }
+            }
+        }
+
         debug!("Saving {} nodes for profile {}", nodes.len(), profile_id);
         let now = Self::now();
         let domain_nodes: Vec<TargetAllocationNode> = nodes
             .into_iter()
             .map(|n| TargetAllocationNode {
                 id: Uuid::new_v4().to_string(),
-                profile_id: n.profile_id,
+                profile_id: profile_id.to_string(),
                 category_id: n.category_id,
                 target_bps: n.target_bps,
                 is_locked: n.is_locked,

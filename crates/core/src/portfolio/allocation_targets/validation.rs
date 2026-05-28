@@ -1,8 +1,6 @@
 use crate::errors::{Error as CoreError, Result as CoreResult, ValidationError};
-use rust_decimal::Decimal;
-use std::str::FromStr;
 
-use super::model::{NewTargetAllocationNode, NewTargetProfile, ScopeType, TriggerType};
+use super::model::{NewTargetAllocationNode, NewTargetProfile, ScopeType};
 
 fn invalid(msg: &str) -> CoreError {
     CoreError::Validation(ValidationError::InvalidInput(msg.to_string()))
@@ -19,20 +17,6 @@ pub fn validate_new_profile(input: &NewTargetProfile) -> CoreResult<()> {
     }
     if input.drift_band_bps < 0 || input.drift_band_bps > 10000 {
         return Err(invalid("drift_band_bps must be between 0 and 10000"));
-    }
-    if matches!(
-        input.trigger_type,
-        TriggerType::Calendar | TriggerType::Combined
-    ) && input.review_frequency.is_none()
-    {
-        return Err(invalid(
-            "review_frequency is required for calendar and combined triggers",
-        ));
-    }
-    let min_trade = Decimal::from_str(&input.min_trade_amount)
-        .map_err(|_| invalid("min_trade_amount must be a valid decimal"))?;
-    if min_trade < Decimal::ZERO {
-        return Err(invalid("min_trade_amount must be >= 0"));
     }
     Ok(())
 }
@@ -65,7 +49,7 @@ pub fn validate_nodes_sum(nodes: &[NewTargetAllocationNode]) -> CoreResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::portfolio::allocation_targets::model::{RebalanceTo, ReviewFrequency, TriggerType};
+    use crate::portfolio::allocation_targets::model::TriggerType;
 
     fn base_profile(name: &str) -> NewTargetProfile {
         NewTargetProfile {
@@ -73,15 +57,8 @@ mod tests {
             scope_type: ScopeType::All,
             scope_id: None,
             taxonomy_id: "asset_classes".to_string(),
-            base_currency: "USD".to_string(),
             trigger_type: TriggerType::Threshold,
             drift_band_bps: 500,
-            review_frequency: None,
-            next_review_date: None,
-            rebalance_to: RebalanceTo::NearestBand,
-            allow_sells: false,
-            min_trade_amount: "0".to_string(),
-            whole_shares_only: false,
         }
     }
 
@@ -144,54 +121,6 @@ mod tests {
             ..base_profile("p")
         };
         assert!(validate_new_profile(&p).is_ok());
-    }
-
-    #[test]
-    fn profile_calendar_trigger_without_frequency_rejected() {
-        let p = NewTargetProfile {
-            trigger_type: TriggerType::Calendar,
-            review_frequency: None,
-            ..base_profile("p")
-        };
-        assert!(validate_new_profile(&p).is_err());
-    }
-
-    #[test]
-    fn profile_calendar_trigger_with_frequency_passes() {
-        let p = NewTargetProfile {
-            trigger_type: TriggerType::Calendar,
-            review_frequency: Some(ReviewFrequency::Quarterly),
-            ..base_profile("p")
-        };
-        assert!(validate_new_profile(&p).is_ok());
-    }
-
-    #[test]
-    fn profile_combined_trigger_without_frequency_rejected() {
-        let p = NewTargetProfile {
-            trigger_type: TriggerType::Combined,
-            review_frequency: None,
-            ..base_profile("p")
-        };
-        assert!(validate_new_profile(&p).is_err());
-    }
-
-    #[test]
-    fn profile_negative_min_trade_rejected() {
-        let p = NewTargetProfile {
-            min_trade_amount: "-1".to_string(),
-            ..base_profile("p")
-        };
-        assert!(validate_new_profile(&p).is_err());
-    }
-
-    #[test]
-    fn profile_invalid_decimal_min_trade_rejected() {
-        let p = NewTargetProfile {
-            min_trade_amount: "abc".to_string(),
-            ..base_profile("p")
-        };
-        assert!(validate_new_profile(&p).is_err());
     }
 
     // ── validate_nodes_sum ───────────────────────────────────────────────────

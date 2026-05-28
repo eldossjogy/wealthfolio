@@ -693,15 +693,8 @@ diesel::table! {
         scope_type -> Text,
         scope_id -> Nullable<Text>,
         taxonomy_id -> Text,
-        base_currency -> Text,
         trigger_type -> Text,
         drift_band_bps -> Integer,
-        review_frequency -> Nullable<Text>,
-        next_review_date -> Nullable<Text>,
-        rebalance_to -> Text,
-        allow_sells -> Integer,
-        min_trade_amount -> Text,
-        whole_shares_only -> Integer,
         created_at -> Text,
         updated_at -> Text,
     }
@@ -720,20 +713,7 @@ diesel::table! {
     }
 }
 
-diesel::table! {
-    rebalance_drafts (id) {
-        id -> Text,
-        profile_id -> Text,
-        profile_snapshot_json -> Text,
-        input_json -> Text,
-        result_json -> Text,
-        created_at -> Text,
-        updated_at -> Text,
-    }
-}
-
 diesel::joinable!(target_allocation_nodes -> target_profiles (profile_id));
-diesel::joinable!(rebalance_drafts -> target_profiles (profile_id));
 
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
@@ -820,5 +800,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     budget_rollover_settings,
     target_profiles,
     target_allocation_nodes,
-    rebalance_drafts,
 );

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Button, Icons, Skeleton } from "@wealthfolio/ui";
 
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
-import { useSettings } from "@/hooks/use-settings";
 import { useArchiveTargetProfile, useDeleteTargetProfile } from "../hooks/use-target-mutations";
 import { usePortfolioStats } from "../hooks/use-portfolio-stats";
 import type { TargetProfile, AccountScope, TargetScopeType } from "@/lib/types";
@@ -54,16 +53,12 @@ export function TargetsTab({
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountScope);
-  const { data: settings } = useSettings();
-
   const archiveProfile = useArchiveTargetProfile();
   const deleteProfile = useDeleteTargetProfile();
   const { stats: portfolioStats } = usePortfolioStats(accountScope);
 
   const currentCategories = allocations?.assetClasses?.categories ?? [];
   const topLevelCurrent = currentCategories.filter((c) => !c.children?.length || c.percentage > 0);
-
-  const baseCurrency = settings?.baseCurrency ?? "USD";
 
   // Sync editor when selected profile changes from header dropdown (including archived)
   useEffect(() => {
@@ -221,7 +216,6 @@ export function TargetsTab({
       profile={editingProfile}
       initialPresetId={mode.presetId}
       portfolioAllocations={allocations}
-      baseCurrency={baseCurrency}
       portfolioStats={portfolioStats}
       defaultScopeType={defaultScope?.scopeType}
       defaultScopeId={defaultScope?.scopeId}

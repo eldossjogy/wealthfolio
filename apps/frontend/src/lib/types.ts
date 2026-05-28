@@ -2258,9 +2258,7 @@ export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
 
 export type ProfileStatus = "draft" | "active" | "archived";
 export type TargetScopeType = "all" | "portfolio" | "account";
-export type TriggerType = "manual" | "threshold" | "calendar" | "combined";
-export type ReviewFrequency = "monthly" | "quarterly" | "semi_annual" | "annual";
-export type RebalanceTo = "nearest_band" | "exact_target";
+export type TriggerType = "manual" | "threshold";
 export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
 
 export interface TargetProfile {
@@ -2270,15 +2268,8 @@ export interface TargetProfile {
   scopeType: TargetScopeType;
   scopeId?: string | null;
   taxonomyId: string;
-  baseCurrency: string;
   triggerType: TriggerType;
   driftBandBps: number;
-  reviewFrequency?: ReviewFrequency | null;
-  nextReviewDate?: string | null;
-  rebalanceTo: RebalanceTo;
-  allowSells: boolean;
-  minTradeAmount: string;
-  wholeSharesOnly: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -2288,15 +2279,8 @@ export interface NewTargetProfile {
   scopeType: TargetScopeType;
   scopeId?: string | null;
   taxonomyId: string;
-  baseCurrency: string;
   triggerType: TriggerType;
   driftBandBps: number;
-  reviewFrequency?: ReviewFrequency | null;
-  nextReviewDate?: string | null;
-  rebalanceTo: RebalanceTo;
-  allowSells: boolean;
-  minTradeAmount: string;
-  wholeSharesOnly: boolean;
 }
 
 export interface TargetAllocationNode {

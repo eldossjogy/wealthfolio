@@ -5,22 +5,22 @@ CREATE TABLE target_profiles (
     scope_type TEXT NOT NULL CHECK (scope_type IN ('all', 'portfolio', 'account')),
     scope_id TEXT,
     taxonomy_id TEXT NOT NULL DEFAULT 'asset_classes',
-    base_currency TEXT NOT NULL,
 
     trigger_type TEXT NOT NULL DEFAULT 'threshold' CHECK (trigger_type IN ('manual', 'threshold')),
     drift_band_bps INTEGER NOT NULL DEFAULT 500 CHECK (drift_band_bps >= 0 AND drift_band_bps <= 10000),
-    rebalance_to TEXT NOT NULL DEFAULT 'nearest_band' CHECK (rebalance_to IN ('nearest_band', 'exact_target')),
-
-    allow_sells INTEGER NOT NULL DEFAULT 0,
-    min_trade_amount TEXT NOT NULL DEFAULT '0',
-    whole_shares_only INTEGER NOT NULL DEFAULT 0,
 
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+
+    CHECK (
+        (scope_type = 'all' AND scope_id IS NULL) OR
+        (scope_type IN ('account', 'portfolio') AND scope_id IS NOT NULL)
+    )
 );
 
+-- COALESCE fixes SQLite NULL-in-unique-index: multiple NULL scope_ids would all match
 CREATE UNIQUE INDEX idx_target_profiles_active_scope
-ON target_profiles(scope_type, scope_id)
+ON target_profiles(scope_type, COALESCE(scope_id, ''))
 WHERE status = 'active';
 
 CREATE INDEX idx_target_profiles_scope
@@ -41,17 +41,3 @@ CREATE TABLE target_allocation_nodes (
 
 CREATE INDEX idx_target_allocation_nodes_profile
 ON target_allocation_nodes(profile_id);
-
-CREATE TABLE rebalance_drafts (
-    id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL,
-    profile_snapshot_json TEXT NOT NULL,
-    input_json TEXT NOT NULL,
-    result_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_rebalance_drafts_profile
-ON rebalance_drafts(profile_id, created_at);

@@ -113,10 +113,10 @@ impl DriftServiceTrait for DriftService {
         // Use the taxonomy matching the profile's taxonomy_id
         let taxonomy_alloc = match profile.taxonomy_id.as_str() {
             "asset_classes" => &allocations.asset_classes,
-            "sectors" => &allocations.sectors,
+            "industries_gics" => &allocations.sectors,
             "regions" => &allocations.regions,
             "risk_category" => &allocations.risk_category,
-            "security_types" => &allocations.security_types,
+            "instrument_type" => &allocations.security_types,
             other => allocations
                 .custom_groups
                 .iter()
@@ -273,8 +273,8 @@ mod tests {
         AllocationHoldings, CategoryAllocation, PortfolioAllocations, TaxonomyAllocation,
     };
     use crate::portfolio::allocation_targets::model::{
-        NewTargetAllocationNode, NewTargetProfile, ProfileStatus, RebalanceTo, ScopeType,
-        TargetAllocationNode, TargetProfile, TriggerType,
+        NewTargetAllocationNode, NewTargetProfile, ProfileStatus, ScopeType, TargetAllocationNode,
+        TargetProfile, TriggerType,
     };
     use async_trait::async_trait;
     use rust_decimal_macros::dec;
@@ -289,15 +289,8 @@ mod tests {
             scope_type: ScopeType::All,
             scope_id: None,
             taxonomy_id: "asset_classes".to_string(),
-            base_currency: "USD".to_string(),
             trigger_type: TriggerType::Threshold,
             drift_band_bps,
-            review_frequency: None,
-            next_review_date: None,
-            rebalance_to: RebalanceTo::NearestBand,
-            allow_sells: false,
-            min_trade_amount: "0".to_string(),
-            whole_shares_only: false,
             created_at: "2026-01-01".to_string(),
             updated_at: "2026-01-01".to_string(),
         }

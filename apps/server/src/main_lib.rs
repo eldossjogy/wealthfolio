@@ -448,6 +448,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     > = Arc::new(
         wealthfolio_core::portfolio::allocation_targets::TargetProfileService::new(
             target_profile_repository,
+            taxonomy_service.clone(),
         ),
     );
     let drift_service: Arc<

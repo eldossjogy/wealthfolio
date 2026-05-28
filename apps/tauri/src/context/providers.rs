@@ -426,7 +426,10 @@ pub async fn initialize_context(
 
     let target_profile_repository =
         Arc::new(TargetProfileRepository::new(pool.clone(), writer.clone()));
-    let target_profile_service = Arc::new(TargetProfileService::new(target_profile_repository));
+    let target_profile_service = Arc::new(TargetProfileService::new(
+        target_profile_repository,
+        taxonomy_service.clone(),
+    ));
     let drift_service = Arc::new(DriftService::new(
         target_profile_service.clone(),
         allocation_service.clone(),
