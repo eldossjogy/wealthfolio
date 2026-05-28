@@ -98,6 +98,32 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     weights: { "30": 25, "35": 25, "55": 20, "40": 10, "10": 10, "20": 10 },
   },
 
+  // ── Instrument Type ──────────────────────────────────────────────────────────
+  {
+    id: "instrument_passive",
+    taxonomyId: "instrument_type",
+    name: "Passive",
+    description: "Pure index approach — ETFs as the primary vehicle",
+    risk: "Conservative",
+    weights: { ETP: 80, DEBT_SECURITY: 10, CASH_FX: 10 },
+  },
+  {
+    id: "instrument_core_satellite",
+    taxonomyId: "instrument_type",
+    name: "Core-Satellite",
+    description: "ETF core with individual stock satellites",
+    risk: "Moderate",
+    weights: { ETP: 65, EQUITY_SECURITY: 20, DEBT_SECURITY: 10, CASH_FX: 5 },
+  },
+  {
+    id: "instrument_diversified",
+    taxonomyId: "instrument_type",
+    name: "Diversified",
+    description: "Broad mix of ETFs, stocks, bonds and funds",
+    risk: "Moderate",
+    weights: { ETP: 45, EQUITY_SECURITY: 30, DEBT_SECURITY: 15, FUND: 10 },
+  },
+
   // ── Risk Category ────────────────────────────────────────────────────────────
   {
     id: "risk_conservative",
