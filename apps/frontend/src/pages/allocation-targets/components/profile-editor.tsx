@@ -148,7 +148,7 @@ export function ProfileEditor({
   saveRef,
 }: ProfileEditorProps) {
   const [taxonomyId, setTaxonomyId] = useState(profile?.taxonomyId ?? "asset_classes");
-  const { data: taxonomies } = useTaxonomies();
+  const { data: taxonomies } = useTaxonomies({ scope: "asset" });
   const { data: taxonomy, isLoading: taxonomyLoading } = useTaxonomy(taxonomyId);
 
   const topLevelCategories = useMemo(
