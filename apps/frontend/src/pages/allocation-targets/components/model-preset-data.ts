@@ -121,7 +121,7 @@ export const BUILT_IN_PRESETS: ModelPreset[] = [
     name: "Diversified",
     description: "Broad mix of ETFs, stocks, bonds and funds",
     risk: "Moderate",
-    weights: { ETP: 45, EQUITY_SECURITY: 30, DEBT_SECURITY: 15, FUND: 10 },
+    weights: { ETP: 40, EQUITY_SECURITY: 25, DEBT_SECURITY: 15, FUND: 10, CASH_FX: 10 },
   },
 
   // ── Risk Category ────────────────────────────────────────────────────────────
