@@ -55,35 +55,32 @@ Frontend
 
 ## 3. Product Principles
 
-1. Targets are the source of truth.
-   Current allocation is observed state. Targets are desired state.
+1. Targets are the source of truth. Current allocation is observed state.
+   Targets are desired state.
 
-2. Rebalancing is policy-driven.
-   "When to act" must be separate from "how to trade".
+2. Rebalancing is policy-driven. "When to act" must be separate from "how to
+   trade".
 
-3. Cash should be first-class.
-   Cash can be a target sleeve, available funding, a reserve, and a trade
-   constraint. These are related but not identical.
+3. Cash should be first-class. Cash can be a target sleeve, available funding, a
+   reserve, and a trade constraint. These are related but not identical.
 
-4. Taxable accounts need restraint.
-   Selling to rebalance may create tax impact. Wealthfolio should prefer
-   contribution-based correction when it satisfies the policy.
+4. Taxable accounts need restraint. Selling to rebalance may create tax impact.
+   Wealthfolio should prefer contribution-based correction when it satisfies the
+   policy.
 
-5. Drafts before action.
-   The system proposes plans and trades. Users review, exclude, export, or
-   execute through supported workflows.
+5. Drafts before action. The system proposes plans and trades. Users review,
+   exclude, export, or execute through supported workflows.
 
-6. Explain every recommendation.
-   Every trade recommendation needs a plain reason and the constraints applied.
+6. Explain every recommendation. Every trade recommendation needs a plain reason
+   and the constraints applied.
 
 7. Multi-dimensional analysis is not automatically multi-dimensional targeting.
    Asset class can be a primary target while geography, sector, risk, and
    account placement act as guardrails unless the optimizer explicitly supports
    simultaneous constraints.
 
-8. The model must support assets not currently owned.
-   A user must be able to target a sleeve, category, or model allocation with
-   zero current holdings.
+8. The model must support assets not currently owned. A user must be able to
+   target a sleeve, category, or model allocation with zero current holdings.
 
 ## 4. Industry Standard Baseline
 
@@ -114,10 +111,10 @@ Industry sources commonly describe three trigger families:
 - Threshold: rebalance when drift breaches a tolerance band.
 - Hybrid: review on a schedule and rebalance only if drift exceeds threshold.
 
-Vanguard describes calendar, threshold, and calendar-plus-threshold methods,
-and highlights the tradeoff between tracking error and transaction costs.
-Fidelity describes the same three approaches and notes that rebalancing can
-involve selling overweight positions and buying underweight ones, while new
+Vanguard describes calendar, threshold, and calendar-plus-threshold methods, and
+highlights the tradeoff between tracking error and transaction costs. Fidelity
+describes the same three approaches and notes that rebalancing can involve
+selling overweight positions and buying underweight ones, while new
 contributions may help avoid taxable sells.
 
 ### 4.3 Cash-Flow Rebalancing
@@ -154,8 +151,8 @@ approval workflows as professional-grade capabilities.
 ### 4.5 Value Averaging
 
 Value averaging is a funding strategy. It defines a target portfolio value path
-over time and calculates the contribution needed to stay on that path. It is
-not an allocation target and not a rebalance trigger.
+over time and calculates the contribution needed to stay on that path. It is not
+an allocation target and not a rebalance trigger.
 
 In Wealthfolio it belongs under Funding Policy:
 
@@ -192,28 +189,28 @@ Defines the desired portfolio model for a scope.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| name | string | User-visible name |
-| status | enum | draft, active, archived |
-| scope_type | enum | portfolio, account, account_group |
-| scope_id | string nullable | Null for whole portfolio |
-| base_currency | string | ISO currency code |
-| objective | enum nullable | growth, balanced, income, preservation, custom |
-| model_type | enum | template, custom, imported |
-| version | integer | Increment on material changes |
-| effective_from | date nullable | For scheduled/glide changes |
-| created_at | datetime | UTC |
-| updated_at | datetime | UTC |
+| Field          | Type            | Notes                                          |
+| -------------- | --------------- | ---------------------------------------------- |
+| id             | string          | UUID                                           |
+| name           | string          | User-visible name                              |
+| status         | enum            | draft, active, archived                        |
+| scope_type     | enum            | portfolio, account, account_group              |
+| scope_id       | string nullable | Null for whole portfolio                       |
+| base_currency  | string          | ISO currency code                              |
+| objective      | enum nullable   | growth, balanced, income, preservation, custom |
+| model_type     | enum            | template, custom, imported                     |
+| version        | integer         | Increment on material changes                  |
+| effective_from | date nullable   | For scheduled/glide changes                    |
+| created_at     | datetime        | UTC                                            |
+| updated_at     | datetime        | UTC                                            |
 
 Rules:
 
 - Only one active profile per scope at a time.
 - Draft profiles can be edited without changing monitoring.
 - Activating a profile snapshots the prior active profile as inactive history.
-- Scope is explicit. Do not use sentinel account IDs like "TOTAL" or
-  "PORTFOLIO" in persisted target records.
+- Scope is explicit. Do not use sentinel account IDs like "TOTAL" or "PORTFOLIO"
+  in persisted target records.
 
 ### 5.2 TargetAllocationNode
 
@@ -221,22 +218,22 @@ Defines a target sleeve in a primary taxonomy.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Parent TargetProfile |
-| taxonomy_id | string | Usually asset_classes for v1 |
-| category_id | string | References taxonomy category |
-| parent_node_id | string nullable | Enables nested sleeve targets |
-| target_bps | integer | 0 to 10000 |
-| min_bps | integer nullable | Lower tolerance bound |
-| max_bps | integer nullable | Upper tolerance bound |
-| drift_threshold_bps | integer nullable | Override policy default |
-| rebalance_priority | integer | Lower number acts first |
-| is_required | boolean | Required in target even if no holdings |
-| is_locked | boolean | UI cannot auto-adjust this row |
-| created_at | datetime | UTC |
-| updated_at | datetime | UTC |
+| Field               | Type             | Notes                                  |
+| ------------------- | ---------------- | -------------------------------------- |
+| id                  | string           | UUID                                   |
+| profile_id          | string           | Parent TargetProfile                   |
+| taxonomy_id         | string           | Usually asset_classes for v1           |
+| category_id         | string           | References taxonomy category           |
+| parent_node_id      | string nullable  | Enables nested sleeve targets          |
+| target_bps          | integer          | 0 to 10000                             |
+| min_bps             | integer nullable | Lower tolerance bound                  |
+| max_bps             | integer nullable | Upper tolerance bound                  |
+| drift_threshold_bps | integer nullable | Override policy default                |
+| rebalance_priority  | integer          | Lower number acts first                |
+| is_required         | boolean          | Required in target even if no holdings |
+| is_locked           | boolean          | UI cannot auto-adjust this row         |
+| created_at          | datetime         | UTC                                    |
+| updated_at          | datetime         | UTC                                    |
 
 Rules:
 
@@ -260,21 +257,21 @@ Examples:
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Parent TargetProfile |
-| guardrail_type | enum | taxonomy, holding, account, cash, concentration |
-| taxonomy_id | string nullable | Required for taxonomy guardrails |
-| category_id | string nullable | Category for taxonomy guardrails |
-| asset_id | string nullable | Asset for holding guardrails |
-| account_id | string nullable | Account-specific constraint |
-| min_bps | integer nullable | Percentage minimum |
-| max_bps | integer nullable | Percentage maximum |
-| min_amount | decimal nullable | Currency minimum |
-| max_amount | decimal nullable | Currency maximum |
-| severity | enum | info, warning, block |
-| enforcement | enum | monitor_only, constrain_plan, block_plan |
+| Field          | Type             | Notes                                           |
+| -------------- | ---------------- | ----------------------------------------------- |
+| id             | string           | UUID                                            |
+| profile_id     | string           | Parent TargetProfile                            |
+| guardrail_type | enum             | taxonomy, holding, account, cash, concentration |
+| taxonomy_id    | string nullable  | Required for taxonomy guardrails                |
+| category_id    | string nullable  | Category for taxonomy guardrails                |
+| asset_id       | string nullable  | Asset for holding guardrails                    |
+| account_id     | string nullable  | Account-specific constraint                     |
+| min_bps        | integer nullable | Percentage minimum                              |
+| max_bps        | integer nullable | Percentage maximum                              |
+| min_amount     | decimal nullable | Currency minimum                                |
+| max_amount     | decimal nullable | Currency maximum                                |
+| severity       | enum             | info, warning, block                            |
+| enforcement    | enum             | monitor_only, constrain_plan, block_plan        |
 
 Rules:
 
@@ -290,20 +287,20 @@ Defines optional instrument targets inside an allocation sleeve.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| allocation_node_id | string | Parent TargetAllocationNode |
-| asset_id | string | Asset/instrument |
-| target_bps | integer nullable | Target inside the sleeve |
-| min_bps | integer nullable | Lower band inside sleeve |
-| max_bps | integer nullable | Upper band inside sleeve |
-| buy_priority | integer nullable | Lower number buys first |
-| sell_priority | integer nullable | Lower number sells first |
-| substitute_group_id | string nullable | For equivalent ETFs/funds |
-| is_locked | boolean | Prevent auto-adjust |
-| is_buyable | boolean | Can receive buys |
-| is_sellable | boolean | Can be sold by plans |
+| Field               | Type             | Notes                       |
+| ------------------- | ---------------- | --------------------------- |
+| id                  | string           | UUID                        |
+| allocation_node_id  | string           | Parent TargetAllocationNode |
+| asset_id            | string           | Asset/instrument            |
+| target_bps          | integer nullable | Target inside the sleeve    |
+| min_bps             | integer nullable | Lower band inside sleeve    |
+| max_bps             | integer nullable | Upper band inside sleeve    |
+| buy_priority        | integer nullable | Lower number buys first     |
+| sell_priority       | integer nullable | Lower number sells first    |
+| substitute_group_id | string nullable  | For equivalent ETFs/funds   |
+| is_locked           | boolean          | Prevent auto-adjust         |
+| is_buyable          | boolean          | Can receive buys            |
+| is_sellable         | boolean          | Can be sold by plans        |
 
 Rules:
 
@@ -320,18 +317,18 @@ Defines when Wealthfolio should prompt the user to rebalance.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Parent TargetProfile |
-| trigger_type | enum | manual, calendar, threshold, hybrid |
-| review_frequency | enum nullable | weekly, monthly, quarterly, semiannual, annual |
-| next_review_date | date nullable | Used for calendar/hybrid |
-| default_band_bps | integer | Example: 500 for +/-5% |
-| band_type | enum | absolute, relative |
-| rebalance_to | enum | exact_target, nearest_band |
-| notify_on_breach | boolean | UI/notification trigger |
-| require_confirmation | boolean | Always true for v1 |
+| Field                | Type          | Notes                                          |
+| -------------------- | ------------- | ---------------------------------------------- |
+| id                   | string        | UUID                                           |
+| profile_id           | string        | Parent TargetProfile                           |
+| trigger_type         | enum          | manual, calendar, threshold, hybrid            |
+| review_frequency     | enum nullable | weekly, monthly, quarterly, semiannual, annual |
+| next_review_date     | date nullable | Used for calendar/hybrid                       |
+| default_band_bps     | integer       | Example: 500 for +/-5%                         |
+| band_type            | enum          | absolute, relative                             |
+| rebalance_to         | enum          | exact_target, nearest_band                     |
+| notify_on_breach     | boolean       | UI/notification trigger                        |
+| require_confirmation | boolean       | Always true for v1                             |
 
 Rules:
 
@@ -346,27 +343,27 @@ Defines how new money enters the plan.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Parent TargetProfile |
-| funding_mode | enum | none, manual_cash, recurring_contribution, dca, value_averaging |
-| cash_source | enum | user_input, account_cash, dividends_interest, external |
-| default_cash_amount | decimal nullable | Optional prefill |
-| reserve_amount | decimal nullable | Cash to keep uninvested |
-| contribution_frequency | enum nullable | weekly, monthly, quarterly, annual |
-| start_date | date nullable | For scheduled funding |
-| end_condition | enum nullable | none, date, target_value |
-| target_value_path | json nullable | Value averaging path parameters |
-| max_top_up_amount | decimal nullable | Cap contribution |
-| overflow_action | enum nullable | hold_cash, next_period, sell_excess |
-| fractional_units | boolean | Whether fractional shares are allowed |
+| Field                  | Type             | Notes                                                           |
+| ---------------------- | ---------------- | --------------------------------------------------------------- |
+| id                     | string           | UUID                                                            |
+| profile_id             | string           | Parent TargetProfile                                            |
+| funding_mode           | enum             | none, manual_cash, recurring_contribution, dca, value_averaging |
+| cash_source            | enum             | user_input, account_cash, dividends_interest, external          |
+| default_cash_amount    | decimal nullable | Optional prefill                                                |
+| reserve_amount         | decimal nullable | Cash to keep uninvested                                         |
+| contribution_frequency | enum nullable    | weekly, monthly, quarterly, annual                              |
+| start_date             | date nullable    | For scheduled funding                                           |
+| end_condition          | enum nullable    | none, date, target_value                                        |
+| target_value_path      | json nullable    | Value averaging path parameters                                 |
+| max_top_up_amount      | decimal nullable | Cap contribution                                                |
+| overflow_action        | enum nullable    | hold_cash, next_period, sell_excess                             |
+| fractional_units       | boolean          | Whether fractional shares are allowed                           |
 
 Rules:
 
 - Empty manual cash input is zero, not invalid.
-- Value averaging calculates contribution amount first. Allocation happens
-  after that amount is known.
+- Value averaging calculates contribution amount first. Allocation happens after
+  that amount is known.
 - Reserve cash is not deployable unless the user explicitly includes it.
 
 ### 5.7 ExecutionPolicy
@@ -375,23 +372,23 @@ Defines how a rebalance plan is allowed to create trades.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Parent TargetProfile |
-| scenario_mode | enum | cash_flow_only, sell_to_rebalance, hybrid |
-| allow_sells | boolean | False for cash-flow-only |
-| tax_mode | enum | ignore, aware, strict |
-| lot_selection | enum nullable | fifo, lifo, hifo, loss_first, long_term_first |
-| wash_sale_check | boolean | Requires lot/history support |
-| min_trade_amount | decimal | Skip tiny trades |
-| min_trade_bps | integer nullable | Skip tiny portfolio changes |
-| max_turnover_bps | integer nullable | Cap total trade volume |
-| max_realized_gain | decimal nullable | User-defined cap |
-| whole_shares_only | boolean | False if fractional allowed |
-| asset_location | enum | ignore, prefer_tax_efficient, enforce_rules |
-| blocked_asset_ids | json | Do-not-trade list |
-| preferred_asset_ids | json | Buy candidates by sleeve |
+| Field               | Type             | Notes                                         |
+| ------------------- | ---------------- | --------------------------------------------- |
+| id                  | string           | UUID                                          |
+| profile_id          | string           | Parent TargetProfile                          |
+| scenario_mode       | enum             | cash_flow_only, sell_to_rebalance, hybrid     |
+| allow_sells         | boolean          | False for cash-flow-only                      |
+| tax_mode            | enum             | ignore, aware, strict                         |
+| lot_selection       | enum nullable    | fifo, lifo, hifo, loss_first, long_term_first |
+| wash_sale_check     | boolean          | Requires lot/history support                  |
+| min_trade_amount    | decimal          | Skip tiny trades                              |
+| min_trade_bps       | integer nullable | Skip tiny portfolio changes                   |
+| max_turnover_bps    | integer nullable | Cap total trade volume                        |
+| max_realized_gain   | decimal nullable | User-defined cap                              |
+| whole_shares_only   | boolean          | False if fractional allowed                   |
+| asset_location      | enum             | ignore, prefer_tax_efficient, enforce_rules   |
+| blocked_asset_ids   | json             | Do-not-trade list                             |
+| preferred_asset_ids | json             | Buy candidates by sleeve                      |
 
 Rules:
 
@@ -406,24 +403,24 @@ Immutable snapshot of one calculation.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| profile_id | string | Target profile used |
-| profile_version | integer | Version at calculation time |
-| scope_type | enum | Copied from profile |
-| scope_id | string nullable | Copied from profile |
-| run_status | enum | draft, accepted, exported, canceled, stale |
-| scenario_mode | enum | Scenario calculated |
-| base_currency | string | Currency |
-| portfolio_value | decimal | Snapshot value |
-| available_cash | decimal | Deployable input |
-| max_drift_bps_before | integer | Before plan |
-| max_drift_bps_after | integer | Estimated after plan |
-| turnover_bps | integer | Estimated turnover |
-| estimated_tax_impact | decimal nullable | If available |
-| explanation | json | Constraints and summary |
-| created_at | datetime | UTC |
+| Field                | Type             | Notes                                      |
+| -------------------- | ---------------- | ------------------------------------------ |
+| id                   | string           | UUID                                       |
+| profile_id           | string           | Target profile used                        |
+| profile_version      | integer          | Version at calculation time                |
+| scope_type           | enum             | Copied from profile                        |
+| scope_id             | string nullable  | Copied from profile                        |
+| run_status           | enum             | draft, accepted, exported, canceled, stale |
+| scenario_mode        | enum             | Scenario calculated                        |
+| base_currency        | string           | Currency                                   |
+| portfolio_value      | decimal          | Snapshot value                             |
+| available_cash       | decimal          | Deployable input                           |
+| max_drift_bps_before | integer          | Before plan                                |
+| max_drift_bps_after  | integer          | Estimated after plan                       |
+| turnover_bps         | integer          | Estimated turnover                         |
+| estimated_tax_impact | decimal nullable | If available                               |
+| explanation          | json             | Constraints and summary                    |
+| created_at           | datetime         | UTC                                        |
 
 Rules:
 
@@ -436,24 +433,24 @@ User-reviewable proposed trade.
 
 Fields:
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| id | string | UUID |
-| run_id | string | Parent RebalanceRun |
-| action | enum | buy, sell |
-| account_id | string | Account where trade occurs |
-| asset_id | string | Asset/instrument |
-| symbol | string | Display symbol snapshot |
-| quantity | decimal | Shares/units |
-| estimated_price | decimal | Quote used |
-| estimated_amount | decimal | Quantity * price |
-| sleeve_category_id | string | Target sleeve reason |
-| reason | string | Human-readable reason |
-| tax_lot_ids | json nullable | If lot-level support exists |
-| estimated_gain | decimal nullable | Tax estimate |
-| wash_sale_warning | boolean | Warning flag |
-| is_excluded | boolean | User excluded from plan |
-| exclusion_reason | string nullable | Optional |
+| Field              | Type             | Notes                       |
+| ------------------ | ---------------- | --------------------------- |
+| id                 | string           | UUID                        |
+| run_id             | string           | Parent RebalanceRun         |
+| action             | enum             | buy, sell                   |
+| account_id         | string           | Account where trade occurs  |
+| asset_id           | string           | Asset/instrument            |
+| symbol             | string           | Display symbol snapshot     |
+| quantity           | decimal          | Shares/units                |
+| estimated_price    | decimal          | Quote used                  |
+| estimated_amount   | decimal          | Quantity \* price           |
+| sleeve_category_id | string           | Target sleeve reason        |
+| reason             | string           | Human-readable reason       |
+| tax_lot_ids        | json nullable    | If lot-level support exists |
+| estimated_gain     | decimal nullable | Tax estimate                |
+| wash_sale_warning  | boolean          | Warning flag                |
+| is_excluded        | boolean          | User excluded from plan     |
+| exclusion_reason   | string nullable  | Optional                    |
 
 Rules:
 
@@ -728,20 +725,20 @@ Core content:
 
 Row display:
 
-| Column | Meaning |
-| --- | --- |
-| Sleeve | Category name and color |
+| Column  | Meaning                   |
+| ------- | ------------------------- |
+| Sleeve  | Category name and color   |
 | Current | Current percent and value |
-| Target | Target percent |
-| Band | Min/max or threshold |
-| Drift | Current - target |
-| Action | Inspect holdings |
+| Target  | Target percent            |
+| Band    | Min/max or threshold      |
+| Drift   | Current - target          |
+| Action  | Inspect holdings          |
 
 Empty states:
 
 - No active profile: show current allocation and CTA to create target profile.
-- No holdings in target sleeve: show target row with 0 current and suggested
-  buy candidates if configured.
+- No holdings in target sleeve: show target row with 0 current and suggested buy
+  candidates if configured.
 - Missing classification: show Unknown category and prompt classification.
 
 ### 7.3 Targets & Policy Screen
@@ -848,18 +845,18 @@ Each scenario must show:
 
 Trade table:
 
-| Column | Meaning |
-| --- | --- |
-| Include | Checkbox to exclude from draft |
-| Action | Buy or sell |
-| Account | Account where trade occurs |
-| Symbol | Ticker |
-| Name | Asset name |
-| Sleeve | Target sleeve |
-| Quantity | Shares/units |
-| Amount | Estimated trade amount |
-| Tax | Gain/loss/warning |
-| Reason | Why this trade exists |
+| Column   | Meaning                        |
+| -------- | ------------------------------ |
+| Include  | Checkbox to exclude from draft |
+| Action   | Buy or sell                    |
+| Account  | Account where trade occurs     |
+| Symbol   | Ticker                         |
+| Name     | Asset name                     |
+| Sleeve   | Target sleeve                  |
+| Quantity | Shares/units                   |
+| Amount   | Estimated trade amount         |
+| Tax      | Gain/loss/warning              |
+| Reason   | Why this trade exists          |
 
 Footer actions:
 
@@ -873,18 +870,18 @@ Footer actions:
 
 Use precise labels:
 
-| Use | Avoid |
-| --- | --- |
-| Targets & Policy | Strategy |
-| Rebalance trigger | Rebalance strategy |
-| Scenario | Mode |
-| Cash-flow only | Buy only |
-| Sell to rebalance | Buy & sell |
-| Hybrid | Combined |
-| Funding policy | Contribution strategy |
-| Execution policy | Advanced settings |
-| Drift | Difference |
-| Out of band | Bad allocation |
+| Use               | Avoid                 |
+| ----------------- | --------------------- |
+| Targets & Policy  | Strategy              |
+| Rebalance trigger | Rebalance strategy    |
+| Scenario          | Mode                  |
+| Cash-flow only    | Buy only              |
+| Sell to rebalance | Buy & sell            |
+| Hybrid            | Combined              |
+| Funding policy    | Contribution strategy |
+| Execution policy  | Advanced settings     |
+| Drift             | Difference            |
+| Out of band       | Bad allocation        |
 
 ## 8. Backend Architecture
 
@@ -988,16 +985,31 @@ disables them in web mode.
 Suggested frontend adapter functions:
 
 ```typescript
-export async function listTargetProfiles(scope?: TargetScope): Promise<TargetProfile[]>;
-export async function getTargetProfile(id: string): Promise<TargetProfileDetail>;
-export async function saveTargetProfile(input: SaveTargetProfileInput): Promise<TargetProfileDetail>;
+export async function listTargetProfiles(
+  scope?: TargetScope,
+): Promise<TargetProfile[]>;
+export async function getTargetProfile(
+  id: string,
+): Promise<TargetProfileDetail>;
+export async function saveTargetProfile(
+  input: SaveTargetProfileInput,
+): Promise<TargetProfileDetail>;
 export async function activateTargetProfile(id: string): Promise<TargetProfile>;
 export async function archiveTargetProfile(id: string): Promise<void>;
-export async function getAllocationAdvisorState(input: AdvisorStateInput): Promise<AdvisorState>;
-export async function evaluateRebalanceTrigger(profileId: string): Promise<TriggerEvaluation>;
-export async function calculateRebalanceScenarios(input: RebalanceScenarioInput): Promise<RebalanceScenarioSet>;
+export async function getAllocationAdvisorState(
+  input: AdvisorStateInput,
+): Promise<AdvisorState>;
+export async function evaluateRebalanceTrigger(
+  profileId: string,
+): Promise<TriggerEvaluation>;
+export async function calculateRebalanceScenarios(
+  input: RebalanceScenarioInput,
+): Promise<RebalanceScenarioSet>;
 export async function saveRebalanceDraft(runId: string): Promise<RebalanceRun>;
-export async function exportRebalanceDraft(runId: string, format: "csv"): Promise<ExportResult>;
+export async function exportRebalanceDraft(
+  runId: string,
+  format: "csv",
+): Promise<ExportResult>;
 ```
 
 ## 9. SQLite Schema Plan

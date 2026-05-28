@@ -98,15 +98,15 @@ Target
 V1 does not need separate tables for every concept. Keep the concepts distinct
 in service code and UI copy, but persist them compactly.
 
-| Concept | V1 Persistence |
-| --- | --- |
-| Target profile | `target_profiles` |
-| Allocation sleeves | `target_allocation_nodes` |
-| Rebalance trigger | Inline fields on `target_profiles` |
-| Funding input | Request-time input, not persisted |
-| Execution constraints | Inline simple fields on `target_profiles` |
-| Suggested trades | Computed on demand; save to `rebalance_drafts` only by user action |
-| Tax lots | Not in this feature |
+| Concept               | V1 Persistence                                                     |
+| --------------------- | ------------------------------------------------------------------ |
+| Target profile        | `target_profiles`                                                  |
+| Allocation sleeves    | `target_allocation_nodes`                                          |
+| Rebalance trigger     | Inline fields on `target_profiles`                                 |
+| Funding input         | Request-time input, not persisted                                  |
+| Execution constraints | Inline simple fields on `target_profiles`                          |
+| Suggested trades      | Computed on demand; save to `rebalance_drafts` only by user action |
+| Tax lots              | Not in this feature                                                |
 
 ## 5. Data Model
 
@@ -145,8 +145,7 @@ Field rules:
 - `scope_type`: `portfolio` or `account`.
 - `scope_id`: null for portfolio, account id for account scope.
 - `trigger_type`: v1 supports `manual` and `threshold`.
-- `drift_band_bps`: absolute tolerance band. `500` means +/-5 percentage
-  points.
+- `drift_band_bps`: absolute tolerance band. `500` means +/-5 percentage points.
 - `rebalance_to`: `nearest_band` or `exact_target`.
 - `allow_sells`: false by default.
 - `min_trade_amount`: decimal string for Rust `Decimal`.
@@ -197,8 +196,8 @@ ON target_allocation_nodes(profile_id);
 
 ### 5.3 rebalance_drafts
 
-Optional. Only create a row when the user explicitly saves a generated plan.
-Do not persist every calculation.
+Optional. Only create a row when the user explicitly saves a generated plan. Do
+not persist every calculation.
 
 ```sql
 CREATE TABLE rebalance_drafts (
@@ -403,9 +402,7 @@ export async function activateTargetProfile(
   profileId: string,
 ): Promise<TargetProfileDetail>;
 
-export async function archiveTargetProfile(
-  profileId: string,
-): Promise<void>;
+export async function archiveTargetProfile(profileId: string): Promise<void>;
 
 export async function getTargetDrift(
   input: TargetDriftInput,
@@ -489,13 +486,13 @@ Show:
 
 Rows must include:
 
-| Column | Description |
-| --- | --- |
-| Sleeve | Category |
-| Current | Current percent and value |
-| Target | Target percent |
-| Drift | Current - target |
-| Status | In band, underweight, overweight |
+| Column  | Description                      |
+| ------- | -------------------------------- |
+| Sleeve  | Category                         |
+| Current | Current percent and value        |
+| Target  | Target percent                   |
+| Drift   | Current - target                 |
+| Status  | In band, underweight, overweight |
 
 ### 8.2 Set Targets Panel
 
