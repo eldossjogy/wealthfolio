@@ -1,4 +1,7 @@
 import { checkQuotesImport, importManualQuotes } from "@/adapters";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
+import { QueryKeys } from "@/lib/query-keys";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import type {
   QuoteImport,
@@ -45,6 +48,7 @@ function normalizeQuoteImport(quote: QuoteImport): QuoteImport {
 }
 
 export function useQuoteImport(): QuoteImportState & QuoteImportActions {
+  const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<QuoteImportPreview | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -138,6 +142,8 @@ export function useQuoteImport(): QuoteImportState & QuoteImportActions {
 
       const importResult = await importManualQuotes(prepareQuotesForImport(validQuotes));
       const normalizedResult = importResult.map(normalizeQuoteImport);
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.LATEST_QUOTES] });
+      invalidatePerformanceCaches(queryClient);
 
       clearInterval(progressInterval);
 
@@ -161,7 +167,7 @@ export function useQuoteImport(): QuoteImportState & QuoteImportActions {
       setIsImporting(false);
       setImportProgress(0);
     }
-  }, [file]);
+  }, [file, queryClient]);
 
   const reset = useCallback(() => {
     setFile(null);

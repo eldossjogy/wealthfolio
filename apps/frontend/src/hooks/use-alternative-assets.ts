@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { logger } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import {
   createAlternativeAsset,
   updateAlternativeAssetValuation,
@@ -37,12 +38,9 @@ export function useCreateAlternativeAsset(options?: UseAlternativeAssetMutations
     mutationFn: createAlternativeAsset,
     onSuccess: (data) => {
       // Invalidate relevant queries
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSETS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH_HISTORY] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ALTERNATIVE_HOLDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSETS] });
+      invalidatePerformanceCaches(queryClient);
 
       toast({
         title: "Asset created successfully",
@@ -84,11 +82,8 @@ export function useUpdateValuation(options?: UseAlternativeAssetMutationsOptions
     },
     onSuccess: () => {
       // Invalidate holdings-related queries to reflect the new valuation
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH_HISTORY] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTS_SUMMARY] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ALTERNATIVE_HOLDINGS] });
+      invalidatePerformanceCaches(queryClient);
 
       toast({
         title: "Valuation updated",
@@ -120,12 +115,9 @@ export function useDeleteAlternativeAsset(options?: UseAlternativeAssetMutations
     mutationFn: deleteAlternativeAsset,
     onSuccess: () => {
       // Invalidate all relevant queries
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSETS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.NET_WORTH_HISTORY] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ALTERNATIVE_HOLDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSETS] });
+      invalidatePerformanceCaches(queryClient);
 
       toast({
         title: "Asset deleted",

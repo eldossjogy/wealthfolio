@@ -492,11 +492,11 @@ export default AnalyticsDashboard;
 // hooks/usePortfolioData.ts
 import { useState, useEffect } from 'react';
 import { getAddonContext } from '@wealthfolio/addon-sdk';
-import type { Holding, PerformanceMetrics } from '@wealthfolio/addon-sdk/types';
+import type { Holding, PerformanceResult } from '@wealthfolio/addon-sdk/types';
 
 export function usePortfolioData(accountId?: string) {
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [performance, setPerformance] = useState<PerformanceMetrics | null>(
+  const [performance, setPerformance] = useState<PerformanceResult | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
@@ -521,6 +521,11 @@ export function usePortfolioData(accountId?: string) {
               itemType: 'account',
               itemId: accountId,
             });
+          console.log(
+            performanceData.returns.twr,
+            performanceData.returns.irr,
+            performanceData.risk.maxDrawdown,
+          );
           setPerformance(performanceData);
         }
       } catch (err) {

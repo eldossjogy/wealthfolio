@@ -654,6 +654,7 @@ export interface Settings {
   theme: string;
   font: string;
   baseCurrency: string;
+  defaultReturnMetric: 'twr' | 'irr' | 'valueReturn';
   timezone?: string;
   instanceId: string;
   onboardingCompleted: boolean;
@@ -760,6 +761,12 @@ export interface AccountValuation {
   netContributionBase: number;
   externalInflowBase: number;
   externalOutflowBase: number;
+  externalFlowSource:
+    | 'UNKNOWN'
+    | 'ACTIVITY_DERIVED'
+    | 'STORED_GROSS'
+    | 'NET_CONTRIBUTION_FALLBACK'
+    | 'MIXED';
   performanceEligibleValueBase: number;
   calculatedAt: string;
 }
@@ -773,10 +780,10 @@ export interface AccountSummaryView {
   totalValueAccountCurrency: number;
   totalValueBaseCurrency: number;
   baseCurrency: string;
-  performance: SimplePerformanceMetrics;
+  performance: SimplePerformanceResult;
 }
 
-export interface SimplePerformanceMetrics {
+export interface SimplePerformanceResult {
   accountId: string;
   totalValue?: number | null;
   accountCurrency?: string | null;
@@ -784,17 +791,18 @@ export interface SimplePerformanceMetrics {
   fxRateToBase?: number | null;
   totalGainLossAmount?: number | null;
   cumulativeReturnPercent?: number | null;
-  dayGainLossAmount?: number | null;
-  dayReturnPercentModDietz?: number | null;
   portfolioWeight?: number | null;
 }
+
+/** @deprecated Use SimplePerformanceResult. */
+export type SimplePerformanceMetrics = SimplePerformanceResult;
 
 export interface AccountGroup {
   groupName: string;
   accounts: AccountSummaryView[];
   totalValueBaseCurrency: number;
   baseCurrency: string;
-  performance: SimplePerformanceMetrics;
+  performance: SimplePerformanceResult;
   accountCount: number;
 }
 
@@ -846,45 +854,72 @@ export interface ReturnData {
   value: number;
 }
 
-export interface PerformanceMetrics {
-  id: string;
-  returns: ReturnData[];
-  periodStartDate?: string | null;
-  periodEndDate?: string | null;
-  currency: string;
-  /** Period gain in dollars (SOTA: change in unrealized P&L for HOLDINGS mode) */
-  periodGain: number;
-  /** Period return percentage (SOTA formula for HOLDINGS mode). Null when start value ≤ 0. */
-  periodReturn: number | null;
-  /** Time-weighted return (null for HOLDINGS mode - requires cash flow tracking) */
-  cumulativeTwr?: number | null;
-  /** Legacy field for backward compatibility */
-  gainLossAmount?: number | null;
-  /** Annualized TWR (null for HOLDINGS mode) */
-  annualizedTwr?: number | null;
-  simpleReturn: number;
-  annualizedSimpleReturn: number;
-  /** Modified Dietz return (null for HOLDINGS mode - requires cash flow tracking) */
-  cumulativeModifiedDietz?: number | null;
-  /** Annualized Modified Dietz return (null for HOLDINGS mode) */
-  annualizedModifiedDietz?: number | null;
-  /** Legacy alias for Modified Dietz */
-  cumulativeMwr?: number | null;
-  /** Legacy alias for annualized Modified Dietz */
-  annualizedMwr?: number | null;
-  volatility: number;
-  maxDrawdown: number;
-  /** Indicates if this is a HOLDINGS mode account (no cash flow tracking) */
+export interface PerformanceResult {
+  scope: PerformanceScopeDescriptor;
+  period: PerformancePeriod;
+  mode: ReturnMethod;
+  returns: PerformanceReturns;
+  attribution: PerformanceAttribution;
+  risk: PerformanceRisk;
+  dataQuality: PerformanceDataQuality;
+  series: ReturnData[];
   isHoldingsMode?: boolean;
-  returnMethod?:
-    | 'timeWeighted'
-    | 'moneyWeighted'
-    | 'modifiedDietz'
-    | 'simpleReturn'
-    | 'symbolPriceBased'
-    | 'notApplicable';
   isMixedTrackingMode?: boolean;
+}
+
+/** @deprecated Use PerformanceResult. */
+export type PerformanceMetrics = PerformanceResult;
+
+export interface PerformanceScopeDescriptor {
+  id: string;
+  currency: string;
+}
+
+export interface PerformancePeriod {
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export type ReturnMethod =
+  | 'timeWeighted'
+  | 'valueReturn'
+  | 'symbolPriceBased'
+  | 'notApplicable';
+
+export interface PerformanceReturns {
+  twr?: number | null;
+  annualizedTwr?: number | null;
+  irr?: number | null;
+  annualizedIrr?: number | null;
+  valueReturn?: number | null;
+  annualizedValueReturn?: number | null;
+}
+
+export interface PerformanceAttribution {
+  contributions: number;
+  distributions: number;
+  income: number;
+  realizedPnl: number;
+  unrealizedPnlChange: number;
+  fxEffect: number;
+  fees: number;
+  taxes: number;
+  residual: number;
+}
+
+export interface PerformanceRisk {
+  volatility?: number | null;
+  maxDrawdown?: number | null;
+  peakDate?: string | null;
+  troughDate?: string | null;
+  recoveryDate?: string | null;
+  drawdownDurationDays?: number | null;
+}
+
+export interface PerformanceDataQuality {
+  status: 'ok' | 'partial' | 'noData' | 'notApplicable';
   warnings?: string[];
+  notApplicableReasons?: string[];
 }
 
 export interface UpdateAssetProfile {
