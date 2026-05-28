@@ -132,6 +132,8 @@ export function ProfileEditor({
       asset_classes: portfolioAllocations.assetClasses,
       industries_gics: portfolioAllocations.sectors,
       regions: portfolioAllocations.regions,
+      instrument_type: portfolioAllocations.securityTypes,
+      risk_category: portfolioAllocations.riskCategory,
     };
     const cats = byTaxonomy[taxonomyId]?.categories ?? [];
     const topLevel = cats.filter((c) => !c.children?.length || c.percentage > 0);
