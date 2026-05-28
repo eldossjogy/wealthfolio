@@ -7,12 +7,10 @@ use std::sync::Arc;
 
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::account_accounting_settings;
-use crate::schema::account_accounting_settings::dsl as accounting_settings_dsl;
 use crate::schema::accounts;
 use crate::schema::accounts::dsl::*;
 
-use super::model::{AccountAccountingSettingsDB, AccountDB};
+use super::model::AccountDB;
 use wealthfolio_core::accounts::{
     Account, AccountAccountingSettings, AccountRepositoryTrait, AccountUpdate, NewAccount,
 };
@@ -45,18 +43,10 @@ impl AccountRepositoryTrait for AccountRepository {
             .exec_tx(move |tx| {
                 let mut account_db: AccountDB = new_account.into();
                 account_db.id = uuid::Uuid::new_v4().to_string();
+                account_db.ensure_default_accounting_meta()?;
 
                 diesel::insert_into(accounts::table)
                     .values(&account_db)
-                    .execute(tx.conn())
-                    .map_err(StorageError::from)?;
-
-                let accounting_settings =
-                    AccountAccountingSettingsDB::default_for_account(&account_db.id);
-                diesel::insert_into(account_accounting_settings::table)
-                    .values(&accounting_settings)
-                    .on_conflict(accounting_settings_dsl::account_id)
-                    .do_nothing()
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
 
@@ -175,9 +165,9 @@ impl AccountRepositoryTrait for AccountRepository {
         }
 
         let mut conn = get_connection(&self.pool)?;
-        let rows: Vec<AccountAccountingSettingsDB> = account_accounting_settings::table
-            .filter(accounting_settings_dsl::account_id.eq_any(requested_account_ids))
-            .select(AccountAccountingSettingsDB::as_select())
+        let rows: Vec<AccountDB> = accounts::table
+            .filter(id.eq_any(requested_account_ids))
+            .select(AccountDB::as_select())
             .load(&mut conn)
             .map_err(StorageError::from)?;
 
@@ -191,8 +181,8 @@ impl AccountRepositoryTrait for AccountRepository {
             })
             .collect();
 
-        for row in rows {
-            let setting = AccountAccountingSettings::try_from(row)?;
+        for account in rows {
+            let setting = account.accounting_settings()?;
             settings.insert(setting.account_id.clone(), setting);
         }
 
@@ -222,6 +212,7 @@ impl AccountRepositoryTrait for AccountRepository {
 mod tests {
     use super::*;
     use crate::db::{create_pool, run_migrations, write_actor::spawn_writer};
+    use crate::schema::accounts::dsl as accounts_dsl;
     use tempfile::tempdir;
     use wealthfolio_core::accounts::{
         CostBasisMethod, CostBasisProfile, LotSelectionStrategy, PoolingScope, TrackingMode,
@@ -278,7 +269,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_seeds_default_accounting_settings() {
+    async fn create_stores_default_accounting_settings_in_meta() {
         let (repo, pool, _dir) = setup().await;
         let account = repo.create(new_account("Seeded")).await.unwrap();
 
@@ -292,12 +283,17 @@ mod tests {
         assert!(setting.lot_selection_strategy.is_none());
 
         let mut conn = get_connection(&pool).unwrap();
-        let count: i64 = account_accounting_settings::table
-            .filter(accounting_settings_dsl::account_id.eq(&account.id))
-            .count()
-            .get_result(&mut conn)
+        let stored_account = accounts_dsl::accounts
+            .find(&account.id)
+            .select(AccountDB::as_select())
+            .first::<AccountDB>(&mut conn)
             .unwrap();
-        assert_eq!(count, 1);
+        let meta_json: serde_json::Value =
+            serde_json::from_str(stored_account.meta.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            meta_json["accounting"]["costBasisMethod"],
+            serde_json::json!("FIFO")
+        );
     }
 
     #[tokio::test]
@@ -322,14 +318,9 @@ mod tests {
 
         let mut conn = get_connection(&pool).unwrap();
         diesel::sql_query(
-            "INSERT INTO account_accounting_settings (
-                account_id, cost_basis_method, cost_basis_profile, pooling_scope,
-                lot_selection_strategy, settings_json, created_at, updated_at
-             ) VALUES (
-                'acc-explicit-settings', 'LIFO', 'CANADA_ACB', 'PORTFOLIO',
-                'HIGHEST_COST', '{\"source\":\"test\"}', '2026-01-01T00:00:00.000Z',
-                '2026-01-02T00:00:00.000Z'
-             )",
+            "UPDATE accounts
+             SET meta = '{\"accounting\":{\"costBasisMethod\":\"LIFO\",\"costBasisProfile\":\"CANADA_ACB\",\"poolingScope\":\"PORTFOLIO\",\"lotSelectionStrategy\":\"HIGHEST_COST\",\"settingsJson\":{\"source\":\"test\"},\"createdAt\":\"2026-01-01T00:00:00.000Z\",\"updatedAt\":\"2026-01-02T00:00:00.000Z\"}}'
+             WHERE id = 'acc-explicit-settings'",
         )
         .execute(&mut conn)
         .unwrap();
@@ -346,21 +337,5 @@ mod tests {
             Some(LotSelectionStrategy::HighestCost)
         );
         assert_eq!(setting.settings_json, "{\"source\":\"test\"}");
-    }
-
-    #[tokio::test]
-    async fn account_delete_cascades_accounting_settings() {
-        let (repo, pool, _dir) = setup().await;
-        let account = repo.create(new_account("Cascade")).await.unwrap();
-
-        repo.delete(&account.id).await.unwrap();
-
-        let mut conn = get_connection(&pool).unwrap();
-        let count: i64 = account_accounting_settings::table
-            .filter(accounting_settings_dsl::account_id.eq(&account.id))
-            .count()
-            .get_result(&mut conn)
-            .unwrap();
-        assert_eq!(count, 0);
     }
 }

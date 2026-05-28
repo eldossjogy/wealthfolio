@@ -1,19 +1,6 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    account_accounting_settings (account_id) {
-        account_id -> Text,
-        cost_basis_method -> Text,
-        cost_basis_profile -> Text,
-        pooling_scope -> Text,
-        lot_selection_strategy -> Nullable<Text>,
-        settings_json -> Text,
-        created_at -> Text,
-        updated_at -> Text,
-    }
-}
-
-diesel::table! {
     accounts (id) {
         id -> Text,
         name -> Text,
@@ -763,7 +750,6 @@ diesel::table! {
 
 diesel::joinable!(allocation_target_weights -> allocation_targets (target_id));
 
-diesel::joinable!(account_accounting_settings -> accounts (account_id));
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
 diesel::joinable!(activities -> assets (asset_id));
@@ -804,7 +790,6 @@ diesel::joinable!(budget_rollover_settings -> taxonomies (taxonomy_id));
 diesel::joinable!(import_account_templates -> import_templates (template_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    account_accounting_settings,
     import_account_templates,
     accounts,
     portfolios,

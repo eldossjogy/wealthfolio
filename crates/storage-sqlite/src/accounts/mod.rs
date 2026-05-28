@@ -3,5 +3,5 @@
 mod model;
 mod repository;
 
-pub use model::{AccountAccountingSettingsDB, AccountDB};
+pub use model::AccountDB;
 pub use repository::AccountRepository;

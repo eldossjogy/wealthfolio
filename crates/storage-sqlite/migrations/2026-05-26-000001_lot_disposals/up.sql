@@ -9,40 +9,6 @@ ALTER TABLE lots ADD COLUMN cost_basis_method TEXT NOT NULL DEFAULT 'FIFO';
 ALTER TABLE daily_account_valuation
 ADD COLUMN external_flow_source TEXT NOT NULL DEFAULT 'UNKNOWN';
 
-CREATE TABLE account_accounting_settings (
-    account_id TEXT PRIMARY KEY NOT NULL,
-    cost_basis_method TEXT NOT NULL DEFAULT 'FIFO',
-    cost_basis_profile TEXT NOT NULL DEFAULT 'GENERIC',
-    pooling_scope TEXT NOT NULL DEFAULT 'ACCOUNT',
-    lot_selection_strategy TEXT NULL,
-    settings_json TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-);
-
-INSERT OR IGNORE INTO account_accounting_settings (
-    account_id,
-    cost_basis_method,
-    cost_basis_profile,
-    pooling_scope,
-    lot_selection_strategy,
-    settings_json,
-    created_at,
-    updated_at
-)
-SELECT
-    id,
-    'FIFO',
-    'GENERIC',
-    'ACCOUNT',
-    NULL,
-    '{}',
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-FROM accounts;
-
 CREATE TABLE lot_disposals (
     id TEXT PRIMARY KEY NOT NULL,
     lot_id TEXT NOT NULL,

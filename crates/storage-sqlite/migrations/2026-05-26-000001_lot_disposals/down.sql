@@ -1,4 +1,3 @@
-DROP TABLE IF EXISTS account_accounting_settings;
 DROP TABLE IF EXISTS lot_disposals;
 
 ALTER TABLE daily_account_valuation DROP COLUMN external_flow_source;

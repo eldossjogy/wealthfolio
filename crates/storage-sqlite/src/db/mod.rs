@@ -176,7 +176,7 @@ mod migration_tests {
     }
 
     #[test]
-    fn lot_disposals_migration_adds_accounting_settings_and_clears_generated_data() {
+    fn lot_disposals_migration_clears_generated_data() {
         let mut conn = SqliteConnection::establish(":memory:").unwrap();
         conn.batch_execute(
             "
@@ -249,17 +249,6 @@ mod migration_tests {
         ))
         .unwrap();
 
-        assert_eq!(
-            count(
-                &mut conn,
-                "SELECT COUNT(*) AS count FROM account_accounting_settings
-                 WHERE account_id = 'acc1'
-                   AND cost_basis_method = 'FIFO'
-                   AND cost_basis_profile = 'GENERIC'
-                   AND pooling_scope = 'ACCOUNT'"
-            ),
-            1
-        );
         assert_eq!(
             count(
                 &mut conn,
