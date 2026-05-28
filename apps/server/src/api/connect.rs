@@ -3,7 +3,7 @@
 //! This module provides REST endpoints for syncing broker accounts and activities
 //! from the Wealthfolio Connect cloud service.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::{Query, State},
@@ -22,8 +22,8 @@ use crate::main_lib::AppState;
 use axum::http::StatusCode;
 use wealthfolio_connect::{
     broker::{
-        BrokerApiClient, PlansResponse, SyncAccountsResponse, SyncActivitiesResponse,
-        SyncConnectionsResponse, UserInfo,
+        BrokerApiClient, BrokerSyncStatusDetail, PlansResponse, SyncAccountsResponse,
+        SyncActivitiesResponse, SyncConnectionsResponse, UserInfo,
     },
     ensure_valid_access_token, fetch_subscription_plans_public, ConnectApiClient, SyncConfig,
     SyncOrchestrator, SyncProgressPayload, SyncProgressReporter, SyncResult, TokenLifecycleConfig,
@@ -52,6 +52,55 @@ fn ensure_connect_sync_enabled() -> ApiResult<()> {
             "Connect sync feature is disabled in this build.".to_string(),
         ))
     }
+}
+
+fn parse_provider_sync_date(value: &str) -> Result<chrono::NaiveDate, String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&chrono::Utc).date_naive())
+        .or_else(|_| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d"))
+        .map_err(|_| format!("Invalid provider sync timestamp '{}'", value))
+}
+
+fn resolve_activity_waterline(
+    status: Option<&BrokerSyncStatusDetail>,
+) -> Result<chrono::NaiveDate, String> {
+    let Some(status) = status else {
+        return Err("Provider transaction sync status is unavailable".to_string());
+    };
+
+    if status.initial_sync_completed == Some(false) {
+        return Err("Provider transaction sync is still preparing".to_string());
+    }
+
+    let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
+        return Err("Provider transaction sync has no successful waterline".to_string());
+    };
+
+    parse_provider_sync_date(last_successful_sync)
+}
+
+fn should_advance_activity_cursor(
+    fetched: usize,
+    has_local_cursor: bool,
+    inconsistent_empty_page: bool,
+    provider_status: Option<&BrokerSyncStatusDetail>,
+) -> bool {
+    if inconsistent_empty_page {
+        return false;
+    }
+
+    if fetched > 0 || has_local_cursor {
+        return true;
+    }
+
+    matches!(
+        provider_status,
+        Some(BrokerSyncStatusDetail {
+            initial_sync_completed: Some(true),
+            first_transaction_date: None,
+            ..
+        })
+    )
 }
 
 fn ensure_device_sync_enabled() -> ApiResult<()> {
@@ -594,10 +643,21 @@ async fn perform_broker_activities_only_sync(
         .connect_sync_service
         .get_synced_accounts()
         .map_err(|e| e.to_string())?;
+    let provider_transaction_statuses: HashMap<String, BrokerSyncStatusDetail> = client
+        .list_accounts(None)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|account| {
+            Some((
+                account.id?,
+                account.sync_status.as_ref()?.transactions.clone()?,
+            ))
+        })
+        .collect();
 
     let mut summary = SyncActivitiesResponse::default();
-    let end_date = chrono::Utc::now().date_naive();
-    let end_date_str = end_date.format("%Y-%m-%d").to_string();
+    let today = chrono::Utc::now().date_naive();
     let page_limit: i64 = 1000;
 
     for account in synced_accounts {
@@ -625,12 +685,56 @@ async fn perform_broker_activities_only_sync(
             continue;
         }
 
-        let start_date = state
+        let local_activity_state = state
             .connect_sync_service
             .get_activity_sync_state(&account_id)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let local_cursor = local_activity_state
+            .as_ref()
+            .and_then(|s| s.last_successful_at.as_ref());
+        let has_local_cursor = local_cursor.is_some();
+        let provider_status = provider_transaction_statuses.get(&provider_account_id);
+        let provider_waterline = match resolve_activity_waterline(provider_status) {
+            Ok(date) => date.min(today),
+            Err(err) => {
+                let warning = format!("Activity sync deferred: {}", err);
+                let _ = state
+                    .connect_sync_service
+                    .finalize_activity_sync_needs_review(account_id.clone(), warning.clone(), None)
+                    .await;
+                summary.accounts_warned += 1;
+                info!("[Connect] {}", warning);
+                continue;
+            }
+        };
+        if let Some(cursor) = local_cursor {
+            if provider_waterline < cursor.date_naive() {
+                let message = format!(
+                    "Activity sync skipped: provider transaction waterline {} is older than local cursor {}",
+                    provider_waterline,
+                    cursor.date_naive()
+                );
+                if let Err(err) = state
+                    .connect_sync_service
+                    .finalize_activity_sync_success(account_id.clone(), cursor.to_rfc3339(), None)
+                    .await
+                {
+                    error!(
+                        "[Connect] Failed to restore activity sync state for {}: {}",
+                        account_name, err
+                    );
+                    summary.accounts_failed += 1;
+                } else {
+                    summary.accounts_synced += 1;
+                    info!("[Connect] {}", message);
+                }
+                continue;
+            }
+        }
+        let end_date_str = provider_waterline.format("%Y-%m-%d").to_string();
+        let start_date = local_activity_state
             .and_then(|s| s.last_successful_at)
-            .map(|dt| (dt.date_naive() - chrono::Days::new(1)).min(end_date))
+            .map(|dt| (dt.date_naive() - chrono::Days::new(1)).min(provider_waterline))
             .map(|d| d.format("%Y-%m-%d").to_string());
 
         info!(
@@ -646,6 +750,9 @@ async fn perform_broker_activities_only_sync(
         let mut account_assets = 0usize;
         let mut account_new_asset_ids: Vec<String> = Vec::new();
         let mut account_failed = false;
+        let mut account_fetched = 0usize;
+        let mut empty_first_page = false;
+        let mut inconsistent_empty_page = false;
 
         loop {
             let page = match client
@@ -675,7 +782,12 @@ async fn perform_broker_activities_only_sync(
             };
 
             let received = page.data.len() as i64;
+            account_fetched += received as usize;
             if received == 0 {
+                empty_first_page = offset == 0;
+                inconsistent_empty_page = page.pagination.as_ref().is_some_and(|p| {
+                    p.has_more == Some(true) || p.total.is_some_and(|total| offset < total)
+                });
                 break;
             }
 
@@ -733,10 +845,32 @@ async fn perform_broker_activities_only_sync(
             continue;
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
+        if !should_advance_activity_cursor(
+            account_fetched,
+            has_local_cursor,
+            inconsistent_empty_page,
+            provider_status,
+        ) {
+            let warning = if inconsistent_empty_page {
+                "Activity sync returned an empty page while provider pagination reported more data"
+            } else if empty_first_page {
+                "Initial activity sync returned no rows even though provider reports transactions may exist"
+            } else {
+                "Initial activity sync did not confirm a complete empty history"
+            }
+            .to_string();
+            let _ = state
+                .connect_sync_service
+                .finalize_activity_sync_needs_review(account_id.clone(), warning.clone(), None)
+                .await;
+            summary.accounts_warned += 1;
+            info!("[Connect] {}", warning);
+            continue;
+        }
+
         if let Err(err) = state
             .connect_sync_service
-            .finalize_activity_sync_success(account_id.clone(), now, None)
+            .finalize_activity_sync_success(account_id.clone(), end_date_str, None)
             .await
         {
             error!(

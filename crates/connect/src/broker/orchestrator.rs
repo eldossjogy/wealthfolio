@@ -3,13 +3,15 @@
 //! This module provides a unified sync implementation that can be used
 //! by both Tauri (desktop) and Axum (web) platforms.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use chrono::{DateTime, NaiveDate, Utc};
 use log::{debug, error, info, warn};
 
 use super::models::{
-    HoldingsDiff, NewAccountInfo, SyncActivitiesResponse, SyncHoldingsResponse, SyncResult,
+    BrokerSyncStatusDetail, HoldingsDiff, NewAccountInfo, SyncActivitiesResponse,
+    SyncHoldingsResponse, SyncResult,
 };
 use super::progress::{SyncProgressPayload, SyncProgressReporter, SyncStatus};
 use super::traits::{BrokerApiClient, BrokerSyncServiceTrait};
@@ -32,6 +34,121 @@ impl Default for SyncConfig {
             max_pages: 10_000,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct ActivityQueryWindow {
+    start_date: Option<String>,
+    end_date: String,
+    provider_waterline: String,
+    has_local_cursor: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ActivitySyncOutcome {
+    fetched: u32,
+    inserted: u32,
+    assets_created: u32,
+    needs_review: u32,
+    new_asset_ids: Vec<String>,
+    empty_first_page: bool,
+    inconsistent_empty_page: bool,
+}
+
+enum ProviderReadiness {
+    Ready(NaiveDate),
+    NotReady(String),
+}
+
+fn parse_provider_sync_date(value: &str) -> Result<NaiveDate, String> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc).date_naive())
+        .or_else(|_| NaiveDate::parse_from_str(value, "%Y-%m-%d"))
+        .map_err(|_| format!("Invalid provider sync timestamp '{}'", value))
+}
+
+fn resolve_activity_readiness(
+    status: Option<&BrokerSyncStatusDetail>,
+) -> Result<ProviderReadiness, String> {
+    let Some(status) = status else {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider transaction sync status is unavailable".to_string(),
+        ));
+    };
+
+    if status.initial_sync_completed == Some(false) {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider transaction sync is still preparing".to_string(),
+        ));
+    }
+
+    let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider transaction sync has no successful waterline".to_string(),
+        ));
+    };
+
+    Ok(ProviderReadiness::Ready(parse_provider_sync_date(
+        last_successful_sync,
+    )?))
+}
+
+fn resolve_holdings_readiness(
+    status: Option<&BrokerSyncStatusDetail>,
+) -> Result<ProviderReadiness, String> {
+    let Some(status) = status else {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider holdings sync status is unavailable".to_string(),
+        ));
+    };
+
+    if status.initial_sync_completed == Some(false) {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider holdings sync is still preparing".to_string(),
+        ));
+    }
+
+    let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
+        return Ok(ProviderReadiness::NotReady(
+            "Provider holdings sync has no successful waterline".to_string(),
+        ));
+    };
+
+    Ok(ProviderReadiness::Ready(parse_provider_sync_date(
+        last_successful_sync,
+    )?))
+}
+
+fn provider_waterline_precedes_local_cursor(
+    local_cursor: Option<&DateTime<Utc>>,
+    provider_waterline: NaiveDate,
+) -> bool {
+    local_cursor
+        .map(|cursor| provider_waterline < cursor.date_naive())
+        .unwrap_or(false)
+}
+
+fn should_advance_activity_cursor(
+    outcome: &ActivitySyncOutcome,
+    window: &ActivityQueryWindow,
+    provider_status: Option<&BrokerSyncStatusDetail>,
+) -> bool {
+    if outcome.inconsistent_empty_page {
+        return false;
+    }
+
+    if outcome.fetched > 0 || window.has_local_cursor {
+        return true;
+    }
+
+    matches!(
+        provider_status,
+        Some(BrokerSyncStatusDetail {
+            initial_sync_completed: Some(true),
+            first_transaction_date: None,
+            ..
+        })
+    )
 }
 
 /// Orchestrates broker data synchronization.
@@ -136,6 +253,25 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             .await
             .map_err(|e| e.to_string())?;
 
+        let provider_transaction_statuses: HashMap<String, BrokerSyncStatusDetail> = all_accounts
+            .iter()
+            .filter_map(|account| {
+                Some((
+                    account.id.clone()?,
+                    account.sync_status.as_ref()?.transactions.clone()?,
+                ))
+            })
+            .collect();
+        let provider_holdings_statuses: HashMap<String, BrokerSyncStatusDetail> = all_accounts
+            .iter()
+            .filter_map(|account| {
+                Some((
+                    account.id.clone()?,
+                    account.sync_status.as_ref()?.holdings.clone()?,
+                ))
+            })
+            .collect();
+
         // Track sync-enabled broker IDs for data sync
         let sync_enabled_broker_ids: HashSet<String> = all_accounts
             .iter()
@@ -165,7 +301,12 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         // - HOLDINGS mode: sync holdings (positions)
         // - NOT_SET mode: skip (needs user configuration first)
         let (activities_result, holdings_result) = self
-            .sync_account_data(api_client, &sync_enabled_broker_ids)
+            .sync_account_data(
+                api_client,
+                &sync_enabled_broker_ids,
+                &provider_transaction_statuses,
+                &provider_holdings_statuses,
+            )
             .await?;
 
         // Build the accounts_needing_setup list - sync-enabled accounts with trackingMode=NOT_SET
@@ -198,7 +339,7 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         };
 
         let total_failed = activities_result.accounts_failed + holdings_result.accounts_failed;
-        let total_warnings = activities_result.accounts_warned;
+        let total_warnings = activities_result.accounts_warned + holdings_result.accounts_warned;
         let result = SyncResult {
             success: total_failed == 0,
             message: format!(
@@ -239,9 +380,9 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         &self,
         api_client: &dyn BrokerApiClient,
         sync_enabled_broker_ids: &HashSet<String>,
+        provider_transaction_statuses: &HashMap<String, BrokerSyncStatusDetail>,
+        provider_holdings_statuses: &HashMap<String, BrokerSyncStatusDetail>,
     ) -> Result<(SyncActivitiesResponse, SyncHoldingsResponse), String> {
-        let end_date = chrono::Utc::now().date_naive();
-
         let synced_accounts = self
             .sync_service
             .get_synced_accounts()
@@ -314,11 +455,14 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             let mut activity_import_run_id: Option<String> = None;
 
             if activity_warning.is_none() {
-                let query_window = match self.compute_activity_query_window(&account_id, end_date) {
-                    Ok(window) => Some(window),
+                let local_activity_state = match self
+                    .sync_service
+                    .get_activity_sync_state(&account_id)
+                {
+                    Ok(state) => Some(state),
                     Err(err) => {
                         error!(
-                            "Failed to compute activity query window for '{}': {}",
+                            "Failed to read activity sync state for '{}': {}",
                             account_name, err
                         );
                         if is_holdings_mode {
@@ -329,12 +473,12 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                                     SyncStatus::NeedsReview,
                                 )
                                 .with_message(format!(
-                                    "Activity reference query window failed; continuing holdings sync: {}",
+                                    "Activity reference sync state failed; continuing holdings sync: {}",
                                     err
                                 )),
                             );
                             activities_summary.accounts_warned += 1;
-                            activity_warning = Some(err);
+                            activity_warning = Some(err.to_string());
                             None
                         } else {
                             activities_summary.accounts_failed += 1;
@@ -343,151 +487,362 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                     }
                 };
 
-                if let Some((start_date, end_date_filter)) = query_window {
-                    let import_mode = if start_date.is_none() {
-                        ImportRunMode::Initial
-                    } else {
-                        ImportRunMode::Incremental
-                    };
+                if let Some(local_activity_state) = local_activity_state {
+                    let local_cursor = local_activity_state
+                        .as_ref()
+                        .and_then(|state| state.last_successful_at.as_ref());
+                    let provider_activity_status =
+                        provider_transaction_statuses.get(&broker_account_id);
 
-                    let import_run = match self
-                        .sync_service
-                        .create_import_run(&account_id, import_mode)
-                        .await
-                    {
-                        Ok(run) => {
-                            debug!(
-                                "Created import run {} for account '{}'",
-                                run.id, account_name
-                            );
-                            Some(run)
-                        }
-                        Err(e) => {
-                            error!("Failed to create import run for '{}': {}", account_name, e);
-                            None
-                        }
-                    };
-                    activity_import_run_id = import_run.as_ref().map(|r| r.id.clone());
-
-                    let window_label = match (&start_date, &end_date_filter) {
-                        (Some(s), Some(e)) => format!("{} -> {}", s, e),
-                        _ => "ALL".to_string(),
-                    };
-                    info!(
-                        "Syncing activities for account '{}' ({}): {}",
-                        account_name, broker_account_id, window_label
-                    );
-
-                    self.progress_reporter.report_progress(
-                        SyncProgressPayload::new(&account_id, &account_name, SyncStatus::Syncing)
-                            .with_message(format!("Starting sync: {}", window_label)),
-                    );
-
-                    match self
-                        .sync_account_activities(
-                            api_client,
-                            &account_id,
-                            &account_name,
-                            &broker_account_id,
-                            start_date.as_deref(),
-                            end_date_filter.as_deref(),
-                            activity_import_run_id.clone(),
-                        )
-                        .await
-                    {
-                        Ok((fetched, inserted, assets_created, needs_review, new_asset_ids)) => {
-                            let summary = ImportRunSummary {
-                                fetched,
-                                inserted,
-                                updated: 0,
-                                skipped: 0,
-                                warnings: needs_review,
-                                errors: 0,
-                                removed: 0,
-                                assets_created,
+                    let activity_waterline = match resolve_activity_readiness(
+                        provider_activity_status,
+                    ) {
+                        Ok(ProviderReadiness::Ready(date))
+                            if provider_waterline_precedes_local_cursor(local_cursor, date) =>
+                        {
+                            let Some(cursor) = local_cursor else {
+                                unreachable!("stale provider waterline requires local cursor");
                             };
-
-                            let last_synced_date = end_date.format("%Y-%m-%d").to_string();
-                            let sync_state_failed = self
+                            let message = format!(
+                                "Activity sync skipped: provider transaction waterline {} is older than local cursor {}",
+                                date,
+                                cursor.date_naive()
+                            );
+                            if let Err(e) = self
                                 .sync_service
                                 .finalize_activity_sync_success(
                                     account_id.clone(),
-                                    last_synced_date,
-                                    activity_import_run_id.clone(),
+                                    cursor.to_rfc3339(),
+                                    None,
                                 )
                                 .await
-                                .is_err();
-
-                            if sync_state_failed {
+                            {
                                 error!(
-                                    "Failed to update activity sync state for '{}', but activities were synced",
-                                    account_name
+                                    "Failed to restore activity sync state for '{}': {}",
+                                    account_name, e
+                                );
+                                activities_summary.accounts_failed += 1;
+                                if !is_holdings_mode {
+                                    continue;
+                                }
+                                activity_warning = Some(format!(
+                                    "Activity sync skipped, but sync state cleanup failed: {}",
+                                    e
+                                ));
+                            } else {
+                                self.progress_reporter.report_progress(
+                                    SyncProgressPayload::new(
+                                        &account_id,
+                                        &account_name,
+                                        SyncStatus::Complete,
+                                    )
+                                    .with_message(message),
+                                );
+                                activities_summary.accounts_synced += 1;
+                            }
+                            None
+                        }
+                        Ok(ProviderReadiness::Ready(date)) => Some(date),
+                        Ok(ProviderReadiness::NotReady(reason)) => {
+                            let warning = format!("Activity sync deferred: {}", reason);
+                            if let Err(e) = self
+                                .sync_service
+                                .finalize_activity_sync_needs_review(
+                                    account_id.clone(),
+                                    warning.clone(),
+                                    None,
+                                )
+                                .await
+                            {
+                                error!(
+                                    "Failed to mark deferred activity sync for '{}': {}",
+                                    account_name, e
                                 );
                             }
+                            self.progress_reporter.report_progress(
+                                SyncProgressPayload::new(
+                                    &account_id,
+                                    &account_name,
+                                    SyncStatus::NeedsReview,
+                                )
+                                .with_message(warning.clone()),
+                            );
+                            activities_summary.accounts_warned += 1;
+                            activity_warning = Some(warning);
+                            None
+                        }
+                        Err(err) => {
+                            error!(
+                                "Failed to resolve provider activity sync status for '{}': {}",
+                                account_name, err
+                            );
+                            if is_holdings_mode {
+                                let message = format!(
+                                    "Activity reference sync status failed; continuing holdings sync: {}",
+                                    err
+                                );
+                                self.progress_reporter.report_progress(
+                                    SyncProgressPayload::new(
+                                        &account_id,
+                                        &account_name,
+                                        SyncStatus::NeedsReview,
+                                    )
+                                    .with_message(message),
+                                );
+                                activities_summary.accounts_warned += 1;
+                                activity_warning = Some(err);
+                                None
+                            } else {
+                                activities_summary.accounts_failed += 1;
+                                continue;
+                            }
+                        }
+                    };
 
-                            if let Some(ref run_id) = activity_import_run_id {
-                                let status = if needs_review > 0 {
-                                    info!(
-                                        "Import run {} has {} activities needing review",
-                                        run_id, needs_review
+                    let query_window = match activity_waterline {
+                        Some(waterline) => {
+                            match self.compute_activity_query_window(&account_id, waterline) {
+                                Ok(window) => Some(window),
+                                Err(err) => {
+                                    error!(
+                                        "Failed to compute activity query window for '{}': {}",
+                                        account_name, err
                                     );
+                                    if is_holdings_mode {
+                                        let message = format!(
+                                            "Activity reference query window failed; continuing holdings sync: {}",
+                                            err
+                                        );
+                                        self.progress_reporter.report_progress(
+                                            SyncProgressPayload::new(
+                                                &account_id,
+                                                &account_name,
+                                                SyncStatus::NeedsReview,
+                                            )
+                                            .with_message(message),
+                                        );
+                                        activities_summary.accounts_warned += 1;
+                                        activity_warning = Some(err);
+                                        None
+                                    } else {
+                                        activities_summary.accounts_failed += 1;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        None => None,
+                    };
+
+                    if let Some(query_window) = query_window {
+                        let import_mode = if query_window.start_date.is_none() {
+                            ImportRunMode::Initial
+                        } else {
+                            ImportRunMode::Incremental
+                        };
+
+                        let import_run = match self
+                            .sync_service
+                            .create_import_run(&account_id, import_mode)
+                            .await
+                        {
+                            Ok(run) => {
+                                debug!(
+                                    "Created import run {} for account '{}'",
+                                    run.id, account_name
+                                );
+                                Some(run)
+                            }
+                            Err(e) => {
+                                error!("Failed to create import run for '{}': {}", account_name, e);
+                                None
+                            }
+                        };
+                        activity_import_run_id = import_run.as_ref().map(|r| r.id.clone());
+
+                        let window_label = match &query_window.start_date {
+                            Some(s) => format!("{} -> {}", s, query_window.end_date),
+                            None => format!("ALL -> {}", query_window.end_date),
+                        };
+                        info!(
+                            "Syncing activities for account '{}' ({}): {}",
+                            account_name, broker_account_id, window_label
+                        );
+
+                        self.progress_reporter.report_progress(
+                            SyncProgressPayload::new(
+                                &account_id,
+                                &account_name,
+                                SyncStatus::Syncing,
+                            )
+                            .with_message(format!("Starting sync: {}", window_label)),
+                        );
+
+                        match self
+                            .sync_account_activities(
+                                api_client,
+                                &account_id,
+                                &account_name,
+                                &broker_account_id,
+                                query_window.start_date.as_deref(),
+                                Some(query_window.end_date.as_str()),
+                                activity_import_run_id.clone(),
+                            )
+                            .await
+                        {
+                            Ok(outcome) => {
+                                let mut import_status = if outcome.needs_review > 0 {
                                     ImportRunStatus::NeedsReview
                                 } else {
                                     ImportRunStatus::Applied
                                 };
+                                let summary = ImportRunSummary {
+                                    fetched: outcome.fetched,
+                                    inserted: outcome.inserted,
+                                    updated: 0,
+                                    skipped: 0,
+                                    warnings: outcome.needs_review,
+                                    errors: 0,
+                                    removed: 0,
+                                    assets_created: outcome.assets_created,
+                                };
 
-                                let _ = self
-                                    .sync_service
-                                    .finalize_import_run(run_id, summary, status, None)
-                                    .await;
+                                let should_advance_cursor = should_advance_activity_cursor(
+                                    &outcome,
+                                    &query_window,
+                                    provider_activity_status,
+                                );
+
+                                if should_advance_cursor {
+                                    let sync_state_failed = self
+                                        .sync_service
+                                        .finalize_activity_sync_success(
+                                            account_id.clone(),
+                                            query_window.provider_waterline.clone(),
+                                            activity_import_run_id.clone(),
+                                        )
+                                        .await
+                                        .is_err();
+
+                                    if sync_state_failed {
+                                        error!(
+                                        "Failed to update activity sync state for '{}', but activities were synced",
+                                        account_name
+                                    );
+                                    }
+                                } else {
+                                    let warning = if outcome.inconsistent_empty_page {
+                                        "Activity sync returned an empty page while provider pagination reported more data"
+                                    } else if outcome.empty_first_page {
+                                        "Initial activity sync returned no rows even though provider reports transactions may exist"
+                                    } else {
+                                        "Initial activity sync did not confirm a complete empty history"
+                                }
+                                .to_string();
+                                    if let Err(e) = self
+                                        .sync_service
+                                        .finalize_activity_sync_needs_review(
+                                            account_id.clone(),
+                                            warning.clone(),
+                                            activity_import_run_id.clone(),
+                                        )
+                                        .await
+                                    {
+                                        error!(
+                                        "Failed to mark activity sync as needs review for '{}': {}",
+                                        account_name, e
+                                    );
+                                    }
+                                    import_status = ImportRunStatus::NeedsReview;
+                                    activities_summary.accounts_warned += 1;
+                                    activity_warning = Some(warning.clone());
+                                    self.progress_reporter.report_progress(
+                                        SyncProgressPayload::new(
+                                            &account_id,
+                                            &account_name,
+                                            SyncStatus::NeedsReview,
+                                        )
+                                        .with_activities_fetched(outcome.fetched as usize)
+                                        .with_message(warning),
+                                    );
+                                }
+
+                                if let Some(ref run_id) = activity_import_run_id {
+                                    if outcome.needs_review > 0 {
+                                        info!(
+                                            "Import run {} has {} activities needing review",
+                                            run_id, outcome.needs_review
+                                        );
+                                    }
+
+                                    let _ = self
+                                        .sync_service
+                                        .finalize_import_run(run_id, summary, import_status, None)
+                                        .await;
+                                }
+
+                                if !should_advance_cursor {
+                                    if !is_holdings_mode {
+                                        continue;
+                                    }
+                                } else {
+                                    let status = if outcome.needs_review > 0 {
+                                        SyncStatus::NeedsReview
+                                    } else {
+                                        SyncStatus::Complete
+                                    };
+                                    self.progress_reporter.report_progress(
+                                        SyncProgressPayload::new(
+                                            &account_id,
+                                            &account_name,
+                                            status,
+                                        )
+                                        .with_activities_fetched(outcome.fetched as usize)
+                                        .with_message(
+                                            format!(
+                                                "Synced {} activities ({} need review)",
+                                                outcome.inserted, outcome.needs_review
+                                            ),
+                                        ),
+                                    );
+
+                                    activities_summary.accounts_synced += 1;
+                                }
+
+                                activities_summary.activities_upserted += outcome.inserted as usize;
+                                activities_summary.assets_inserted +=
+                                    outcome.assets_created as usize;
+                                activities_summary
+                                    .new_asset_ids
+                                    .extend(outcome.new_asset_ids);
                             }
+                            Err(err) => {
+                                error!("Failed to sync activities for '{}': {}", account_name, err);
 
-                            let status = if needs_review > 0 {
-                                SyncStatus::NeedsReview
-                            } else {
-                                SyncStatus::Complete
-                            };
-                            self.progress_reporter.report_progress(
-                                SyncProgressPayload::new(&account_id, &account_name, status)
-                                    .with_activities_fetched(fetched as usize)
-                                    .with_message(format!(
-                                        "Synced {} activities ({} need review)",
-                                        inserted, needs_review
-                                    )),
-                            );
-
-                            activities_summary.accounts_synced += 1;
-                            activities_summary.activities_upserted += inserted as usize;
-                            activities_summary.assets_inserted += assets_created as usize;
-                            activities_summary.new_asset_ids.extend(new_asset_ids);
-                        }
-                        Err(err) => {
-                            error!("Failed to sync activities for '{}': {}", account_name, err);
-
-                            let _ = self
-                                .sync_service
-                                .finalize_activity_sync_failure(
-                                    account_id.clone(),
-                                    err.clone(),
-                                    activity_import_run_id.clone(),
-                                )
-                                .await;
-
-                            if let Some(ref run_id) = activity_import_run_id {
-                                let summary = ImportRunSummary::default();
                                 let _ = self
                                     .sync_service
-                                    .finalize_import_run(
-                                        run_id,
-                                        summary,
-                                        ImportRunStatus::Failed,
-                                        Some(err.clone()),
+                                    .finalize_activity_sync_failure(
+                                        account_id.clone(),
+                                        err.clone(),
+                                        activity_import_run_id.clone(),
                                     )
                                     .await;
-                            }
 
-                            if is_holdings_mode {
-                                self.progress_reporter.report_progress(
+                                if let Some(ref run_id) = activity_import_run_id {
+                                    let summary = ImportRunSummary::default();
+                                    let _ = self
+                                        .sync_service
+                                        .finalize_import_run(
+                                            run_id,
+                                            summary,
+                                            ImportRunStatus::Failed,
+                                            Some(err.clone()),
+                                        )
+                                        .await;
+                                }
+
+                                if is_holdings_mode {
+                                    self.progress_reporter.report_progress(
                                     SyncProgressPayload::new(
                                         &account_id,
                                         &account_name,
@@ -498,19 +853,20 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                                         err
                                     )),
                                 );
-                                activities_summary.accounts_warned += 1;
-                                activity_warning = Some(err);
-                            } else {
-                                self.progress_reporter.report_progress(
-                                    SyncProgressPayload::new(
-                                        &account_id,
-                                        &account_name,
-                                        SyncStatus::Failed,
-                                    )
-                                    .with_message(err.clone()),
-                                );
-                                activities_summary.accounts_failed += 1;
-                                continue;
+                                    activities_summary.accounts_warned += 1;
+                                    activity_warning = Some(err);
+                                } else {
+                                    self.progress_reporter.report_progress(
+                                        SyncProgressPayload::new(
+                                            &account_id,
+                                            &account_name,
+                                            SyncStatus::Failed,
+                                        )
+                                        .with_message(err.clone()),
+                                    );
+                                    activities_summary.accounts_failed += 1;
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -521,14 +877,40 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                 continue;
             }
 
-            // Determine import run mode from existing sync state.
-            let holdings_import_mode = match self.sync_service.get_activity_sync_state(&account_id)
+            match resolve_holdings_readiness(provider_holdings_statuses.get(&broker_account_id)) {
+                Ok(ProviderReadiness::Ready(_)) => {}
+                Ok(ProviderReadiness::NotReady(reason)) => {
+                    let warning = format!("Holdings sync deferred: {}", reason);
+                    self.progress_reporter.report_progress(
+                        SyncProgressPayload::new(
+                            &account_id,
+                            &account_name,
+                            SyncStatus::NeedsReview,
+                        )
+                        .with_message(warning),
+                    );
+                    holdings_summary.accounts_warned += 1;
+                    continue;
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to resolve provider holdings sync status for '{}': {}",
+                        account_name, err
+                    );
+                    holdings_summary.accounts_failed += 1;
+                    continue;
+                }
+            }
+
+            let holdings_import_mode = match self
+                .sync_service
+                .has_broker_imported_holdings_snapshot(&account_id)
             {
-                Ok(Some(state)) if state.last_successful_at.is_some() => ImportRunMode::Incremental,
-                Ok(_) => ImportRunMode::Initial,
+                Ok(true) => ImportRunMode::Incremental,
+                Ok(false) => ImportRunMode::Initial,
                 Err(e) => {
                     warn!(
-                        "Failed to read sync state for '{}' before holdings sync: {}",
+                        "Failed to read holdings snapshot state for '{}' before holdings sync: {}",
                         account_name, e
                     );
                     ImportRunMode::Initial
@@ -745,11 +1127,13 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         start_date: Option<&str>,
         end_date: Option<&str>,
         import_run_id: Option<String>,
-    ) -> Result<(u32, u32, u32, u32, Vec<String>), String> {
+    ) -> Result<ActivitySyncOutcome, String> {
         let mut offset: i64 = 0;
         let limit = self.config.page_limit;
         let mut pages_fetched: usize = 0;
         let mut last_page_first_id: Option<String> = None;
+        let mut empty_first_page = false;
+        let mut inconsistent_empty_page = false;
 
         let mut total_fetched: u32 = 0;
         let mut total_inserted: u32 = 0;
@@ -852,6 +1236,10 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
 
             // Avoid spinning forever if API reports more pages but returns no data.
             if received == 0 {
+                empty_first_page = pages_fetched == 1;
+                inconsistent_empty_page = page.pagination.as_ref().is_some_and(|p| {
+                    p.has_more == Some(true) || p.total.is_some_and(|total| offset < total)
+                });
                 break;
             }
 
@@ -882,39 +1270,43 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             }
         }
 
-        Ok((
-            total_fetched,
-            total_inserted,
-            total_assets_created,
-            total_needs_review,
-            all_new_asset_ids,
-        ))
+        Ok(ActivitySyncOutcome {
+            fetched: total_fetched,
+            inserted: total_inserted,
+            assets_created: total_assets_created,
+            needs_review: total_needs_review,
+            new_asset_ids: all_new_asset_ids,
+            empty_first_page,
+            inconsistent_empty_page,
+        })
     }
 
     /// Compute the activity query window for incremental sync.
     fn compute_activity_query_window(
         &self,
         account_id: &str,
-        end_date: chrono::NaiveDate,
-    ) -> Result<(Option<String>, Option<String>), String> {
+        provider_waterline: NaiveDate,
+    ) -> Result<ActivityQueryWindow, String> {
+        let today = Utc::now().date_naive();
+        let end_date = provider_waterline.min(today);
         let sync_state = self
             .sync_service
             .get_activity_sync_state(account_id)
             .map_err(|e| format!("Failed to read activity sync state: {}", e))?;
 
-        let from_state = sync_state
-            .and_then(|s| s.last_successful_at)
+        let local_cursor = sync_state.and_then(|s| s.last_successful_at);
+        let has_local_cursor = local_cursor.is_some();
+        let start_date = local_cursor
             .map(|dt| dt.date_naive())
-            .map(|d| (d - chrono::Days::new(1)).min(end_date));
+            .map(|d| (d - chrono::Days::new(1)).min(end_date))
+            .map(|d| d.format("%Y-%m-%d").to_string());
 
-        if let Some(d) = from_state {
-            return Ok((
-                Some(d.format("%Y-%m-%d").to_string()),
-                Some(end_date.format("%Y-%m-%d").to_string()),
-            ));
-        }
-
-        Ok((None, None))
+        Ok(ActivityQueryWindow {
+            start_date,
+            end_date: end_date.format("%Y-%m-%d").to_string(),
+            provider_waterline: end_date.format("%Y-%m-%d").to_string(),
+            has_local_cursor,
+        })
     }
 }
 
@@ -927,5 +1319,133 @@ mod tests {
         let config = SyncConfig::default();
         assert_eq!(config.page_limit, 1000);
         assert_eq!(config.max_pages, 10_000);
+    }
+
+    fn transactions_status(
+        initial_sync_completed: Option<bool>,
+        last_successful_sync: Option<&str>,
+        first_transaction_date: Option<&str>,
+    ) -> BrokerSyncStatusDetail {
+        BrokerSyncStatusDetail {
+            initial_sync_completed,
+            last_successful_sync: last_successful_sync.map(str::to_string),
+            first_transaction_date: first_transaction_date.map(str::to_string),
+        }
+    }
+
+    fn window(has_local_cursor: bool) -> ActivityQueryWindow {
+        ActivityQueryWindow {
+            start_date: has_local_cursor.then(|| "2026-05-21".to_string()),
+            end_date: "2026-05-22".to_string(),
+            provider_waterline: "2026-05-22".to_string(),
+            has_local_cursor,
+        }
+    }
+
+    #[test]
+    fn provider_not_ready_defers_first_activity_sync() {
+        let status = transactions_status(Some(false), None, None);
+        let readiness = resolve_activity_readiness(Some(&status)).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::NotReady(_)));
+    }
+
+    #[test]
+    fn provider_waterline_without_initial_flag_allows_activity_fetch() {
+        let status = transactions_status(None, Some("2026-05-22"), None);
+        let readiness = resolve_activity_readiness(Some(&status)).unwrap();
+
+        assert!(matches!(
+            readiness,
+            ProviderReadiness::Ready(date)
+                if date == NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()
+        ));
+    }
+
+    #[test]
+    fn provider_waterline_before_local_cursor_is_stale() {
+        let local_cursor = DateTime::parse_from_rfc3339("2026-05-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let stale_waterline = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
+        let current_waterline = NaiveDate::from_ymd_opt(2026, 5, 22).unwrap();
+
+        assert!(provider_waterline_precedes_local_cursor(
+            Some(&local_cursor),
+            stale_waterline
+        ));
+        assert!(!provider_waterline_precedes_local_cursor(
+            Some(&local_cursor),
+            current_waterline
+        ));
+    }
+
+    #[test]
+    fn initial_empty_activity_sync_with_first_transaction_does_not_advance_cursor() {
+        let status = transactions_status(Some(true), Some("2026-05-22"), Some("2020-01-01"));
+        let outcome = ActivitySyncOutcome {
+            empty_first_page: true,
+            ..ActivitySyncOutcome::default()
+        };
+
+        assert!(!should_advance_activity_cursor(
+            &outcome,
+            &window(false),
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn initial_empty_activity_sync_with_confirmed_empty_history_advances_cursor() {
+        let status = transactions_status(Some(true), Some("2026-05-22"), None);
+        let outcome = ActivitySyncOutcome {
+            empty_first_page: true,
+            ..ActivitySyncOutcome::default()
+        };
+
+        assert!(should_advance_activity_cursor(
+            &outcome,
+            &window(false),
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn incremental_empty_activity_sync_advances_cursor_to_provider_waterline() {
+        let status = transactions_status(Some(true), Some("2026-05-22"), Some("2020-01-01"));
+        let outcome = ActivitySyncOutcome {
+            empty_first_page: true,
+            ..ActivitySyncOutcome::default()
+        };
+
+        assert!(should_advance_activity_cursor(
+            &outcome,
+            &window(true),
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn inconsistent_empty_activity_page_does_not_advance_cursor() {
+        let status = transactions_status(Some(true), Some("2026-05-22"), None);
+        let outcome = ActivitySyncOutcome {
+            empty_first_page: true,
+            inconsistent_empty_page: true,
+            ..ActivitySyncOutcome::default()
+        };
+
+        assert!(!should_advance_activity_cursor(
+            &outcome,
+            &window(true),
+            Some(&status)
+        ));
+    }
+
+    #[test]
+    fn holdings_not_ready_defers_snapshot_sync() {
+        let status = transactions_status(Some(false), None, None);
+        let readiness = resolve_holdings_readiness(Some(&status)).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::NotReady(_)));
     }
 }
