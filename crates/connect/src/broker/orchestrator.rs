@@ -11,7 +11,6 @@ mod activity_phase;
 mod holdings_phase;
 
 use log::{debug, info};
-use serde_json::Value;
 
 use super::models::{
     BrokerSyncStatusDetail, NewAccountInfo, SyncActivitiesResponse, SyncHoldingsResponse,
@@ -44,25 +43,15 @@ pub(super) struct AccountSyncJob {
     account_id: String,
     account_name: String,
     broker_account_id: String,
-    provider: String,
     tracking_mode: TrackingMode,
 }
 
 impl AccountSyncJob {
     fn from_account(account: Account) -> Option<Self> {
-        let provider = account
-            .provider
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase())
-            .unwrap_or_else(|| "snaptrade".to_string());
-
         Some(Self {
             account_id: account.id,
             account_name: account.name,
             broker_account_id: account.provider_account_id?,
-            provider,
             tracking_mode: account.tracking_mode,
         })
     }
@@ -83,11 +72,9 @@ pub(super) struct ActivityQueryWindow {
 pub(super) struct ActivitySyncOutcome {
     fetched: u32,
     inserted: u32,
-    removed: u32,
     assets_created: u32,
     needs_review: u32,
     new_asset_ids: Vec<String>,
-    checkpoint: Option<Value>,
     inconsistent_empty_page: bool,
 }
 
@@ -494,10 +481,10 @@ mod tests {
     }
 
     use super::super::models::{
-        AccountUniversalActivity, ActivitySyncResponse, BrokerAccount, BrokerAccountSyncStatus,
-        BrokerBrokerage, BrokerConnection, BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff,
-        HoldingsOptionPosition, HoldingsPosition, PaginatedUniversalActivity,
-        RemovedProviderActivity, SyncAccountsResponse, SyncConnectionsResponse,
+        AccountUniversalActivity, BrokerAccount, BrokerAccountSyncStatus, BrokerBrokerage,
+        BrokerConnection, BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff,
+        HoldingsOptionPosition, HoldingsPosition, PaginatedUniversalActivity, PaginationDetails,
+        SyncAccountsResponse, SyncConnectionsResponse,
     };
     use super::super::progress::NoOpProgressReporter;
     use super::super::traits::BrokerSyncServiceTrait;
@@ -511,7 +498,7 @@ mod tests {
     #[derive(Default)]
     struct MockBrokerApiClient {
         broker_accounts: Vec<BrokerAccount>,
-        activity_pages: Mutex<Vec<ActivitySyncResponse>>,
+        activity_pages: Mutex<Vec<PaginatedUniversalActivity>>,
         activity_calls: Mutex<usize>,
     }
 
@@ -540,22 +527,10 @@ mod tests {
             _offset: Option<i64>,
             _limit: Option<i64>,
         ) -> Result<PaginatedUniversalActivity> {
-            Ok(PaginatedUniversalActivity::default())
-        }
-
-        async fn sync_account_activities(
-            &self,
-            _account_id: &str,
-            _provider: Option<&str>,
-            _checkpoint: Option<Value>,
-            _start_date: Option<&str>,
-            _end_date: Option<&str>,
-            _limit: Option<i64>,
-        ) -> Result<ActivitySyncResponse> {
             *self.activity_calls.lock().unwrap() += 1;
             let mut pages = self.activity_pages.lock().unwrap();
             if pages.is_empty() {
-                return Ok(ActivitySyncResponse::default());
+                return Ok(PaginatedUniversalActivity::default());
             }
             Ok(pages.remove(0))
         }
@@ -639,20 +614,11 @@ mod tests {
             Ok(self.upsert_result.clone())
         }
 
-        async fn remove_account_activities(
-            &self,
-            _account_id: String,
-            removed_activities: Vec<RemovedProviderActivity>,
-        ) -> Result<usize> {
-            Ok(removed_activities.len())
-        }
-
         async fn finalize_activity_sync_success(
             &self,
             account_id: String,
             last_synced_date: String,
             import_run_id: Option<String>,
-            _checkpoint: Option<Value>,
         ) -> Result<()> {
             self.calls.lock().unwrap().activity_successes.push((
                 account_id,
@@ -817,20 +783,24 @@ mod tests {
         });
         let api_client = MockBrokerApiClient {
             activity_pages: Mutex::new(vec![
-                ActivitySyncResponse {
-                    activities: vec![AccountUniversalActivity {
+                PaginatedUniversalActivity {
+                    data: vec![AccountUniversalActivity {
                         id: Some("activity-1".to_string()),
                         ..AccountUniversalActivity::default()
                     }],
-                    checkpoint: Some(serde_json::json!({"cursor": 1})),
-                    has_more: true,
-                    ..ActivitySyncResponse::default()
+                    pagination: Some(PaginationDetails {
+                        has_more: Some(true),
+                        total: Some(2),
+                        ..PaginationDetails::default()
+                    }),
                 },
-                ActivitySyncResponse {
-                    activities: Vec::new(),
-                    checkpoint: Some(serde_json::json!({"cursor": 2})),
-                    has_more: true,
-                    ..ActivitySyncResponse::default()
+                PaginatedUniversalActivity {
+                    data: Vec::new(),
+                    pagination: Some(PaginationDetails {
+                        has_more: Some(true),
+                        total: Some(2),
+                        ..PaginationDetails::default()
+                    }),
                 },
             ]),
             ..MockBrokerApiClient::default()
@@ -961,14 +931,16 @@ mod tests {
                 broker_account("broker-1", Some(ready_status("2026-05-22", None)), None),
                 broker_account("broker-2", Some(ready_status("2026-05-22", None)), None),
             ],
-            activity_pages: Mutex::new(vec![ActivitySyncResponse {
-                activities: vec![AccountUniversalActivity {
+            activity_pages: Mutex::new(vec![PaginatedUniversalActivity {
+                data: vec![AccountUniversalActivity {
                     id: Some("activity-1".to_string()),
                     ..AccountUniversalActivity::default()
                 }],
-                checkpoint: Some(serde_json::json!({"cursor": 1})),
-                has_more: false,
-                ..ActivitySyncResponse::default()
+                pagination: Some(PaginationDetails {
+                    has_more: Some(false),
+                    total: Some(1),
+                    ..PaginationDetails::default()
+                }),
             }]),
             ..MockBrokerApiClient::default()
         };

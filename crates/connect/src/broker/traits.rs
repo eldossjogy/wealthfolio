@@ -3,15 +3,13 @@
 use async_trait::async_trait;
 
 use super::models::{
-    AccountUniversalActivity, ActivitySyncResponse, BrokerAccount, BrokerBrokerage,
-    BrokerConnection, BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff,
-    HoldingsOptionPosition, HoldingsPosition, PaginatedUniversalActivity, RemovedProviderActivity,
-    SyncAccountsResponse, SyncConnectionsResponse,
+    AccountUniversalActivity, BrokerAccount, BrokerBrokerage, BrokerConnection,
+    BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff, HoldingsOptionPosition,
+    HoldingsPosition, PaginatedUniversalActivity, SyncAccountsResponse, SyncConnectionsResponse,
 };
 use crate::broker_ingest::BrokerSyncState;
 use crate::broker_ingest::{ImportRun, ImportRunMode, ImportRunStatus, ImportRunSummary};
 use crate::platform::Platform;
-use serde_json::Value;
 use wealthfolio_core::accounts::Account;
 use wealthfolio_core::errors::Result;
 
@@ -47,17 +45,6 @@ pub trait BrokerApiClient: Send + Sync {
         offset: Option<i64>,
         limit: Option<i64>,
     ) -> Result<PaginatedUniversalActivity>;
-
-    /// Sync account activities using the provider-neutral v2 checkpoint API.
-    async fn sync_account_activities(
-        &self,
-        account_id: &str,
-        provider: Option<&str>,
-        checkpoint: Option<Value>,
-        start_date: Option<&str>,
-        end_date: Option<&str>,
-        limit: Option<i64>,
-    ) -> Result<ActivitySyncResponse>;
 
     /// Fetch current holdings for a broker account.
     ///
@@ -118,20 +105,12 @@ pub trait BrokerSyncServiceTrait: Send + Sync {
         activities: Vec<AccountUniversalActivity>,
     ) -> Result<(usize, usize, Vec<String>, usize)>;
 
-    /// Remove provider activities that were tombstoned by the upstream provider.
-    async fn remove_account_activities(
-        &self,
-        account_id: String,
-        removed_activities: Vec<RemovedProviderActivity>,
-    ) -> Result<usize>;
-
     /// Finalize an activity sync as successful for an account.
     async fn finalize_activity_sync_success(
         &self,
         account_id: String,
         last_synced_date: String,
         import_run_id: Option<String>,
-        checkpoint: Option<Value>,
     ) -> Result<()>;
 
     /// Finalize an activity sync as failed for an account.

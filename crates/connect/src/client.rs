@@ -7,14 +7,12 @@
 use async_trait::async_trait;
 use log::{debug, info};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::Value;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
 
 use crate::broker::{
-    ActivitySyncRequest, ActivitySyncResponse, BrokerAccount, BrokerBrokerage, BrokerConnection,
-    BrokerConnectionBrokerage, BrokerHoldingsResponse, PaginatedUniversalActivity, PlansResponse,
-    UserInfo, UserTeam,
+    BrokerAccount, BrokerBrokerage, BrokerConnection, BrokerConnectionBrokerage,
+    BrokerHoldingsResponse, PaginatedUniversalActivity, PlansResponse, UserInfo, UserTeam,
 };
 use crate::request_metadata::{
     header_value, log_failed_cloud_request, request_metadata_suffix, server_request_id,
@@ -46,8 +44,6 @@ struct ApiConnectionsResponse {
 struct ApiConnection {
     id: String,
     authorization_id: Option<String>,
-    provider: Option<String>,
-    category: Option<String>,
     brokerage_name: Option<String>,
     brokerage_slug: Option<String>,
     brokerage: Option<ApiBrokerage>,
@@ -204,23 +200,6 @@ impl ConnectApiClient {
         self.parse_response(response, &context).await
     }
 
-    /// Make a POST request and parse the response.
-    async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
-        let context = CloudRequestContext::new("POST", path, None);
-        let url = format!("{}{}", self.base_url, path);
-
-        let response = self
-            .client
-            .post(&url)
-            .headers(self.headers(&context.client_request_id)?)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| self.request_transport_error(&context, e))?;
-
-        self.parse_response(response, &context).await
-    }
-
     /// Parse an HTTP response, handling errors appropriately.
     async fn parse_response<T: DeserializeOwned>(
         &self,
@@ -330,110 +309,6 @@ impl ConnectApiClient {
         self.get(&path).await
     }
 
-    /// Sync account activities using the provider-neutral v2 checkpoint endpoint.
-    pub async fn sync_account_activities_v2(
-        &self,
-        account_id: &str,
-        provider: Option<&str>,
-        checkpoint: Option<Value>,
-        start_date: Option<&str>,
-        end_date: Option<&str>,
-        limit: Option<i64>,
-    ) -> Result<ActivitySyncResponse> {
-        let path = format!(
-            "/api/v2/sync/brokerage/accounts/{}/activities/sync",
-            account_id
-        );
-        let body = ActivitySyncRequest {
-            provider: provider.map(str::to_string),
-            checkpoint: checkpoint.clone(),
-            start_date: start_date.map(str::to_string),
-            end_date: end_date.map(str::to_string),
-            limit,
-        };
-
-        debug!("[ConnectApi] Syncing activities from: {}", path);
-
-        match self.post(&path, &body).await {
-            Ok(response) => Ok(response),
-            Err(error) if provider.is_none_or(|p| p.eq_ignore_ascii_case("snaptrade")) => {
-                debug!(
-                    "[ConnectApi] v2 activity sync failed for SnapTrade, falling back to v1: {}",
-                    error
-                );
-                self.sync_snaptrade_activities_v1(
-                    account_id, checkpoint, start_date, end_date, limit,
-                )
-                .await
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    async fn sync_snaptrade_activities_v1(
-        &self,
-        account_id: &str,
-        checkpoint: Option<Value>,
-        start_date: Option<&str>,
-        end_date: Option<&str>,
-        limit: Option<i64>,
-    ) -> Result<ActivitySyncResponse> {
-        let offset = checkpoint
-            .as_ref()
-            .filter(|value| {
-                let checkpoint_start = value.get("startDate").and_then(Value::as_str);
-                let checkpoint_end = value.get("endDate").and_then(Value::as_str);
-                checkpoint_start == start_date && checkpoint_end == end_date
-            })
-            .and_then(|value| value.get("offset"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let page = self
-            .get_account_activities(account_id, start_date, end_date, Some(offset), limit)
-            .await?;
-        let received = page.data.len() as i64;
-        let next_offset = offset + received;
-        let has_more = page
-            .pagination
-            .as_ref()
-            .and_then(|pagination| pagination.has_more)
-            .unwrap_or_else(|| {
-                if let Some(total) = page
-                    .pagination
-                    .as_ref()
-                    .and_then(|pagination| pagination.total)
-                {
-                    next_offset < total
-                } else if let Some(page_limit) = page
-                    .pagination
-                    .as_ref()
-                    .and_then(|pagination| pagination.limit)
-                {
-                    received >= page_limit
-                } else if let Some(request_limit) = limit {
-                    received >= request_limit
-                } else {
-                    false
-                }
-            });
-
-        Ok(ActivitySyncResponse {
-            provider: Some("snaptrade".to_string()),
-            source_system: Some("SNAPTRADE".to_string()),
-            account_id: Some(account_id.to_string()),
-            activities: page.data,
-            removed_activities: Vec::new(),
-            checkpoint: Some(serde_json::json!({
-                "provider": "snaptrade",
-                "accountId": account_id,
-                "startDate": start_date,
-                "endDate": end_date,
-                "offset": next_offset,
-            })),
-            has_more,
-        })
-    }
-
     /// Fetch current holdings for a broker account.
     ///
     /// # Arguments
@@ -541,16 +416,7 @@ impl BrokerApiClient for ConnectApiClient {
     /// Fetch all broker connections for the user.
     async fn list_connections(&self) -> Result<Vec<BrokerConnection>> {
         let api_response: ApiConnectionsResponse =
-            match self.get("/api/v2/sync/brokerage/connections").await {
-                Ok(response) => response,
-                Err(error) => {
-                    debug!(
-                        "[ConnectApi] v2 connections endpoint failed, falling back to v1: {}",
-                        error
-                    );
-                    self.get("/api/v1/sync/brokerage/connections").await?
-                }
-            };
+            self.get("/api/v1/sync/brokerage/connections").await?;
 
         let connections: Vec<BrokerConnection> = api_response
             .connections
@@ -584,8 +450,6 @@ impl BrokerApiClient for ConnectApiClient {
                 BrokerConnection {
                     id: c.authorization_id.unwrap_or(c.id),
                     brokerage,
-                    provider: c.provider,
-                    category: c.category,
                     connection_type: None,
                     status: c.status,
                     disabled: c.disabled.unwrap_or(false),
@@ -606,17 +470,7 @@ impl BrokerApiClient for ConnectApiClient {
         &self,
         _authorization_ids: Option<Vec<String>>,
     ) -> Result<Vec<BrokerAccount>> {
-        let api_response: ApiAccountsResponse =
-            match self.get("/api/v2/sync/brokerage/accounts").await {
-                Ok(response) => response,
-                Err(error) => {
-                    debug!(
-                        "[ConnectApi] v2 accounts endpoint failed, falling back to v1: {}",
-                        error
-                    );
-                    self.get("/api/v1/sync/brokerage/accounts").await?
-                }
-            };
+        let api_response: ApiAccountsResponse = self.get("/api/v1/sync/brokerage/accounts").await?;
 
         Ok(api_response.accounts)
     }
@@ -640,21 +494,6 @@ impl BrokerApiClient for ConnectApiClient {
         // Delegate to the inherent method
         ConnectApiClient::get_account_activities(
             self, account_id, start_date, end_date, offset, limit,
-        )
-        .await
-    }
-
-    async fn sync_account_activities(
-        &self,
-        account_id: &str,
-        provider: Option<&str>,
-        checkpoint: Option<Value>,
-        start_date: Option<&str>,
-        end_date: Option<&str>,
-        limit: Option<i64>,
-    ) -> Result<ActivitySyncResponse> {
-        ConnectApiClient::sync_account_activities_v2(
-            self, account_id, provider, checkpoint, start_date, end_date, limit,
         )
         .await
     }
