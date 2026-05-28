@@ -1,3 +1,4 @@
+import { ActivityType } from "@/lib/constants";
 import { ActivityDetails, TimePeriod } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 import { Icons, formatAmount } from "@wealthfolio/ui";
@@ -5,7 +6,7 @@ import { useMemo } from "react";
 import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 
 interface ActivityEnrichment {
-  activityType: "BUY" | "SELL";
+  activityType: ActivityType;
   quantity: string | null;
   unitPrice: string | null;
   id: string;
@@ -99,14 +100,19 @@ export default function HistoryChart({
     const activitiesByDate = new Map<string, ActivityEnrichment[]>();
     for (const act of activity) {
       if (!act.date) continue;
-      const actDate = new Date(act.date);
-      const dateKey = actDate.toISOString().split("T")[0];
+      const enriched = {
+        id: act.id,
+        activityType: act.activityType,
+        quantity: act.quantity,
+        unitPrice: act.unitPrice,
+      };
 
-      const existing = activitiesByDate.get(dateKey);
-      if (existing) {
-        existing.push(getEnrichedAct(act));
+      const key = dateKey(new Date(act.date));
+      const list = activitiesByDate.get(key);
+      if (list) {
+        list.push(enriched);
       } else {
-        activitiesByDate.set(dateKey, [getEnrichedAct(act)]);
+        activitiesByDate.set(key, [enriched]);
       }
     }
 
@@ -114,20 +120,17 @@ export default function HistoryChart({
     const enrichedData: HistoryChartData[] = [];
 
     data.forEach((point, index) => {
-      const pointDate = new Date(point.timestamp);
-      const dateKey = pointDate.toISOString().split("T")[0];
+      const key = dateKey(new Date(point.timestamp));
+      const matchingActivities = activitiesByDate.get(key);
 
-      const matchingActivities = activitiesByDate.get(dateKey) || [];
-      const final = { ...point };
-
-      if (matchingActivities.length > 0) {
-        final.activities = matchingActivities;
-        matchingActivities.forEach((act) => {
-          const m = { index, act, pointData: point };
-          activityMarkers.push(m);
-        });
+      if (matchingActivities) {
+        enrichedData.push({ ...point, activities: matchingActivities });
+        for (const act of matchingActivities) {
+          activityMarkers.push({ index, act, pointData: point });
+        }
+      } else {
+        enrichedData.push(point);
       }
-      enrichedData.push(final);
     });
 
     return { enrichedData, activityMarkers };
@@ -170,7 +173,8 @@ export default function HistoryChart({
               fill="url(#colorUv)"
             />
             {activityMarkers.map((marker) => {
-              const shape = marker.act.activityType === "BUY" ? <Icons.BuyDot /> : <Icons.SellDot />;
+              const shape =
+                marker.act.activityType === "BUY" ? <Icons.BuyDot /> : <Icons.SellDot />;
               return (
                 <ReferenceDot
                   key={marker.act.id}
@@ -194,11 +198,9 @@ interface ActivityMarker {
   pointData: HistoryChartData;
 }
 
-function getEnrichedAct(act: ActivityDetails): ActivityEnrichment {
-  return {
-    id: act.id,
-    activityType: act.activityType as "BUY",
-    quantity: act.quantity,
-    unitPrice: act.unitPrice,
-  };
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
