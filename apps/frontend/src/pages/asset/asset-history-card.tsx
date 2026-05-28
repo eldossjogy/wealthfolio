@@ -2,6 +2,7 @@ import HistoryChart from "@/components/history-chart-symbol";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useSyncMarketDataMutation } from "@/hooks/use-sync-market-data";
 import { ActivityType, DateRange, Quote, TimePeriod } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import {
   AmountDisplay,
   Badge,
@@ -16,6 +17,10 @@ import {
   HoverCardTrigger,
   Icons,
   IntervalSelector,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
   usePersistentState,
 } from "@wealthfolio/ui";
 import { format, subMonths } from "date-fns";
@@ -48,6 +53,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
   const syncMarketDataMutation = useSyncMarketDataMutation(true);
   const { isBalanceHidden } = useBalancePrivacy();
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
+  const [showActivityMarkers, setShowActivityMarkers] = useState(false);
 
   const handleRefreshQuotes = useCallback(() => {
     syncMarketDataMutation.mutate([assetId]);
@@ -60,7 +66,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
     to: new Date(),
   });
 
-  const filteredData = useMemo(() => {
+  const filteredData: FilteredData[] = useMemo(() => {
     if (!quoteHistory) return [];
 
     // Sort quotes chronologically (oldest first) for proper chart display
@@ -135,25 +141,6 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
     setDateRange(range);
   };
 
-  const [selectedAccounts, _] = usePersistentState<string[]>("activity-filter-accounts", []);
-  const searchOptions = useMemo<UseActivitySearchInfiniteOptions>(
-    () => ({
-      searchQuery: assetId,
-      mode: "infinite",
-      filters: {
-        status: "validated",
-        dateTo: dateRange?.to,
-        dateFrom: dateRange?.from,
-        accountIds: selectedAccounts,
-        activityTypes: [ActivityType.BUY, ActivityType.SELL],
-      },
-      pageSize: Number.MAX_SAFE_INTEGER,
-      sorting: [{ desc: false, id: "date" }],
-    }),
-    [selectedAccounts, dateRange, assetId],
-  );
-  const activityData = useActivitySearch(searchOptions);
-
   return (
     <>
       <RefreshQuotesConfirmDialog
@@ -213,12 +200,40 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
               </HoverCardContent>
             </HoverCard>
           </CardTitle>
+          <div className="mt-2 flex items-center gap-1 self-start">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showActivityMarkers ? "default" : "secondary"}
+                    size="icon-xs"
+                    className={cn("rounded-full", !showActivityMarkers && "bg-secondary/50")}
+                    onClick={() => setShowActivityMarkers(!showActivityMarkers)}
+                  >
+                    {showActivityMarkers ? (
+                      <Icons.Goals className="size-5" />
+                    ) : (
+                      <Icons.Goal className="size-5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{showActivityMarkers ? "Hide" : "Show"} activity markers</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </CardHeader>
         <CardContent className="relative flex-1 p-0">
-          <HistoryChart
-            data={filteredData}
-            activity={activityData.isLoading ? [] : activityData.data}
-          />
+          {showActivityMarkers ? (
+            <ChartWithActivity
+              assetId={assetId}
+              dateRange={dateRange}
+              filteredData={filteredData}
+            />
+          ) : (
+            <HistoryChart data={filteredData} activity={[]} />
+          )}
           <IntervalSelector
             onIntervalSelect={handleIntervalSelect}
             className="absolute bottom-2 left-1/2 -translate-x-1/2 transform"
@@ -230,5 +245,43 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
     </>
   );
 };
+
+interface FilteredData {
+  timestamp: string;
+  totalValue: number;
+  currency: string;
+}
+
+function ChartWithActivity({
+  assetId,
+  dateRange,
+  filteredData,
+}: {
+  assetId: string;
+  dateRange?: DateRange;
+  filteredData: FilteredData[];
+}) {
+  const [selectedAccounts, _] = usePersistentState<string[]>("activity-filter-accounts", []);
+  const searchOptions = useMemo<UseActivitySearchInfiniteOptions>(
+    () => ({
+      searchQuery: assetId,
+      mode: "infinite",
+      filters: {
+        status: "validated",
+        dateTo: dateRange?.to,
+        dateFrom: dateRange?.from,
+        accountIds: selectedAccounts,
+        activityTypes: [ActivityType.BUY, ActivityType.SELL],
+      },
+      pageSize: Number.MAX_SAFE_INTEGER,
+      sorting: [{ desc: false, id: "date" }],
+    }),
+    [selectedAccounts, dateRange, assetId],
+  );
+  const activityData = useActivitySearch(searchOptions);
+  return (
+    <HistoryChart data={filteredData} activity={activityData.isLoading ? [] : activityData.data} />
+  );
+}
 
 export default AssetHistoryCard;
