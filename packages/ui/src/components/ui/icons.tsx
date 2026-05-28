@@ -169,6 +169,8 @@ export interface IconProps {
   className?: string;
   style?: CSSProperties;
   weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone";
+  cx?: number;
+  cy?: number;
 }
 
 export type Icon = ComponentType<IconProps>;
@@ -717,6 +719,26 @@ const IconsInternal = {
   OtherAssetDuotone: ({ size, className, style, color }: IconProps) => (
     <CubeIcon size={size} weight="duotone" className={className} style={style} color={color} />
   ),
+
+  BuyDot: ({ cx, cy }: IconProps) => (
+    <g transform={`translate(${cx}, ${cy})`}>
+      <circle r={18} fill="var(--success)" opacity={0.15} />
+      <circle r={10} fill="var(--success)" />
+      <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
+        B
+      </text>
+    </g>
+  ),
+
+  SellDot: ({ cx, cy}: IconProps) => {
+    return (<g transform={`translate(${cx}, ${cy})`}>
+      <circle r={14} fill="#3b82f6" opacity={0.15} />
+      <circle r={10} fill="#3b82f6" />
+      <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
+        S
+      </text>
+    </g>
+  )},
 };
 
 /**
@@ -900,7 +922,9 @@ export type IconName =
   | "CollectibleDuotone"
   | "PreciousDuotone"
   | "LiabilityDuotone"
-  | "OtherAssetDuotone";
+  | "OtherAssetDuotone"
+  | "BuyDot"
+  | "SellDot";
 
 /**
  * Icons object with unified typing - all icons have the same Icon type

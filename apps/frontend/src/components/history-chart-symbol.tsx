@@ -1,6 +1,6 @@
 import { ActivityDetails, TimePeriod } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
-import { formatAmount } from "@wealthfolio/ui";
+import { Icons, formatAmount } from "@wealthfolio/ui";
 import { useMemo } from "react";
 import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 
@@ -81,43 +81,6 @@ interface HistoryChartData {
   activities?: ActivityEnrichment[];
 }
 
-const BuyDot = ({ cx, cy }: { cx?: number; cy?: number }) => (
-  <g transform={`translate(${cx}, ${cy})`}>
-    <circle r={18} fill="var(--success)" opacity={0.15} />
-    <circle r={10} fill="var(--success)" />
-    <text
-      x={0}
-      y={0}
-      textAnchor="middle"
-      dominantBaseline="central"
-      fill="white"
-      fontSize={12}
-      fontWeight="bold"
-    >
-      B
-    </text>
-  </g>
-);
-
-const SellDot = ({ cx, cy }: { cx?: number; cy?: number }) => (
-  <g transform={`translate(${cx}, ${cy})`}>
-    <circle r={18} fill="#3b82f6" opacity={0.15} />
-    <circle r={10} fill="#3b82f6" />
-    <text
-      x={0}
-      y={0}
-      textAnchor="middle"
-      dominantBaseline="central"
-      fill="white"
-      fontSize={12}
-      fontWeight="bold"
-    >
-      S
-    </text>
-  </g>
-);
-
-// TODO: Clean up the file if we're okay to upstream the changes.
 export default function HistoryChart({
   data,
   interval,
@@ -207,7 +170,7 @@ export default function HistoryChart({
               fill="url(#colorUv)"
             />
             {activityMarkers.map((marker) => {
-              const shape = marker.act.activityType === "BUY" ? <BuyDot /> : <SellDot />;
+              const shape = marker.act.activityType === "BUY" ? <Icons.BuyDot /> : <Icons.SellDot />;
               return (
                 <ReferenceDot
                   key={marker.act.id}
