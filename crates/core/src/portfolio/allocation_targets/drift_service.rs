@@ -331,15 +331,16 @@ mod tests {
         categories: Vec<CategoryAllocation>,
         total: rust_decimal::Decimal,
     ) -> PortfolioAllocations {
-        let mut pa = PortfolioAllocations::default();
-        pa.asset_classes = TaxonomyAllocation {
-            taxonomy_id: "asset_classes".to_string(),
-            taxonomy_name: "Asset Classes".to_string(),
-            color: "#000000".to_string(),
-            categories,
-        };
-        pa.total_value = total;
-        pa
+        PortfolioAllocations {
+            asset_classes: TaxonomyAllocation {
+                taxonomy_id: "asset_classes".to_string(),
+                taxonomy_name: "Asset Classes".to_string(),
+                color: "#000000".to_string(),
+                categories,
+            },
+            total_value: total,
+            ..Default::default()
+        }
     }
 
     // ── Mocks ────────────────────────────────────────────────────────────────
