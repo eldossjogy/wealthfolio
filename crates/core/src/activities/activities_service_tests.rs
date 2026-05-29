@@ -974,6 +974,18 @@ mod tests {
                 .ok_or_else(|| Error::Unexpected("Activity not found".to_string()))
         }
 
+        fn find_transfer_counterpart(
+            &self,
+            group_id: &str,
+            exclude_id: &str,
+        ) -> Result<Option<Activity>> {
+            let activities = self.activities.lock().unwrap();
+            Ok(activities
+                .iter()
+                .find(|a| a.source_group_id.as_deref() == Some(group_id) && a.id != exclude_id)
+                .cloned())
+        }
+
         fn get_activities(&self) -> Result<Vec<Activity>> {
             Ok(self.activities.lock().unwrap().clone())
         }
@@ -1072,6 +1084,7 @@ mod tests {
             existing.account_id = activity_update.account_id;
             existing.asset_id = asset_id;
             existing.activity_type = activity_update.activity_type;
+            existing.activity_date = parse_test_activity_datetime(&activity_update.activity_date);
             existing.subtype = match activity_update.subtype {
                 Some(subtype) if subtype.trim().is_empty() => None,
                 Some(subtype) => Some(subtype),
@@ -1089,8 +1102,20 @@ mod tests {
             Ok(existing.clone())
         }
 
-        async fn delete_activity(&self, _activity_id: String) -> Result<Activity> {
-            unimplemented!()
+        async fn delete_activity(&self, activity_id: String) -> Result<Activity> {
+            let mut activities = self.activities.lock().unwrap();
+            let idx = activities
+                .iter()
+                .position(|a| a.id == activity_id)
+                .ok_or_else(|| {
+                    crate::errors::Error::Unexpected("activity not found".to_string())
+                })?;
+            let activity = activities.remove(idx);
+            // Cascade-delete counterpart (mirrors repo behavior)
+            if let Some(ref group_id) = activity.source_group_id.clone() {
+                activities.retain(|a| a.source_group_id.as_deref() != Some(group_id));
+            }
+            Ok(activity)
         }
 
         async fn link_transfer_activities(
@@ -8626,5 +8651,247 @@ mod tests {
             Some("aapl-opt-uuid".to_string()),
             "OCC symbol should match existing option asset"
         );
+    }
+
+    // ── Transfer pair sync ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_update_activity_propagates_to_transfer_counterpart() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+        let quote_service = Arc::new(MockQuoteService);
+        account_service.add_account(create_test_account("acc-out", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        )
+        .with_event_sink(event_sink.clone());
+
+        let date_original = DateTime::parse_from_rfc3339("2024-01-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let date_updated = DateTime::parse_from_rfc3339("2024-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        activity_repository.activities.lock().unwrap().extend([
+            Activity {
+                id: "transfer-out".to_string(),
+                account_id: "acc-out".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_OUT".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date_original,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(500)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-1".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date_original,
+                updated_at: date_original,
+            },
+            Activity {
+                id: "transfer-in".to_string(),
+                account_id: "acc-in".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_IN".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date_original,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(500)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-1".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date_original,
+                updated_at: date_original,
+            },
+        ]);
+
+        let update = crate::activities::ActivityUpdate {
+            id: "transfer-out".to_string(),
+            account_id: "acc-out".to_string(),
+            asset: None,
+            activity_type: "TRANSFER_OUT".to_string(),
+            subtype: None,
+            activity_date: date_updated.to_rfc3339(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            amount: Some(Some(dec!(750))),
+            status: Some(ActivityStatus::Posted),
+            notes: Some("moved funds".to_string()),
+            fx_rate: None,
+            metadata: None,
+        };
+
+        activity_service
+            .update_activity(update)
+            .await
+            .expect("update should succeed");
+
+        let stored = activity_repository.activities.lock().unwrap().clone();
+
+        let counterpart = stored
+            .iter()
+            .find(|a| a.id == "transfer-in")
+            .expect("transfer-in should still exist");
+
+        assert_eq!(counterpart.amount, Some(dec!(750)), "amount propagated");
+        assert_eq!(counterpart.activity_date, date_updated, "date propagated");
+        assert_eq!(
+            counterpart.notes,
+            Some("moved funds".to_string()),
+            "notes propagated"
+        );
+        assert_eq!(counterpart.account_id, "acc-in", "account_id not changed");
+        assert_eq!(
+            counterpart.activity_type, "TRANSFER_IN",
+            "activity_type not changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_activity_cascades_transfer_pair() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        )
+        .with_event_sink(event_sink.clone());
+
+        let date = DateTime::parse_from_rfc3339("2024-01-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        activity_repository.activities.lock().unwrap().extend([
+            Activity {
+                id: "transfer-out".to_string(),
+                account_id: "acc-out".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_OUT".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(100)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-cascade".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date,
+                updated_at: date,
+            },
+            Activity {
+                id: "transfer-in".to_string(),
+                account_id: "acc-in".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_IN".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(100)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-cascade".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date,
+                updated_at: date,
+            },
+        ]);
+
+        activity_service
+            .delete_activity("transfer-out".to_string())
+            .await
+            .expect("delete should succeed");
+
+        let stored = activity_repository.activities.lock().unwrap().clone();
+        assert!(
+            stored
+                .iter()
+                .all(|a| a.source_group_id.as_deref() != Some("grp-cascade")),
+            "both transfer legs should be deleted"
+        );
+        assert_eq!(stored.len(), 0, "no activities should remain");
+
+        // Both accounts must appear in the emitted event
+        let events = event_sink.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DomainEvent::ActivitiesChanged { account_ids, .. } => {
+                let mut ids = account_ids.clone();
+                ids.sort();
+                assert_eq!(ids, vec!["acc-in", "acc-out"]);
+            }
+            event => panic!("expected ActivitiesChanged, got {event:?}"),
+        }
     }
 }

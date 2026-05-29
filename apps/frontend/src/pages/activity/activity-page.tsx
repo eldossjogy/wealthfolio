@@ -240,10 +240,24 @@ const ActivityPage = () => {
     ? paginatedSearch.totalRowCount
     : infiniteSearch.totalRowCount;
 
-  const handleEdit = useCallback((activity?: ActivityDetails, activityType?: ActivityType) => {
-    setSelectedActivity(activity ?? { activityType });
-    setShowForm(true);
-  }, []);
+  const handleEdit = useCallback(
+    (activity?: ActivityDetails, activityType?: ActivityType) => {
+      if (activity?.sourceGroupId) {
+        const allLoaded = [...tableActivities, ...datagridActivities];
+        const counterpart = allLoaded.find(
+          (a) => a.sourceGroupId === activity.sourceGroupId && a.id !== activity.id,
+        );
+        if (counterpart) {
+          setSelectedActivity({ ...activity, counterpartAccountId: counterpart.accountId });
+          setShowForm(true);
+          return;
+        }
+      }
+      setSelectedActivity(activity ?? { activityType });
+      setShowForm(true);
+    },
+    [tableActivities, datagridActivities],
+  );
 
   const handleDelete = useCallback((activity: ActivityDetails) => {
     setSelectedActivity(activity);
@@ -514,6 +528,7 @@ const ActivityPage = () => {
       <ActivityDeleteModal
         isOpen={showDeleteAlert}
         isDeleting={deleteActivityMutation.isPending}
+        linkedTransfer={!!selectedActivity?.sourceGroupId}
         onConfirm={handleDeleteConfirm}
         onCancel={() => {
           setShowDeleteAlert(false);

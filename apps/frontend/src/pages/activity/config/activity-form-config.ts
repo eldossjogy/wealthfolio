@@ -379,8 +379,16 @@ export const ACTIVITY_FORM_CONFIG: Record<
         isExternal,
         direction,
         accountId: isExternal ? (activity?.accountId ?? "") : "",
-        fromAccountId: !isExternal ? (activity?.accountId ?? "") : "",
-        toAccountId: "",
+        fromAccountId: !isExternal
+          ? direction === "out"
+            ? (activity?.accountId ?? "")
+            : (activity?.counterpartAccountId ?? "")
+          : "",
+        toAccountId: !isExternal
+          ? direction === "in"
+            ? (activity?.accountId ?? "")
+            : (activity?.counterpartAccountId ?? "")
+          : "",
         activityDate: activity?.date ? new Date(activity.date) : new Date(),
         transferMode,
         amount: absNum(activity?.amount),

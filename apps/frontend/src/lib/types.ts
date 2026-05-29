@@ -233,6 +233,8 @@ export interface ActivityDetails {
   isUserModified?: boolean;
   metadata?: Record<string, unknown>;
   subRows?: ActivityDetails[];
+  // Frontend-only: counterpart account ID for linked transfer pairs
+  counterpartAccountId?: string;
 }
 
 export interface ActivitySearchResponse {

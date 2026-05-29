@@ -339,6 +339,13 @@ mod tests {
         fn get_activity(&self, _activity_id: &str) -> AppResult<Activity> {
             unimplemented!()
         }
+        fn find_transfer_counterpart(
+            &self,
+            _group_id: &str,
+            _exclude_id: &str,
+        ) -> AppResult<Option<Activity>> {
+            Ok(None)
+        }
         fn get_activities(&self) -> AppResult<Vec<Activity>> {
             unimplemented!()
         }
@@ -558,6 +565,13 @@ mod tests {
                 .find(|a| a.id == activity_id)
                 .cloned()
                 .ok_or_else(|| Error::Repository(format!("Activity {} not found", activity_id)))
+        }
+        fn find_transfer_counterpart(
+            &self,
+            _group_id: &str,
+            _exclude_id: &str,
+        ) -> AppResult<Option<Activity>> {
+            Ok(None)
         }
         fn get_activities(&self) -> AppResult<Vec<Activity>> {
             Ok(self.activities.clone())

@@ -94,8 +94,33 @@ export function useActivityForm({
         if (selectedType === "TRANSFER") {
           const transferData = formData as TransferFormValues;
 
-          // Internal transfer: create both TRANSFER_OUT and TRANSFER_IN
+          // Internal transfer: update or create both legs
           if (!transferData.isExternal && transferData.fromAccountId && transferData.toAccountId) {
+            if (isEditing && activity?.id) {
+              // Update primary leg only — backend propagates date/amount/currency/notes to counterpart
+              const formPayload = config.toPayload(formData);
+              const direction = activity.activityType === ActivityType.TRANSFER_IN ? "in" : "out";
+              const accountId =
+                direction === "in" ? transferData.toAccountId : transferData.fromAccountId;
+              const account = accounts.find((a) => a.value === accountId);
+              const submitData: NewActivityFormValues = {
+                ...formPayload,
+                accountId,
+                activityType: (direction === "in"
+                  ? ActivityType.TRANSFER_IN
+                  : ActivityType.TRANSFER_OUT) as NewActivityFormValues["activityType"],
+              } as NewActivityFormValues;
+              if (!submitData.currency?.trim() && account?.currency) {
+                submitData.currency = account.currency;
+              }
+              await updateActivityMutation.mutateAsync({
+                id: activity.id,
+                currentAssetId: activity.assetId,
+                ...submitData,
+              } as NewActivityFormValues & { id: string; currentAssetId?: string });
+              return;
+            }
+
             const formPayload = config.toPayload(formData);
             const sourceGroupId = generateSourceGroupId();
 
