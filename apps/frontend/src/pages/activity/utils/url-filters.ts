@@ -15,3 +15,10 @@ export function resolveActivityUrlFilters(searchParams: URLSearchParams): Activi
     ...(needsReview ? { statusFilter: "pending" as const } : {}),
   };
 }
+
+export function clearActivityUrlFilters(searchParams: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(searchParams);
+  next.delete("account");
+  next.delete("needsReview");
+  return next;
+}

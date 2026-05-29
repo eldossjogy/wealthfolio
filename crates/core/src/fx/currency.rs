@@ -83,7 +83,35 @@ fn get_rules() -> &'static HashMap<&'static str, CurrencyNormalizationRule> {
 
 /// Returns the normalization rule for a given currency code, if one exists.
 pub fn get_normalization_rule(code: &str) -> Option<&'static CurrencyNormalizationRule> {
-    get_rules().get(code)
+    let rules = get_rules();
+    rules.get(code).or_else(|| {
+        normalization_rule_key(code)
+            .filter(|key| *key != code)
+            .and_then(|key| rules.get(key))
+    })
+}
+
+fn normalization_rule_key(code: &str) -> Option<&'static str> {
+    let trimmed = code.trim();
+    if trimmed == "GBp" {
+        return Some("GBp");
+    }
+    if trimmed.eq_ignore_ascii_case("GBX") {
+        return Some("GBX");
+    }
+    if trimmed.eq_ignore_ascii_case("KWF") {
+        return Some("KWF");
+    }
+    if trimmed == "ZAc" || trimmed.eq_ignore_ascii_case("ZAC") {
+        return Some("ZAc");
+    }
+    if trimmed.eq_ignore_ascii_case("ILA") {
+        return Some("ILA");
+    }
+    if trimmed.eq_ignore_ascii_case("USX") {
+        return Some("USX");
+    }
+    None
 }
 
 /// Converts an amount from its potentially minor unit into its major unit equivalent
@@ -157,5 +185,19 @@ mod tests {
         assert_eq!(currency, "USD");
         assert_eq!(normalize_currency_code("USX"), "USD");
         assert_eq!(denormalization_multiplier("USX"), dec!(100));
+    }
+
+    #[test]
+    fn normalizes_minor_currency_alias_casing_without_treating_gbp_as_pence() {
+        let (amount, currency) = normalize_amount(dec!(85), "GBx");
+
+        assert_eq!(amount, dec!(0.85));
+        assert_eq!(currency, "GBP");
+        assert_eq!(normalize_currency_code("gbx"), "GBP");
+
+        let (amount, currency) = normalize_amount(dec!(85), "gbp");
+
+        assert_eq!(amount, dec!(85));
+        assert_eq!(currency, "gbp");
     }
 }

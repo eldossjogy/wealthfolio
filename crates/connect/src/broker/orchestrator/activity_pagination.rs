@@ -21,7 +21,6 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         let limit = self.config.page_limit;
         let mut pages_fetched: usize = 0;
         let mut last_page_first_id: Option<String> = None;
-        let mut empty_first_page = false;
         let mut inconsistent_empty_page = false;
 
         let mut total_fetched: u32 = 0;
@@ -119,7 +118,6 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             let next_offset = offset + received;
 
             if received == 0 {
-                empty_first_page = offset == 0;
                 inconsistent_empty_page = page.pagination.as_ref().is_some_and(|p| {
                     p.has_more == Some(true) || p.total.is_some_and(|total| offset < total)
                 });
@@ -156,7 +154,6 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             assets_created: total_assets_created,
             needs_review: total_needs_review,
             new_asset_ids: all_new_asset_ids,
-            empty_first_page,
             inconsistent_empty_page,
         })
     }

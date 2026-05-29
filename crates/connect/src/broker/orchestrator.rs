@@ -75,7 +75,6 @@ pub(super) struct ActivitySyncOutcome {
     assets_created: u32,
     needs_review: u32,
     new_asset_ids: Vec<String>,
-    empty_first_page: bool,
     inconsistent_empty_page: bool,
 }
 
@@ -324,6 +323,53 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         Ok(result)
     }
 
+    /// Sync activities for existing transaction-tracked accounts only.
+    /// This is used by legacy activities-only API endpoints that should not sync
+    /// connections, accounts, or holdings.
+    pub async fn sync_activities_only(
+        &self,
+        api_client: &dyn BrokerApiClient,
+    ) -> Result<SyncActivitiesResponse, String> {
+        let provider_transaction_statuses: HashMap<String, BrokerSyncStatusDetail> = api_client
+            .list_accounts(None)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter_map(|account| {
+                Some((
+                    account.id?,
+                    account.sync_status.as_ref()?.transactions.clone()?,
+                ))
+            })
+            .collect();
+        let synced_accounts = self
+            .sync_service
+            .get_synced_accounts()
+            .map_err(|e| format!("Failed to get synced accounts: {}", e))?;
+        let mut activities_summary = SyncActivitiesResponse::default();
+
+        for account in synced_accounts {
+            let Some(job) = AccountSyncJob::from_account(account) else {
+                continue;
+            };
+
+            if job.tracking_mode != TrackingMode::Transactions {
+                continue;
+            }
+
+            let activity_result = self
+                .sync_activity_phase(
+                    api_client,
+                    &job,
+                    provider_transaction_statuses.get(&job.broker_account_id),
+                )
+                .await;
+            Self::merge_activities_summary(&mut activities_summary, activity_result.summary);
+        }
+
+        Ok(activities_summary)
+    }
+
     /// Sync account data for all synced accounts based on their tracking mode.
     /// - TRANSACTIONS mode: sync activities
     /// - HOLDINGS mode: sync holdings (positions)
@@ -435,10 +481,10 @@ mod tests {
     }
 
     use super::super::models::{
-        AccountUniversalActivity, BrokerAccount, BrokerBrokerage, BrokerConnection,
-        BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff, HoldingsOptionPosition,
-        HoldingsPosition, PaginatedUniversalActivity, PaginationDetails, SyncAccountsResponse,
-        SyncConnectionsResponse,
+        AccountUniversalActivity, BrokerAccount, BrokerAccountSyncStatus, BrokerBrokerage,
+        BrokerConnection, BrokerHoldingsResponse, HoldingsBalance, HoldingsDiff,
+        HoldingsOptionPosition, HoldingsPosition, PaginatedUniversalActivity, PaginationDetails,
+        SyncAccountsResponse, SyncConnectionsResponse,
     };
     use super::super::progress::NoOpProgressReporter;
     use super::super::traits::BrokerSyncServiceTrait;
@@ -451,6 +497,7 @@ mod tests {
 
     #[derive(Default)]
     struct MockBrokerApiClient {
+        broker_accounts: Vec<BrokerAccount>,
         activity_pages: Mutex<Vec<PaginatedUniversalActivity>>,
         activity_calls: Mutex<usize>,
     }
@@ -465,7 +512,7 @@ mod tests {
             &self,
             _authorization_ids: Option<Vec<String>>,
         ) -> Result<Vec<BrokerAccount>> {
-            Ok(Vec::new())
+            Ok(self.broker_accounts.clone())
         }
 
         async fn list_brokerages(&self) -> Result<Vec<BrokerBrokerage>> {
@@ -690,6 +737,21 @@ mod tests {
         }
     }
 
+    fn broker_account(
+        broker_account_id: &str,
+        transactions: Option<BrokerSyncStatusDetail>,
+        holdings: Option<BrokerSyncStatusDetail>,
+    ) -> BrokerAccount {
+        BrokerAccount {
+            id: Some(broker_account_id.to_string()),
+            sync_status: Some(BrokerAccountSyncStatus {
+                transactions,
+                holdings,
+            }),
+            ..BrokerAccount::default()
+        }
+    }
+
     fn sync_state(account_id: &str, last_successful_at: &str) -> BrokerSyncState {
         let mut state = BrokerSyncState::new(account_id.to_string(), "TEST".to_string());
         state.last_successful_at = Some(
@@ -852,5 +914,45 @@ mod tests {
         let calls = service.calls.lock().unwrap();
         assert_eq!(calls.activity_successes.len(), 1);
         assert_eq!(calls.activity_successes[0].1, "2026-05-22T00:00:00+00:00");
+    }
+
+    #[tokio::test]
+    async fn activities_only_sync_uses_shared_activity_phase_for_transaction_accounts() {
+        let service = Arc::new(MockSyncService {
+            accounts: vec![
+                synced_account("account-1", "broker-1", TrackingMode::Transactions),
+                synced_account("account-2", "broker-2", TrackingMode::Holdings),
+            ],
+            upsert_result: (1, 0, Vec::new(), 0),
+            ..MockSyncService::default()
+        });
+        let api_client = MockBrokerApiClient {
+            broker_accounts: vec![
+                broker_account("broker-1", Some(ready_status("2026-05-22", None)), None),
+                broker_account("broker-2", Some(ready_status("2026-05-22", None)), None),
+            ],
+            activity_pages: Mutex::new(vec![PaginatedUniversalActivity {
+                data: vec![AccountUniversalActivity {
+                    id: Some("activity-1".to_string()),
+                    ..AccountUniversalActivity::default()
+                }],
+                pagination: Some(PaginationDetails {
+                    has_more: Some(false),
+                    total: Some(1),
+                    ..PaginationDetails::default()
+                }),
+            }]),
+            ..MockBrokerApiClient::default()
+        };
+
+        let activities = orchestrator(service.clone())
+            .sync_activities_only(&api_client)
+            .await
+            .unwrap();
+
+        assert_eq!(activities.accounts_synced, 1);
+        assert_eq!(activities.activities_upserted, 1);
+        assert_eq!(*api_client.activity_calls.lock().unwrap(), 1);
+        assert_eq!(service.calls.lock().unwrap().save_holdings_calls, 0);
     }
 }

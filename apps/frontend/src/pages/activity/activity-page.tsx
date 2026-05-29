@@ -33,7 +33,7 @@ import {
   SpendingTransactionsTab,
   type SpendingTransactionsTabHandle,
 } from "@/features/spending/components/spending-transactions-tab";
-import { resolveActivityUrlFilters } from "./utils/url-filters";
+import { clearActivityUrlFilters, resolveActivityUrlFilters } from "./utils/url-filters";
 
 const ActivityPage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -53,9 +53,9 @@ const ActivityPage = () => {
   );
 
   // Filter and search state
-  const [accountScope, setAccountScope] = usePersistentState<AccountScope>(
+  const [persistedAccountScope, setPersistedAccountScope] = usePersistentState<AccountScope>(
     "activity-filter-scope",
-    activityUrlFilters.accountScope ?? { type: "all" },
+    { type: "all" },
   );
   const { data: portfolios = [] } = usePortfolios();
   const [selectedActivityTypes, setSelectedActivityTypes] = usePersistentState<ActivityType[]>(
@@ -66,10 +66,8 @@ const ActivityPage = () => {
     "activity-filter-instrument-types",
     [],
   );
-  const [statusFilter, setStatusFilter] = usePersistentState<ActivityStatusFilter>(
-    "activity-filter-status",
-    activityUrlFilters.statusFilter ?? "all",
-  );
+  const [persistedStatusFilter, setPersistedStatusFilter] =
+    usePersistentState<ActivityStatusFilter>("activity-filter-status", "all");
   const [searchInput, setSearchInput] = usePersistentState<string>("activity-filter-search", "");
   const [searchQuery, setSearchQuery] = useState(searchInput);
   const [viewMode, setViewMode] = usePersistentState<ActivityViewMode>(
@@ -94,19 +92,50 @@ const ActivityPage = () => {
     isLoading: isSpendingSettingsLoading,
   } = useSpendingSettings();
 
-  const activityUrlAccountId =
-    activityUrlFilters.accountScope?.type === "account"
-      ? activityUrlFilters.accountScope.accountId
-      : undefined;
+  const accountScope = activityUrlFilters.accountScope ?? persistedAccountScope;
+  const statusFilter = activityUrlFilters.statusFilter ?? persistedStatusFilter;
 
-  useEffect(() => {
-    if (activityUrlAccountId) {
-      setAccountScope({ type: "account", accountId: activityUrlAccountId });
-    }
-    if (activityUrlFilters.statusFilter) {
-      setStatusFilter(activityUrlFilters.statusFilter);
-    }
-  }, [activityUrlAccountId, activityUrlFilters.statusFilter, setAccountScope, setStatusFilter]);
+  const clearBrokerReviewUrlFilters = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = clearActivityUrlFilters(prev);
+        return next.toString() === prev.toString() ? prev : next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const setAccountScope = useCallback(
+    (scope: AccountScope) => {
+      setPersistedAccountScope(scope);
+      if (activityUrlFilters.statusFilter) {
+        setPersistedStatusFilter(activityUrlFilters.statusFilter);
+      }
+      clearBrokerReviewUrlFilters();
+    },
+    [
+      activityUrlFilters.statusFilter,
+      clearBrokerReviewUrlFilters,
+      setPersistedAccountScope,
+      setPersistedStatusFilter,
+    ],
+  );
+
+  const setStatusFilter = useCallback(
+    (status: ActivityStatusFilter) => {
+      if (activityUrlFilters.accountScope) {
+        setPersistedAccountScope(activityUrlFilters.accountScope);
+      }
+      setPersistedStatusFilter(status);
+      clearBrokerReviewUrlFilters();
+    },
+    [
+      activityUrlFilters.accountScope,
+      clearBrokerReviewUrlFilters,
+      setPersistedAccountScope,
+      setPersistedStatusFilter,
+    ],
+  );
 
   // Coerce "spending" URL state back to investments when the module is disabled.
   const urlTab = searchParams.get("tab");
@@ -298,17 +327,19 @@ const ActivityPage = () => {
     searchInput.trim().length > 0;
 
   const clearInvestmentsFilters = useCallback(() => {
-    setAccountScope({ type: "all" });
+    setPersistedAccountScope({ type: "all" });
     setSelectedActivityTypes([]);
     setSelectedInstrumentTypes([]);
-    setStatusFilter("all");
+    setPersistedStatusFilter("all");
     setSearchInput("");
     setSearchQuery("");
+    clearBrokerReviewUrlFilters();
   }, [
-    setAccountScope,
+    clearBrokerReviewUrlFilters,
+    setPersistedAccountScope,
     setSelectedActivityTypes,
     setSelectedInstrumentTypes,
-    setStatusFilter,
+    setPersistedStatusFilter,
     setSearchInput,
   ]);
 

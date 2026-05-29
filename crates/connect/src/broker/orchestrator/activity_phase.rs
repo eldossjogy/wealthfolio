@@ -3,8 +3,7 @@ use log::{debug, error, info};
 use super::super::models::BrokerSyncStatusDetail;
 use super::super::progress::{SyncProgressPayload, SyncProgressReporter, SyncStatus};
 use super::super::sync_readiness::{
-    provider_waterline_precedes_local_cursor, resolve_activity_readiness,
-    should_advance_activity_cursor, ProviderReadiness,
+    resolve_activity_readiness, should_advance_activity_cursor, ProviderReadiness,
 };
 use super::super::traits::BrokerApiClient;
 use super::{
@@ -118,53 +117,50 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
             .and_then(|state| state.last_successful_at.as_ref());
 
         let activity_waterline = match resolve_activity_readiness(provider_activity_status) {
-            Ok(ProviderReadiness::Ready(date))
-                if provider_waterline_precedes_local_cursor(local_cursor, date) =>
-            {
-                let Some(cursor) = local_cursor else {
-                    unreachable!("stale provider waterline requires local cursor");
-                };
-                let message = format!(
-                    "Activity sync skipped: provider transaction waterline {} is older than local cursor {}",
-                    date,
-                    cursor.date_naive()
-                );
-                if let Err(e) = self
-                    .sync_service
-                    .finalize_activity_sync_success(
-                        job.account_id.clone(),
-                        cursor.to_rfc3339(),
-                        None,
-                    )
-                    .await
-                {
-                    error!(
-                        "Failed to restore activity sync state for '{}': {}",
-                        job.account_name, e
+            Ok(ProviderReadiness::Ready(date)) => {
+                if let Some(cursor) = local_cursor.filter(|cursor| date < cursor.date_naive()) {
+                    let message = format!(
+                        "Activity sync skipped: provider transaction waterline {} is older than local cursor {}",
+                        date,
+                        cursor.date_naive()
                     );
-                    result.summary.accounts_failed += 1;
-                    if !job.is_holdings_mode() {
-                        result.continue_account = false;
-                        return result;
-                    }
-                    result.activity_warning = Some(format!(
-                        "Activity sync skipped, but sync state cleanup failed: {}",
-                        e
-                    ));
-                } else {
-                    self.progress_reporter.report_progress(
-                        SyncProgressPayload::new(
-                            &job.account_id,
-                            &job.account_name,
-                            SyncStatus::Complete,
+                    if let Err(e) = self
+                        .sync_service
+                        .finalize_activity_sync_success(
+                            job.account_id.clone(),
+                            cursor.to_rfc3339(),
+                            None,
                         )
-                        .with_message(message),
-                    );
-                    result.summary.accounts_synced += 1;
+                        .await
+                    {
+                        error!(
+                            "Failed to restore activity sync state for '{}': {}",
+                            job.account_name, e
+                        );
+                        result.summary.accounts_failed += 1;
+                        if !job.is_holdings_mode() {
+                            result.continue_account = false;
+                            return result;
+                        }
+                        result.activity_warning = Some(format!(
+                            "Activity sync skipped, but sync state cleanup failed: {}",
+                            e
+                        ));
+                    } else {
+                        self.progress_reporter.report_progress(
+                            SyncProgressPayload::new(
+                                &job.account_id,
+                                &job.account_name,
+                                SyncStatus::Complete,
+                            )
+                            .with_message(message),
+                        );
+                        result.summary.accounts_synced += 1;
+                    }
+                    return result;
                 }
-                return result;
+                date
             }
-            Ok(ProviderReadiness::Ready(date)) => date,
             Ok(ProviderReadiness::NotReady(reason)) => {
                 let warning = format!("Activity sync deferred: {}", reason);
                 if let Err(e) = self
@@ -431,10 +427,8 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
         } else {
             let warning = if outcome.inconsistent_empty_page {
                 "Activity sync returned an empty page while provider pagination reported more data"
-            } else if outcome.empty_first_page {
-                "Initial activity sync returned no rows even though provider reports transactions may exist"
             } else {
-                "Initial activity sync did not confirm a complete empty history"
+                "Initial activity sync returned no rows even though provider reports transactions may exist"
             }
             .to_string();
             if let Err(e) = self

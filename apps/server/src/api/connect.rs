@@ -3,7 +3,7 @@
 //! This module provides REST endpoints for syncing broker accounts and activities
 //! from the Wealthfolio Connect cloud service.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     extract::{Query, State},
@@ -22,15 +22,13 @@ use crate::main_lib::AppState;
 use axum::http::StatusCode;
 use wealthfolio_connect::{
     broker::{
-        resolve_activity_readiness, should_advance_activity_cursor, BrokerApiClient,
-        BrokerSyncStatusDetail, PlansResponse, ProviderReadiness, SyncAccountsResponse,
-        SyncActivitiesResponse, SyncConnectionsResponse, UserInfo,
+        BrokerApiClient, PlansResponse, SyncAccountsResponse, SyncActivitiesResponse,
+        SyncConnectionsResponse, UserInfo,
     },
     ensure_valid_access_token, fetch_subscription_plans_public, ConnectApiClient, SyncConfig,
     SyncOrchestrator, SyncProgressPayload, SyncProgressReporter, SyncResult, TokenLifecycleConfig,
     TokenLifecycleError, CLOUD_ACCESS_TOKEN_KEY, CLOUD_REFRESH_TOKEN_KEY,
 };
-use wealthfolio_core::accounts::TrackingMode;
 use wealthfolio_device_sync::{EnableSyncResult, SyncState, SyncStateResult};
 
 const DEVICE_ID_KEY: &str = "sync_device_id";
@@ -590,281 +588,14 @@ async fn perform_broker_activities_only_sync(
     let client = create_connect_client(state)
         .await
         .map_err(|e| e.to_string())?;
+    let reporter = Arc::new(EventBusProgressReporter::new(state.event_bus.clone()));
+    let orchestrator = SyncOrchestrator::new(
+        state.connect_sync_service.clone(),
+        reporter,
+        SyncConfig::default(),
+    );
 
-    let synced_accounts = state
-        .connect_sync_service
-        .get_synced_accounts()
-        .map_err(|e| e.to_string())?;
-    let provider_transaction_statuses: HashMap<String, BrokerSyncStatusDetail> = client
-        .list_accounts(None)
-        .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter_map(|account| {
-            Some((
-                account.id?,
-                account.sync_status.as_ref()?.transactions.clone()?,
-            ))
-        })
-        .collect();
-
-    let mut summary = SyncActivitiesResponse::default();
-    let today = chrono::Utc::now().date_naive();
-    let page_limit: i64 = 1000;
-
-    for account in synced_accounts {
-        if account.tracking_mode != TrackingMode::Transactions {
-            continue;
-        }
-
-        let Some(provider_account_id) = account.provider_account_id.clone() else {
-            continue;
-        };
-
-        let account_id = account.id.clone();
-        let account_name = account.name.clone();
-
-        if let Err(err) = state
-            .connect_sync_service
-            .mark_activity_sync_attempt(account_id.clone())
-            .await
-        {
-            error!(
-                "[Connect] Failed to mark activity sync attempt for {}: {}",
-                account_name, err
-            );
-            summary.accounts_failed += 1;
-            continue;
-        }
-
-        let local_activity_state = match state
-            .connect_sync_service
-            .get_activity_sync_state(&account_id)
-        {
-            Ok(state) => state,
-            Err(err) => {
-                let failure = format!("Activity sync state failed: {}", err);
-                let _ = state
-                    .connect_sync_service
-                    .finalize_activity_sync_failure(account_id.clone(), failure.clone(), None)
-                    .await;
-                error!("[Connect] {} for {}", failure, account_name);
-                summary.accounts_failed += 1;
-                continue;
-            }
-        };
-        let local_cursor = local_activity_state
-            .as_ref()
-            .and_then(|s| s.last_successful_at.as_ref());
-        let has_local_cursor = local_cursor.is_some();
-        let provider_status = provider_transaction_statuses.get(&provider_account_id);
-        let provider_waterline = match resolve_activity_readiness(provider_status) {
-            Ok(ProviderReadiness::Ready(date)) => date.min(today),
-            Ok(ProviderReadiness::NotReady(reason)) => {
-                let warning = format!("Activity sync deferred: {}", reason);
-                let _ = state
-                    .connect_sync_service
-                    .finalize_activity_sync_needs_review(account_id.clone(), warning.clone(), None)
-                    .await;
-                summary.accounts_warned += 1;
-                info!("[Connect] {}", warning);
-                continue;
-            }
-            Err(err) => {
-                let _ = state
-                    .connect_sync_service
-                    .finalize_activity_sync_failure(account_id.clone(), err.clone(), None)
-                    .await;
-                summary.accounts_failed += 1;
-                error!(
-                    "[Connect] Failed to resolve provider activity sync status for {}: {}",
-                    account_name, err
-                );
-                continue;
-            }
-        };
-        if let Some(cursor) = local_cursor {
-            if provider_waterline < cursor.date_naive() {
-                let message = format!(
-                    "Activity sync skipped: provider transaction waterline {} is older than local cursor {}",
-                    provider_waterline,
-                    cursor.date_naive()
-                );
-                if let Err(err) = state
-                    .connect_sync_service
-                    .finalize_activity_sync_success(account_id.clone(), cursor.to_rfc3339(), None)
-                    .await
-                {
-                    error!(
-                        "[Connect] Failed to restore activity sync state for {}: {}",
-                        account_name, err
-                    );
-                    summary.accounts_failed += 1;
-                } else {
-                    summary.accounts_synced += 1;
-                    info!("[Connect] {}", message);
-                }
-                continue;
-            }
-        }
-        let end_date_str = provider_waterline.format("%Y-%m-%d").to_string();
-        let start_date = local_activity_state
-            .and_then(|s| s.last_successful_at)
-            .map(|dt| (dt.date_naive() - chrono::Days::new(1)).min(provider_waterline))
-            .map(|d| d.format("%Y-%m-%d").to_string());
-
-        info!(
-            "[Connect] Activities-only sync for account '{}' (provider={}): {} -> {}",
-            account_name,
-            provider_account_id,
-            start_date.as_deref().unwrap_or("ALL"),
-            end_date_str
-        );
-
-        let mut offset: i64 = 0;
-        let mut account_upserted = 0usize;
-        let mut account_assets = 0usize;
-        let mut account_new_asset_ids: Vec<String> = Vec::new();
-        let mut account_failed = false;
-        let mut account_fetched = 0usize;
-        let mut empty_first_page = false;
-        let mut inconsistent_empty_page = false;
-
-        loop {
-            let page = match client
-                .get_account_activities(
-                    &provider_account_id,
-                    start_date.as_deref(),
-                    Some(&end_date_str),
-                    Some(offset),
-                    Some(page_limit),
-                )
-                .await
-            {
-                Ok(page) => page,
-                Err(err) => {
-                    error!(
-                        "[Connect] Failed to fetch activities for {}: {}",
-                        account_name, err
-                    );
-                    let _ = state
-                        .connect_sync_service
-                        .finalize_activity_sync_failure(account_id.clone(), err.to_string(), None)
-                        .await;
-                    summary.accounts_failed += 1;
-                    account_failed = true;
-                    break;
-                }
-            };
-
-            let received = page.data.len() as i64;
-            account_fetched += received as usize;
-            if received == 0 {
-                empty_first_page = offset == 0;
-                inconsistent_empty_page = page.pagination.as_ref().is_some_and(|p| {
-                    p.has_more == Some(true) || p.total.is_some_and(|total| offset < total)
-                });
-                break;
-            }
-
-            match state
-                .connect_sync_service
-                .upsert_account_activities(account_id.clone(), None, page.data)
-                .await
-            {
-                Ok((upserted, assets, new_asset_ids, _needs_review)) => {
-                    account_upserted += upserted;
-                    account_assets += assets;
-                    account_new_asset_ids.extend(new_asset_ids);
-                }
-                Err(err) => {
-                    error!(
-                        "[Connect] Failed to upsert activities for {}: {}",
-                        account_name, err
-                    );
-                    let _ = state
-                        .connect_sync_service
-                        .finalize_activity_sync_failure(account_id.clone(), err.to_string(), None)
-                        .await;
-                    summary.accounts_failed += 1;
-                    account_failed = true;
-                    break;
-                }
-            }
-
-            let next_offset = offset + received;
-            let has_more = match page.pagination.as_ref() {
-                Some(p) => match p.has_more {
-                    Some(true) => true,
-                    Some(false) => false,
-                    None => {
-                        if let Some(total) = p.total {
-                            next_offset < total
-                        } else if let Some(limit) = p.limit {
-                            received >= limit
-                        } else {
-                            received >= page_limit
-                        }
-                    }
-                },
-                None => received >= page_limit,
-            };
-
-            offset = next_offset;
-
-            if !has_more {
-                break;
-            }
-        }
-
-        if account_failed {
-            continue;
-        }
-
-        summary.activities_upserted += account_upserted;
-        summary.assets_inserted += account_assets;
-        summary.new_asset_ids.extend(account_new_asset_ids);
-
-        if !should_advance_activity_cursor(
-            account_fetched,
-            has_local_cursor,
-            inconsistent_empty_page,
-            provider_status,
-        ) {
-            let warning = if inconsistent_empty_page {
-                "Activity sync returned an empty page while provider pagination reported more data"
-            } else if empty_first_page {
-                "Initial activity sync returned no rows even though provider reports transactions may exist"
-            } else {
-                "Initial activity sync did not confirm a complete empty history"
-            }
-            .to_string();
-            let _ = state
-                .connect_sync_service
-                .finalize_activity_sync_needs_review(account_id.clone(), warning.clone(), None)
-                .await;
-            summary.accounts_warned += 1;
-            info!("[Connect] {}", warning);
-            continue;
-        }
-
-        if let Err(err) = state
-            .connect_sync_service
-            .finalize_activity_sync_success(account_id.clone(), end_date_str, None)
-            .await
-        {
-            error!(
-                "[Connect] Failed to finalize activity sync success for {}: {}",
-                account_name, err
-            );
-            summary.accounts_failed += 1;
-            continue;
-        }
-
-        summary.accounts_synced += 1;
-    }
-
-    Ok(summary)
+    orchestrator.sync_activities_only(&client).await
 }
 
 async fn get_subscription_plans(
