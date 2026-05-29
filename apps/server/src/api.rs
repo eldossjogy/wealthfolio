@@ -23,6 +23,7 @@ mod activities;
 mod addons;
 mod ai_chat;
 mod ai_providers;
+mod allocation_targets;
 mod alternative_assets;
 mod assets;
 #[cfg(any(feature = "connect-sync", feature = "device-sync"))]
@@ -114,7 +115,8 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
         .merge(ai_chat::router())
         .merge(health::router())
         .merge(custom_providers::router())
-        .merge(spending::router());
+        .merge(spending::router())
+        .merge(allocation_targets::router());
 
     #[cfg(feature = "device-sync")]
     {

@@ -98,3 +98,4 @@ apps/db/
 apps/tauri/db/
 tasks
 **/*.local.md
+wealthfolio.db

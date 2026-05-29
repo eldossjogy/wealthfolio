@@ -49,7 +49,7 @@ pub struct AccountScopeInput {
 }
 
 impl AccountScopeInput {
-    fn into_account_filter(self) -> Result<AccountScope, String> {
+    pub fn into_account_filter(self) -> Result<AccountScope, String> {
         match self.kind.as_str() {
             "all" => Ok(AccountScope::All),
             "account" => {
