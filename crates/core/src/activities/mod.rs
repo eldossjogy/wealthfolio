@@ -9,6 +9,7 @@ mod compiler;
 mod csv_parser;
 mod idempotency;
 mod import_run_model;
+mod transfer_pairs;
 
 #[cfg(test)]
 mod activities_service_tests;
@@ -42,3 +43,4 @@ pub use import_run_model::{
     ImportRun, ImportRunMode, ImportRunRepositoryTrait, ImportRunStatus, ImportRunSummary,
     ImportRunType, ReviewMode,
 };
+pub use transfer_pairs::{InvalidTransferGroup, TransferPair, TransferPairResolution};

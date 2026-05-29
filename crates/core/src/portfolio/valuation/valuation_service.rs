@@ -1,13 +1,13 @@
 use crate::activities::{
-    Activity, ActivityRepositoryTrait, ActivityStatus, ACTIVITY_TYPE_TRANSFER_IN,
+    Activity, ActivityRepositoryTrait, TransferPairResolution, ACTIVITY_TYPE_TRANSFER_IN,
     ACTIVITY_TYPE_TRANSFER_OUT, ACTIVITY_TYPE_WITHDRAWAL,
 };
 use crate::errors::{CalculatorError, Error as CoreError, Result as CoreResult};
 use crate::fx::currency::normalize_currency_code;
 use crate::fx::FxServiceTrait;
 use crate::portfolio::performance::{
-    classify_flow_for_scope, classify_transfer_for_account_scope, infer_paired_transfer_account_id,
-    FlowType, PerformanceScope,
+    classify_flow_for_scope, classify_transfer_for_account_scope, is_external_transfer, FlowType,
+    PerformanceScope,
 };
 use crate::portfolio::snapshot::{Position, SnapshotServiceTrait};
 use crate::portfolio::valuation::valuation_calculator::calculate_valuation;
@@ -18,7 +18,7 @@ use crate::portfolio::valuation::ValuationRepositoryTrait;
 use crate::quotes::QuoteServiceTrait;
 use crate::utils::time_utils;
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use log::{debug, error, warn};
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
@@ -284,6 +284,7 @@ impl ValuationService {
         base_currency: &str,
         histories: Vec<Vec<DailyAccountValuation>>,
         external_flows_by_date: Option<&HashMap<NaiveDate, (Decimal, Decimal)>>,
+        internal_transfer_flow_adjustments_by_date: Option<&HashMap<NaiveDate, (Decimal, Decimal)>>,
     ) -> CoreResult<Vec<DailyAccountValuation>> {
         if account_ids.is_empty() {
             return Ok(Vec::new());
@@ -350,6 +351,9 @@ impl ValuationService {
                 );
             }
             None => Self::set_external_flows_from_net_contribution_base(&mut values),
+        }
+        if let Some(adjustments_by_date) = internal_transfer_flow_adjustments_by_date {
+            Self::apply_internal_transfer_flow_adjustments(&mut values, adjustments_by_date);
         }
         Ok(values)
     }
@@ -531,6 +535,34 @@ impl ValuationService {
         }
     }
 
+    fn apply_internal_transfer_flow_adjustments(
+        values: &mut [DailyAccountValuation],
+        adjustments_by_date: &HashMap<NaiveDate, (Decimal, Decimal)>,
+    ) {
+        for value in values {
+            let Some((inflow_to_remove, outflow_to_remove)) =
+                adjustments_by_date.get(&value.valuation_date)
+            else {
+                continue;
+            };
+
+            value.external_inflow_base =
+                Self::subtract_flow_floor_zero(value.external_inflow_base, *inflow_to_remove);
+            value.external_outflow_base =
+                Self::subtract_flow_floor_zero(value.external_outflow_base, *outflow_to_remove);
+            value.external_flow_source = ExternalFlowSource::ActivityDerived;
+        }
+    }
+
+    fn subtract_flow_floor_zero(current: Decimal, amount_to_remove: Decimal) -> Decimal {
+        let adjusted = current - amount_to_remove;
+        if adjusted.is_sign_negative() {
+            Decimal::ZERO
+        } else {
+            adjusted
+        }
+    }
+
     fn activity_flow_amount(activity: &Activity) -> Decimal {
         activity
             .amount
@@ -577,7 +609,72 @@ impl ValuationService {
         }
     }
 
-    fn scoped_external_flows_by_date(
+    fn activity_query_utc_bounds(
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+        let start_utc = start_date_opt.map(|date| {
+            (date - Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight is valid")
+                .and_utc()
+        });
+        let end_exclusive_utc = end_date_opt.map(|date| {
+            (date + Duration::days(2))
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight is valid")
+                .and_utc()
+        });
+        (start_utc, end_exclusive_utc)
+    }
+
+    fn activity_date_in_range(
+        activity_date: NaiveDate,
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> bool {
+        !start_date_opt
+            .map(|start_date| activity_date < start_date)
+            .unwrap_or(false)
+            && !end_date_opt
+                .map(|end_date| activity_date > end_date)
+                .unwrap_or(false)
+    }
+
+    fn merge_activities_by_id(primary: Vec<Activity>, secondary: Vec<Activity>) -> Vec<Activity> {
+        let mut by_id: HashMap<String, Activity> = primary
+            .into_iter()
+            .map(|activity| (activity.id.clone(), activity))
+            .collect();
+        for activity in secondary {
+            by_id.entry(activity.id.clone()).or_insert(activity);
+        }
+        let mut activities: Vec<Activity> = by_id.into_values().collect();
+        activities.sort_by_key(|activity| activity.activity_date);
+        activities
+    }
+
+    fn add_external_flow_amount(
+        flows_by_date: &mut HashMap<NaiveDate, (Decimal, Decimal)>,
+        activity_date: NaiveDate,
+        amount_base: Decimal,
+        is_outflow: bool,
+    ) {
+        if amount_base.is_zero() {
+            return;
+        }
+
+        let entry = flows_by_date
+            .entry(activity_date)
+            .or_insert((Decimal::ZERO, Decimal::ZERO));
+        if is_outflow {
+            entry.1 += amount_base;
+        } else {
+            entry.0 += amount_base;
+        }
+    }
+
+    fn account_external_flows_by_date(
         &self,
         account_ids: &[String],
         base_currency: &str,
@@ -591,31 +688,42 @@ impl ValuationService {
             return Ok(Some(HashMap::new()));
         }
 
-        let all_activities: Vec<Activity> = activity_repository
-            .get_activities()?
-            .into_iter()
-            .filter(|activity| matches!(activity.status, ActivityStatus::Posted))
-            .collect();
         let scope_account_ids: HashSet<String> = account_ids.iter().cloned().collect();
         let timezone = {
             let timezone_guard = self.timezone.read().unwrap();
             time_utils::parse_user_timezone_or_default(&timezone_guard)
         };
+        let (start_utc, end_exclusive_utc) =
+            Self::activity_query_utc_bounds(start_date_opt, end_date_opt);
+
+        let scoped_activities = match (start_utc, end_exclusive_utc) {
+            (Some(start_utc), Some(end_exclusive_utc)) => activity_repository
+                .get_activities_by_account_ids_in_date_range(
+                    account_ids,
+                    start_utc,
+                    end_exclusive_utc,
+                )?,
+            _ => activity_repository.get_activities_by_account_ids(account_ids)?,
+        };
+        let transfer_activities = activity_repository
+            .get_transfer_activities_touching_account_ids_in_date_range(
+                account_ids,
+                start_utc,
+                end_exclusive_utc,
+            )?;
+        let all_activities = Self::merge_activities_by_id(scoped_activities, transfer_activities);
+        let transfer_resolution = TransferPairResolution::from_activities(&all_activities);
 
         let mut flows_by_date: HashMap<NaiveDate, (Decimal, Decimal)> = HashMap::new();
-
         for activity in all_activities
             .iter()
             .filter(|activity| scope_account_ids.contains(&activity.account_id))
         {
+            if !activity.is_posted() {
+                continue;
+            }
             let activity_date = time_utils::activity_date_in_tz(activity.activity_date, timezone);
-            if start_date_opt
-                .map(|start_date| activity_date < start_date)
-                .unwrap_or(false)
-                || end_date_opt
-                    .map(|end_date| activity_date > end_date)
-                    .unwrap_or(false)
-            {
+            if !Self::activity_date_in_range(activity_date, start_date_opt, end_date_opt) {
                 continue;
             }
 
@@ -623,22 +731,30 @@ impl ValuationService {
             let flow_type = if effective_type == ACTIVITY_TYPE_TRANSFER_IN
                 || effective_type == ACTIVITY_TYPE_TRANSFER_OUT
             {
-                let paired_account_id =
-                    infer_paired_transfer_account_id(activity, &all_activities, |candidate| {
-                        time_utils::activity_date_in_tz(candidate.activity_date, timezone)
-                    });
-                let flow_type = classify_transfer_for_account_scope(
-                    activity,
-                    &scope_account_ids,
-                    paired_account_id.as_deref(),
-                );
-                if flow_type == FlowType::External && paired_account_id.is_none() {
-                    warn!(
-                        "Unpaired transfer activity {} on {} treated as an external scoped flow.",
-                        activity.id, activity_date
-                    );
+                if let Some(pair) = transfer_resolution.pair_for_activity(&activity.id) {
+                    classify_transfer_for_account_scope(
+                        activity,
+                        &scope_account_ids,
+                        pair.counterparty_account_id(&activity.id),
+                    )
+                } else {
+                    if let Some(group) =
+                        transfer_resolution.invalid_group_for_activity(&activity.id)
+                    {
+                        warn!(
+                            "Invalid transfer group {} ({}) includes activity {}; treating it as an external scoped flow.",
+                            group.group_id, group.reason, activity.id
+                        );
+                    } else if transfer_resolution.is_ungrouped_transfer(&activity.id)
+                        && !is_external_transfer(activity)
+                    {
+                        warn!(
+                            "Unresolved transfer activity {} on {} treated as an external scoped flow.",
+                            activity.id, activity_date
+                        );
+                    }
+                    FlowType::External
                 }
-                flow_type
             } else {
                 classify_flow_for_scope(activity, PerformanceScope::Portfolio)
             };
@@ -649,21 +765,70 @@ impl ValuationService {
 
             let amount_base =
                 self.activity_flow_amount_base(activity, base_currency, activity_date)?;
-            if amount_base.is_zero() {
-                continue;
-            }
-
-            let entry = flows_by_date
-                .entry(activity_date)
-                .or_insert((Decimal::ZERO, Decimal::ZERO));
-            if Self::activity_is_outflow(activity) {
-                entry.1 += amount_base;
-            } else {
-                entry.0 += amount_base;
-            }
+            Self::add_external_flow_amount(
+                &mut flows_by_date,
+                activity_date,
+                amount_base,
+                Self::activity_is_outflow(activity),
+            );
         }
 
         Ok(Some(flows_by_date))
+    }
+
+    fn scoped_internal_transfer_flow_adjustments_by_date(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> CoreResult<Option<HashMap<NaiveDate, (Decimal, Decimal)>>> {
+        let Some(activity_repository) = &self.activity_repository else {
+            return Ok(None);
+        };
+        if account_ids.is_empty() {
+            return Ok(Some(HashMap::new()));
+        }
+
+        let scope_account_ids: HashSet<String> = account_ids.iter().cloned().collect();
+        let timezone = {
+            let timezone_guard = self.timezone.read().unwrap();
+            time_utils::parse_user_timezone_or_default(&timezone_guard)
+        };
+        let (start_utc, end_exclusive_utc) =
+            Self::activity_query_utc_bounds(start_date_opt, end_date_opt);
+        let transfer_activities = activity_repository
+            .get_transfer_activities_touching_account_ids_in_date_range(
+                account_ids,
+                start_utc,
+                end_exclusive_utc,
+            )?;
+        let transfer_resolution = TransferPairResolution::from_activities(&transfer_activities);
+
+        let mut adjustments_by_date: HashMap<NaiveDate, (Decimal, Decimal)> = HashMap::new();
+        for pair in transfer_resolution.pairs() {
+            if !pair.both_accounts_in_scope(&scope_account_ids) {
+                continue;
+            }
+
+            for activity in [&pair.transfer_in, &pair.transfer_out] {
+                let activity_date =
+                    time_utils::activity_date_in_tz(activity.activity_date, timezone);
+                if !Self::activity_date_in_range(activity_date, start_date_opt, end_date_opt) {
+                    continue;
+                }
+                let amount_base =
+                    self.activity_flow_amount_base(activity, base_currency, activity_date)?;
+                Self::add_external_flow_amount(
+                    &mut adjustments_by_date,
+                    activity_date,
+                    amount_base,
+                    Self::activity_is_outflow(activity),
+                );
+            }
+        }
+
+        Ok(Some(adjustments_by_date))
     }
 }
 
@@ -929,7 +1094,7 @@ impl ValuationServiceTrait for ValuationService {
             ))));
         }
 
-        if let Some(flows_by_date) = self.scoped_external_flows_by_date(
+        if let Some(flows_by_date) = self.account_external_flows_by_date(
             &[account_id.to_string()],
             &base_curr,
             Some(actual_calculation_start_date),
@@ -1037,19 +1202,21 @@ impl ValuationServiceTrait for ValuationService {
             .map(|account_id| histories_by_account.remove(account_id).unwrap_or_default())
             .collect();
 
-        let external_flows_by_date = self.scoped_external_flows_by_date(
-            account_ids,
-            base_currency,
-            start_date_opt,
-            end_date_opt,
-        )?;
+        let internal_transfer_flow_adjustments_by_date = self
+            .scoped_internal_transfer_flow_adjustments_by_date(
+                account_ids,
+                base_currency,
+                start_date_opt,
+                end_date_opt,
+            )?;
 
         let aggregate = Self::aggregate_scoped_valuations(
             scope_id,
             account_ids,
             base_currency,
             histories,
-            external_flows_by_date.as_ref(),
+            None,
+            internal_transfer_flow_adjustments_by_date.as_ref(),
         )?;
 
         {
@@ -1254,6 +1421,7 @@ mod tests {
             "USD",
             histories,
             None,
+            None,
         )
         .expect("complete scoped histories should aggregate");
 
@@ -1268,6 +1436,69 @@ mod tests {
         assert_eq!(aggregate[2].net_contribution_base, dec!(120));
         assert_eq!(aggregate[2].external_inflow_base, dec!(20));
         assert_eq!(aggregate[2].external_outflow_base, Decimal::ZERO);
+    }
+
+    #[test]
+    fn scoped_aggregation_removes_both_sides_of_internal_transfer_flows() {
+        let histories = vec![
+            vec![
+                valuation(
+                    "a1",
+                    "2026-05-01",
+                    dec!(100),
+                    dec!(100),
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                ),
+                valuation(
+                    "a1",
+                    "2026-05-02",
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                    dec!(100),
+                ),
+            ],
+            vec![
+                valuation(
+                    "a2",
+                    "2026-05-01",
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                    Decimal::ZERO,
+                ),
+                valuation(
+                    "a2",
+                    "2026-05-02",
+                    dec!(98),
+                    dec!(98),
+                    dec!(98),
+                    Decimal::ZERO,
+                ),
+            ],
+        ];
+        let account_ids = vec!["a1".to_string(), "a2".to_string()];
+        let flow_date = NaiveDate::parse_from_str("2026-05-02", "%Y-%m-%d").unwrap();
+        let mut internal_transfer_adjustments = HashMap::new();
+        internal_transfer_adjustments.insert(flow_date, (dec!(98), dec!(100)));
+
+        let aggregate = ValuationService::aggregate_scoped_valuations(
+            "accounts:test",
+            &account_ids,
+            "USD",
+            histories,
+            None,
+            Some(&internal_transfer_adjustments),
+        )
+        .expect("complete scoped histories should aggregate");
+
+        assert_eq!(aggregate[1].external_inflow_base, Decimal::ZERO);
+        assert_eq!(aggregate[1].external_outflow_base, Decimal::ZERO);
+        assert_eq!(
+            aggregate[1].external_flow_source,
+            ExternalFlowSource::ActivityDerived
+        );
     }
 
     #[test]
@@ -1321,6 +1552,7 @@ mod tests {
             "USD",
             histories,
             Some(&flows_by_date),
+            None,
         )
         .expect("complete scoped histories should aggregate");
 
@@ -1450,6 +1682,7 @@ mod tests {
             "USD",
             histories,
             Some(&flows_by_date),
+            None,
         )
         .expect("mixed scoped histories should aggregate");
 
@@ -1513,6 +1746,7 @@ mod tests {
             &account_ids,
             "USD",
             histories,
+            None,
             None,
         )
         .expect_err("missing account valuation date should be rejected");
@@ -1578,6 +1812,7 @@ mod tests {
             &account_ids,
             "USD",
             histories,
+            None,
             None,
         )
         .expect_err("stale nonzero account tail should be rejected");

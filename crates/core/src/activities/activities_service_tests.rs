@@ -553,26 +553,26 @@ mod tests {
             _to_currency: &str,
             _date: NaiveDate,
         ) -> Result<Decimal> {
-            unimplemented!()
+            Ok(Decimal::ONE)
         }
 
         fn convert_currency(
             &self,
-            _amount: Decimal,
+            amount: Decimal,
             _from_currency: &str,
             _to_currency: &str,
         ) -> Result<Decimal> {
-            unimplemented!()
+            Ok(amount)
         }
 
         fn convert_currency_for_date(
             &self,
-            _amount: Decimal,
+            amount: Decimal,
             _from_currency: &str,
             _to_currency: &str,
             _date: NaiveDate,
         ) -> Result<Decimal> {
-            unimplemented!()
+            Ok(amount)
         }
 
         fn get_latest_exchange_rates(&self) -> Result<Vec<ExchangeRate>> {
@@ -6450,6 +6450,125 @@ mod tests {
         assert_eq!(performance.returns.twr, Some(dec!(0.1)));
         assert_eq!(performance.attribution.unrealized_pnl_change, dec!(100));
         assert_eq!(performance.series.last().unwrap().value, dec!(0.1));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_cross_currency_transfer_delta_is_fx_attribution() {
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut transfer_out = create_stored_activity("transfer-out", "acc-usd", None);
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.activity_date = parse_test_activity_datetime("2026-05-02");
+        transfer_out.amount = Some(dec!(100));
+        transfer_out.currency = "USD".to_string();
+        transfer_out.source_group_id = Some("transfer-group".to_string());
+
+        let mut transfer_in = create_stored_activity("transfer-in", "acc-eur", None);
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.activity_date = parse_test_activity_datetime("2026-05-02");
+        transfer_in.amount = Some(dec!(98));
+        transfer_in.currency = "EUR".to_string();
+        transfer_in.source_group_id = Some("transfer-group".to_string());
+
+        activity_repository.add_activity(transfer_out);
+        activity_repository.add_activity(transfer_in);
+
+        let mut usd_start = create_daily_valuation(
+            "acc-usd",
+            "2026-05-01",
+            dec!(100),
+            Decimal::ZERO,
+            dec!(100),
+            dec!(100),
+        );
+        let mut usd_end = create_daily_valuation(
+            "acc-usd",
+            "2026-05-02",
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+        usd_end.external_outflow_base = dec!(100);
+        usd_end.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut eur_start = create_daily_valuation(
+            "acc-eur",
+            "2026-05-01",
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+        let mut eur_end = create_daily_valuation(
+            "acc-eur",
+            "2026-05-02",
+            dec!(98),
+            Decimal::ZERO,
+            dec!(98),
+            dec!(98),
+        );
+        eur_end.account_currency = "EUR".to_string();
+        eur_end.base_currency = "USD".to_string();
+        eur_end.external_inflow_base = dec!(98);
+        eur_end.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        usd_start.external_flow_source = ExternalFlowSource::ActivityDerived;
+        for valuation in [&mut usd_start, &mut usd_end, &mut eur_start, &mut eur_end] {
+            valuation.cost_basis = Decimal::ZERO;
+            valuation.cost_basis_base = Decimal::ZERO;
+        }
+        let valuation_repository = Arc::new(MockValuationRepository::new(vec![
+            usd_start, usd_end, eur_start, eur_end,
+        ]));
+        let quote_service = Arc::new(MockQuoteService);
+        let timezone = Arc::new(RwLock::new("UTC".to_string()));
+        let valuation_service = Arc::new(
+            ValuationService::new(
+                Arc::new(RwLock::new("USD".to_string())),
+                valuation_repository,
+                Arc::new(MockSnapshotService),
+                quote_service.clone(),
+                fx_service.clone(),
+            )
+            .with_activity_repository(activity_repository.clone(), timezone),
+        );
+
+        let account_ids = vec!["acc-usd".to_string(), "acc-eur".to_string()];
+        let start_date = NaiveDate::parse_from_str("2026-05-01", "%Y-%m-%d").unwrap();
+        let end_date = NaiveDate::parse_from_str("2026-05-02", "%Y-%m-%d").unwrap();
+        let scoped_valuations = valuation_service
+            .get_historical_valuations_for_accounts(
+                "scope:transfer",
+                &account_ids,
+                "USD",
+                Some(start_date),
+                Some(end_date),
+            )
+            .expect("scoped valuation should remove internal transfer flows");
+
+        assert_eq!(scoped_valuations[1].external_inflow_base, Decimal::ZERO);
+        assert_eq!(scoped_valuations[1].external_outflow_base, Decimal::ZERO);
+
+        let performance_service = PerformanceService::new(valuation_service, quote_service)
+            .with_activity_repository(activity_repository, fx_service);
+        let performance = performance_service
+            .calculate_performance_history_for_accounts(
+                "scope:transfer",
+                &account_ids,
+                "USD",
+                &HashMap::new(),
+                Some(start_date),
+                Some(end_date),
+            )
+            .await
+            .expect("performance should attribute transfer FX delta");
+
+        assert_eq!(performance.attribution.contributions, Decimal::ZERO);
+        assert_eq!(performance.attribution.distributions, Decimal::ZERO);
+        assert_eq!(performance.attribution.fx_effect, dec!(-2));
+        assert_eq!(performance.attribution.residual, Decimal::ZERO);
     }
 
     #[tokio::test]

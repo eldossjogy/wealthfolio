@@ -15,7 +15,7 @@ fn transfer_match_tolerance() -> Decimal {
     Decimal::new(1, 6)
 }
 
-fn is_external_transfer(activity: &Activity) -> bool {
+pub fn is_external_transfer(activity: &Activity) -> bool {
     activity
         .metadata
         .as_ref()
@@ -107,19 +107,17 @@ pub fn classify_transfer_for_account_scope(
         return classify_flow_for_scope(activity, PerformanceScope::Portfolio);
     }
 
-    if is_external_transfer(activity) {
-        return FlowType::External;
-    }
-
     let current_inside = scope_account_ids.contains(&activity.account_id);
-    let paired_inside = paired_account_id
-        .map(|account_id| scope_account_ids.contains(account_id))
-        .unwrap_or(false);
+    if let Some(paired_account_id) = paired_account_id {
+        let paired_inside = scope_account_ids.contains(paired_account_id);
 
-    match (current_inside, paired_inside) {
-        (true, true) | (false, false) => FlowType::Internal,
-        (true, false) | (false, true) => FlowType::External,
+        return match (current_inside, paired_inside) {
+            (true, true) | (false, false) => FlowType::Internal,
+            (true, false) | (false, true) => FlowType::External,
+        };
     }
+
+    FlowType::External
 }
 
 fn opposite_transfer_type(activity_type: &str) -> Option<&'static str> {
@@ -405,12 +403,23 @@ mod tests {
     }
 
     #[test]
-    fn metadata_can_force_transfer_external() {
+    fn paired_transfer_overrides_stale_external_metadata() {
         let mut activity = create_test_activity("TRANSFER_OUT");
         activity.metadata = Some(json!({ "flow": { "is_external": true } }));
         let scope = account_scope(&["account-1", "account-2"]);
         assert_eq!(
             classify_transfer_for_account_scope(&activity, &scope, Some("account-2")),
+            FlowType::Internal
+        );
+    }
+
+    #[test]
+    fn unpaired_external_metadata_marks_transfer_external() {
+        let mut activity = create_test_activity("TRANSFER_OUT");
+        activity.metadata = Some(json!({ "flow": { "is_external": true } }));
+        let scope = account_scope(&["account-1", "account-2"]);
+        assert_eq!(
+            classify_transfer_for_account_scope(&activity, &scope, None),
             FlowType::External
         );
     }

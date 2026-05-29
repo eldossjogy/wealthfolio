@@ -1,5 +1,5 @@
 use crate::accounts::TrackingMode;
-use crate::activities::{Activity, ActivityRepositoryTrait, ActivityType};
+use crate::activities::{Activity, ActivityRepositoryTrait, ActivityType, TransferPairResolution};
 use crate::constants::DECIMAL_PRECISION;
 use crate::errors::{self, Result, ValidationError};
 use crate::fx::FxServiceTrait;
@@ -10,7 +10,7 @@ use crate::utils::time_utils::{activity_date_in_tz, parse_user_timezone_or_defau
 use crate::valuation::ValuationServiceTrait;
 
 use async_trait::async_trait;
-use chrono::{Duration, NaiveDate};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -23,9 +23,9 @@ use rust_decimal::MathematicalOps;
 use rust_decimal_macros::dec;
 
 use super::{
-    DataQualityStatus, PerformanceAttribution, PerformanceDataQuality, PerformancePeriod,
-    PerformanceResult, PerformanceReturns, PerformanceRisk, PerformanceScopeDescriptor,
-    ReturnMethod, SimplePerformanceMetrics,
+    is_external_transfer, DataQualityStatus, PerformanceAttribution, PerformanceDataQuality,
+    PerformancePeriod, PerformanceResult, PerformanceReturns, PerformanceRisk,
+    PerformanceScopeDescriptor, ReturnMethod, SimplePerformanceMetrics,
 };
 use crate::portfolio::valuation::{
     DailyAccountValuation, ExternalFlowSource as ValuationExternalFlowSource,
@@ -230,6 +230,29 @@ impl PerformanceService {
     fn activity_local_date(&self, activity: &Activity) -> NaiveDate {
         let tz = parse_user_timezone_or_default(&self.timezone.read().unwrap());
         activity_date_in_tz(activity.activity_date, tz)
+    }
+
+    fn activity_query_utc_bounds(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> (DateTime<Utc>, DateTime<Utc>) {
+        let start_utc = (start_date - Duration::days(1))
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is valid")
+            .and_utc();
+        let end_exclusive_utc = (end_date + Duration::days(2))
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight is valid")
+            .and_utc();
+        (start_utc, end_exclusive_utc)
+    }
+
+    fn activity_flow_amount(activity: &Activity) -> Decimal {
+        activity
+            .amount
+            .or_else(|| Some(activity.quantity? * activity.unit_price?))
+            .unwrap_or(Decimal::ZERO)
+            .abs()
     }
 
     // =========================================================================
@@ -779,6 +802,160 @@ impl PerformanceService {
         );
     }
 
+    async fn apply_scoped_transfer_pair_attribution_best_effort(
+        &self,
+        result: &mut PerformanceResult,
+        account_ids: &[String],
+        history: &[DailyAccountValuation],
+    ) {
+        let Some(activity_repository) = &self.activity_repository else {
+            return;
+        };
+        let Some(start_date) = result.period.start_date else {
+            return;
+        };
+        let Some(end_date) = result.period.end_date else {
+            return;
+        };
+        if account_ids.is_empty() {
+            return;
+        }
+
+        let (start_utc, end_exclusive_utc) = Self::activity_query_utc_bounds(start_date, end_date);
+        let transfer_activities = match activity_repository
+            .get_transfer_activities_touching_account_ids_in_date_range(
+                account_ids,
+                Some(start_utc),
+                Some(end_exclusive_utc),
+            ) {
+            Ok(activities) => activities,
+            Err(e) => {
+                warn!(
+                    "Failed to load transfer pairs for performance attribution scope {}: {}",
+                    result.scope.id, e
+                );
+                return;
+            }
+        };
+
+        let transfer_resolution = TransferPairResolution::from_activities(&transfer_activities);
+        let scope_account_ids: HashSet<String> = account_ids.iter().cloned().collect();
+        let mut warnings = Vec::new();
+        let mut warned_invalid_groups = HashSet::new();
+        let mut warned_unresolved_activities = HashSet::new();
+
+        for activity in &transfer_activities {
+            if !scope_account_ids.contains(&activity.account_id) {
+                continue;
+            }
+            let activity_date = self.activity_local_date(activity);
+            if activity_date <= start_date || activity_date > end_date {
+                continue;
+            }
+            if transfer_resolution
+                .pair_for_activity(&activity.id)
+                .is_some()
+            {
+                continue;
+            }
+
+            if let Some(group) = transfer_resolution.invalid_group_for_activity(&activity.id) {
+                if warned_invalid_groups.insert(group.group_id.clone()) {
+                    warnings.push(format!(
+                        "Transfer group {} is invalid ({}); affected transfer activity flows were treated as external.",
+                        group.group_id, group.reason
+                    ));
+                }
+            } else if transfer_resolution.is_ungrouped_transfer(&activity.id)
+                && !is_external_transfer(activity)
+                && warned_unresolved_activities.insert(activity.id.clone())
+            {
+                warnings.push(format!(
+                    "Transfer activity {} has no valid linked transfer pair and no external intent; it was treated as external.",
+                    activity.id
+                ));
+            }
+        }
+
+        let mut processed_groups = HashSet::new();
+        let mut transfer_fx_effect = Decimal::ZERO;
+        for pair in transfer_resolution.pairs() {
+            if !pair.both_accounts_in_scope(&scope_account_ids)
+                || !processed_groups.insert(pair.group_id.clone())
+            {
+                continue;
+            }
+
+            let transfer_in_date = self.activity_local_date(&pair.transfer_in);
+            let transfer_out_date = self.activity_local_date(&pair.transfer_out);
+            let touches_period = [
+                (&pair.transfer_in, transfer_in_date),
+                (&pair.transfer_out, transfer_out_date),
+            ]
+            .iter()
+            .any(|(activity, activity_date)| {
+                scope_account_ids.contains(&activity.account_id)
+                    && *activity_date > start_date
+                    && *activity_date <= end_date
+            });
+            if !touches_period {
+                continue;
+            }
+            if pair
+                .transfer_in
+                .currency
+                .eq_ignore_ascii_case(&pair.transfer_out.currency)
+            {
+                continue;
+            }
+
+            let in_base = Self::activity_flow_amount(&pair.transfer_in);
+            let out_base = Self::activity_flow_amount(&pair.transfer_out);
+            if in_base.is_zero() && out_base.is_zero() {
+                continue;
+            }
+
+            let Some(in_base) = self.convert_activity_amount_for_attribution(
+                &pair.transfer_in,
+                in_base,
+                &result.scope.currency,
+                transfer_in_date,
+            ) else {
+                warnings.push(format!(
+                    "Transfer FX attribution skipped for activity {} because FX conversion failed.",
+                    pair.transfer_in.id
+                ));
+                continue;
+            };
+            let Some(out_base) = self.convert_activity_amount_for_attribution(
+                &pair.transfer_out,
+                out_base,
+                &result.scope.currency,
+                transfer_out_date,
+            ) else {
+                warnings.push(format!(
+                    "Transfer FX attribution skipped for activity {} because FX conversion failed.",
+                    pair.transfer_out.id
+                ));
+                continue;
+            };
+
+            transfer_fx_effect += in_base - out_base;
+        }
+
+        let changed = !transfer_fx_effect.is_zero();
+        if changed {
+            result.attribution.fx_effect =
+                (result.attribution.fx_effect + transfer_fx_effect).round_dp(DECIMAL_PRECISION);
+        }
+        if !warnings.is_empty() {
+            result.data_quality.warnings.extend(warnings);
+        }
+        if changed || !result.data_quality.warnings.is_empty() {
+            Self::recompute_attribution_residual(result, history, ExternalFlowBasis::BaseCurrency);
+        }
+    }
+
     async fn apply_activity_attribution_best_effort(
         &self,
         result: &mut PerformanceResult,
@@ -798,14 +975,7 @@ impl PerformanceService {
             return;
         }
 
-        let start_utc = (start_date - Duration::days(1))
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc();
-        let end_utc = (end_date + Duration::days(1))
-            .and_hms_opt(23, 59, 59)
-            .unwrap()
-            .and_utc();
+        let (start_utc, end_utc) = Self::activity_query_utc_bounds(start_date, end_date);
 
         let activities = match activity_repository.get_activities_by_account_ids_in_date_range(
             account_ids,
@@ -1654,6 +1824,12 @@ impl PerformanceService {
 
         metrics.scope.id = scope_id.to_string();
         self.apply_scoped_unrealized_attribution_best_effort(
+            &mut metrics,
+            account_ids,
+            &full_history,
+        )
+        .await;
+        self.apply_scoped_transfer_pair_attribution_best_effort(
             &mut metrics,
             account_ids,
             &full_history,
