@@ -33,7 +33,7 @@ use wealthfolio_core::assets::{
 };
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
-use wealthfolio_core::fx::currency::normalize_amount;
+use wealthfolio_core::fx::currency::{normalize_amount, normalize_currency_code};
 use wealthfolio_core::portfolio::snapshot::{
     AccountStateSnapshot, Position, SnapshotRepositoryTrait, SnapshotServiceTrait, SnapshotSource,
 };
@@ -53,6 +53,16 @@ fn normalize_holdings_money(amount: Decimal, currency: &str) -> (Decimal, String
         amount.round_dp(HOLDINGS_DECIMAL_PRECISION),
         currency.to_string(),
     )
+}
+
+#[derive(Debug, Clone)]
+struct HoldingsPositionData {
+    spec_key: String,
+    quantity: Decimal,
+    quote_price: Decimal,
+    quote_currency: String,
+    average_cost: Option<Decimal>,
+    position_currency: String,
 }
 
 /// Service for syncing broker data to the local database
@@ -671,9 +681,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         let mut asset_specs: Vec<AssetSpec> = Vec::new();
         // Keyed by (symbol, currency) → index into asset_specs
         let mut spec_key_to_idx: HashMap<String, usize> = HashMap::new();
-        // Position data: (spec_key, quantity, price, avg_cost, currency)
-        let mut position_data: Vec<(String, Decimal, Decimal, Option<Decimal>, String)> =
-            Vec::new();
+        let mut position_data: Vec<HoldingsPositionData> = Vec::new();
 
         for pos in &positions {
             let symbol_info = pos.symbol.as_ref().and_then(|s| s.symbol.as_ref());
@@ -727,7 +735,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 .as_ref()
                 .and_then(|c| c.code.clone())
                 .unwrap_or_else(|| account_currency.clone());
-            let (_, money_currency) = normalize_holdings_money(Decimal::ZERO, &raw_quote_currency);
+            let position_currency = normalize_currency_code(&raw_quote_currency).to_string();
 
             let instrument_type =
                 map_broker_symbol_type(symbol_type_code.as_deref(), is_crypto_asset);
@@ -764,13 +772,20 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 .unwrap_or(Decimal::ZERO)
                 .round_dp(HOLDINGS_DECIMAL_PRECISION);
             let raw_price = Decimal::from_f64(pos.price.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
-            let price = normalize_holdings_money(raw_price, &raw_quote_currency).0;
+            let quote_price = raw_price.round_dp(HOLDINGS_DECIMAL_PRECISION);
             let avg_cost = pos
                 .average_purchase_price
                 .and_then(Decimal::from_f64)
                 .map(|value| normalize_holdings_money(value, &raw_quote_currency).0);
 
-            position_data.push((spec_key, quantity, price, avg_cost, money_currency));
+            position_data.push(HoldingsPositionData {
+                spec_key,
+                quantity,
+                quote_price,
+                quote_currency: raw_quote_currency,
+                average_cost: avg_cost,
+                position_currency,
+            });
         }
 
         // 1b. Build AssetSpecs and position data from option positions
@@ -811,7 +826,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 .as_ref()
                 .and_then(|c| c.code.clone())
                 .unwrap_or_else(|| account_currency.clone());
-            let (_, money_currency) = normalize_holdings_money(Decimal::ZERO, &raw_quote_currency);
+            let position_currency = normalize_currency_code(&raw_quote_currency).to_string();
 
             let multiplier = if option_symbol.is_mini_option.unwrap_or(false) {
                 Decimal::from(10)
@@ -852,13 +867,20 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 .round_dp(HOLDINGS_DECIMAL_PRECISION);
             let raw_price =
                 Decimal::from_f64(opt_pos.price.unwrap_or(0.0)).unwrap_or(Decimal::ZERO);
-            let price = normalize_holdings_money(raw_price, &raw_quote_currency).0;
+            let quote_price = raw_price.round_dp(HOLDINGS_DECIMAL_PRECISION);
             let avg_cost = opt_pos
                 .average_purchase_price
                 .and_then(Decimal::from_f64)
                 .map(|value| normalize_holdings_money(value, &raw_quote_currency).0);
 
-            position_data.push((spec_key, quantity, price, avg_cost, money_currency));
+            position_data.push(HoldingsPositionData {
+                spec_key,
+                quantity,
+                quote_price,
+                quote_currency: raw_quote_currency,
+                average_cost: avg_cost,
+                position_currency,
+            });
         }
 
         // 2. Ensure assets exist via service layer (dedup by instrument_key)
@@ -907,11 +929,11 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
             let today_date = today.format("%Y-%m-%d").to_string();
             let mut quotes: Vec<Quote> = Vec::new();
 
-            for (spec_key, _quantity, price, _avg_cost, currency) in &position_data {
-                if *price <= Decimal::ZERO {
+            for position in &position_data {
+                if position.quote_price <= Decimal::ZERO {
                     continue;
                 }
-                let asset_id = match spec_key_to_asset_id.get(spec_key) {
+                let asset_id = match spec_key_to_asset_id.get(&position.spec_key) {
                     Some(id) => id,
                     None => continue,
                 };
@@ -920,13 +942,13 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                     id: format!("{}_{}_{}", asset_id, today_date, DATA_SOURCE_BROKER),
                     asset_id: asset_id.clone(),
                     timestamp: now,
-                    open: *price,
-                    high: *price,
-                    low: *price,
-                    close: *price,
-                    adjclose: *price,
+                    open: position.quote_price,
+                    high: position.quote_price,
+                    low: position.quote_price,
+                    close: position.quote_price,
+                    adjclose: position.quote_price,
                     volume: Decimal::ZERO,
-                    currency: currency.clone(),
+                    currency: position.quote_currency.clone(),
                     data_source: DATA_SOURCE_BROKER.to_string(),
                     created_at: now,
                     notes: None,
@@ -960,41 +982,45 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
         let mut positions_map: HashMap<String, Position> = HashMap::new();
         let mut total_cost_basis = Decimal::ZERO;
 
-        for (spec_key, quantity, _price, broker_avg_cost, currency) in &position_data {
-            let asset_id = match spec_key_to_asset_id.get(spec_key) {
+        for position in &position_data {
+            let asset_id = match spec_key_to_asset_id.get(&position.spec_key) {
                 Some(id) => id.clone(),
                 None => {
-                    warn!("Could not resolve asset for position key '{}'", spec_key);
+                    warn!(
+                        "Could not resolve asset for position key '{}'",
+                        position.spec_key
+                    );
                     continue;
                 }
             };
 
             // Determine contract multiplier from the asset spec metadata
             let contract_multiplier = spec_key_to_idx
-                .get(spec_key)
+                .get(&position.spec_key)
                 .and_then(|idx| asset_specs.get(*idx))
                 .and_then(|spec| spec.option_multiplier())
                 .unwrap_or(Decimal::ONE);
 
             let avg_cost = Self::resolve_position_average_cost(
-                broker_avg_cost.as_ref().copied(),
+                position.average_cost,
                 latest
                     .as_ref()
                     .and_then(|snapshot| snapshot.positions.get(&asset_id)),
-                *quantity,
-                currency,
+                position.quantity,
+                &position.position_currency,
             );
-            let position_cost_basis = (*quantity * avg_cost).round_dp(HOLDINGS_DECIMAL_PRECISION);
+            let position_cost_basis =
+                (position.quantity * avg_cost).round_dp(HOLDINGS_DECIMAL_PRECISION);
             total_cost_basis += position_cost_basis;
 
             let position = Position {
                 id: format!("{}_{}", account_id, asset_id),
                 account_id: account_id.clone(),
                 asset_id: asset_id.clone(),
-                quantity: *quantity,
+                quantity: position.quantity,
                 average_cost: avg_cost,
                 total_cost_basis: position_cost_basis,
-                currency: currency.clone(),
+                currency: position.position_currency.clone(),
                 inception_date: now,
                 lots: VecDeque::new(),
                 created_at: now,
@@ -1492,6 +1518,27 @@ mod tests {
         assert_eq!(spec.quote_ccy, "GBp");
         assert_eq!(broker_price, decimal("0.85"));
         assert_eq!(broker_currency, "GBP");
+    }
+
+    #[test]
+    fn holdings_position_data_keeps_quote_values_in_raw_quote_units() {
+        let raw_quote_currency = "GBp".to_string();
+        let position_currency =
+            wealthfolio_core::fx::currency::normalize_currency_code(&raw_quote_currency)
+                .to_string();
+        let position = super::HoldingsPositionData {
+            spec_key: "SEC:VUSA:XLON".to_string(),
+            quantity: decimal("10"),
+            quote_price: decimal("85"),
+            quote_currency: raw_quote_currency,
+            average_cost: Some(normalize_holdings_money(decimal("82.5"), "GBp").0),
+            position_currency,
+        };
+
+        assert_eq!(position.quote_price, decimal("85"));
+        assert_eq!(position.quote_currency, "GBp");
+        assert_eq!(position.average_cost, Some(decimal("0.825")));
+        assert_eq!(position.position_currency, "GBP");
     }
 
     fn position(

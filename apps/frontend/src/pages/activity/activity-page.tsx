@@ -33,6 +33,7 @@ import {
   SpendingTransactionsTab,
   type SpendingTransactionsTabHandle,
 } from "@/features/spending/components/spending-transactions-tab";
+import { resolveActivityUrlFilters } from "./utils/url-filters";
 
 const ActivityPage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -42,11 +43,19 @@ const ActivityPage = () => {
   const [showAlternativeAssetModal, setShowAlternativeAssetModal] = useState(false);
   const [showActionPalette, setShowActionPalette] = useState(false);
   const [showSpendingActionPalette, setShowSpendingActionPalette] = useState(false);
+  const isMobileViewport = useIsMobileViewport();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activityUrlFilterKey = searchParams.toString();
+  const activityUrlFilters = useMemo(
+    () => resolveActivityUrlFilters(new URLSearchParams(activityUrlFilterKey)),
+    [activityUrlFilterKey],
+  );
 
   // Filter and search state
   const [accountScope, setAccountScope] = usePersistentState<AccountScope>(
     "activity-filter-scope",
-    { type: "all" },
+    activityUrlFilters.accountScope ?? { type: "all" },
   );
   const { data: portfolios = [] } = usePortfolios();
   const [selectedActivityTypes, setSelectedActivityTypes] = usePersistentState<ActivityType[]>(
@@ -59,7 +68,7 @@ const ActivityPage = () => {
   );
   const [statusFilter, setStatusFilter] = usePersistentState<ActivityStatusFilter>(
     "activity-filter-status",
-    "all",
+    activityUrlFilters.statusFilter ?? "all",
   );
   const [searchInput, setSearchInput] = usePersistentState<string>("activity-filter-search", "");
   const [searchQuery, setSearchQuery] = useState(searchInput);
@@ -79,14 +88,25 @@ const ActivityPage = () => {
   const [pageIndex, setPageIndex] = usePersistentState("activity-datagrid-page-index", 0);
   const [pageSize, setPageSize] = usePersistentState("activity-datagrid-page-size", 50);
 
-  const isMobileViewport = useIsMobileViewport();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const {
     isEnabled: isSpendingEnabled,
     accountIds: spendingAccountIds,
     isLoading: isSpendingSettingsLoading,
   } = useSpendingSettings();
+
+  const activityUrlAccountId =
+    activityUrlFilters.accountScope?.type === "account"
+      ? activityUrlFilters.accountScope.accountId
+      : undefined;
+
+  useEffect(() => {
+    if (activityUrlAccountId) {
+      setAccountScope({ type: "account", accountId: activityUrlAccountId });
+    }
+    if (activityUrlFilters.statusFilter) {
+      setStatusFilter(activityUrlFilters.statusFilter);
+    }
+  }, [activityUrlAccountId, activityUrlFilters.statusFilter, setAccountScope, setStatusFilter]);
 
   // Coerce "spending" URL state back to investments when the module is disabled.
   const urlTab = searchParams.get("tab");
@@ -114,7 +134,7 @@ const ActivityPage = () => {
       setSearchInput(value);
       debouncedUpdateSearch(value);
     },
-    [debouncedUpdateSearch],
+    [debouncedUpdateSearch, setSearchInput],
   );
 
   // Cleanup debounced function on unmount
@@ -229,6 +249,7 @@ const ActivityPage = () => {
     selectedInstrumentTypes,
     statusFilter,
     searchQuery,
+    setPageIndex,
     sorting,
   ]);
 

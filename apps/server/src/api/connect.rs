@@ -22,7 +22,8 @@ use crate::main_lib::AppState;
 use axum::http::StatusCode;
 use wealthfolio_connect::{
     broker::{
-        BrokerApiClient, BrokerSyncStatusDetail, PlansResponse, SyncAccountsResponse,
+        resolve_activity_readiness, should_advance_activity_cursor, BrokerApiClient,
+        BrokerSyncStatusDetail, PlansResponse, ProviderReadiness, SyncAccountsResponse,
         SyncActivitiesResponse, SyncConnectionsResponse, UserInfo,
     },
     ensure_valid_access_token, fetch_subscription_plans_public, ConnectApiClient, SyncConfig,
@@ -52,55 +53,6 @@ fn ensure_connect_sync_enabled() -> ApiResult<()> {
             "Connect sync feature is disabled in this build.".to_string(),
         ))
     }
-}
-
-fn parse_provider_sync_date(value: &str) -> Result<chrono::NaiveDate, String> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|dt| dt.with_timezone(&chrono::Utc).date_naive())
-        .or_else(|_| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d"))
-        .map_err(|_| format!("Invalid provider sync timestamp '{}'", value))
-}
-
-fn resolve_activity_waterline(
-    status: Option<&BrokerSyncStatusDetail>,
-) -> Result<chrono::NaiveDate, String> {
-    let Some(status) = status else {
-        return Err("Provider transaction sync status is unavailable".to_string());
-    };
-
-    if status.initial_sync_completed == Some(false) {
-        return Err("Provider transaction sync is still preparing".to_string());
-    }
-
-    let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
-        return Err("Provider transaction sync has no successful waterline".to_string());
-    };
-
-    parse_provider_sync_date(last_successful_sync)
-}
-
-fn should_advance_activity_cursor(
-    fetched: usize,
-    has_local_cursor: bool,
-    inconsistent_empty_page: bool,
-    provider_status: Option<&BrokerSyncStatusDetail>,
-) -> bool {
-    if inconsistent_empty_page {
-        return false;
-    }
-
-    if fetched > 0 || has_local_cursor {
-        return true;
-    }
-
-    matches!(
-        provider_status,
-        Some(BrokerSyncStatusDetail {
-            initial_sync_completed: Some(true),
-            first_transaction_date: None,
-            ..
-        })
-    )
 }
 
 fn ensure_device_sync_enabled() -> ApiResult<()> {
@@ -685,25 +637,49 @@ async fn perform_broker_activities_only_sync(
             continue;
         }
 
-        let local_activity_state = state
+        let local_activity_state = match state
             .connect_sync_service
             .get_activity_sync_state(&account_id)
-            .map_err(|e| e.to_string())?;
+        {
+            Ok(state) => state,
+            Err(err) => {
+                let failure = format!("Activity sync state failed: {}", err);
+                let _ = state
+                    .connect_sync_service
+                    .finalize_activity_sync_failure(account_id.clone(), failure.clone(), None)
+                    .await;
+                error!("[Connect] {} for {}", failure, account_name);
+                summary.accounts_failed += 1;
+                continue;
+            }
+        };
         let local_cursor = local_activity_state
             .as_ref()
             .and_then(|s| s.last_successful_at.as_ref());
         let has_local_cursor = local_cursor.is_some();
         let provider_status = provider_transaction_statuses.get(&provider_account_id);
-        let provider_waterline = match resolve_activity_waterline(provider_status) {
-            Ok(date) => date.min(today),
-            Err(err) => {
-                let warning = format!("Activity sync deferred: {}", err);
+        let provider_waterline = match resolve_activity_readiness(provider_status) {
+            Ok(ProviderReadiness::Ready(date)) => date.min(today),
+            Ok(ProviderReadiness::NotReady(reason)) => {
+                let warning = format!("Activity sync deferred: {}", reason);
                 let _ = state
                     .connect_sync_service
                     .finalize_activity_sync_needs_review(account_id.clone(), warning.clone(), None)
                     .await;
                 summary.accounts_warned += 1;
                 info!("[Connect] {}", warning);
+                continue;
+            }
+            Err(err) => {
+                let _ = state
+                    .connect_sync_service
+                    .finalize_activity_sync_failure(account_id.clone(), err.clone(), None)
+                    .await;
+                summary.accounts_failed += 1;
+                error!(
+                    "[Connect] Failed to resolve provider activity sync status for {}: {}",
+                    account_name, err
+                );
                 continue;
             }
         };
@@ -845,6 +821,10 @@ async fn perform_broker_activities_only_sync(
             continue;
         }
 
+        summary.activities_upserted += account_upserted;
+        summary.assets_inserted += account_assets;
+        summary.new_asset_ids.extend(account_new_asset_ids);
+
         if !should_advance_activity_cursor(
             account_fetched,
             has_local_cursor,
@@ -882,9 +862,6 @@ async fn perform_broker_activities_only_sync(
         }
 
         summary.accounts_synced += 1;
-        summary.activities_upserted += account_upserted;
-        summary.assets_inserted += account_assets;
-        summary.new_asset_ids.extend(account_new_asset_ids);
     }
 
     Ok(summary)
