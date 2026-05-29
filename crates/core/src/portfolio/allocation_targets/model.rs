@@ -224,3 +224,71 @@ pub struct DriftHoldingsReport {
     pub base_currency: String,
     pub rows: Vec<DriftHoldingRow>,
 }
+
+// ── Rebalance types ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculateRebalancePlanInput {
+    pub target_id: String,
+    pub available_cash: Decimal,
+    pub account_ids: Vec<String>,
+    pub base_currency: String,
+    pub aggregated_account_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RebalanceWarningKind {
+    MissingQuote,
+    NoBuyCandidate,
+    WholeShareResidue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalanceWarning {
+    pub kind: RebalanceWarningKind,
+    pub category_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedManualTrade {
+    pub action: String,
+    pub category_id: String,
+    pub category_name: String,
+    pub asset_id: Option<String>,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub quantity: Option<Decimal>,
+    pub estimated_price: Option<Decimal>,
+    pub estimated_amount: Decimal,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalancePlan {
+    pub target_id: String,
+    pub available_cash: Decimal,
+    pub cash_used: Decimal,
+    pub cash_remaining: Decimal,
+    pub max_drift_bps_before: i32,
+    pub max_drift_bps_after: i32,
+    pub trades: Vec<SuggestedManualTrade>,
+    pub warnings: Vec<RebalanceWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalanceDraft {
+    pub id: String,
+    pub target_id: String,
+    pub target_snapshot_json: String,
+    pub input_json: String,
+    pub result_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
