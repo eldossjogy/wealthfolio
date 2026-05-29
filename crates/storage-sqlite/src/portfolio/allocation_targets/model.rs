@@ -1,6 +1,6 @@
 use diesel::prelude::*;
 use wealthfolio_core::portfolio::allocation_targets::{
-    AllocationTarget, AllocationTargetWeight, RebalanceGoal, ScopeType, TriggerType,
+    AllocationTarget, AllocationTargetWeight, RebalanceDraft, RebalanceGoal, ScopeType, TriggerType,
 };
 
 #[derive(Debug, Clone, Queryable, Insertable, AsChangeset)]
@@ -59,6 +59,46 @@ impl TryFrom<AllocationTargetDB> for AllocationTarget {
             updated_at: db.updated_at,
             archived_at: db.archived_at,
         })
+    }
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, AsChangeset)]
+#[diesel(table_name = crate::schema::rebalance_drafts)]
+pub struct RebalanceDraftDB {
+    pub id: String,
+    pub target_id: String,
+    pub target_snapshot_json: String,
+    pub input_json: String,
+    pub result_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<RebalanceDraft> for RebalanceDraftDB {
+    fn from(d: RebalanceDraft) -> Self {
+        Self {
+            id: d.id,
+            target_id: d.target_id,
+            target_snapshot_json: d.target_snapshot_json,
+            input_json: d.input_json,
+            result_json: d.result_json,
+            created_at: d.created_at,
+            updated_at: d.updated_at,
+        }
+    }
+}
+
+impl From<RebalanceDraftDB> for RebalanceDraft {
+    fn from(db: RebalanceDraftDB) -> Self {
+        Self {
+            id: db.id,
+            target_id: db.target_id,
+            target_snapshot_json: db.target_snapshot_json,
+            input_json: db.input_json,
+            result_json: db.result_json,
+            created_at: db.created_at,
+            updated_at: db.updated_at,
+        }
     }
 }
 
