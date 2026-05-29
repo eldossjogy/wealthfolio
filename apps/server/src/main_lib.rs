@@ -126,6 +126,9 @@ pub struct AppState {
     >,
     pub drift_service:
         Arc<dyn wealthfolio_core::portfolio::allocation_targets::DriftServiceTrait + Send + Sync>,
+    pub rebalance_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::RebalanceServiceTrait + Send + Sync,
+    >,
 }
 
 pub fn init_tracing() {
@@ -457,6 +460,22 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         wealthfolio_core::portfolio::allocation_targets::DriftService::new(
             allocation_target_service.clone(),
             allocation_service.clone(),
+        ),
+    );
+    let rebalance_draft_repository = Arc::new(
+        wealthfolio_storage_sqlite::portfolio::allocation_targets::RebalanceDraftRepository::new(
+            pool.clone(),
+            writer.clone(),
+        ),
+    );
+    let rebalance_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::RebalanceServiceTrait + Send + Sync,
+    > = Arc::new(
+        wealthfolio_core::portfolio::allocation_targets::RebalanceService::new(
+            allocation_target_service.clone(),
+            drift_service.clone(),
+            allocation_service.clone(),
+            rebalance_draft_repository,
         ),
     );
 
@@ -803,6 +822,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         spending_insight_service,
         allocation_target_service,
         drift_service,
+        rebalance_service,
     });
 
     #[cfg(feature = "device-sync")]

@@ -802,6 +802,10 @@ pub fn run() {
             commands::allocation_targets::save_allocation_target_weights,
             commands::allocation_targets::save_allocation_target_with_weights,
             commands::allocation_targets::get_allocation_target_drift,
+            commands::allocation_targets::calculate_rebalance_plan,
+            commands::allocation_targets::save_rebalance_draft,
+            commands::allocation_targets::list_rebalance_drafts,
+            commands::allocation_targets::delete_rebalance_draft,
             // RetirementPlan-based FIRE commands
             commands::fire::calculate_retirement_projection,
             commands::fire::run_retirement_decision_sensitivity_map,

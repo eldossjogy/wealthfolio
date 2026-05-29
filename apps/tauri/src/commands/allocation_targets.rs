@@ -4,8 +4,9 @@ use tauri::State;
 
 use wealthfolio_core::{
     portfolio::allocation_targets::{
-        AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
-        NewAllocationTargetWeight, SaveAllocationTargetResult, ScopeType,
+        AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalanceDraft, RebalancePlan,
+        SaveAllocationTargetResult, ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -201,4 +202,59 @@ pub async fn get_allocation_target_drift(
             .await
             .map_err(|e| e.to_string())
     }
+}
+
+// ── Rebalance ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn calculate_rebalance_plan(
+    state: State<'_, Arc<ServiceContext>>,
+    input: CalculateRebalancePlanInput,
+) -> Result<RebalancePlan, String> {
+    state
+        .rebalance_service()
+        .calculate_plan(input)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_rebalance_draft(
+    state: State<'_, Arc<ServiceContext>>,
+    target_id: String,
+    input: CalculateRebalancePlanInput,
+    plan: RebalancePlan,
+) -> Result<RebalanceDraft, String> {
+    let svc = state.rebalance_service();
+    let target = state
+        .allocation_target_service()
+        .get_target(&target_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Target {target_id} not found"))?;
+    svc.save_draft(&target, &input, &plan)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_rebalance_drafts(
+    state: State<'_, Arc<ServiceContext>>,
+    target_id: String,
+) -> Result<Vec<RebalanceDraft>, String> {
+    state
+        .rebalance_service()
+        .list_drafts(&target_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_rebalance_draft(
+    state: State<'_, Arc<ServiceContext>>,
+    id: String,
+) -> Result<(), String> {
+    state
+        .rebalance_service()
+        .delete_draft(&id)
+        .await
+        .map_err(|e| e.to_string())
 }

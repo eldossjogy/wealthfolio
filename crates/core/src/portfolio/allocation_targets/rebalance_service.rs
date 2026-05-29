@@ -135,9 +135,6 @@ impl RebalanceServiceTrait for RebalanceService {
         struct SleeveShortfall {
             category_id: String,
             category_name: String,
-            color: String,
-            current_value: Decimal,
-            target_bps: i32,
             shortfall: Decimal,
         }
 
@@ -154,9 +151,6 @@ impl RebalanceServiceTrait for RebalanceService {
                 sleeves.push(SleeveShortfall {
                     category_id: row.category_id.clone(),
                     category_name: row.category_name.clone(),
-                    color: row.color.clone(),
-                    current_value: row.current_value,
-                    target_bps: row.target_bps,
                     shortfall,
                 });
             }
