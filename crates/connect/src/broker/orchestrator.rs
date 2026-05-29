@@ -885,7 +885,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_provider_waterline_restores_cursor_without_fetching_activities() {
+    async fn stale_provider_waterline_restores_cursor_without_counting_synced_account() {
         let service = Arc::new(MockSyncService {
             accounts: vec![synced_account(
                 "account-1",
@@ -909,7 +909,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(activities.accounts_synced, 1);
+        assert_eq!(activities.accounts_synced, 0);
         assert_eq!(*api_client.activity_calls.lock().unwrap(), 0);
         let calls = service.calls.lock().unwrap();
         assert_eq!(calls.activity_successes.len(), 1);

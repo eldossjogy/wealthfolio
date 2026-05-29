@@ -15,13 +15,15 @@ pub fn parse_provider_sync_date(value: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("Invalid provider sync timestamp '{}'", value))
 }
 
+fn legacy_provider_waterline() -> NaiveDate {
+    Utc::now().date_naive()
+}
+
 pub fn resolve_activity_readiness(
     status: Option<&BrokerSyncStatusDetail>,
 ) -> Result<ProviderReadiness, String> {
     let Some(status) = status else {
-        return Ok(ProviderReadiness::NotReady(
-            "Provider transaction sync status is unavailable".to_string(),
-        ));
+        return Ok(ProviderReadiness::Ready(legacy_provider_waterline()));
     };
 
     if status.initial_sync_completed == Some(false) {
@@ -31,9 +33,7 @@ pub fn resolve_activity_readiness(
     }
 
     let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
-        return Ok(ProviderReadiness::NotReady(
-            "Provider transaction sync has no successful waterline".to_string(),
-        ));
+        return Ok(ProviderReadiness::Ready(legacy_provider_waterline()));
     };
 
     Ok(ProviderReadiness::Ready(parse_provider_sync_date(
@@ -44,27 +44,13 @@ pub fn resolve_activity_readiness(
 pub fn resolve_holdings_readiness(
     status: Option<&BrokerSyncStatusDetail>,
 ) -> Result<ProviderReadiness, String> {
-    let Some(status) = status else {
-        return Ok(ProviderReadiness::NotReady(
-            "Provider holdings sync status is unavailable".to_string(),
-        ));
-    };
-
-    if status.initial_sync_completed == Some(false) {
+    if status.is_some_and(|status| status.initial_sync_completed == Some(false)) {
         return Ok(ProviderReadiness::NotReady(
             "Provider holdings sync is still preparing".to_string(),
         ));
     }
 
-    let Some(last_successful_sync) = status.last_successful_sync.as_deref() else {
-        return Ok(ProviderReadiness::NotReady(
-            "Provider holdings sync has no successful waterline".to_string(),
-        ));
-    };
-
-    Ok(ProviderReadiness::Ready(parse_provider_sync_date(
-        last_successful_sync,
-    )?))
+    Ok(ProviderReadiness::Ready(legacy_provider_waterline()))
 }
 
 pub fn provider_waterline_precedes_local_cursor(
@@ -92,8 +78,12 @@ pub fn should_advance_activity_cursor(
 
     matches!(
         provider_status,
-        Some(BrokerSyncStatusDetail {
+        None | Some(BrokerSyncStatusDetail {
             initial_sync_completed: Some(true),
+            first_transaction_date: None,
+            ..
+        }) | Some(BrokerSyncStatusDetail {
+            initial_sync_completed: None,
             first_transaction_date: None,
             ..
         })
@@ -122,6 +112,23 @@ mod tests {
         let readiness = resolve_activity_readiness(Some(&status)).unwrap();
 
         assert!(matches!(readiness, ProviderReadiness::NotReady(_)));
+    }
+
+    #[test]
+    fn missing_activity_status_uses_legacy_today_waterline() {
+        let today = Utc::now().date_naive();
+        let readiness = resolve_activity_readiness(None).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::Ready(date) if date == today));
+    }
+
+    #[test]
+    fn activity_status_without_waterline_uses_legacy_today_waterline() {
+        let status = transactions_status(None, None, None);
+        let today = Utc::now().date_naive();
+        let readiness = resolve_activity_readiness(Some(&status)).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::Ready(date) if date == today));
     }
 
     #[test]
@@ -179,6 +186,11 @@ mod tests {
     }
 
     #[test]
+    fn initial_empty_activity_sync_without_provider_status_uses_legacy_cursor_advance() {
+        assert!(should_advance_activity_cursor(0, false, false, None));
+    }
+
+    #[test]
     fn incremental_empty_activity_sync_advances_cursor_to_provider_waterline() {
         let status = transactions_status(Some(true), Some("2026-05-22"), Some("2020-01-01"));
 
@@ -208,5 +220,20 @@ mod tests {
         let readiness = resolve_holdings_readiness(Some(&status)).unwrap();
 
         assert!(matches!(readiness, ProviderReadiness::NotReady(_)));
+    }
+
+    #[test]
+    fn missing_holdings_status_allows_legacy_snapshot_sync() {
+        let readiness = resolve_holdings_readiness(None).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::Ready(_)));
+    }
+
+    #[test]
+    fn holdings_readiness_does_not_parse_unused_waterline() {
+        let status = transactions_status(Some(true), Some("not-a-date"), None);
+        let readiness = resolve_holdings_readiness(Some(&status)).unwrap();
+
+        assert!(matches!(readiness, ProviderReadiness::Ready(_)));
     }
 }

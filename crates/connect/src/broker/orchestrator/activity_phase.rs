@@ -155,7 +155,6 @@ impl<P: SyncProgressReporter> SyncOrchestrator<P> {
                             )
                             .with_message(message),
                         );
-                        result.summary.accounts_synced += 1;
                     }
                     return result;
                 }

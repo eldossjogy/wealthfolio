@@ -53,6 +53,10 @@ jobs:
   rust-check:
     name: Rust Check
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-C debuginfo=0"
 
     steps:
       - name: Checkout code
