@@ -31,16 +31,17 @@ import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { listBrokerConnections } from "../services/broker-service";
-import type { BrokerConnection, ImportRun } from "../types";
+import type { BrokerConnection, BrokerSyncState, ImportRun } from "../types";
 
 import type { Device } from "@/features/devices-sync/types";
 import type { Account } from "@/lib/types";
 import { hasBrokerSync } from "../lib/plan-capabilities";
+import { hasReviewableActivityWarnings } from "../lib/import-run-review";
 import { NewAccountsFoundModal } from "../components/new-accounts-found-modal";
 
 export default function ConnectPage() {
   const { isEnabled, isConnected, isInitializing, userInfo } = useWealthfolioConnect();
-  const { status, lastSyncTime, issueCount } = useAggregatedSyncStatus();
+  const { status, lastSyncTime, syncStates } = useAggregatedSyncStatus();
   const showBrokerSync = hasBrokerSync(userInfo);
   const { data: brokerAccounts = [] } = useBrokerAccounts({ enabled: showBrokerSync });
   const { mutate: syncBrokerData, isPending: isSyncing } = useSyncBrokerData();
@@ -104,6 +105,23 @@ export default function ConnectPage() {
     if (!importRunsData?.pages) return [];
     return importRunsData.pages.flat().slice(0, 10);
   }, [importRunsData]);
+
+  const recentActivityIssueCount = useMemo(() => {
+    return recentActivity.filter((run) => {
+      const summary = run.summary;
+      return (
+        run.status === "FAILED" ||
+        run.status === "NEEDS_REVIEW" ||
+        (summary?.warnings ?? 0) > 0 ||
+        (summary?.errors ?? 0) > 0
+      );
+    }).length;
+  }, [recentActivity]);
+
+  const brokerSyncIssues = useMemo(
+    () => syncStates.filter((s) => s.syncStatus === "NEEDS_REVIEW" || s.syncStatus === "FAILED"),
+    [syncStates],
+  );
 
   const accountNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -256,6 +274,16 @@ export default function ConnectPage() {
             </Alert>
           )}
 
+          {showBrokerSync && brokerSyncIssues.length > 0 && (
+            <BrokerSyncAttentionSection
+              issues={brokerSyncIssues}
+              accounts={localAccounts}
+              onRetry={() => syncBrokerData()}
+              onManage={() => openUrlInBrowser(`${WEALTHFOLIO_CONNECT_PORTAL_URL}/connections`)}
+              isSyncing={isSyncRunning}
+            />
+          )}
+
           <div className={`grid grid-cols-1 gap-4 ${showBrokerSync ? "md:grid-cols-2" : ""}`}>
             {showBrokerSync && (
               <Card className="flex flex-col border">
@@ -395,9 +423,9 @@ export default function ConnectPage() {
                     <Icons.History className="text-muted-foreground h-3.5 w-3.5" />
                   </div>
                   Recent Activity
-                  {issueCount > 0 && (
+                  {recentActivityIssueCount > 0 && (
                     <Badge variant="default" className="ml-1 h-5 min-w-5 px-1.5 text-xs">
-                      {issueCount}
+                      {recentActivityIssueCount}
                     </Badge>
                   )}
                 </CardTitle>
@@ -660,6 +688,80 @@ function formatDeviceLastSeen(device: Device): string {
   return `${diffDays}d ago`;
 }
 
+function BrokerSyncAttentionSection({
+  issues,
+  accounts,
+  onRetry,
+  onManage,
+  isSyncing,
+}: {
+  issues: BrokerSyncState[];
+  accounts: Account[];
+  onRetry: () => void;
+  onManage: () => void;
+  isSyncing: boolean;
+}) {
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account])),
+    [accounts],
+  );
+
+  return (
+    <Alert variant="warning" className="mb-4">
+      <Icons.AlertTriangle className="h-4 w-4" />
+      <div className="flex flex-1 flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="font-medium">Broker sync needs attention</p>
+            <p className="text-muted-foreground text-sm">
+              {issues.length} account{issues.length === 1 ? "" : "s"} need a retry or broker review.
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" variant="outline" onClick={onRetry} disabled={isSyncing}>
+              {isSyncing ? (
+                <Icons.Spinner className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Icons.RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Retry
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onManage}>
+              <Icons.ExternalLink className="mr-2 h-4 w-4" />
+              Manage
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {issues.map((issue) => {
+            const account = accountById.get(issue.accountId);
+            const accountName = account?.name || issue.accountId;
+            const broker = account?.provider || issue.provider;
+            const message =
+              issue.lastError ||
+              (issue.syncStatus === "FAILED"
+                ? "Broker sync failed."
+                : "Broker sync needs review before the cursor can advance.");
+
+            return (
+              <div key={`${issue.provider}:${issue.accountId}`} className="rounded-md border p-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-medium">{accountName}</span>
+                  <Badge variant={issue.syncStatus === "FAILED" ? "destructive" : "outline"}>
+                    {issue.syncStatus === "FAILED" ? "Failed" : "Needs Review"}
+                  </Badge>
+                  <span className="text-muted-foreground text-xs">{broker}</span>
+                </div>
+                <p className="text-muted-foreground mt-1 text-sm">{message}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Alert>
+  );
+}
+
 function SyncHistoryItem({
   run,
   accountName,
@@ -685,6 +787,7 @@ function SyncHistoryItem({
 
   const hasIssues = warnings > 0 || errors > 0;
   const needsAttention = isNeedsReview || hasIssues;
+  const canReviewActivities = hasReviewableActivityWarnings(warnings);
 
   let description = "";
   if (isRunning) {
@@ -693,7 +796,10 @@ function SyncHistoryItem({
     description = "Something went wrong";
   } else if (needsAttention) {
     const issueCount = warnings + errors;
-    description = `${issueCount} ${issueCount === 1 ? "item needs" : "items need"} your review`;
+    description =
+      issueCount > 0
+        ? `${issueCount} ${issueCount === 1 ? "item needs" : "items need"} your review`
+        : run.error || "Sync needs attention";
   } else if (inserted > 0 || updated > 0 || removed > 0) {
     const parts: string[] = [];
     if (inserted > 0) {
@@ -736,7 +842,7 @@ function SyncHistoryItem({
         </span>
         {isRunning && <Icons.Spinner className="h-3 w-3 animate-spin" />}
       </div>
-      {needsAttention && (
+      {canReviewActivities && (
         <Link
           to={`/activities?account=${run.accountId}&needsReview=true`}
           className="text-primary shrink-0 text-sm font-medium hover:underline"

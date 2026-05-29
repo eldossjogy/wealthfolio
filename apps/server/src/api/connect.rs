@@ -29,7 +29,6 @@ use wealthfolio_connect::{
     SyncOrchestrator, SyncProgressPayload, SyncProgressReporter, SyncResult, TokenLifecycleConfig,
     TokenLifecycleError, CLOUD_ACCESS_TOKEN_KEY, CLOUD_REFRESH_TOKEN_KEY,
 };
-use wealthfolio_core::accounts::TrackingMode;
 use wealthfolio_device_sync::{EnableSyncResult, SyncState, SyncStateResult};
 
 const DEVICE_ID_KEY: &str = "sync_device_id";
@@ -589,171 +588,14 @@ async fn perform_broker_activities_only_sync(
     let client = create_connect_client(state)
         .await
         .map_err(|e| e.to_string())?;
+    let reporter = Arc::new(EventBusProgressReporter::new(state.event_bus.clone()));
+    let orchestrator = SyncOrchestrator::new(
+        state.connect_sync_service.clone(),
+        reporter,
+        SyncConfig::default(),
+    );
 
-    let synced_accounts = state
-        .connect_sync_service
-        .get_synced_accounts()
-        .map_err(|e| e.to_string())?;
-
-    let mut summary = SyncActivitiesResponse::default();
-    let end_date = chrono::Utc::now().date_naive();
-    let end_date_str = end_date.format("%Y-%m-%d").to_string();
-    let page_limit: i64 = 1000;
-
-    for account in synced_accounts {
-        if account.tracking_mode != TrackingMode::Transactions {
-            continue;
-        }
-
-        let Some(provider_account_id) = account.provider_account_id.clone() else {
-            continue;
-        };
-
-        let account_id = account.id.clone();
-        let account_name = account.name.clone();
-
-        if let Err(err) = state
-            .connect_sync_service
-            .mark_activity_sync_attempt(account_id.clone())
-            .await
-        {
-            error!(
-                "[Connect] Failed to mark activity sync attempt for {}: {}",
-                account_name, err
-            );
-            summary.accounts_failed += 1;
-            continue;
-        }
-
-        let start_date = state
-            .connect_sync_service
-            .get_activity_sync_state(&account_id)
-            .map_err(|e| e.to_string())?
-            .and_then(|s| s.last_successful_at)
-            .map(|dt| (dt.date_naive() - chrono::Days::new(1)).min(end_date))
-            .map(|d| d.format("%Y-%m-%d").to_string());
-
-        info!(
-            "[Connect] Activities-only sync for account '{}' (provider={}): {} -> {}",
-            account_name,
-            provider_account_id,
-            start_date.as_deref().unwrap_or("ALL"),
-            end_date_str
-        );
-
-        let mut offset: i64 = 0;
-        let mut account_upserted = 0usize;
-        let mut account_assets = 0usize;
-        let mut account_new_asset_ids: Vec<String> = Vec::new();
-        let mut account_failed = false;
-
-        loop {
-            let page = match client
-                .get_account_activities(
-                    &provider_account_id,
-                    start_date.as_deref(),
-                    Some(&end_date_str),
-                    Some(offset),
-                    Some(page_limit),
-                )
-                .await
-            {
-                Ok(page) => page,
-                Err(err) => {
-                    error!(
-                        "[Connect] Failed to fetch activities for {}: {}",
-                        account_name, err
-                    );
-                    let _ = state
-                        .connect_sync_service
-                        .finalize_activity_sync_failure(account_id.clone(), err.to_string(), None)
-                        .await;
-                    summary.accounts_failed += 1;
-                    account_failed = true;
-                    break;
-                }
-            };
-
-            let received = page.data.len() as i64;
-            if received == 0 {
-                break;
-            }
-
-            match state
-                .connect_sync_service
-                .upsert_account_activities(account_id.clone(), None, page.data)
-                .await
-            {
-                Ok((upserted, assets, new_asset_ids, _needs_review)) => {
-                    account_upserted += upserted;
-                    account_assets += assets;
-                    account_new_asset_ids.extend(new_asset_ids);
-                }
-                Err(err) => {
-                    error!(
-                        "[Connect] Failed to upsert activities for {}: {}",
-                        account_name, err
-                    );
-                    let _ = state
-                        .connect_sync_service
-                        .finalize_activity_sync_failure(account_id.clone(), err.to_string(), None)
-                        .await;
-                    summary.accounts_failed += 1;
-                    account_failed = true;
-                    break;
-                }
-            }
-
-            let next_offset = offset + received;
-            let has_more = match page.pagination.as_ref() {
-                Some(p) => match p.has_more {
-                    Some(true) => true,
-                    Some(false) => false,
-                    None => {
-                        if let Some(total) = p.total {
-                            next_offset < total
-                        } else if let Some(limit) = p.limit {
-                            received >= limit
-                        } else {
-                            received >= page_limit
-                        }
-                    }
-                },
-                None => received >= page_limit,
-            };
-
-            offset = next_offset;
-
-            if !has_more {
-                break;
-            }
-        }
-
-        if account_failed {
-            continue;
-        }
-
-        let now = chrono::Utc::now().to_rfc3339();
-        if let Err(err) = state
-            .connect_sync_service
-            .finalize_activity_sync_success(account_id.clone(), now, None)
-            .await
-        {
-            error!(
-                "[Connect] Failed to finalize activity sync success for {}: {}",
-                account_name, err
-            );
-            summary.accounts_failed += 1;
-            continue;
-        }
-
-        summary.accounts_synced += 1;
-        summary.activities_upserted += account_upserted;
-        summary.assets_inserted += account_assets;
-        summary.new_asset_ids.extend(account_new_asset_ids);
-    }
-
-    Ok(summary)
+    orchestrator.sync_activities_only(&client).await
 }
 
 async fn get_subscription_plans(

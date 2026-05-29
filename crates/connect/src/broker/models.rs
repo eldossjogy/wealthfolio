@@ -589,6 +589,9 @@ pub struct SyncHoldingsResponse {
     pub positions_upserted: usize,
     pub assets_inserted: usize,
     pub accounts_failed: usize,
+    /// Accounts with soft warnings (e.g., provider holdings sync is still preparing).
+    #[serde(default)]
+    pub accounts_warned: usize,
     /// IDs of newly created assets (for background enrichment)
     #[serde(default)]
     pub new_asset_ids: Vec<String>,

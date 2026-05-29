@@ -33,6 +33,7 @@ import {
   SpendingTransactionsTab,
   type SpendingTransactionsTabHandle,
 } from "@/features/spending/components/spending-transactions-tab";
+import { clearActivityUrlFilters, resolveActivityUrlFilters } from "./utils/url-filters";
 
 const ActivityPage = () => {
   const [showForm, setShowForm] = useState(false);
@@ -42,9 +43,17 @@ const ActivityPage = () => {
   const [showAlternativeAssetModal, setShowAlternativeAssetModal] = useState(false);
   const [showActionPalette, setShowActionPalette] = useState(false);
   const [showSpendingActionPalette, setShowSpendingActionPalette] = useState(false);
+  const isMobileViewport = useIsMobileViewport();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activityUrlFilterKey = searchParams.toString();
+  const activityUrlFilters = useMemo(
+    () => resolveActivityUrlFilters(new URLSearchParams(activityUrlFilterKey)),
+    [activityUrlFilterKey],
+  );
 
   // Filter and search state
-  const [accountScope, setAccountScope] = usePersistentState<AccountScope>(
+  const [persistedAccountScope, setPersistedAccountScope] = usePersistentState<AccountScope>(
     "activity-filter-scope",
     { type: "all" },
   );
@@ -57,10 +66,8 @@ const ActivityPage = () => {
     "activity-filter-instrument-types",
     [],
   );
-  const [statusFilter, setStatusFilter] = usePersistentState<ActivityStatusFilter>(
-    "activity-filter-status",
-    "all",
-  );
+  const [persistedStatusFilter, setPersistedStatusFilter] =
+    usePersistentState<ActivityStatusFilter>("activity-filter-status", "all");
   const [searchInput, setSearchInput] = usePersistentState<string>("activity-filter-search", "");
   const [searchQuery, setSearchQuery] = useState(searchInput);
   const [viewMode, setViewMode] = usePersistentState<ActivityViewMode>(
@@ -79,14 +86,56 @@ const ActivityPage = () => {
   const [pageIndex, setPageIndex] = usePersistentState("activity-datagrid-page-index", 0);
   const [pageSize, setPageSize] = usePersistentState("activity-datagrid-page-size", 50);
 
-  const isMobileViewport = useIsMobileViewport();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const {
     isEnabled: isSpendingEnabled,
     accountIds: spendingAccountIds,
     isLoading: isSpendingSettingsLoading,
   } = useSpendingSettings();
+
+  const accountScope = activityUrlFilters.accountScope ?? persistedAccountScope;
+  const statusFilter = activityUrlFilters.statusFilter ?? persistedStatusFilter;
+
+  const clearBrokerReviewUrlFilters = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = clearActivityUrlFilters(prev);
+        return next.toString() === prev.toString() ? prev : next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  const setAccountScope = useCallback(
+    (scope: AccountScope) => {
+      setPersistedAccountScope(scope);
+      if (activityUrlFilters.statusFilter) {
+        setPersistedStatusFilter(activityUrlFilters.statusFilter);
+      }
+      clearBrokerReviewUrlFilters();
+    },
+    [
+      activityUrlFilters.statusFilter,
+      clearBrokerReviewUrlFilters,
+      setPersistedAccountScope,
+      setPersistedStatusFilter,
+    ],
+  );
+
+  const setStatusFilter = useCallback(
+    (status: ActivityStatusFilter) => {
+      if (activityUrlFilters.accountScope) {
+        setPersistedAccountScope(activityUrlFilters.accountScope);
+      }
+      setPersistedStatusFilter(status);
+      clearBrokerReviewUrlFilters();
+    },
+    [
+      activityUrlFilters.accountScope,
+      clearBrokerReviewUrlFilters,
+      setPersistedAccountScope,
+      setPersistedStatusFilter,
+    ],
+  );
 
   // Coerce "spending" URL state back to investments when the module is disabled.
   const urlTab = searchParams.get("tab");
@@ -114,7 +163,7 @@ const ActivityPage = () => {
       setSearchInput(value);
       debouncedUpdateSearch(value);
     },
-    [debouncedUpdateSearch],
+    [debouncedUpdateSearch, setSearchInput],
   );
 
   // Cleanup debounced function on unmount
@@ -229,6 +278,7 @@ const ActivityPage = () => {
     selectedInstrumentTypes,
     statusFilter,
     searchQuery,
+    setPageIndex,
     sorting,
   ]);
 
@@ -277,17 +327,19 @@ const ActivityPage = () => {
     searchInput.trim().length > 0;
 
   const clearInvestmentsFilters = useCallback(() => {
-    setAccountScope({ type: "all" });
+    setPersistedAccountScope({ type: "all" });
     setSelectedActivityTypes([]);
     setSelectedInstrumentTypes([]);
-    setStatusFilter("all");
+    setPersistedStatusFilter("all");
     setSearchInput("");
     setSearchQuery("");
+    clearBrokerReviewUrlFilters();
   }, [
-    setAccountScope,
+    clearBrokerReviewUrlFilters,
+    setPersistedAccountScope,
     setSelectedActivityTypes,
     setSelectedInstrumentTypes,
-    setStatusFilter,
+    setPersistedStatusFilter,
     setSearchInput,
   ]);
 
