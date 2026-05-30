@@ -299,17 +299,6 @@ impl RebalanceServiceTrait for RebalanceService {
                         continue;
                     }
                     let amt = whole * price;
-                    let residue = holding_budget - amt;
-                    if residue > Decimal::ZERO {
-                        warnings.push(RebalanceWarning {
-                            kind: RebalanceWarningKind::WholeShareResidue,
-                            category_id: sleeve.category_id.clone(),
-                            message: format!(
-                                "{}: ${:.2} left undeployed after whole-share rounding.",
-                                holding.symbol, residue
-                            ),
-                        });
-                    }
                     (Some(whole), amt)
                 } else {
                     // Fractional: full budget, compute shares for display.
@@ -336,6 +325,73 @@ impl RebalanceServiceTrait for RebalanceService {
                     ),
                 });
                 sleeve_deployed += amount;
+            }
+
+            // --- Intra-sleeve budget optimisation (whole_shares_only) -----------
+            // After proportional round-lot allocation, rounding residue remains
+            // undeployed. Redistribute it to affordable holdings ordered by price
+            // ascending to maximise the number of purchasable shares without
+            // crossing sleeve boundaries.
+            if profile.whole_shares_only {
+                let mut residue = budget - sleeve_deployed;
+                let mut sorted: Vec<_> = holdings
+                    .iter()
+                    .filter(|h| h.quantity > Decimal::ZERO && h.market_value > Decimal::ZERO)
+                    .collect();
+                sorted.sort_by(|a, b| {
+                    let pa = a.market_value / a.quantity;
+                    let pb = b.market_value / b.quantity;
+                    pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                'deploy_residue: loop {
+                    let mut absorbed = false;
+                    for holding in &sorted {
+                        if residue <= Decimal::ZERO {
+                            break 'deploy_residue;
+                        }
+                        let price = holding.market_value / holding.quantity;
+                        if price <= Decimal::ZERO || price > residue {
+                            continue;
+                        }
+                        let additional = (residue / price).floor();
+                        if additional < Decimal::ONE {
+                            continue;
+                        }
+                        let amt = additional * price;
+
+                        let existing = trades.iter_mut().rev().find(|t| {
+                            t.asset_id.as_deref() == Some(holding.id.as_str())
+                                && t.category_id == sleeve.category_id
+                        });
+                        if let Some(t) = existing {
+                            t.quantity = t.quantity.map(|q| q + additional);
+                            t.estimated_amount += amt;
+                        } else if amt >= profile.min_trade_amount {
+                            trades.push(SuggestedManualTrade {
+                                action: "buy".to_string(),
+                                category_id: sleeve.category_id.clone(),
+                                category_name: sleeve.category_name.clone(),
+                                asset_id: Some(holding.id.clone()),
+                                symbol: Some(holding.symbol.clone()),
+                                name: holding.name.clone(),
+                                quantity: Some(additional),
+                                estimated_price: Some(price),
+                                estimated_amount: amt,
+                                reason: format!(
+                                    "{} is underweight in {}.",
+                                    holding.symbol, sleeve.category_name
+                                ),
+                            });
+                        }
+                        sleeve_deployed += amt;
+                        residue -= amt;
+                        absorbed = true;
+                    }
+                    if !absorbed {
+                        break;
+                    }
+                }
             }
 
             *deployed_per_sleeve
