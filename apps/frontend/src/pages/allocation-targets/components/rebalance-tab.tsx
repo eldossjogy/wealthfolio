@@ -119,10 +119,10 @@ function copyToText(plan: RebalancePlan, currency: string) {
 
 // ── Mode switcher ─────────────────────────────────────────────────────────────
 
-function ModeSwitch() {
+function ModeSwitch({ currency }: { currency: string }) {
   const modes = [
     { id: "full", label: "Full rebalance", hint: "buy + sell", soon: true },
-    { id: "cash", label: "Cash-only", hint: "deploy new $", soon: false },
+    { id: "cash", label: "Cash-only", hint: `deploy new ${currencySymbol(currency)}`, soon: false },
     { id: "min", label: "Minimal trades", hint: "fewest moves", soon: true },
   ] as const;
 
@@ -699,7 +699,7 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
         </p>
       </div>
 
-      <ModeSwitch />
+      <ModeSwitch currency={currency} />
 
       {/* Input bar — only shown once a plan exists; empty state has its own input */}
       {plan ? (
@@ -806,7 +806,13 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       {plan && !isCalculating && (
         <div className="border-border flex items-center justify-between border-t pt-4">
           <span className="text-muted-foreground text-[11px]">
-            Prices are estimates. Not financial advice.
+            {profile.name} · Calculated{" "}
+            {new Date().toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })}{" "}
+            · Prices are estimates
           </span>
           <div className="flex gap-2">
             <Button
@@ -820,7 +826,13 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
               <Icons.Copy className="mr-1.5 h-4 w-4" />
               Copy as text
             </Button>
-            <Button size="sm" onClick={() => exportCsv(plan, currency)}>
+            <Button
+              size="sm"
+              onClick={() => {
+                exportCsv(plan, currency);
+                toast.success("CSV downloaded");
+              }}
+            >
               <Icons.Download className="mr-1.5 h-4 w-4" />
               Export CSV
             </Button>
