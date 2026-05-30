@@ -73,7 +73,7 @@ function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
 }
 
 function exportCsv(plan: RebalancePlan, currency: string) {
-  const header = "Action,Symbol,Name,Category,Amount,Shares,Est. Price,Reason";
+  const header = "Action,Symbol,Name,Category,Amount,Shares,Last Price,Reason";
   const rows = plan.trades.map((t) =>
     [
       t.action,
@@ -271,8 +271,8 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
             <th className="py-2.5 pr-3 text-left font-medium">Category</th>
             <th className="py-2.5 pr-3 text-right font-medium">Amount</th>
             <th className="py-2.5 pr-3 text-right font-medium">Shares</th>
-            <th className="py-2.5 pr-3 text-right font-medium">Est. price</th>
-            <th className="py-2.5 pr-5 text-left font-medium">Reason</th>
+            <th className="py-2.5 pr-3 text-right font-medium">Last price</th>
+            <th className="py-2.5 pl-6 pr-5 text-left font-medium">Reason</th>
           </tr>
         </thead>
         <tbody>
@@ -309,7 +309,7 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
               <td className="text-muted-foreground pr-3 text-right tabular-nums">
                 {t.estimatedPrice != null ? formatAmount(t.estimatedPrice, currency) : "—"}
               </td>
-              <td className="text-muted-foreground pr-5 text-[12px]">{t.reason}</td>
+              <td className="text-muted-foreground pl-6 pr-5 text-[12px]">{t.reason}</td>
             </tr>
           ))}
         </tbody>
