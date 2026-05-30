@@ -559,6 +559,11 @@ mod tests {
         quantity: Decimal,
         market_value: Decimal,
     ) -> HoldingSummary {
+        let unit_price = if quantity > Decimal::ZERO {
+            Some(market_value / quantity)
+        } else {
+            None
+        };
         HoldingSummary {
             id: id.to_string(),
             symbol: symbol.to_string(),
@@ -568,6 +573,7 @@ mod tests {
             market_value,
             currency: "USD".to_string(),
             weight_in_category: Decimal::ZERO,
+            unit_price,
         }
     }
 
@@ -942,6 +948,48 @@ mod tests {
         assert!(
             plan_band.cash_used <= plan_exact.cash_used,
             "nearest_band deploys less cash than exact_target"
+        );
+    }
+
+    #[tokio::test]
+    async fn min_trade_amount_filters_small_trades() {
+        // Equity 60% current, 80% target → $2000 shortfall.
+        // Two holdings: VTI $900 (90%), IVV $100 (10%).
+        // Cash = $200 → VTI gets $180, IVV gets $20.
+        // min_trade_amount = $100 → IVV trade dropped, VTI kept.
+        let total = dec!(10000);
+        let rows = vec![make_drift_row("equity", 6000, 8000, total)];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![
+                make_holding("h1", "VTI", dec!(9), dec!(900)),
+                make_holding("h2", "IVV", dec!(1), dec!(100)),
+            ],
+        );
+        let profile = TargetProfile {
+            min_trade_amount: dec!(100),
+            ..make_profile(RebalanceTo::ExactTarget, false)
+        };
+
+        let svc = make_service(profile, report, holdings);
+        let plan = svc.calculate_plan(make_input(dec!(200))).await.unwrap();
+
+        // VTI gets $180 → above $100 → kept.
+        assert!(
+            plan.trades
+                .iter()
+                .any(|t| t.symbol.as_deref() == Some("VTI")),
+            "VTI trade should survive min_trade filter"
+        );
+        // IVV gets $20 → below $100 → dropped.
+        assert!(
+            !plan
+                .trades
+                .iter()
+                .any(|t| t.symbol.as_deref() == Some("IVV")),
+            "IVV trade should be filtered by min_trade_amount"
         );
     }
 
