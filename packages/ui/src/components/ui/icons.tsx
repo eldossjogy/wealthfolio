@@ -12,7 +12,10 @@ import {
   ArrowRightLeft,
   ArrowUp,
   ArrowUpRight,
+  // Spending taxonomy icons (referenced by category seed data)
+  Award,
   BadgeDollarSign,
+  Banknote,
   BarChart,
   Baseline,
   Bitcoin,
@@ -39,6 +42,8 @@ import {
   Clock,
   Cloud,
   CloudCog,
+  Code,
+  Coffee,
   Coins,
   Copy,
   CreditCard,
@@ -47,6 +52,7 @@ import {
   DollarSign,
   Dot,
   Download,
+  Dumbbell,
   Ellipsis,
   Eraser,
   ExternalLink,
@@ -58,21 +64,29 @@ import {
   FileText,
   FileVideo,
   FileX,
+  Film,
   Folder,
   FolderOpen,
+  Fuel,
   Fullscreen,
+  Gamepad2,
   Gem,
+  Gift,
   Globe,
   Goal,
+  GraduationCap,
   Grid3x3,
   Group,
   HandCoins,
   Hash,
+  Heart,
   HelpCircle,
   History,
   Home,
   Info,
+  Laptop,
   LayoutDashboard,
+  Lightbulb,
   Link,
   List,
   ListChecks,
@@ -80,23 +94,30 @@ import {
   ListFilter,
   Loader,
   Loader2,
+  Lock,
+  LockOpen,
   Mail,
   Minus,
   MinusCircle,
   Monitor,
   Moon,
+  MoreHorizontal,
   MoreVertical,
   OctagonX,
   Package,
   Palette,
   PanelLeft,
   PanelLeftOpen,
+  ParkingCircle,
   PauseCircle,
   Pencil,
   Percent,
   PieChart,
+  PiggyBank,
+  Pill,
   Pin,
   PinOff,
+  Plane,
   PlayCircle,
   Plus,
   PlusCircle,
@@ -107,6 +128,7 @@ import {
   RectangleEllipsis,
   RefreshCcw,
   RefreshCw,
+  RotateCcw,
   Rows3,
   Save,
   Scissors,
@@ -115,26 +137,39 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Shirt,
+  ShoppingBag,
+  ShoppingCart,
   Smartphone,
+  Smile,
+  Sofa,
   Sparkles,
   Split,
   Square,
   Star,
+  Stethoscope,
   Store,
   Sun,
   Target,
+  Train,
   Trash,
   Trash2,
   TrendingDown,
   TrendingUp,
+  Truck,
+  Tv,
   Type,
   Undo2,
   Unlink,
   Upload,
   User,
   Users,
+  UtensilsCrossed,
   Wallet,
   Wand2,
+  Wifi,
+  Wine,
+  Wrench,
   X,
   XCircle,
 } from "lucide-react";
@@ -310,6 +345,8 @@ const IconsInternal = {
   Folder: Folder,
   FolderOpen: FolderOpen,
   List: List,
+  Lock: Lock,
+  LockOpen: LockOpen,
   Pin: Pin,
   PinOff: PinOff,
   Presentation: Presentation,
@@ -740,6 +777,42 @@ const IconsInternal = {
       </g>
     );
   },
+  // Spending taxonomy icons (referenced by category seed data; keys must match
+  // the strings stored in `taxonomy_categories.icon`).
+  Award: Award,
+  Banknote: Banknote,
+  Code: Code,
+  Coffee: Coffee,
+  Dumbbell: Dumbbell,
+  Film: Film,
+  Fuel: Fuel,
+  Gamepad2: Gamepad2,
+  Gift: Gift,
+  GraduationCap: GraduationCap,
+  Heart: Heart,
+  Laptop: Laptop,
+  Lightbulb: Lightbulb,
+  MoreHorizontal: MoreHorizontal,
+  ParkingCircle: ParkingCircle,
+  PiggyBank: PiggyBank,
+  Pill: Pill,
+  Plane: Plane,
+  RotateCcw: RotateCcw,
+  Shirt: Shirt,
+  ShoppingBag: ShoppingBag,
+  ShoppingCart: ShoppingCart,
+  Smile: Smile,
+  Sofa: Sofa,
+  Stethoscope: Stethoscope,
+  // Tag is registered above as a Phosphor TagIcon — don't re-register here
+  // (Lucide and Phosphor Tag both want the same key).
+  Train: Train,
+  Truck: Truck,
+  Tv: Tv,
+  UtensilsCrossed: UtensilsCrossed,
+  Wifi: Wifi,
+  Wine: Wine,
+  Wrench: Wrench,
 };
 
 /**
@@ -903,6 +976,8 @@ export type IconName =
   | "Folder"
   | "FolderOpen"
   | "List"
+  | "Lock"
+  | "LockOpen"
   | "Pin"
   | "PinOff"
   | "Presentation"
@@ -925,7 +1000,40 @@ export type IconName =
   | "LiabilityDuotone"
   | "OtherAssetDuotone"
   | "BuyDot"
-  | "SellDot";
+  | "SellDot"
+  // Spending taxonomy icons
+  | "Award"
+  | "Banknote"
+  | "Code"
+  | "Coffee"
+  | "Dumbbell"
+  | "Film"
+  | "Fuel"
+  | "Gamepad2"
+  | "Gift"
+  | "GraduationCap"
+  | "Heart"
+  | "Laptop"
+  | "Lightbulb"
+  | "MoreHorizontal"
+  | "ParkingCircle"
+  | "PiggyBank"
+  | "Pill"
+  | "Plane"
+  | "RotateCcw"
+  | "Shirt"
+  | "ShoppingBag"
+  | "ShoppingCart"
+  | "Smile"
+  | "Sofa"
+  | "Stethoscope"
+  | "Train"
+  | "Truck"
+  | "Tv"
+  | "UtensilsCrossed"
+  | "Wifi"
+  | "Wine"
+  | "Wrench";
 
 /**
  * Icons object with unified typing - all icons have the same Icon type
