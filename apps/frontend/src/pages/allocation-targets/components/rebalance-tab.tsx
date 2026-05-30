@@ -356,7 +356,7 @@ function BeforeAfterStack({ sleeves }: { sleeves: SleeveSummaryRow[] }) {
         >
           {label}
         </span>
-        <div className="flex h-9 flex-1 overflow-hidden rounded-md">
+        <div className="flex h-6 flex-1 overflow-hidden rounded-md">
           {sleeves.map((s) => {
             const pct = s[field] / 100;
             return (
@@ -761,6 +761,21 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
           <KpiStrip plan={plan} currency={currency} />
           <Warnings items={plan.warnings} />
 
+          {/* Sleeve changes */}
+          {sleeveSummary.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Before · Target · After</CardTitle>
+                <CardDescription>
+                  How deploying this cash reshapes the portfolio by sleeve
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-5 pb-6 pt-2">
+                <BeforeAfterStack sleeves={sleeveSummary} />
+              </CardContent>
+            </Card>
+          )}
+
           {/* Trades */}
           <Card>
             <CardHeader className="pb-2">
@@ -784,21 +799,6 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
               )}
             </CardContent>
           </Card>
-
-          {/* Sleeve changes + Plan impact */}
-          {sleeveSummary.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Before · Target · After</CardTitle>
-                <CardDescription>
-                  How deploying this cash reshapes the portfolio by sleeve
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="px-5 pb-6 pt-2">
-                <BeforeAfterStack sleeves={sleeveSummary} />
-              </CardContent>
-            </Card>
-          )}
         </div>
       )}
 
