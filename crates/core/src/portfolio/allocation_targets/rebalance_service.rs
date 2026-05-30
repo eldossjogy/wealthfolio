@@ -248,7 +248,14 @@ impl RebalanceServiceTrait for RebalanceService {
                 let holding_budget = budget * weight;
 
                 // Derive price per share.
-                if holding.quantity <= Decimal::ZERO || holding.market_value <= Decimal::ZERO {
+                // Prefer unit_price (actual quote from provider) over market_value/quantity,
+                // which gives a wrong proportional price when a holding spans multiple
+                // taxonomy categories (e.g. a multi-sector ETF in GICS).
+                let price = if let Some(p) = holding.unit_price.filter(|p| *p > Decimal::ZERO) {
+                    p
+                } else if holding.quantity > Decimal::ZERO && holding.market_value > Decimal::ZERO {
+                    holding.market_value / holding.quantity
+                } else {
                     if profile.whole_shares_only {
                         warnings.push(RebalanceWarning {
                             kind: RebalanceWarningKind::MissingQuote,
@@ -281,9 +288,7 @@ impl RebalanceServiceTrait for RebalanceService {
                     });
                     sleeve_deployed += holding_budget;
                     continue;
-                }
-
-                let price = holding.market_value / holding.quantity;
+                };
 
                 let (shares, amount) = if profile.whole_shares_only {
                     let whole = (holding_budget / price).floor();
@@ -342,15 +347,15 @@ impl RebalanceServiceTrait for RebalanceService {
                         if residue <= Decimal::ZERO {
                             break 'deploy_residue;
                         }
-                        if holding.quantity <= Decimal::ZERO
-                            || holding.market_value <= Decimal::ZERO
-                        {
-                            continue;
-                        }
-                        let price = holding.market_value / holding.quantity;
-                        if price <= Decimal::ZERO {
-                            continue;
-                        }
+                        let price = match holding.unit_price.filter(|p| *p > Decimal::ZERO) {
+                            Some(p) => p,
+                            None if holding.quantity > Decimal::ZERO
+                                && holding.market_value > Decimal::ZERO =>
+                            {
+                                holding.market_value / holding.quantity
+                            }
+                            _ => continue,
+                        };
                         let weight = if sleeve_total_value > Decimal::ZERO {
                             holding.market_value / sleeve_total_value
                         } else {
