@@ -261,7 +261,10 @@ function ChartWithActivity({
   dateRange?: DateRange;
   filteredData: FilteredData[];
 }) {
-  const [selectedAccounts, _] = usePersistentState<string[]>("activity-filter-accounts", []);
+  const [selectedAccounts, _] = usePersistentState<string[] | undefined>(
+    "activity-filter-accounts",
+    undefined,
+  );
   const searchOptions = useMemo<UseActivitySearchInfiniteOptions>(
     () => ({
       searchQuery: assetId,
