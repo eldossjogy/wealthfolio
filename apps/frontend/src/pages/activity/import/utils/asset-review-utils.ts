@@ -1,4 +1,5 @@
 import { isCashSymbol, needsImportAssetResolution } from "@/lib/activity-utils";
+import { quoteModeFromSearchResult } from "@/lib/asset-utils";
 import { ActivityType } from "@/lib/constants";
 import type {
   ImportAssetCandidate,
@@ -16,7 +17,7 @@ export function applyAssetResolution(
   options: { assetId?: string; importAssetKey?: string },
 ): DraftActivity[] {
   return drafts.map((row) => {
-    if (row.assetCandidateKey !== key) {
+    if (row.assetCandidateKey !== key && buildImportAssetCandidateKeyFromDraft(row) !== key) {
       return row;
     }
     return {
@@ -27,7 +28,10 @@ export function applyAssetResolution(
       quoteCcy: draft.quoteCcy || row.quoteCcy,
       instrumentType: draft.instrumentType || row.instrumentType,
       quoteMode: draft.quoteMode || row.quoteMode,
+      providerId: draft.providerId,
+      providerSymbol: draft.providerSymbol,
       assetId: options.assetId,
+      assetCandidateKey: key,
       importAssetKey: options.importAssetKey,
     };
   });
@@ -68,19 +72,52 @@ export function buildImportAssetCandidateKey(input: {
   quoteCcy?: string;
   exchangeMic?: string;
   isin?: string;
+  providerId?: string;
+  providerSymbol?: string;
 }): string {
   // quoteCcy is included so that the same symbol with different currencies
   // (e.g. SHOP on NASDAQ/USD vs TSX/CAD) resolves independently.
   // ISIN is included so same-ticker rows from different instruments do not
   // collapse before preview/validation can disambiguate them.
-  return [
+  // Provider refs are appended only when present to preserve existing keys.
+  const parts = [
     input.symbol.trim().toUpperCase(),
     input.instrumentType?.trim().toUpperCase() ?? "",
     input.quoteMode?.trim().toUpperCase() ?? "",
     input.exchangeMic?.trim().toUpperCase() ?? "",
     input.quoteCcy?.trim().toUpperCase() ?? "",
     input.isin?.trim().toUpperCase() ?? "",
-  ].join("::");
+  ];
+
+  const providerId = input.providerId?.trim().toUpperCase() ?? "";
+  const providerSymbol = input.providerSymbol?.trim().toUpperCase() ?? "";
+  if (providerId || providerSymbol) {
+    parts.push("PROVIDER", providerId, providerSymbol);
+  }
+
+  return parts.join("::");
+}
+
+function hasProviderIdentity(input: { providerId?: string; providerSymbol?: string }): boolean {
+  return Boolean(input.providerId?.trim() || input.providerSymbol?.trim());
+}
+
+function buildImportAssetCandidateKeyFromDraft(draft: DraftActivity): string | undefined {
+  if (!draft.symbol || !draft.accountId) {
+    return undefined;
+  }
+
+  return buildImportAssetCandidateKey({
+    accountId: draft.accountId,
+    symbol: draft.symbol,
+    instrumentType: draft.instrumentType,
+    quoteMode: draft.quoteMode,
+    quoteCcy: draft.quoteCcy || draft.currency,
+    exchangeMic: draft.exchangeMic,
+    isin: draft.isin,
+    providerId: draft.providerId,
+    providerSymbol: draft.providerSymbol,
+  });
 }
 
 export function buildImportAssetCandidateFromDraft(
@@ -99,18 +136,17 @@ export function buildImportAssetCandidateFromDraft(
     return null;
   }
 
+  const computedKey = buildImportAssetCandidateKeyFromDraft(draft);
+  if (!computedKey) {
+    return null;
+  }
+  const storedKey = draft.assetCandidateKey;
+  const shouldUseStoredKey = Boolean(
+    storedKey && (!hasProviderIdentity(draft) || draft.assetId || draft.importAssetKey),
+  );
+
   return {
-    key:
-      draft.assetCandidateKey ||
-      buildImportAssetCandidateKey({
-        accountId: draft.accountId,
-        symbol: draft.symbol,
-        instrumentType: draft.instrumentType,
-        quoteMode: draft.quoteMode,
-        quoteCcy: draft.quoteCcy || draft.currency,
-        exchangeMic: draft.exchangeMic,
-        isin: draft.isin,
-      }),
+    key: shouldUseStoredKey && storedKey ? storedKey : computedKey,
     accountId: draft.accountId,
     symbol: draft.symbol,
     currency: draft.currency,
@@ -119,6 +155,8 @@ export function buildImportAssetCandidateFromDraft(
     quoteMode: draft.quoteMode,
     exchangeMic: draft.exchangeMic,
     isin: draft.isin,
+    providerId: draft.providerId,
+    providerSymbol: draft.providerSymbol,
   };
 }
 
@@ -128,18 +166,22 @@ export function buildNewAssetFromSearchResult(
 ): NewAsset {
   const instrumentType = mapQuoteTypeToInstrumentType(result.quoteType);
   const kind = instrumentType === "FX" ? "FX" : "INVESTMENT";
-  const quoteMode = result.dataSource === "MANUAL" ? "MANUAL" : "MARKET";
+  const quoteMode = quoteModeFromSearchResult(result);
+  const canonicalSymbol = result.canonicalSymbol || result.symbol;
+  const canonicalExchangeMic = result.canonicalExchangeMic || result.exchangeMic;
 
   return {
     kind,
     name: result.longName || result.shortName || result.symbol,
-    displayCode: result.symbol,
+    displayCode: canonicalSymbol,
     isActive: true,
     quoteMode,
     quoteCcy: result.currency || fallbackCurrency,
     instrumentType,
-    instrumentSymbol: result.symbol,
-    instrumentExchangeMic: result.exchangeMic,
+    instrumentSymbol: canonicalSymbol,
+    instrumentExchangeMic: canonicalExchangeMic,
+    providerId: result.providerId,
+    providerSymbol: result.providerSymbol,
   };
 }
 
@@ -161,6 +203,8 @@ export function buildNewAssetFromDraft(draft: DraftActivity): NewAsset | null {
     instrumentType: draft.instrumentType,
     instrumentSymbol: draft.symbol,
     instrumentExchangeMic: draft.exchangeMic,
+    providerId: draft.providerId,
+    providerSymbol: draft.providerSymbol,
   };
 }
 
@@ -206,6 +250,8 @@ export function buildSyntheticDraftsFromHoldings(
       instrumentType: meta.instrumentType,
       quoteCcy: meta.quoteCcy || currency,
       exchangeMic: meta.exchangeMic,
+      providerId: meta.providerId,
+      providerSymbol: meta.providerSymbol,
     });
 
     drafts.push({
@@ -222,6 +268,8 @@ export function buildSyntheticDraftsFromHoldings(
       quoteCcy: meta.quoteCcy,
       instrumentType: meta.instrumentType,
       symbolName: meta.symbolName,
+      providerId: meta.providerId,
+      providerSymbol: meta.providerSymbol,
       assetCandidateKey: key,
       status: "valid",
       errors: {},

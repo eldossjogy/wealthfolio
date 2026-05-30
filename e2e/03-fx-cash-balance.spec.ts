@@ -1,4 +1,5 @@
 import { expect, Page, test } from "@playwright/test";
+import { gotoActivities } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
 
@@ -206,8 +207,7 @@ test.describe("FX Cash Balance - Cross-currency Buy", () => {
   });
 
   test("3. Deposit 10,000 EUR", async () => {
-    await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
+    await gotoActivities(page);
 
     await openAddActivitySheet();
 
@@ -246,8 +246,7 @@ test.describe("FX Cash Balance - Cross-currency Buy", () => {
 
   test("4. Buy PANW (USD) from EUR account with FX rate", async () => {
     test.setTimeout(60000);
-    await page.goto(`${BASE_URL}/activities`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible({ timeout: 10000 });
+    await gotoActivities(page);
 
     await openAddActivitySheet();
 
@@ -265,16 +264,24 @@ test.describe("FX Cash Balance - Cross-currency Buy", () => {
       .click();
 
     // Search and select PANW
+    const escapedSymbol = BUY.symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const exactSymbolPattern = new RegExp(`^${escapedSymbol}$`, "i");
     const symbolCombobox = page.getByRole("combobox").filter({ hasText: /Select symbol/i });
     await symbolCombobox.click();
-    await page.waitForTimeout(200);
     const searchInput = page.getByPlaceholder("Search for symbol");
+    await expect(searchInput).toBeVisible({ timeout: 5000 });
     await searchInput.fill(BUY.symbol);
-    await page.waitForTimeout(500);
-    const symbolOption = page.getByRole("option", { name: new RegExp(BUY.symbol, "i") }).first();
-    await expect(symbolOption).toBeVisible({ timeout: 5000 });
+    const suggestions = page.getByRole("listbox", { name: /Suggestions/i });
+    await expect(suggestions).toBeVisible({ timeout: 10000 });
+    const symbolOption = suggestions
+      .getByRole("option")
+      .filter({
+        has: page.locator("span.font-mono").filter({ hasText: exactSymbolPattern }),
+        hasNotText: /Create custom|manual/i,
+      })
+      .first();
+    await expect(symbolOption).toBeVisible({ timeout: 30000 });
     await symbolOption.click();
-    await page.waitForTimeout(200);
 
     // Fill date (5 days ago - after deposit)
     await fillDateField(page, 5);

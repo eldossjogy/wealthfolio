@@ -3,6 +3,7 @@ pub mod activity;
 pub mod addon;
 pub mod ai_chat;
 pub mod ai_providers;
+pub mod allocation_targets;
 pub mod alternative_assets;
 pub mod asset;
 #[cfg(feature = "connect-sync")]
@@ -20,9 +21,11 @@ pub mod limits;
 pub mod market_data;
 pub mod platform;
 pub mod portfolio;
+pub mod portfolios;
 pub mod providers_settings;
 pub mod secrets;
 pub mod settings;
+pub mod spending;
 #[cfg(feature = "device-sync")]
 pub mod sync_crypto;
 pub mod taxonomy;

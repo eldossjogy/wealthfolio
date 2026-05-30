@@ -18,10 +18,11 @@ wealthfolio-connect = { workspace = true }
 wealthfolio-storage-sqlite = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-ai = { workspace = true }
+wealthfolio-spending = { workspace = true }
 
 # Tauri
 tauri = { version = "2.10", features = [] }
-tauri-plugin-fs = "2"
+tauri-plugin-fs = "2.5"
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-log = "2"

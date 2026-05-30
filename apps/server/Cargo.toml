@@ -11,6 +11,7 @@ wealthfolio-connect = { workspace = true }
 wealthfolio-storage-sqlite = { workspace = true }
 wealthfolio-device-sync = { workspace = true }
 wealthfolio-ai = { workspace = true }
+wealthfolio-spending = { workspace = true }
 
 # Web framework
 axum = { version = "0.8", features = ["json", "macros", "multipart"] }
@@ -59,5 +60,5 @@ connect-sync = []
 device-sync = []
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { workspace = true }
 tempfile = "3"

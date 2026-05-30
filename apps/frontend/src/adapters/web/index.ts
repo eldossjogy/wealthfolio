@@ -26,6 +26,7 @@ export type {
   BackendSyncReconcileReadyResult,
   BackendSyncSnapshotUploadResult,
   BackendSyncStateResult,
+  DataExportResult,
   EphemeralKeyPair,
   EventCallback,
   ExtractedAddon,
@@ -68,6 +69,14 @@ export const RUN_ENV: RunEnv = RunEnvs.WEB;
 // ============================================================================
 // Shared domain modules (identical logic for both platforms)
 // ============================================================================
+
+// Portfolio Commands
+export {
+  createPortfolio,
+  deletePortfolio,
+  getPortfolios,
+  updatePortfolioEntry,
+} from "../shared/portfolios";
 
 // Account Commands
 export { createAccount, deleteAccount, getAccounts, updateAccount } from "../shared/accounts";
@@ -146,6 +155,7 @@ export {
   checkHoldingsImport,
   deleteSnapshot,
   getAssetHoldings,
+  getAssetLots,
   getHistoricalValuations,
   getHolding,
   getHoldings,
@@ -167,7 +177,7 @@ export {
   createAsset,
   deleteAsset,
   deleteQuote,
-  fetchYahooDividends,
+  fetchDividends,
   getAssetProfile,
   getAssets,
   getExchanges,
@@ -309,6 +319,24 @@ export {
   updateHealthConfig,
 } from "../shared/health";
 
+// Allocation Target Commands
+export {
+  activateTargetProfile,
+  archiveTargetProfile,
+  createTargetProfile,
+  deleteTargetProfile,
+  getTargetDrift,
+  getTargetDriftForProfile,
+  getTargetProfile,
+  listTargetNodes,
+  listTargetProfiles,
+  saveTargetNodes,
+  updateTargetProfile,
+} from "../shared/allocation-targets";
+
+// Data Export Commands
+export { exportDataFile } from "./exports";
+
 // ============================================================================
 // Platform-specific modules (different implementations for web vs desktop)
 // ============================================================================
@@ -341,22 +369,28 @@ export {
   openDatabaseFileDialog,
   openFileSaveDialog,
   openFolderDialog,
+  saveAppDataFileViaPicker,
   openUrlInBrowser,
 } from "./files";
 
 // Settings Commands (web-specific API for backups and updates)
 export {
   backupDatabase,
+  backupDatabaseToPendingExport,
   backupDatabaseToPath,
   checkForUpdates,
+  deleteDatabaseBackup,
   getAppInfo,
+  getDatabaseBackupDownloadUrl,
   getPlatform,
   getSettings,
   installUpdate,
   isAutoUpdateCheckEnabled,
+  listDatabaseBackups,
   restoreDatabase,
   updateSettings,
 } from "./settings";
+export type { DatabaseBackup } from "./settings";
 
 // Addon Commands (web-specific implementations)
 export {

@@ -47,6 +47,13 @@ const staticNavigation: NavigationProps = {
       label: "View Activities",
     },
     {
+      icon: <Icons.Target className="size-6" />,
+      title: "Allocation",
+      href: "/allocation-targets",
+      keywords: ["allocation", "targets", "drift", "rebalance"],
+      label: "Allocation Targets",
+    },
+    {
       icon: <Icons.Goals className="size-6" />,
       title: "Goals",
       href: "/goals",
@@ -92,9 +99,10 @@ export function useNavigation() {
     };
   }, []);
 
-  // Combine static navigation items with addons grouped separately.
-  // Hide desktop-only features (FIRE Planner) in web mode.
-  const primary = staticNavigation.primary;
+  // Spending lives entirely on the dashboard tab (and its deep-linked pages);
+  // no top-level nav entry. Combine static navigation items with addons.
+  const primary = [...staticNavigation.primary];
+
   const navigation: NavigationProps = {
     primary,
     secondary: staticNavigation.secondary,

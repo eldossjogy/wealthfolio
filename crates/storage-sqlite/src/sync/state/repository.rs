@@ -1,7 +1,7 @@
 //! Repository for broker sync state persistence.
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use diesel::prelude::*;
 use diesel::r2d2::{self, Pool};
 use diesel::sqlite::SqliteConnection;
@@ -10,13 +10,29 @@ use std::sync::Arc;
 use wealthfolio_connect::broker_ingest::{
     BrokerSyncState, BrokerSyncStateRepositoryTrait as ConnectBrokerSyncStateRepositoryTrait,
 };
-use wealthfolio_core::errors::Result;
+use wealthfolio_core::errors::{Error, Result, ValidationError};
 
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::brokers_sync_state;
 
 use super::model::BrokerSyncStateDB;
+
+fn parse_sync_cursor(last_synced_date: &str) -> Result<String> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(last_synced_date) {
+        return Ok(dt.with_timezone(&Utc).to_rfc3339());
+    }
+
+    if let Ok(date) = NaiveDate::parse_from_str(last_synced_date, "%Y-%m-%d") {
+        let dt = date.and_time(NaiveTime::MIN).and_utc();
+        return Ok(dt.to_rfc3339());
+    }
+
+    Err(Error::Validation(ValidationError::InvalidInput(format!(
+        "Invalid broker sync cursor '{}'",
+        last_synced_date
+    ))))
+}
 
 pub struct BrokerSyncStateRepository {
     pool: Arc<Pool<r2d2::ConnectionManager<SqliteConnection>>>,
@@ -165,9 +181,11 @@ impl BrokerSyncStateRepository {
         &self,
         account_id: String,
         provider: String,
-        _last_synced_date: String,
+        last_synced_date: String,
         import_run_id: Option<String>,
     ) -> Result<()> {
+        let cursor_str = parse_sync_cursor(&last_synced_date)?;
+
         self.writer
             .exec(move |conn| {
                 let now = Utc::now();
@@ -185,7 +203,7 @@ impl BrokerSyncStateRepository {
                         // Update success timestamp and status
                         diesel::update(brokers_sync_state::table.find((&account_id, &provider)))
                             .set((
-                                brokers_sync_state::last_successful_at.eq(&now_str),
+                                brokers_sync_state::last_successful_at.eq(&cursor_str),
                                 brokers_sync_state::sync_status.eq("IDLE"),
                                 brokers_sync_state::last_error.eq::<Option<String>>(None),
                                 brokers_sync_state::last_run_id.eq(&import_run_id),
@@ -201,7 +219,7 @@ impl BrokerSyncStateRepository {
                             provider,
                             checkpoint_json: None,
                             last_attempted_at: Some(now_str.clone()),
-                            last_successful_at: Some(now_str.clone()),
+                            last_successful_at: Some(cursor_str),
                             last_error: None,
                             last_run_id: import_run_id,
                             sync_status: "IDLE".to_string(),
@@ -434,5 +452,81 @@ impl ConnectBrokerSyncStateRepositoryTrait for BrokerSyncStateRepository {
 
     fn get_all(&self) -> Result<Vec<BrokerSyncState>> {
         BrokerSyncStateRepository::get_all(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_sync_cursor, BrokerSyncStateRepository};
+    use crate::db::{create_pool, get_connection, run_migrations, write_actor::spawn_writer};
+    use diesel::sql_query;
+    use diesel::RunQueryDsl;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    fn setup_repo() -> BrokerSyncStateRepository {
+        std::env::set_var("CONNECT_API_URL", "http://test.local");
+        let temp_dir = tempdir().expect("tempdir").keep();
+        let db_path = temp_dir.join("test.db");
+        let db_path = db_path.to_string_lossy().to_string();
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let writer = spawn_writer((*pool).clone()).expect("spawn writer");
+
+        {
+            let mut conn = get_connection(&pool).expect("connection");
+            sql_query(
+                "INSERT INTO accounts (
+                    id, name, account_type, `group`, currency, is_default, is_active,
+                    created_at, updated_at, platform_id, account_number, meta, provider,
+                    provider_account_id, is_archived, tracking_mode
+                ) VALUES (
+                    'account-1', 'Broker Account', 'brokerage', NULL, 'GBP', 0, 1,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL, NULL, 'snaptrade',
+                    'provider-account-1', 0, 'TRANSACTIONS'
+                )",
+            )
+            .execute(&mut conn)
+            .expect("insert account");
+        }
+
+        BrokerSyncStateRepository::new(Arc::clone(&pool), writer)
+    }
+
+    #[test]
+    fn parse_sync_cursor_accepts_date_without_using_now() {
+        let cursor = parse_sync_cursor("2026-05-22").expect("valid cursor");
+
+        assert!(cursor.starts_with("2026-05-22T00:00:00"));
+    }
+
+    #[test]
+    fn parse_sync_cursor_rejects_invalid_value() {
+        let err = parse_sync_cursor("not-a-date").expect_err("invalid cursor");
+
+        assert!(err.to_string().contains("Invalid broker sync cursor"));
+    }
+
+    #[tokio::test]
+    async fn upsert_success_stores_passed_cursor_date() {
+        let repo = setup_repo();
+
+        repo.upsert_success(
+            "account-1".to_string(),
+            "snaptrade".to_string(),
+            "2026-05-22".to_string(),
+            None,
+        )
+        .await
+        .expect("upsert success");
+
+        let state = repo
+            .get("account-1", "snaptrade")
+            .expect("state query")
+            .expect("state exists");
+        assert_eq!(
+            state.last_successful_at.expect("cursor").date_naive(),
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 22).unwrap()
+        );
     }
 }

@@ -1,4 +1,4 @@
-import { ACTIVITY_SUBTYPES, ActivityType, ImportFormat } from "@/lib/constants";
+import { ACTIVITY_SUBTYPES, AccountType, ActivityType, ImportFormat } from "@/lib/constants";
 import type { ActivityImport } from "@/lib/types";
 import { tryParseDate } from "@/lib/utils";
 import { isValid, parse, parseISO } from "date-fns";
@@ -13,6 +13,11 @@ import {
   resolveCashActivityFields,
 } from "./review-draft-utils";
 import type { DraftActivity, DraftActivityStatus } from "../context";
+import {
+  getAllowedActivityTypesForAccountType,
+  isTransactionImportProfile,
+  type ActivityImportProfile,
+} from "./activity-import-profile";
 
 // ---------------------------------------------------------------------------
 // Skip sentinel — used in activity mappings to exclude rows from import
@@ -130,6 +135,8 @@ export function mapSymbol(
       quoteCcy?: string;
       instrumentType?: string;
       quoteMode?: string;
+      providerId?: string;
+      providerSymbol?: string;
     }
   >,
 ): {
@@ -139,6 +146,8 @@ export function mapSymbol(
   quoteCcy?: string;
   instrumentType?: string;
   quoteMode?: string;
+  providerId?: string;
+  providerSymbol?: string;
 } {
   if (!csvSymbol) return { symbol: undefined };
 
@@ -152,13 +161,18 @@ export function mapSymbol(
     quoteCcy: meta?.quoteCcy,
     instrumentType: meta?.instrumentType,
     quoteMode: meta?.quoteMode,
+    providerId: meta?.providerId,
+    providerSymbol: meta?.providerSymbol,
   };
 }
 
 /**
  * Validate a draft activity and return errors/warnings
  */
-export function validateDraft(draft: Partial<DraftActivity>): {
+export function validateDraft(
+  draft: Partial<DraftActivity>,
+  accountTypeById?: Map<string, string>,
+): {
   status: DraftActivityStatus;
   errors: Record<string, string[]>;
   warnings: Record<string, string[]>;
@@ -187,6 +201,19 @@ export function validateDraft(draft: Partial<DraftActivity>): {
 
   if (!draft.accountId) {
     errors.accountId = ["Account is required"];
+  }
+
+  const accountType = draft.accountId ? accountTypeById?.get(draft.accountId) : undefined;
+  const allowedActivityTypes = new Set(getAllowedActivityTypesForAccountType(accountType));
+  if (
+    accountType === AccountType.CREDIT_CARD &&
+    activityType &&
+    !allowedActivityTypes.has(activityType as ActivityType)
+  ) {
+    errors.activityType = [
+      ...(errors.activityType ?? []),
+      "Credit card imports only support charges, payments, refunds, fees, and interest",
+    ];
   }
 
   // Trade activities (BUY/SELL)
@@ -334,7 +361,15 @@ export function createDraftActivities(
     accountMappings: Record<string, string>;
     symbolMappingMeta?: Record<
       string,
-      { exchangeMic?: string; symbolName?: string; quoteCcy?: string; instrumentType?: string }
+      {
+        exchangeMic?: string;
+        symbolName?: string;
+        quoteCcy?: string;
+        instrumentType?: string;
+        quoteMode?: string;
+        providerId?: string;
+        providerSymbol?: string;
+      }
     >;
   },
   parseConfig: {
@@ -345,6 +380,8 @@ export function createDraftActivities(
   },
   defaultAccountId: string,
   validAccountIds?: Set<string>,
+  accountTypeById?: Map<string, string>,
+  options?: { importProfile?: ActivityImportProfile },
 ): DraftActivity[] {
   const { fieldMappings, activityMappings, symbolMappings, accountMappings, symbolMappingMeta } =
     mapping;
@@ -385,10 +422,14 @@ export function createDraftActivities(
     // Skip rows mapped to SKIP
     const preCheckType = mapActivityType(rawType, activityMappings);
     if (preCheckType === ACTIVITY_SKIP) return [];
-    const rawSymbol = getColumnValue(row, ImportFormat.SYMBOL);
-    const rawIsin = getColumnValue(row, ImportFormat.ISIN);
-    const rawQuantity = getColumnValue(row, ImportFormat.QUANTITY);
-    const rawUnitPrice = getColumnValue(row, ImportFormat.UNIT_PRICE);
+    const ignoresAssetFields =
+      options?.importProfile && isTransactionImportProfile(options.importProfile);
+    const rawSymbol = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.SYMBOL);
+    const rawIsin = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.ISIN);
+    const rawQuantity = ignoresAssetFields ? undefined : getColumnValue(row, ImportFormat.QUANTITY);
+    const rawUnitPrice = ignoresAssetFields
+      ? undefined
+      : getColumnValue(row, ImportFormat.UNIT_PRICE);
     const rawAmount = getColumnValue(row, ImportFormat.AMOUNT);
     const rawCurrency = getColumnValue(row, ImportFormat.CURRENCY);
     const rawFee = getColumnValue(row, ImportFormat.FEE);
@@ -396,7 +437,9 @@ export function createDraftActivities(
     const rawAccount = getColumnValue(row, ImportFormat.ACCOUNT);
     const rawFxRate = getColumnValue(row, ImportFormat.FX_RATE);
     const rawSubtype = getColumnValue(row, ImportFormat.SUBTYPE);
-    const rawInstrumentType = getColumnValue(row, ImportFormat.INSTRUMENT_TYPE);
+    const rawInstrumentType = ignoresAssetFields
+      ? undefined
+      : getColumnValue(row, ImportFormat.INSTRUMENT_TYPE);
 
     // Parse and normalize values
     const activityDate = parseDateValue(rawDate, dateFormat);
@@ -408,6 +451,8 @@ export function createDraftActivities(
       quoteCcy: mappedQuoteCcy,
       instrumentType: mappedInstrumentType,
       quoteMode: mappedQuoteMode,
+      providerId: mappedProviderId,
+      providerSymbol: mappedProviderSymbol,
     } = mapSymbol(rawSymbol, symbolMappings, symbolMappingMeta);
 
     // Parse typed symbol prefixes (e.g., "bond:US037833DU14")
@@ -465,6 +510,8 @@ export function createDraftActivities(
       quoteCcy: mappedQuoteCcy,
       instrumentType: resolvedInstrumentType,
       quoteMode: mappedQuoteMode,
+      providerId: mappedProviderId,
+      providerSymbol: mappedProviderSymbol,
       assetCandidateKey:
         symbol && activityType
           ? buildImportAssetCandidateKey({
@@ -491,7 +538,7 @@ export function createDraftActivities(
     };
 
     // Validate and get status
-    const validation = validateDraft(draft);
+    const validation = validateDraft(draft, accountTypeById);
 
     return [
       {
@@ -529,6 +576,8 @@ export function draftToActivityImport(draft: DraftActivity): ActivityImport {
     quoteCcy: draft.quoteCcy,
     instrumentType: draft.instrumentType,
     quoteMode: draft.quoteMode as ActivityImport["quoteMode"],
+    providerId: draft.providerId,
+    providerSymbol: draft.providerSymbol,
     errors: draft.errors,
     isValid:
       draft.status === "valid" ||

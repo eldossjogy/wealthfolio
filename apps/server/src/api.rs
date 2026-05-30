@@ -23,11 +23,14 @@ mod activities;
 mod addons;
 mod ai_chat;
 mod ai_providers;
+mod allocation_targets;
 mod alternative_assets;
 mod assets;
 #[cfg(any(feature = "connect-sync", feature = "device-sync"))]
 pub mod connect;
 mod custom_providers;
+mod data_exports;
+mod database_backups;
 #[cfg(feature = "device-sync")]
 mod device_sync;
 #[cfg(feature = "device-sync")]
@@ -41,9 +44,11 @@ mod market_data;
 mod net_worth;
 mod performance;
 mod portfolio;
+mod portfolios;
 mod secrets;
 mod settings;
 pub mod shared;
+mod spending;
 #[cfg(feature = "device-sync")]
 mod sync_crypto;
 mod taxonomies;
@@ -88,7 +93,10 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
     #[allow(unused_mut)]
     let mut protected_api = Router::new()
         .merge(accounts::router())
+        .merge(portfolios::router())
         .merge(settings::router())
+        .merge(data_exports::router())
+        .merge(database_backups::router())
         .merge(portfolio::router())
         .merge(holdings::router())
         .merge(performance::router())
@@ -106,7 +114,9 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
         .merge(ai_providers::router())
         .merge(ai_chat::router())
         .merge(health::router())
-        .merge(custom_providers::router());
+        .merge(custom_providers::router())
+        .merge(spending::router())
+        .merge(allocation_targets::router());
 
     #[cfg(feature = "device-sync")]
     {

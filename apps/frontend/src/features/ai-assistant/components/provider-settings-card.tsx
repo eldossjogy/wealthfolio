@@ -75,9 +75,17 @@ const DATA_ACCESS_OPTIONS = [
     description: "Current positions and their values",
   },
   {
-    toolIds: ["search_activities", "record_activity", "record_activities", "import_csv"],
+    toolIds: [
+      "search_activities",
+      "record_activity",
+      "record_activities",
+      "import_csv",
+      "propose_transaction_categories",
+      "list_categorization_context",
+      "create_categorization_rule",
+    ],
     label: "Transactions",
-    description: "View, draft, and import activities",
+    description: "View, draft, import, and categorize activities",
   },
   {
     toolIds: ["get_performance"],
@@ -713,6 +721,16 @@ export function ProviderSettingsCard({
                     <span className="text-muted-foreground text-xs">
                       What data the AI can access
                     </span>
+                  </div>
+                  <div className="border-border/70 bg-background/60 flex gap-2 rounded-md border px-3 py-2.5">
+                    <Icons.Info className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">AI data sharing</p>
+                      <p className="text-muted-foreground text-xs leading-relaxed">
+                        Enabled AI tools may share relevant portfolio data and attachments with your
+                        selected AI provider when used in chat.
+                      </p>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {DATA_ACCESS_OPTIONS.map((option) => {

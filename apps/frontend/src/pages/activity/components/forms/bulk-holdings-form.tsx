@@ -2,7 +2,8 @@ import { AccountSelector } from "@/components/account-selector";
 import { TickerAvatar } from "@/components/ticker-avatar";
 import TickerSearchInput from "@/components/ticker-search";
 import { useAccounts } from "@/hooks/use-accounts";
-import { QuoteMode } from "@/lib/constants";
+import { quoteModeFromSearchResult } from "@/lib/asset-utils";
+import { AccountPurpose, QuoteMode } from "@/lib/constants";
 import { Account, SymbolSearchResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -123,12 +124,9 @@ const HoldingRow = memo(
 
     const handleAssetSelect = useCallback(
       (_symbol: string, searchResult?: SymbolSearchResult) => {
-        const isManualAsset = searchResult?.dataSource === "MANUAL";
-        setValue(
-          `holdings.${index}.quoteMode`,
-          isManualAsset ? QuoteMode.MANUAL : QuoteMode.MARKET,
-          { shouldDirty: true },
-        );
+        const quoteMode = quoteModeFromSearchResult(searchResult);
+        const isManualAsset = quoteMode === QuoteMode.MANUAL;
+        setValue(`holdings.${index}.quoteMode`, quoteMode, { shouldDirty: true });
 
         // Always update symbol metadata to avoid carrying stale values across selections.
         // Fall back to the account currency when the search result has no currency
@@ -386,6 +384,7 @@ export const BulkHoldingsForm = ({ onAccountChange, defaultAccount }: BulkHoldin
                       variant="form"
                       filterActive={true}
                       trackingModes={["TRANSACTIONS"]}
+                      accountPurpose={AccountPurpose.HOLDINGS}
                     />
                   </FormControl>
                   <FormMessage />

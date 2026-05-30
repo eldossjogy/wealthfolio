@@ -1,11 +1,36 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use wealthfolio_core::portfolios::AccountScope;
 
 #[derive(Deserialize)]
-pub struct HoldingsQuery {
+pub struct FilterBody {
+    pub filter: AccountScope,
+}
+
+#[derive(Deserialize)]
+pub struct AllocationFilterBody {
+    pub filter: AccountScope,
+    #[serde(rename = "taxonomyId")]
+    pub taxonomy_id: String,
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct AccountIdQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct AllocationHoldingsQuery {
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    #[serde(rename = "taxonomyId")]
+    pub taxonomy_id: String,
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
 }
 
 #[derive(Deserialize)]
@@ -23,6 +48,14 @@ pub struct AssetHoldingsQuery {
 }
 
 #[derive(Deserialize)]
+pub struct AssetLotsQuery {
+    #[serde(rename = "assetId")]
+    pub asset_id: String,
+    #[serde(rename = "includeSnapshotPositions", default)]
+    pub include_snapshot_positions: bool,
+}
+
+#[derive(Deserialize)]
 pub struct HistoryQuery {
     #[serde(rename = "accountId")]
     pub account_id: String,
@@ -33,13 +66,12 @@ pub struct HistoryQuery {
 }
 
 #[derive(Deserialize)]
-pub struct AllocationHoldingsQuery {
-    #[serde(rename = "accountId")]
-    pub account_id: String,
-    #[serde(rename = "taxonomyId")]
-    pub taxonomy_id: String,
-    #[serde(rename = "categoryId")]
-    pub category_id: String,
+pub struct HistoryFilterBody {
+    pub filter: AccountScope,
+    #[serde(rename = "startDate")]
+    pub start_date: Option<String>,
+    #[serde(rename = "endDate")]
+    pub end_date: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +107,7 @@ pub struct SnapshotInfo {
     pub source: String,
     pub position_count: usize,
     pub cash_currency_count: usize,
+    pub cash_total_account_currency: String,
 }
 
 /// Input for a single holding when saving manual holdings
@@ -90,6 +123,14 @@ pub struct HoldingInput {
     pub average_cost: Option<String>,
     /// Exchange MIC code for new holdings (e.g., "XNAS", "XTSE"). Used when asset_id is not provided.
     pub exchange_mic: Option<String>,
+    /// Quote currency resolved during search/review (e.g., GBp)
+    pub quote_ccy: Option<String>,
+    /// Instrument type resolved during search/review (e.g., EQUITY, CRYPTO)
+    pub instrument_type: Option<String>,
+    /// Market data provider that resolved this holding, if selected.
+    pub provider_id: Option<String>,
+    /// Provider-native symbol/code selected by search/import.
+    pub provider_symbol: Option<String>,
     /// Asset name for new custom assets
     pub name: Option<String>,
     /// Data source (e.g., "MANUAL" for custom assets) — sets quote mode to manual
@@ -122,6 +163,14 @@ pub struct HoldingsPositionInput {
     pub currency: String,
     /// Exchange MIC code (e.g., "XNAS", "XTSE") resolved during check step
     pub exchange_mic: Option<String>,
+    /// Quote currency resolved during asset review/search
+    pub quote_ccy: Option<String>,
+    /// Instrument type resolved during asset review/search
+    pub instrument_type: Option<String>,
+    /// Market data provider that resolved this position, if selected.
+    pub provider_id: Option<String>,
+    /// Provider-native symbol/code selected by search/import.
+    pub provider_symbol: Option<String>,
     /// Resolved asset ID from asset review step
     pub asset_id: Option<String>,
 }

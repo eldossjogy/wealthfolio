@@ -32,6 +32,8 @@ const assetMetadataSchema = z
     name: z.string().nullable().optional(),
     kind: z.string().nullable().optional(),
     exchangeMic: z.string().nullable().optional(),
+    providerId: z.string().nullable().optional(),
+    providerSymbol: z.string().nullable().optional(),
   })
   .optional();
 
@@ -256,7 +258,7 @@ export function SellForm({
   const assetCurrencyFromSymbol = normalizeCurrency(symbolQuoteCcy ?? undefined)?.toUpperCase();
 
   // Fetch holdings for the selected account to check available quantity
-  const { holdings } = useHoldings(accountId);
+  const { holdings } = useHoldings({ type: "account", accountId });
 
   // Resolve the effective assetId for holdings lookup (OCC symbol for options)
   const effectiveAssetId = useMemo(() => {

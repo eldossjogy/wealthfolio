@@ -2,12 +2,7 @@ import { HistoryChart } from "@/components/history-chart";
 import { useHapticFeedback } from "@/hooks";
 import { useHoldings } from "@/hooks/use-holdings";
 import { useValuationHistory } from "@/hooks/use-valuation-history";
-import {
-  HoldingType,
-  isAlternativeAssetKind,
-  PORTFOLIO_ACCOUNT_ID,
-  type AssetKind,
-} from "@/lib/constants";
+import { HoldingType, isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
 import { DateRange, TimePeriod } from "@/lib/types";
 import { calculatePerformanceMetrics } from "@/lib/utils";
@@ -43,7 +38,7 @@ export function DashboardContent() {
   );
   const [isAllTime, setIsAllTime] = useState<boolean>(() => intervalCode === "ALL");
 
-  const { holdings: allHoldings, isLoading: isHoldingsLoading } = useHoldings(PORTFOLIO_ACCOUNT_ID);
+  const { holdings: allHoldings, isLoading: isHoldingsLoading } = useHoldings({ type: "all" });
   const { triggerHaptic } = useHapticFeedback();
 
   // Filter holdings for display (exclude alternative assets and cash for TopHoldings)
@@ -88,8 +83,8 @@ export function DashboardContent() {
     return (
       valuationHistory?.map((item) => ({
         date: item.valuationDate,
-        totalValue: item.totalValue,
-        netContribution: item.netContribution,
+        totalValue: item.totalValueBase,
+        netContribution: item.netContributionBase,
         currency: item.baseCurrency ?? baseCurrency,
       })) ?? []
     );
@@ -109,7 +104,7 @@ export function DashboardContent() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-full flex-col">
       <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
         <PortfolioUpdateTrigger lastCalculatedAt={currentValuation?.calculatedAt}>
           <div className="flex items-start gap-2">

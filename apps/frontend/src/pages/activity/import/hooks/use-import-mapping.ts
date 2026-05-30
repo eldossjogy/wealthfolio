@@ -1,11 +1,18 @@
 import { useState, useCallback } from "react";
 import { ImportFormat, ImportMappingData, type SymbolSearchResult } from "@/lib/types";
+import { quoteModeFromSearchResult } from "@/lib/asset-utils";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { saveAccountImportMapping, logger } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { createDefaultActivityMapping } from "../utils/default-activity-template";
 import { normalizeActivityLabel } from "../utils/activity-type-mapping";
+import {
+  DEFAULT_ACTIVITY_IMPORT_PROFILE,
+  isTransactionImportProfile,
+  sanitizeFieldMappingsForImportProfile,
+  type ActivityImportProfile,
+} from "../utils/activity-import-profile";
 
 /**
  * Common column name aliases for each ImportFormat field.
@@ -122,6 +129,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   ],
   [ImportFormat.AMOUNT]: [
     "amount",
+    "transaction amount",
+    "transactionamount",
     "total",
     "totalamount",
     "total amount",
@@ -200,6 +209,8 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     "note",
     "notes",
     "description",
+    "transaction description",
+    "transactiondescription",
     "memo",
     "remarks",
     "details",
@@ -226,6 +237,35 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   ],
 };
 
+const TRANSACTION_COLUMN_ALIASES: Partial<Record<ImportFormat, string[]>> = {
+  [ImportFormat.AMOUNT]: [
+    "debit",
+    "credit",
+    "charge",
+    "charges",
+    "payment",
+    "payments",
+    "withdrawal",
+    "withdrawals",
+    "deposit",
+    "deposits",
+    "money out",
+    "money in",
+    "paid out",
+    "paid in",
+  ],
+  [ImportFormat.COMMENT]: [
+    "merchant",
+    "merchant name",
+    "payee",
+    "payer",
+    "vendor",
+    "name",
+    "transaction name",
+    "narrative",
+  ],
+};
+
 /**
  * Normalize a header string for comparison.
  * Removes special characters, converts to lowercase, and trims whitespace.
@@ -239,22 +279,43 @@ function normalizeHeader(header: string): string {
     .trim();
 }
 
+function aliasesForField(field: ImportFormat, profile: ActivityImportProfile): string[] {
+  const aliases = COLUMN_ALIASES[field] ?? [field];
+  if (!isTransactionImportProfile(profile)) return aliases;
+  return [...aliases, ...(TRANSACTION_COLUMN_ALIASES[field] ?? [])];
+}
+
+function headerMatchesAliases(header: string, aliases: readonly string[]): boolean {
+  const normalized = normalizeHeader(header);
+  const compact = normalized.replace(/\s/g, "");
+  return aliases.some((alias) => {
+    const aliasNormalized = normalizeHeader(alias);
+    const aliasCompact = aliasNormalized.replace(/\s/g, "");
+    return (
+      normalized === aliasNormalized ||
+      (aliasNormalized.length >= 4 && normalized.includes(aliasNormalized)) ||
+      (aliasCompact.length >= 4 && compact.includes(aliasCompact))
+    );
+  });
+}
+
 /**
  * Initialize column mapping by matching CSV headers to ImportFormat fields.
  * Uses tiered matching: exact → word-boundary contains → substring contains.
  */
 export function initializeColumnMapping(
   headerRow: string[],
+  profile: ActivityImportProfile = DEFAULT_ACTIVITY_IMPORT_PROFILE,
 ): Partial<Record<ImportFormat, string>> {
   const initialMapping: Partial<Record<ImportFormat, string>> = {};
   const usedHeaders = new Set<string>();
 
-  const fields = Object.values(ImportFormat);
+  const fields = profile.visibleMappingFields;
 
   // Pass 1: Exact match (normalized alias === normalized header)
   for (const field of fields) {
-    if (initialMapping[field as ImportFormat]) continue;
-    const aliases = COLUMN_ALIASES[field] ?? [field];
+    if (initialMapping[field]) continue;
+    const aliases = aliasesForField(field, profile);
 
     const match = headerRow.find((header) => {
       if (usedHeaders.has(header)) return false;
@@ -263,15 +324,15 @@ export function initializeColumnMapping(
     });
 
     if (match) {
-      initialMapping[field as ImportFormat] = match;
+      initialMapping[field] = match;
       usedHeaders.add(match);
     }
   }
 
   // Pass 2: Word-boundary contains (catches "Trade Date (UTC)" → alias "trade date")
   for (const field of fields) {
-    if (initialMapping[field as ImportFormat]) continue;
-    const aliases = COLUMN_ALIASES[field] ?? [field];
+    if (initialMapping[field]) continue;
+    const aliases = aliasesForField(field, profile);
 
     const match = headerRow.find((header) => {
       if (usedHeaders.has(header)) return false;
@@ -287,15 +348,15 @@ export function initializeColumnMapping(
     });
 
     if (match) {
-      initialMapping[field as ImportFormat] = match;
+      initialMapping[field] = match;
       usedHeaders.add(match);
     }
   }
 
   // Pass 3: Substring contains for aliases ≥ 4 chars (catches "transactiondate_utc")
   for (const field of fields) {
-    if (initialMapping[field as ImportFormat]) continue;
-    const aliases = COLUMN_ALIASES[field] ?? [field];
+    if (initialMapping[field]) continue;
+    const aliases = aliasesForField(field, profile);
 
     const match = headerRow.find((header) => {
       if (usedHeaders.has(header)) return false;
@@ -307,7 +368,7 @@ export function initializeColumnMapping(
     });
 
     if (match) {
-      initialMapping[field as ImportFormat] = match;
+      initialMapping[field] = match;
       usedHeaders.add(match);
     }
   }
@@ -322,8 +383,9 @@ export function initializeColumnMapping(
 export function computeFieldMappings(
   headers: string[],
   savedFieldMappings?: Record<string, string | string[]>,
+  profile: ActivityImportProfile = DEFAULT_ACTIVITY_IMPORT_PROFILE,
 ): Record<string, string | string[]> {
-  const autoDetected = initializeColumnMapping(headers);
+  const autoDetected = initializeColumnMapping(headers, profile);
   const headerSet = new Set(headers);
 
   // Start with auto-detected (all values are defined)
@@ -332,9 +394,19 @@ export function computeFieldMappings(
     if (header) result[field] = header;
   }
 
+  if (isTransactionImportProfile(profile)) {
+    const amountAliases = aliasesForField(ImportFormat.AMOUNT, profile);
+    const amountHeaders = headers.filter((header) => headerMatchesAliases(header, amountAliases));
+    if (amountHeaders.length > 1) {
+      result[ImportFormat.AMOUNT] = amountHeaders;
+    }
+  }
+
   // Merge saved mappings on top (only entries pointing to headers that still exist)
   if (savedFieldMappings) {
-    for (const [field, header] of Object.entries(savedFieldMappings)) {
+    for (const [field, header] of Object.entries(
+      sanitizeFieldMappingsForImportProfile(savedFieldMappings, profile),
+    )) {
       if (!header) continue;
       if (Array.isArray(header)) {
         // Keep fallback array if at least one header exists in the CSV
@@ -347,7 +419,7 @@ export function computeFieldMappings(
     }
   }
 
-  return result;
+  return sanitizeFieldMappingsForImportProfile(result, profile);
 }
 
 const emptyMapping: ImportMappingData = createDefaultActivityMapping();
@@ -440,22 +512,27 @@ export function useImportMapping({
 
   const handleSymbolMapping = useCallback(
     (csvSymbol: string, newSymbol: string, searchResult?: SymbolSearchResult) => {
+      const canonicalSymbol = searchResult?.canonicalSymbol || newSymbol;
+      const canonicalExchangeMic = searchResult?.canonicalExchangeMic || searchResult?.exchangeMic;
+
       setMapping((prev) => ({
         ...prev,
         symbolMappings: {
           ...prev.symbolMappings,
-          [csvSymbol.trim()]: newSymbol.trim(),
+          [csvSymbol.trim()]: canonicalSymbol.trim(),
         },
         symbolMappingMeta: {
           ...prev.symbolMappingMeta,
           ...(searchResult
             ? {
                 [csvSymbol.trim()]: {
-                  exchangeMic: searchResult.exchangeMic,
+                  exchangeMic: canonicalExchangeMic,
                   symbolName: searchResult.longName,
                   quoteCcy: searchResult.currency,
                   instrumentType: searchResult.quoteType,
-                  quoteMode: searchResult.dataSource === "MANUAL" ? "MANUAL" : undefined,
+                  quoteMode: quoteModeFromSearchResult(searchResult),
+                  providerId: searchResult.providerId,
+                  providerSymbol: searchResult.providerSymbol,
                 },
               }
             : {}),

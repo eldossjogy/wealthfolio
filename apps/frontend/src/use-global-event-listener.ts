@@ -15,7 +15,7 @@ import {
 } from "@/adapters";
 import { usePortfolioSyncOptional } from "@/context/portfolio-sync-context";
 import { useIsMobileViewport } from "@/hooks/use-platform";
-import { QueryKeys } from "@/lib/query-keys";
+import { shouldInvalidateAfterPortfolioUpdate } from "@/lib/query-invalidation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -29,32 +29,6 @@ const TOAST_IDS = {
   brokerSyncStart: "broker-sync-start",
 } as const;
 
-const CLOUD_SYNC_INVALIDATION_EXCLUSIONS = new Set<string>([
-  QueryKeys.BROKER_CONNECTIONS,
-  QueryKeys.BROKER_ACCOUNTS,
-  QueryKeys.BROKER_SYNC_STATES,
-  QueryKeys.IMPORT_RUNS,
-  QueryKeys.USER_INFO,
-  QueryKeys.SUBSCRIPTION_PLANS,
-  QueryKeys.SUBSCRIPTION_PLANS_PUBLIC,
-  QueryKeys.SYNCED_ACCOUNTS,
-  QueryKeys.PLATFORMS,
-]);
-
-function shouldInvalidateAfterPortfolioUpdate(queryKey: readonly unknown[]): boolean {
-  const rootKey = queryKey[0];
-
-  if (typeof rootKey === "string" && CLOUD_SYNC_INVALIDATION_EXCLUSIONS.has(rootKey)) {
-    return false;
-  }
-
-  if (rootKey === "sync") {
-    return false;
-  }
-
-  return true;
-}
-
 interface MarketSyncCompletePayload {
   failed_syncs?: [string, string][];
   skipped_reasons?: [string, string][];
@@ -62,10 +36,6 @@ interface MarketSyncCompletePayload {
 
 function getSyncFailures(payload?: MarketSyncCompletePayload | null): [string, string][] {
   return Array.isArray(payload?.failed_syncs) ? payload.failed_syncs : [];
-}
-
-function getSyncSkips(payload?: MarketSyncCompletePayload | null): [string, string][] {
-  return Array.isArray(payload?.skipped_reasons) ? payload.skipped_reasons : [];
 }
 
 const useGlobalEventListener = () => {
@@ -107,7 +77,6 @@ const useGlobalEventListener = () => {
 
     const handleMarketSyncComplete = (event: { payload: MarketSyncCompletePayload | null }) => {
       const failed_syncs = getSyncFailures(event.payload);
-      const skipped_reasons = getSyncSkips(event.payload);
 
       if (isMobileViewportRef.current && syncContextRef.current) {
         syncContextRef.current.setIdle();
@@ -125,18 +94,6 @@ const useGlobalEventListener = () => {
             label: "View",
             onClick: () => navigateRef.current("/health"),
           },
-        });
-      }
-
-      if (skipped_reasons.length > 0) {
-        const [assetId, reason] = skipped_reasons[0];
-        const suffix =
-          skipped_reasons.length === 1
-            ? `${assetId}: ${reason}`
-            : `${skipped_reasons.length} assets skipped`;
-        toast.info("Price update skipped", {
-          description: suffix,
-          duration: 7000,
         });
       }
     };

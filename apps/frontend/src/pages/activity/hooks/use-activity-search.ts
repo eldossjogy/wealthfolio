@@ -10,7 +10,7 @@ import { useMemo } from "react";
 export type ActivityStatusFilter = "all" | "pending" | "validated";
 
 export interface ActivitySearchFilters {
-  accountIds: string[];
+  accountIds?: string[];
   activityTypes: ActivityType[];
   instrumentTypes?: string[];
   status?: ActivityStatusFilter;
@@ -68,6 +68,7 @@ export type UseActivitySearchResult =
 
 const DEFAULT_SORT = { id: "date", desc: true };
 const DEFAULT_PAGE_SIZE = 50;
+const EMPTY_RESPONSE: ActivitySearchResponse = { data: [], meta: { totalRowCount: 0 } };
 
 export function useActivitySearch(
   options: UseActivitySearchInfiniteOptions,
@@ -79,6 +80,7 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
   const { filters, searchQuery, sorting, pageSize = DEFAULT_PAGE_SIZE } = options;
   const mode = options.mode ?? "infinite";
   const pageIndex = "pageIndex" in options ? options.pageIndex : 0;
+  const hasClosedAccountScope = filters.accountIds !== undefined && filters.accountIds.length === 0;
 
   const normalizedFilters = useMemo(() => {
     // Convert status filter to needsReview boolean
@@ -88,10 +90,10 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
     } else if (filters.status === "validated") {
       needsReview = false;
     }
-    // "all" or undefined means no filter
+    // Undefined means all accounts; an empty array means a closed-empty scope.
 
     return {
-      accountIds: filters.accountIds.length > 0 ? filters.accountIds : undefined,
+      accountIds: filters.accountIds,
       activityTypes: filters.activityTypes.length > 0 ? filters.activityTypes : undefined,
       instrumentTypes: filters.instrumentTypes?.length ? filters.instrumentTypes : undefined,
       dateFrom: filters.dateFrom ? format(filters.dateFrom, "yyyy-MM-dd") : undefined,
@@ -128,6 +130,7 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
     ],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
+      if (hasClosedAccountScope) return EMPTY_RESPONSE;
       const page = typeof pageParam === "number" ? pageParam : 0;
       return searchActivities(page, pageSize, normalizedFilters, searchQuery, primarySort);
     },
@@ -151,6 +154,7 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       pageSize,
     ],
     queryFn: async () => {
+      if (hasClosedAccountScope) return EMPTY_RESPONSE;
       return searchActivities(pageIndex, pageSize, normalizedFilters, searchQuery, primarySort);
     },
     enabled: mode === "paginated",

@@ -1,5 +1,11 @@
 import * as z from "zod";
-import { accountTypeSchema, ActivityType, activityTypeSchema, quoteModeSchema } from "./constants";
+import {
+  AccountType,
+  accountTypeSchema,
+  ActivityType,
+  activityTypeSchema,
+  quoteModeSchema,
+} from "./constants";
 import { tryParseDate } from "./utils";
 import {
   isCashActivity,
@@ -66,6 +72,8 @@ export const importMappingSchema = z.object({
         quoteCcy: z.string().optional(),
         instrumentType: z.string().optional(),
         quoteMode: quoteModeSchema.optional(),
+        providerId: z.string().optional(),
+        providerSymbol: z.string().optional(),
       }),
     )
     .optional(),
@@ -75,25 +83,33 @@ export const importMappingSchema = z.object({
 
 export const trackingModeSchema = z.enum(["TRANSACTIONS", "HOLDINGS", "NOT_SET"]);
 
-export const newAccountSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z
-    .string()
-    .min(2, {
-      message: "Name must be at least 2 characters.",
-    })
-    .max(50, {
-      message: "Name must not be longer than 50 characters.",
-    }),
-  group: z.string().optional(),
-  isDefault: z.boolean().optional(),
-  isActive: z.boolean().optional(),
-  isArchived: z.boolean().optional().default(false),
-  accountType: accountTypeSchema,
-  currency: z.string({ required_error: "Please select a currency." }),
-  trackingMode: trackingModeSchema.optional().default("NOT_SET"),
-  meta: z.string().nullable().optional(),
-});
+export const newAccountSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    name: z
+      .string()
+      .min(2, {
+        message: "Name must be at least 2 characters.",
+      })
+      .max(50, {
+        message: "Name must not be longer than 50 characters.",
+      }),
+    group: z.string().optional(),
+    isDefault: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+    isArchived: z.boolean().optional().default(false),
+    accountType: accountTypeSchema,
+    currency: z.string({ required_error: "Please select a currency." }),
+    trackingMode: trackingModeSchema.optional().default("NOT_SET"),
+    meta: z.string().nullable().optional(),
+  })
+  .refine(
+    (data) => data.accountType !== AccountType.CREDIT_CARD || data.trackingMode !== "HOLDINGS",
+    {
+      message: "Credit card accounts cannot use holdings tracking mode.",
+      path: ["trackingMode"],
+    },
+  );
 
 export const newGoalSchema = z.object({
   id: z.string().uuid().optional(),
@@ -181,6 +197,10 @@ export const importActivitySchema = z
     instrumentType: z.string().optional(),
     /** Optional quote mode hint (e.g., MANUAL, MARKET). */
     quoteMode: quoteModeSchema.optional(),
+    /** Market data provider that resolved this import row, if selected. */
+    providerId: z.string().optional(),
+    /** Provider-native symbol/code selected by search/import. */
+    providerSymbol: z.string().optional(),
     /** ISIN identifier from the CSV (e.g. GB0007188757). Used for unambiguous exchange resolution. */
     isin: z.string().optional(),
     errors: z.record(z.string(), z.array(z.string())).optional(),

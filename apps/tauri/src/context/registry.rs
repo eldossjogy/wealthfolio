@@ -5,9 +5,18 @@ use wealthfolio_core::{
     self, accounts, activities,
     assets::{self, AlternativeAssetServiceTrait},
     events::DomainEventSink,
-    fx, goals, health, limits, portfolio, quotes, settings, taxonomies,
+    fx, goals, health, limits,
+    lots::LotRepositoryTrait,
+    portfolio, portfolios, quotes, settings, taxonomies,
 };
 use wealthfolio_device_sync::{engine::DeviceSyncRuntimeState, DeviceEnrollService};
+use wealthfolio_spending::analytics::AnalyticsService;
+use wealthfolio_spending::budget::BudgetService;
+use wealthfolio_spending::cash_activities::CashActivityService;
+use wealthfolio_spending::categorization_rules::CategorizationRulesService;
+use wealthfolio_spending::events::EventsService;
+use wealthfolio_spending::insight::InsightService;
+use wealthfolio_spending::settings::SpendingSettingsService;
 use wealthfolio_storage_sqlite::{
     portfolio::snapshot::SnapshotRepository, sync::AppSyncRepository,
 };
@@ -41,9 +50,12 @@ pub struct ServiceContext {
     pub income_service: Arc<dyn portfolio::income::IncomeServiceTrait>,
     pub snapshot_service: Arc<dyn portfolio::snapshot::SnapshotServiceTrait>,
     pub snapshot_repository: Arc<SnapshotRepository>,
+    pub lots_repository: Arc<dyn LotRepositoryTrait>,
     pub app_sync_repository: Arc<AppSyncRepository>,
     pub holdings_service: Arc<dyn portfolio::holdings::HoldingsServiceTrait>,
     pub allocation_service: Arc<dyn portfolio::allocation::AllocationServiceTrait>,
+    pub target_profile_service: Arc<dyn portfolio::allocation_targets::TargetProfileServiceTrait>,
+    pub drift_service: Arc<dyn portfolio::allocation_targets::DriftServiceTrait>,
     pub valuation_service: Arc<dyn portfolio::valuation::ValuationServiceTrait>,
     pub net_worth_service: Arc<dyn portfolio::net_worth::NetWorthServiceTrait>,
     pub sync_service: Arc<dyn BrokerSyncServiceTrait>,
@@ -56,6 +68,14 @@ pub struct ServiceContext {
     pub device_sync_runtime: Arc<DeviceSyncRuntimeState>,
     pub health_service: Arc<health::HealthService>,
     pub custom_provider_service: Arc<wealthfolio_core::custom_provider::CustomProviderService>,
+    pub portfolio_service: Arc<dyn portfolios::PortfolioServiceTrait>,
+    pub spending_settings_service: Arc<SpendingSettingsService>,
+    pub cash_activity_service: Arc<CashActivityService>,
+    pub categorization_rules_service: Arc<CategorizationRulesService>,
+    pub events_service: Arc<EventsService>,
+    pub budget_service: Arc<BudgetService>,
+    pub spending_analytics_service: Arc<AnalyticsService>,
+    pub spending_insight_service: Arc<InsightService>,
 }
 
 impl ServiceContext {
@@ -77,6 +97,34 @@ impl ServiceContext {
 
     pub fn settings_service(&self) -> Arc<dyn settings::SettingsServiceTrait> {
         Arc::clone(&self.settings_service)
+    }
+
+    pub fn spending_settings_service(&self) -> Arc<SpendingSettingsService> {
+        Arc::clone(&self.spending_settings_service)
+    }
+
+    pub fn cash_activity_service(&self) -> Arc<CashActivityService> {
+        Arc::clone(&self.cash_activity_service)
+    }
+
+    pub fn categorization_rules_service(&self) -> Arc<CategorizationRulesService> {
+        Arc::clone(&self.categorization_rules_service)
+    }
+
+    pub fn events_service(&self) -> Arc<EventsService> {
+        Arc::clone(&self.events_service)
+    }
+
+    pub fn budget_service(&self) -> Arc<BudgetService> {
+        Arc::clone(&self.budget_service)
+    }
+
+    pub fn spending_analytics_service(&self) -> Arc<AnalyticsService> {
+        Arc::clone(&self.spending_analytics_service)
+    }
+
+    pub fn spending_insight_service(&self) -> Arc<InsightService> {
+        Arc::clone(&self.spending_insight_service)
     }
 
     pub fn account_service(&self) -> Arc<dyn accounts::AccountServiceTrait> {
@@ -135,6 +183,16 @@ impl ServiceContext {
         Arc::clone(&self.allocation_service)
     }
 
+    pub fn target_profile_service(
+        &self,
+    ) -> Arc<dyn portfolio::allocation_targets::TargetProfileServiceTrait> {
+        Arc::clone(&self.target_profile_service)
+    }
+
+    pub fn drift_service(&self) -> Arc<dyn portfolio::allocation_targets::DriftServiceTrait> {
+        Arc::clone(&self.drift_service)
+    }
+
     pub fn valuation_service(&self) -> Arc<dyn portfolio::valuation::ValuationServiceTrait> {
         Arc::clone(&self.valuation_service)
     }
@@ -165,6 +223,10 @@ impl ServiceContext {
 
     pub fn ai_chat_service(&self) -> Arc<ChatService<TauriAiEnvironment>> {
         Arc::clone(&self.ai_chat_service)
+    }
+
+    pub fn portfolio_service(&self) -> Arc<dyn portfolios::PortfolioServiceTrait> {
+        Arc::clone(&self.portfolio_service)
     }
 
     pub fn device_enroll_service(&self) -> Arc<DeviceEnrollService> {

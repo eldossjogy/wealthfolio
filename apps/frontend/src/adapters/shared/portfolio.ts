@@ -1,5 +1,6 @@
 // Portfolio Commands
 import type {
+  AccountScope,
   Holding,
   AllocationHoldings,
   IncomeSummary,
@@ -11,6 +12,7 @@ import type {
   ImportHoldingsCsvResult,
   CheckHoldingsImportResult,
   SnapshotInfo,
+  AssetLotView,
 } from "@/lib/types";
 
 import { invoke, logger } from "./platform";
@@ -23,21 +25,24 @@ export const recalculatePortfolio = async (): Promise<void> => {
   return invoke<void>("recalculate_portfolio");
 };
 
-export const getHoldings = async (accountId: string): Promise<Holding[]> => {
-  return invoke<Holding[]>("get_holdings", { accountId });
+export const getHoldings = async (filter: AccountScope): Promise<Holding[]> => {
+  return invoke<Holding[]>("get_holdings", { filter });
 };
 
-export const getIncomeSummary = async (accountId?: string): Promise<IncomeSummary[]> => {
-  return invoke<IncomeSummary[]>("get_income_summary", { accountId });
+export const getIncomeSummary = async (filter?: AccountScope): Promise<IncomeSummary[]> => {
+  return invoke<IncomeSummary[]>("get_income_summary", { filter });
 };
 
 export const getHistoricalValuations = async (
-  accountId?: string,
+  filter?: AccountScope,
   startDate?: string,
   endDate?: string,
 ): Promise<AccountValuation[]> => {
-  const params: { accountId?: string; startDate?: string; endDate?: string } = {};
-  if (accountId) params.accountId = accountId;
+  const params: {
+    filter?: AccountScope;
+    startDate?: string;
+    endDate?: string;
+  } = { filter: filter ?? { type: "all" } };
   if (startDate) params.startDate = startDate;
   if (endDate) params.endDate = endDate;
 
@@ -57,11 +62,13 @@ export const calculatePerformanceHistory = async (
   startDate: string | undefined,
   endDate: string | undefined,
   trackingMode?: "HOLDINGS" | "TRANSACTIONS",
+  filter?: AccountScope,
 ): Promise<PerformanceMetrics> => {
   const args: Record<string, unknown> = { itemType, itemId };
   if (startDate) args.startDate = startDate;
   if (endDate) args.endDate = endDate;
   if (trackingMode) args.trackingMode = trackingMode;
+  if (filter) args.filter = filter;
   const response = await invoke<PerformanceMetrics>("calculate_performance_history", args);
 
   if (typeof response === "string" || !response || Object.keys(response).length === 0) {
@@ -79,6 +86,7 @@ interface CalculatePerformanceSummaryArgs {
   startDate?: string | null;
   endDate?: string | null;
   trackingMode?: "HOLDINGS" | "TRANSACTIONS";
+  filter?: AccountScope;
 }
 
 export const calculatePerformanceSummary = async ({
@@ -87,6 +95,7 @@ export const calculatePerformanceSummary = async ({
   startDate,
   endDate,
   trackingMode,
+  filter,
 }: CalculatePerformanceSummaryArgs): Promise<PerformanceMetrics> => {
   const args: Record<string, unknown> = {
     itemType,
@@ -100,6 +109,9 @@ export const calculatePerformanceSummary = async ({
   }
   if (trackingMode) {
     args.trackingMode = trackingMode;
+  }
+  if (filter) {
+    args.filter = filter;
   }
 
   const response = await invoke<PerformanceMetrics>("calculate_performance_summary", args);
@@ -130,8 +142,20 @@ export const getAssetHoldings = async (assetId: string): Promise<Holding[]> => {
   return invoke<Holding[]>("get_asset_holdings", { assetId });
 };
 
-export const getPortfolioAllocations = async (accountId: string): Promise<PortfolioAllocations> => {
-  return invoke<PortfolioAllocations>("get_portfolio_allocations", { accountId });
+export const getAssetLots = async (
+  assetId: string,
+  includeSnapshotPositions = false,
+): Promise<AssetLotView[]> => {
+  return invoke<AssetLotView[]>("get_asset_lots", {
+    assetId,
+    includeSnapshotPositions,
+  });
+};
+
+export const getPortfolioAllocations = async (
+  filter: AccountScope,
+): Promise<PortfolioAllocations> => {
+  return invoke<PortfolioAllocations>("get_portfolio_allocations", { filter });
 };
 
 /**
@@ -140,12 +164,12 @@ export const getPortfolioAllocations = async (accountId: string): Promise<Portfo
  * Returns full category metadata along with the holdings.
  */
 export const getHoldingsByAllocation = async (
-  accountId: string,
+  filter: AccountScope,
   taxonomyId: string,
   categoryId: string,
 ): Promise<AllocationHoldings> => {
   return invoke<AllocationHoldings>("get_holdings_by_allocation", {
-    accountId,
+    filter,
     taxonomyId,
     categoryId,
   });
@@ -167,6 +191,14 @@ export interface HoldingInput {
   averageCost?: string;
   /** Exchange MIC code for new holdings (e.g., "XNAS", "XTSE"). Required for symbols without Yahoo suffixes. */
   exchangeMic?: string;
+  /** Quote currency resolved from search/provider (e.g., GBp). */
+  quoteCcy?: string;
+  /** Instrument type resolved from search/provider (e.g., EQUITY, CRYPTO). */
+  instrumentType?: string;
+  /** Market data provider that resolved this holding, if selected. */
+  providerId?: string;
+  /** Provider-native symbol/code selected by search/import. */
+  providerSymbol?: string;
   /** Asset name for new custom assets */
   name?: string;
   /** Data source (e.g., "MANUAL" for custom assets) — sets quote mode to manual */

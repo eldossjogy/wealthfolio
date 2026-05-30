@@ -25,11 +25,11 @@ use yahoo_finance_api as yahoo;
 
 use crate::errors::MarketDataError;
 use crate::models::{
-    AssetProfile, Coverage, InstrumentKind, ProviderInstrument, Quote, QuoteContext, SearchResult,
-    SplitEvent,
+    AssetProfile, Coverage, DividendEvent, InstrumentKind, ProviderInstrument, Quote, QuoteContext,
+    SearchResult, SplitEvent,
 };
 use crate::provider::{MarketDataProvider, ProviderCapabilities, RateLimit};
-use crate::resolver::{yahoo_exchange_to_mic, ResolverChain};
+use crate::resolver::{yahoo_equity_search_queries, yahoo_exchange_to_mic, ResolverChain};
 
 use models::{YahooQuoteSummaryResponse, YahooQuoteSummaryResult};
 
@@ -80,13 +80,6 @@ lazy_static! {
 /// and foreign exchange rates through the Yahoo Finance API.
 pub struct YahooProvider {
     connector: yahoo::YahooConnector,
-}
-
-/// A single dividend event returned by Yahoo Finance.
-#[derive(Debug, serde::Serialize)]
-pub struct YahooDividend {
-    pub amount: f64,
-    pub date: i64, // unix seconds
 }
 
 impl YahooProvider {
@@ -233,23 +226,23 @@ impl YahooProvider {
     // Dividend Fetching
     // ========================================================================
 
-    /// Fetch dividend events for a symbol over the past two years.
+    /// Fetch dividend events for a symbol in the requested date range.
     pub async fn fetch_dividends(
         &self,
         symbol: &str,
-    ) -> Result<Vec<YahooDividend>, MarketDataError> {
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DividendEvent>, MarketDataError> {
         use std::collections::HashMap;
 
         let crumb_data = self.ensure_crumb().await?;
 
-        let now = chrono::Utc::now().timestamp();
-        let two_years_ago = now - 2 * 365 * 24 * 60 * 60;
         let encoded = urlencoding::encode(symbol);
         let url = format!(
             "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&period1={}&period2={}&events=div&crumb={}",
             encoded,
-            two_years_ago,
-            now,
+            start.timestamp(),
+            end.timestamp(),
             urlencoding::encode(&crumb_data.crumb)
         );
 
@@ -358,9 +351,9 @@ impl YahooProvider {
             .and_then(|e| e.dividends)
             .unwrap_or_default();
 
-        let mut result: Vec<YahooDividend> = divs
+        let mut result: Vec<DividendEvent> = divs
             .into_values()
-            .map(|d| YahooDividend {
+            .map(|d| DividendEvent {
                 amount: d.amount,
                 date: d.date,
             })
@@ -440,7 +433,8 @@ impl YahooProvider {
         let exchange = item.exchange.unwrap_or_default();
         let quote_type = item.quote_type.unwrap_or_else(|| "UNKNOWN".to_string());
 
-        let mut result = SearchResult::new(symbol.to_string(), name, &exchange, quote_type);
+        let mut result = SearchResult::new(symbol.to_string(), name, &exchange, quote_type)
+            .with_data_source("YAHOO");
 
         // Derive MIC from Yahoo exchange code (e.g., NMS→XNAS, TOR→XTSE)
         if let Some(mic) = yahoo_exchange_to_mic(&exchange) {
@@ -838,6 +832,55 @@ impl YahooProvider {
 
         Ok(profile)
     }
+
+    async fn search_single(&self, query: &str) -> Result<Vec<SearchResult>, MarketDataError> {
+        let encoded_query = encode(query);
+
+        debug!("Searching Yahoo for '{}'", query);
+
+        // First try raw endpoint parsing so we can preserve currency (e.g., GBP vs GBp on LSE ETFs).
+        match self.search_raw_with_currency(&encoded_query).await {
+            Ok(results) if !results.is_empty() => return Ok(results),
+            Ok(_) => debug!(
+                "Yahoo raw search returned no quotes for '{}', falling back to connector API",
+                query
+            ),
+            Err(e) => debug!(
+                "Yahoo raw search failed for '{}': {}. Falling back to connector API",
+                query, e
+            ),
+        }
+
+        let result = self
+            .connector
+            .search_ticker(&encoded_query)
+            .await
+            .map_err(|e| MarketDataError::ProviderError {
+                provider: "YAHOO".to_string(),
+                message: e.to_string(),
+            })?;
+
+        let search_results = result
+            .quotes
+            .iter()
+            .map(|item| {
+                let mut r = SearchResult::new(
+                    &item.symbol,
+                    &item.long_name,
+                    &item.exchange,
+                    &item.quote_type,
+                )
+                .with_score(item.score)
+                .with_data_source("YAHOO");
+                if let Some(mic) = yahoo_exchange_to_mic(&item.exchange) {
+                    r = r.with_exchange_mic(mic.into_owned());
+                }
+                r
+            })
+            .collect();
+
+        Ok(search_results)
+    }
 }
 
 // ============================================================================
@@ -868,6 +911,7 @@ impl MarketDataProvider for YahooProvider {
             supports_historical: true,
             supports_search: true,
             supports_profile: true,
+            supports_dividends: true,
         }
     }
 
@@ -1021,52 +1065,42 @@ impl MarketDataProvider for YahooProvider {
         Ok(events)
     }
 
+    async fn get_dividends(
+        &self,
+        _context: &QuoteContext,
+        instrument: ProviderInstrument,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<DividendEvent>, MarketDataError> {
+        let symbol = match instrument {
+            ProviderInstrument::EquitySymbol { symbol } => symbol.to_string(),
+            _ => {
+                return Err(MarketDataError::NotSupported {
+                    operation: "dividends".to_string(),
+                    provider: self.id().to_string(),
+                });
+            }
+        };
+
+        self.fetch_dividends(&symbol, start, end).await
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, MarketDataError> {
-        let encoded_query = encode(query);
+        let mut last_error = None;
 
-        debug!("Searching Yahoo for '{}'", query);
-
-        // First try raw endpoint parsing so we can preserve currency (e.g., GBP vs GBp on LSE ETFs).
-        match self.search_raw_with_currency(&encoded_query).await {
-            Ok(results) if !results.is_empty() => return Ok(results),
-            Ok(_) => debug!(
-                "Yahoo raw search returned no quotes for '{}', falling back to connector API",
-                query
-            ),
-            Err(e) => debug!(
-                "Yahoo raw search failed for '{}': {}. Falling back to connector API",
-                query, e
-            ),
+        for provider_query in yahoo_equity_search_queries(query) {
+            match self.search_single(&provider_query).await {
+                Ok(results) if !results.is_empty() => return Ok(results),
+                Ok(_) => {}
+                Err(e) => last_error = Some(e),
+            }
         }
 
-        let result = self
-            .connector
-            .search_ticker(&encoded_query)
-            .await
-            .map_err(|e| MarketDataError::ProviderError {
-                provider: "YAHOO".to_string(),
-                message: e.to_string(),
-            })?;
-
-        let search_results = result
-            .quotes
-            .iter()
-            .map(|item| {
-                let mut r = SearchResult::new(
-                    &item.symbol,
-                    &item.long_name,
-                    &item.exchange,
-                    &item.quote_type,
-                )
-                .with_score(item.score);
-                if let Some(mic) = yahoo_exchange_to_mic(&item.exchange) {
-                    r = r.with_exchange_mic(mic.into_owned());
-                }
-                r
-            })
-            .collect();
-
-        Ok(search_results)
+        if let Some(error) = last_error {
+            Err(error)
+        } else {
+            Ok(vec![])
+        }
     }
 
     async fn get_profile(&self, symbol: &str) -> Result<AssetProfile, MarketDataError> {
@@ -1360,6 +1394,7 @@ mod tests {
             supports_historical: true,
             supports_search: true,
             supports_profile: true,
+            supports_dividends: true,
         };
 
         assert!(capabilities
@@ -1379,6 +1414,7 @@ mod tests {
         assert!(capabilities.supports_historical);
         assert!(capabilities.supports_search);
         assert!(capabilities.supports_profile);
+        assert!(capabilities.supports_dividends);
     }
 
     #[test]
@@ -1432,6 +1468,26 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "BARC.L");
         assert_eq!(results[0].currency, None);
+    }
+
+    #[test]
+    fn test_yahoo_search_queries_prefers_share_class_alias() {
+        assert_eq!(
+            yahoo_equity_search_queries("BRK.B"),
+            vec!["BRK-B".to_string(), "BRK.B".to_string()]
+        );
+        assert_eq!(
+            yahoo_equity_search_queries("SHOP.TO"),
+            vec!["SHOP.TO".to_string()]
+        );
+        assert_eq!(
+            yahoo_equity_search_queries("VOD.L"),
+            vec!["VOD.L".to_string()]
+        );
+        assert_eq!(
+            yahoo_equity_search_queries("AAPL"),
+            vec!["AAPL".to_string()]
+        );
     }
 
     #[test]
