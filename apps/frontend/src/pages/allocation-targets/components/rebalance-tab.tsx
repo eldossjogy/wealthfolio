@@ -332,55 +332,67 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
   );
 }
 
-// ── Sleeve changes ────────────────────────────────────────────────────────────
+// ── Before · Target · After stacked bars ─────────────────────────────────────
 
-const BAR_MAX = 3500;
+type SleeveSummaryRow = ReturnType<typeof computeSleeveSummary>[number];
 
-function SleeveBar({
-  s,
-}: {
-  s: {
-    categoryName: string;
-    color: string;
-    currentBps: number;
-    targetBps: number;
-    afterBps: number;
-  };
-}) {
-  const w = (bps: number) => Math.min(100, (bps / BAR_MAX) * 100);
-  const delta = s.afterBps - s.currentBps;
-  const tone = delta > 0 ? "text-green-700 dark:text-green-400" : "text-muted-foreground";
+function BeforeAfterStack({ sleeves }: { sleeves: SleeveSummaryRow[] }) {
+  function StackRow({
+    label,
+    field,
+    bold,
+  }: {
+    label: string;
+    field: "currentBps" | "targetBps" | "afterBps";
+    bold?: boolean;
+  }) {
+    return (
+      <div className="flex items-center gap-4">
+        <span
+          className={cn(
+            "w-10 shrink-0 text-[12px]",
+            bold ? "text-foreground font-semibold" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </span>
+        <div className="flex h-9 flex-1 overflow-hidden rounded-md">
+          {sleeves.map((s) => {
+            const pct = s[field] / 100;
+            return (
+              <div
+                key={s.categoryId}
+                className="flex items-center justify-center text-[11px] font-medium text-white/90"
+                style={{ width: `${pct}%`, background: s.color }}
+                title={`${s.categoryName}: ${pct.toFixed(1)}%`}
+              >
+                {pct >= 8 ? `${pct.toFixed(0)}%` : ""}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="grid items-center gap-x-4" style={{ gridTemplateColumns: "150px 1fr 150px" }}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
-        <span className="text-foreground truncate text-[13px] font-medium">{s.categoryName}</span>
-      </div>
-      <div className="relative h-7">
-        <div className="bg-muted absolute inset-0 rounded" />
-        <div
-          className="absolute top-1 h-2 rounded-sm opacity-40"
-          style={{ background: s.color, width: `${w(s.currentBps)}%` }}
-        />
-        <div
-          className="absolute bottom-1 h-2 rounded-sm"
-          style={{ background: s.color, width: `${w(s.afterBps)}%` }}
-        />
-        <div
-          className="bg-foreground/50 absolute inset-y-0 w-0.5"
-          style={{ left: `${w(s.targetBps)}%` }}
-          title={`target ${fmtBps(s.targetBps)}`}
-        />
-      </div>
-      <div className="flex items-center justify-end gap-2 text-[12px] tabular-nums">
-        <span className="text-muted-foreground">{fmtBps(s.currentBps)}</span>
-        <Icons.ArrowRight className="text-muted-foreground/60 h-3 w-3" />
-        <span className="text-foreground font-semibold">{fmtBps(s.afterBps)}</span>
-        <span className={cn("w-12 text-right font-medium", tone)}>
-          {delta >= 0 ? "+" : ""}
-          {fmtBps(delta)}
-        </span>
+    <div className="space-y-2.5">
+      <StackRow label="Now" field="currentBps" />
+      <StackRow label="Target" field="targetBps" />
+      <StackRow label="After" field="afterBps" bold />
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 pt-2">
+        {sleeves.map((s) => (
+          <div
+            key={s.categoryId}
+            className="flex items-center gap-1.5 whitespace-nowrap text-[11px]"
+          >
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: s.color }} />
+            <span className="text-foreground font-medium">{s.categoryName}</span>
+            <span className="text-muted-foreground tabular-nums">
+              {(s.currentBps / 100).toFixed(0)}%→{(s.afterBps / 100).toFixed(0)}%
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -591,37 +603,6 @@ function EmptyState({
   );
 }
 
-// ── Plan impact sidebar ───────────────────────────────────────────────────────
-
-function ImpactRow({
-  label,
-  sub,
-  value,
-  last,
-}: {
-  label: string;
-  sub?: string;
-  value: React.ReactNode;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 py-3",
-        !last && "border-border/60 border-b",
-      )}
-    >
-      <div>
-        <div className="text-foreground whitespace-nowrap text-[13px] font-medium">{label}</div>
-        {sub && <div className="text-muted-foreground text-[12px]">{sub}</div>}
-      </div>
-      <div className="whitespace-nowrap text-right text-[14px] font-semibold tabular-nums">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface RebalanceTabProps {
@@ -806,60 +787,17 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
 
           {/* Sleeve changes + Plan impact */}
           {sleeveSummary.length > 0 && (
-            <div className="grid grid-cols-[3fr_2fr] gap-5">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Sleeve changes</CardTitle>
-                  <CardDescription>current · target ▎ · after</CardDescription>
-                </CardHeader>
-                <CardContent className="px-5 pb-6 pt-2">
-                  <div className="space-y-3.5">
-                    {sleeveSummary.map((s) => (
-                      <SleeveBar key={s.categoryId} s={s} />
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Plan impact</CardTitle>
-                  <CardDescription>What this plan does to the portfolio</CardDescription>
-                </CardHeader>
-                <CardContent className="px-5 pb-2 pt-0">
-                  <ImpactRow
-                    label="Cash deployed"
-                    sub={`of ${formatAmount(plan.availableCash, currency)} available`}
-                    value={formatAmount(plan.cashUsed, currency)}
-                  />
-                  <ImpactRow
-                    label="Unused cash"
-                    sub="below min trade / lot size"
-                    value={
-                      <span className="text-muted-foreground">
-                        {formatAmount(plan.cashRemaining, currency)}
-                      </span>
-                    }
-                  />
-                  <ImpactRow label="Buys" value={String(plan.trades.length)} />
-                  <ImpactRow
-                    label="Max drift"
-                    value={
-                      <span className="flex items-center gap-1">
-                        <span className="text-muted-foreground">
-                          {fmtBps(plan.maxDriftBpsBefore)}
-                        </span>
-                        <Icons.ArrowRight className="text-muted-foreground/60 h-3 w-3" />
-                        <span className="text-green-700 dark:text-green-400">
-                          {fmtBps(plan.maxDriftBpsAfter)}
-                        </span>
-                      </span>
-                    }
-                    last
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Before · Target · After</CardTitle>
+                <CardDescription>
+                  How deploying this cash reshapes the portfolio by sleeve
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="px-5 pb-6 pt-2">
+                <BeforeAfterStack sleeves={sleeveSummary} />
+              </CardContent>
+            </Card>
           )}
         </div>
       )}
