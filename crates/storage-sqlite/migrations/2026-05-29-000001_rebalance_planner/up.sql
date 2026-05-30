@@ -1,6 +1,6 @@
 -- Milestone 2: cash-flow rebalance planner.
 -- Saved rebalance plans. JSON snapshot keeps drafts readable even after the target changes.
-CREATE TABLE IF NOT EXISTS rebalance_drafts (
+CREATE TABLE rebalance_drafts (
     id TEXT PRIMARY KEY NOT NULL,
     target_id TEXT NOT NULL,
     target_snapshot_json TEXT NOT NULL,
@@ -11,5 +11,5 @@ CREATE TABLE IF NOT EXISTS rebalance_drafts (
     FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_rebalance_drafts_target
+CREATE INDEX idx_rebalance_drafts_target
 ON rebalance_drafts(target_id);
