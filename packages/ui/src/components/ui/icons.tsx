@@ -204,8 +204,8 @@ export interface IconProps {
   className?: string;
   style?: CSSProperties;
   weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone";
-  cx?: number;
-  cy?: number;
+  cx?: number | string;
+  cy?: number | string;
 }
 
 export type Icon = ComponentType<IconProps>;
