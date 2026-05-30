@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
@@ -201,10 +202,39 @@ async fn get_drift_for_target(
 
 // ── Rebalance ─────────────────────────────────────────────────────────────────
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CalculatePlanBody {
+    target_id: String,
+    available_cash: Decimal,
+    filter: AccountScope,
+}
+
+fn resolve_rebalance_input(
+    state: &Arc<AppState>,
+    target_id: String,
+    available_cash: Decimal,
+    filter: &AccountScope,
+) -> ApiResult<CalculateRebalancePlanInput> {
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let resolved = state
+        .portfolio_service
+        .resolve_account_scope(filter, &base_currency)
+        .map_err(crate::error::ApiError::from)?;
+    Ok(CalculateRebalancePlanInput {
+        target_id,
+        available_cash,
+        account_ids: resolved.account_ids,
+        base_currency,
+        aggregated_account_id: resolved.scope_id,
+    })
+}
+
 async fn calculate_plan(
     State(state): State<Arc<AppState>>,
-    Json(input): Json<CalculateRebalancePlanInput>,
+    Json(body): Json<CalculatePlanBody>,
 ) -> ApiResult<Json<RebalancePlan>> {
+    let input = resolve_rebalance_input(&state, body.target_id, body.available_cash, &body.filter)?;
     let plan = state.rebalance_service.calculate_plan(input).await?;
     Ok(Json(plan))
 }
@@ -213,7 +243,8 @@ async fn calculate_plan(
 #[serde(rename_all = "camelCase")]
 struct SaveDraftBody {
     target_id: String,
-    input: CalculateRebalancePlanInput,
+    available_cash: Decimal,
+    filter: AccountScope,
     plan: RebalancePlan,
 }
 
@@ -221,13 +252,19 @@ async fn save_draft(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SaveDraftBody>,
 ) -> ApiResult<Json<RebalanceDraft>> {
+    let input = resolve_rebalance_input(
+        &state,
+        body.target_id.clone(),
+        body.available_cash,
+        &body.filter,
+    )?;
     let profile = state
         .allocation_target_service
         .get_target(&body.target_id)?
         .ok_or(crate::error::ApiError::NotFound)?;
     let draft = state
         .rebalance_service
-        .save_draft(&profile, &body.input, &body.plan)
+        .save_draft(&profile, &input, &body.plan)
         .await?;
     Ok(Json(draft))
 }
