@@ -39,6 +39,18 @@ function fmtBps(bps: number) {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
+function currencySymbol(code: string): string {
+  try {
+    return (
+      new Intl.NumberFormat(undefined, { style: "currency", currency: code })
+        .formatToParts(0)
+        .find((p) => p.type === "currency")?.value ?? code
+    );
+  } catch {
+    return code;
+  }
+}
+
 function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
   const newTotal = driftReport.totalValue + plan.cashUsed;
   return driftReport.rows
@@ -82,6 +94,27 @@ function exportCsv(plan: RebalancePlan, currency: string) {
   a.download = `rebalance-plan-${currency}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function copyToText(plan: RebalancePlan, currency: string) {
+  const lines = [
+    `Rebalance plan · ${new Date().toLocaleDateString()}`,
+    `Cash deployed: ${formatAmount(plan.cashUsed, currency)} of ${formatAmount(plan.availableCash, currency)}`,
+    `Max drift: ${fmtBps(plan.maxDriftBpsBefore)} → ${fmtBps(plan.maxDriftBpsAfter)}`,
+    "",
+    "PROPOSED TRADES",
+    ...plan.trades.map(
+      (t) =>
+        `BUY  ${t.symbol ?? t.categoryName}  ${formatAmount(t.estimatedAmount, currency)}` +
+        (t.quantity != null ? `  ${t.quantity.toFixed(t.quantity % 1 === 0 ? 0 : 4)} sh` : "") +
+        (t.estimatedPrice != null ? ` @ ${formatAmount(t.estimatedPrice, currency)}` : ""),
+    ),
+  ];
+  if (plan.warnings.length) {
+    lines.push("", `${plan.warnings.length} warning(s):`);
+    plan.warnings.forEach((w) => lines.push(`  · ${w.message}`));
+  }
+  navigator.clipboard.writeText(lines.join("\n")).then(() => {});
 }
 
 // ── Mode switcher ─────────────────────────────────────────────────────────────
@@ -190,25 +223,37 @@ const WARN_LABEL: Record<string, string> = {
 };
 
 function Warnings({ items }: { items: RebalanceWarning[] }) {
+  const [open, setOpen] = useState(false);
   if (!items.length) return null;
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
-      <div className="flex items-center gap-2 border-b border-amber-200/70 px-4 py-2.5 dark:border-amber-900/70">
-        <Icons.AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-        <span className="text-[12px] font-semibold text-amber-800 dark:text-amber-300">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
+      >
+        <Icons.AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <span className="flex-1 text-[12px] font-semibold text-amber-800 dark:text-amber-300">
           {items.length} thing{items.length > 1 ? "s" : ""} to know about this plan
         </span>
-      </div>
-      <ul className="divide-y divide-amber-200/60 dark:divide-amber-900/60">
-        {items.map((w, i) => (
-          <li key={i} className="flex items-start gap-3 px-4 py-2.5">
-            <span className="mt-px shrink-0 whitespace-nowrap rounded border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:text-amber-400">
-              {WARN_LABEL[w.kind] ?? w.kind}
-            </span>
-            <span className="text-foreground/80 text-[12px] leading-snug">{w.message}</span>
-          </li>
-        ))}
-      </ul>
+        <Icons.ChevronDown
+          className={cn(
+            "h-4 w-4 text-amber-600 transition-transform dark:text-amber-400",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <ul className="divide-y divide-amber-200/60 border-t border-amber-200/70 dark:divide-amber-900/60 dark:border-amber-900/70">
+          {items.map((w, i) => (
+            <li key={i} className="flex items-start gap-3 px-4 py-2.5">
+              <span className="mt-px shrink-0 whitespace-nowrap rounded border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                {WARN_LABEL[w.kind] ?? w.kind}
+              </span>
+              <span className="text-foreground/80 text-[12px] leading-snug">{w.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -345,9 +390,11 @@ function SleeveBar({
 
 function DraftDropdown({
   targetId,
+  currency,
   onLoad,
 }: {
   targetId: string;
+  currency: string;
   onLoad: (draft: RebalanceDraft) => void;
 }) {
   const { data: drafts = [] } = useRebalanceDrafts(targetId);
@@ -356,7 +403,11 @@ function DraftDropdown({
   if (!drafts.length) return null;
 
   function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   }
 
   return (
@@ -376,7 +427,7 @@ function DraftDropdown({
           try {
             const input = JSON.parse(d.inputJson) as { available_cash?: number };
             if (input.available_cash != null)
-              cashLabel = ` · $${input.available_cash.toLocaleString()}`;
+              cashLabel = ` · ${currencySymbol(currency)}${input.available_cash.toLocaleString()}`;
           } catch {}
           return (
             <DropdownMenuItem
@@ -410,6 +461,7 @@ function DraftDropdown({
 function InputBar({
   targetId,
   cashValue,
+  currency,
   onCashChange,
   onCalculate,
   onSaveDraft,
@@ -420,6 +472,7 @@ function InputBar({
 }: {
   targetId: string;
   cashValue: string;
+  currency: string;
   onCashChange: (v: string) => void;
   onCalculate: () => void;
   onSaveDraft: () => void;
@@ -436,7 +489,9 @@ function InputBar({
             Available cash to deploy
           </label>
           <div className="border-input bg-background focus-within:ring-ring flex h-11 items-center rounded-md border px-3 focus-within:ring-2">
-            <span className="text-muted-foreground mr-1 text-[15px]">$</span>
+            <span className="text-muted-foreground mr-1 text-[15px]">
+              {currencySymbol(currency)}
+            </span>
             <input
               value={cashValue}
               onChange={(e) => onCashChange(e.target.value)}
@@ -449,7 +504,7 @@ function InputBar({
         </div>
 
         <div className="flex items-center gap-2">
-          <DraftDropdown targetId={targetId} onLoad={onLoadDraft} />
+          <DraftDropdown targetId={targetId} currency={currency} onLoad={onLoadDraft} />
           {hasPlan && (
             <Button variant="outline" size="sm" onClick={onSaveDraft} disabled={isSaving}>
               <Icons.FileText className="mr-1.5 h-4 w-4" />
@@ -471,6 +526,7 @@ function InputBar({
 function EmptyState({
   targetId,
   cashValue,
+  currency,
   onCashChange,
   onCalculate,
   onLoadDraft,
@@ -478,6 +534,7 @@ function EmptyState({
 }: {
   targetId: string;
   cashValue: string;
+  currency: string;
   onCashChange: (v: string) => void;
   onCalculate: () => void;
   onLoadDraft: (draft: RebalanceDraft) => void;
@@ -504,7 +561,9 @@ function EmptyState({
               Available cash to deploy
             </label>
             <div className="border-input bg-background focus-within:ring-ring flex h-11 items-center rounded-md border px-3 focus-within:ring-2">
-              <span className="text-muted-foreground mr-1 text-[15px]">$</span>
+              <span className="text-muted-foreground mr-1 text-[15px]">
+                {currencySymbol(currency)}
+              </span>
               <input
                 value={cashValue}
                 onChange={(e) => onCashChange(e.target.value)}
@@ -524,7 +583,7 @@ function EmptyState({
               <Icons.BarChart className="mr-1.5 h-4 w-4" />
               {isCalculating ? "Calculating…" : "Calculate plan"}
             </Button>
-            <DraftDropdown targetId={targetId} onLoad={onLoadDraft} />
+            <DraftDropdown targetId={targetId} currency={currency} onLoad={onLoadDraft} />
           </div>
         </div>
       </CardContent>
@@ -622,7 +681,11 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       }
       setPlan(loadedPlan);
       setDraftLabel(
-        new Date(draft.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        new Date(draft.createdAt).toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
       );
     } catch {
       toast.error("Failed to load draft");
@@ -662,6 +725,7 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
         <InputBar
           targetId={profile.id}
           cashValue={cashValue}
+          currency={currency}
           onCashChange={setCashValue}
           onCalculate={handleCalculate}
           onSaveDraft={handleSaveDraft}
@@ -702,6 +766,7 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
         <EmptyState
           targetId={profile.id}
           cashValue={cashValue}
+          currency={currency}
           onCashChange={setCashValue}
           onCalculate={handleCalculate}
           onLoadDraft={handleLoadDraft}
@@ -799,13 +864,29 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
         </div>
       )}
 
-      {/* Footer with Export CSV */}
+      {/* Footer */}
       {plan && !isCalculating && (
-        <div className="border-border flex items-center justify-end border-t pt-4">
-          <Button variant="outline" size="sm" onClick={() => exportCsv(plan, currency)}>
-            <Icons.Download className="mr-1.5 h-4 w-4" />
-            Export CSV
-          </Button>
+        <div className="border-border flex items-center justify-between border-t pt-4">
+          <span className="text-muted-foreground text-[11px]">
+            Prices are estimates. Not financial advice.
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                copyToText(plan, currency);
+                toast.success("Copied to clipboard");
+              }}
+            >
+              <Icons.Copy className="mr-1.5 h-4 w-4" />
+              Copy as text
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => exportCsv(plan, currency)}>
+              <Icons.Download className="mr-1.5 h-4 w-4" />
+              Export CSV
+            </Button>
+          </div>
         </div>
       )}
     </div>
