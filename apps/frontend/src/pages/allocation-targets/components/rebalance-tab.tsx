@@ -114,7 +114,7 @@ function copyToText(plan: RebalancePlan, currency: string) {
     lines.push("", `${plan.warnings.length} warning(s):`);
     plan.warnings.forEach((w) => lines.push(`  · ${w.message}`));
   }
-  navigator.clipboard.writeText(lines.join("\n")).then(() => {});
+  void navigator.clipboard.writeText(lines.join("\n"));
 }
 
 // ── Mode switcher ─────────────────────────────────────────────────────────────
@@ -575,7 +575,7 @@ function EmptyState({
             How much cash do you want to deploy?
           </div>
           <div className="text-muted-foreground mt-1 max-w-sm text-[13px]">
-            We'll spread it across your underweight sleeves to cut drift as much as possible —
+            We&apos;ll spread it across your underweight sleeves to cut drift as much as possible —
             without selling a thing.
           </div>
         </div>
