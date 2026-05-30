@@ -263,15 +263,24 @@ function Warnings({ items }: { items: RebalanceWarning[] }) {
 function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; currency: string }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[13px]">
+      <table className="w-full table-fixed text-[13px]">
+        <colgroup>
+          <col className="w-[6%]" />
+          <col className="w-[23%]" />
+          <col className="w-[10%]" />
+          <col className="w-[13%]" />
+          <col className="w-[9%]" />
+          <col className="w-[12%]" />
+          <col className="w-[27%]" />
+        </colgroup>
         <thead>
           <tr className="border-border text-muted-foreground border-b text-[10px] uppercase tracking-wider">
             <th className="py-2.5 pl-5 pr-2 text-left font-medium">Action</th>
             <th className="py-2.5 pr-3 text-left font-medium">Ticker</th>
-            <th className="py-2.5 pr-3 text-left font-medium">Category</th>
+            <th className="py-2.5 pl-14 pr-3 text-left font-medium">Category</th>
             <th className="py-2.5 pr-3 text-right font-medium">Amount</th>
             <th className="py-2.5 pr-3 text-right font-medium">Shares</th>
-            <th className="py-2.5 pr-3 text-right font-medium">Last price</th>
+            <th className="py-2.5 pr-7 text-right font-medium">Last price</th>
             <th className="py-2.5 pl-10 pr-5 text-left font-medium">Reason</th>
           </tr>
         </thead>
@@ -290,26 +299,29 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
                       {t.symbol}
                     </div>
                     {t.name && (
-                      <div className="text-muted-foreground max-w-[180px] truncate text-[11px]">
-                        {t.name}
-                      </div>
+                      <div className="text-muted-foreground truncate text-[11px]">{t.name}</div>
                     )}
                   </>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
               </td>
-              <td className="text-muted-foreground pr-3 text-[12px]">{t.categoryName}</td>
+              <td className="text-muted-foreground pl-14 pr-3 text-[12px]">{t.categoryName}</td>
               <td className="text-foreground pr-3 text-right font-semibold tabular-nums">
                 {formatAmount(t.estimatedAmount, currency)}
               </td>
               <td className="text-muted-foreground pr-3 text-right tabular-nums">
                 {t.quantity != null ? t.quantity.toFixed(t.quantity % 1 === 0 ? 0 : 4) : "—"}
               </td>
-              <td className="text-muted-foreground pr-3 text-right tabular-nums">
+              <td className="text-muted-foreground pr-7 text-right tabular-nums">
                 {t.estimatedPrice != null ? formatAmount(t.estimatedPrice, currency) : "—"}
               </td>
-              <td className="text-muted-foreground pl-10 pr-5 text-[12px]">{t.reason}</td>
+              <td
+                className="text-muted-foreground max-w-0 truncate pl-10 pr-5 text-[12px]"
+                title={t.reason}
+              >
+                {t.reason}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -496,7 +508,7 @@ function InputBar({
   return (
     <Card>
       <CardContent className="flex flex-wrap items-end justify-between gap-4 px-5 py-4">
-        <div className="min-w-[220px]">
+        <div className="min-w-sidebar">
           <label className="text-muted-foreground mb-1.5 block text-[11px] font-medium uppercase tracking-wider">
             Available cash to deploy
           </label>
