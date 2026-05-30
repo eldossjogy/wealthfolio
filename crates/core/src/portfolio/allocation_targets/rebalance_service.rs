@@ -329,32 +329,34 @@ impl RebalanceServiceTrait for RebalanceService {
 
             // --- Intra-sleeve budget optimisation (whole_shares_only) -----------
             // After proportional round-lot allocation, rounding residue remains
-            // undeployed. Redistribute it to affordable holdings ordered by price
-            // ascending to maximise the number of purchasable shares without
-            // crossing sleeve boundaries.
+            // undeployed. Re-apply the same proportional weights to the residue
+            // iteratively until no further whole shares can be purchased. Using
+            // proportional weights (instead of price-ascending order) preserves
+            // sleeve composition — a cheap holding cannot absorb all the residue.
             if profile.whole_shares_only {
                 let mut residue = budget - sleeve_deployed;
-                let mut sorted: Vec<_> = holdings
-                    .iter()
-                    .filter(|h| h.quantity > Decimal::ZERO && h.market_value > Decimal::ZERO)
-                    .collect();
-                sorted.sort_by(|a, b| {
-                    let pa = a.market_value / a.quantity;
-                    let pb = b.market_value / b.quantity;
-                    pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
-                });
 
                 'deploy_residue: loop {
                     let mut absorbed = false;
-                    for holding in &sorted {
+                    for holding in holdings.iter() {
                         if residue <= Decimal::ZERO {
                             break 'deploy_residue;
                         }
-                        let price = holding.market_value / holding.quantity;
-                        if price <= Decimal::ZERO || price > residue {
+                        if holding.quantity <= Decimal::ZERO
+                            || holding.market_value <= Decimal::ZERO
+                        {
                             continue;
                         }
-                        let additional = (residue / price).floor();
+                        let price = holding.market_value / holding.quantity;
+                        if price <= Decimal::ZERO {
+                            continue;
+                        }
+                        let weight = if sleeve_total_value > Decimal::ZERO {
+                            holding.market_value / sleeve_total_value
+                        } else {
+                            Decimal::ONE / Decimal::from(holdings.len() as i64)
+                        };
+                        let additional = (residue * weight / price).floor();
                         if additional < Decimal::ONE {
                             continue;
                         }
