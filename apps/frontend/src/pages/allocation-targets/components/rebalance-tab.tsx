@@ -376,7 +376,7 @@ function BeforeAfterStack({ sleeves }: { sleeves: SleeveSummaryRow[] }) {
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-4">
       <StackRow label="Now" field="currentBps" />
       <StackRow label="Target" field="targetBps" />
       <StackRow label="After" field="afterBps" bold />
@@ -820,7 +820,7 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
               <Icons.Copy className="mr-1.5 h-4 w-4" />
               Copy as text
             </Button>
-            <Button variant="outline" size="sm" onClick={() => exportCsv(plan, currency)}>
+            <Button size="sm" onClick={() => exportCsv(plan, currency)}>
               <Icons.Download className="mr-1.5 h-4 w-4" />
               Export CSV
             </Button>
