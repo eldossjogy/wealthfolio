@@ -272,7 +272,7 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
             <th className="py-2.5 pr-3 text-right font-medium">Amount</th>
             <th className="py-2.5 pr-3 text-right font-medium">Shares</th>
             <th className="py-2.5 pr-3 text-right font-medium">Last price</th>
-            <th className="py-2.5 pl-6 pr-5 text-left font-medium">Reason</th>
+            <th className="py-2.5 pl-10 pr-5 text-left font-medium">Reason</th>
           </tr>
         </thead>
         <tbody>
@@ -309,7 +309,7 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
               <td className="text-muted-foreground pr-3 text-right tabular-nums">
                 {t.estimatedPrice != null ? formatAmount(t.estimatedPrice, currency) : "—"}
               </td>
-              <td className="text-muted-foreground pl-6 pr-5 text-[12px]">{t.reason}</td>
+              <td className="text-muted-foreground pl-10 pr-5 text-[12px]">{t.reason}</td>
             </tr>
           ))}
         </tbody>
@@ -806,13 +806,12 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       {plan && !isCalculating && (
         <div className="border-border flex items-center justify-between border-t pt-4">
           <span className="text-muted-foreground text-[11px]">
-            {profile.name} · Calculated{" "}
+            Profile: {profile.name} · Calculated{" "}
             {new Date().toLocaleDateString(undefined, {
               year: "numeric",
               month: "short",
               day: "numeric",
-            })}{" "}
-            · Prices are estimates
+            })}
           </span>
           <div className="flex gap-2">
             <Button
