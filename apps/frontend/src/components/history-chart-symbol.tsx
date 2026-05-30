@@ -1,6 +1,6 @@
 import { ActivityType } from "@/lib/constants";
 import { ActivityDetails, TimePeriod } from "@/lib/types";
-import { cn, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { Icons, formatAmount } from "@wealthfolio/ui";
 import { useMemo } from "react";
 import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, YAxis } from "recharts";
@@ -12,7 +12,20 @@ interface ActivityEnrichment {
   id: string;
 }
 
-interface CustomTooltipProps<
+interface HistoryChartData {
+  timestamp: string;
+  totalValue: number;
+  currency: string;
+  activities?: ActivityEnrichment[];
+}
+
+interface ActivityMarker {
+  index: number;
+  act: ActivityEnrichment;
+  point: HistoryChartData;
+}
+
+interface SymbolTooltipProps<
   TPayload = {
     timestamp: string;
     currency: string;
@@ -23,63 +36,11 @@ interface CustomTooltipProps<
   payload: { value: number; payload: TPayload }[];
 }
 
-const CustomTooltip = ({ active, payload }: CustomTooltipProps) => {
-  if (active && payload?.length) {
-    const data = payload[0].payload;
-
-    return (
-      <div className="bg-popover text-popover-foreground border-border/60 rounded-lg border p-3 text-sm shadow-lg">
-        <p className="text-muted-foreground mb-2 font-medium">{formatDate(data.timestamp)}</p>
-        <p className="mb-2 text-lg font-bold">
-          {formatAmount(payload[0].value, data.currency, false)}
-        </p>
-        {data.activities && data.activities.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {data.activities.map((act) => {
-              const isBuy = act.activityType === "BUY";
-              return (
-                <div
-                  key={act.id}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-md border px-3 py-2",
-                    isBuy
-                      ? "border-green-500/30 bg-green-500/10"
-                      : "border-blue-500/30 bg-blue-500/10",
-                  )}
-                >
-                  <div className="flex flex-1 items-center justify-between gap-3">
-                    <span
-                      className={cn(
-                        "text-sm font-semibold",
-                        isBuy
-                          ? "text-green-700 dark:text-green-300"
-                          : "text-blue-700 dark:text-blue-300",
-                      )}
-                    >
-                      {isBuy ? "Bought" : "Sold"}
-                    </span>
-                    <span className="text-muted-foreground text-sm tabular-nums">
-                      {parseFloat(act.quantity || "0")} @{" "}
-                      {formatAmount(parseFloat(act.unitPrice || "0"), data.currency, false)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return null;
-};
-
-interface HistoryChartData {
-  timestamp: string;
-  totalValue: number;
-  currency: string;
-  activities?: ActivityEnrichment[];
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function HistoryChart({
@@ -157,7 +118,7 @@ export default function HistoryChart({
               </linearGradient>
             </defs>
             {/* @ts-expect-error - Recharts Tooltip content typing mismatch */}
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<SymbolToolTip />} />
             {interval !== "ALL" && interval !== "1Y" ? (
               <YAxis hide={true} type="number" domain={["auto", "auto"]} />
             ) : null}
@@ -192,15 +153,47 @@ export default function HistoryChart({
   );
 }
 
-interface ActivityMarker {
-  index: number;
-  act: ActivityEnrichment;
-  point: HistoryChartData;
-}
+function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+  const data = payload[0].payload;
+  return (
+    <div className="bg-popover pointer-events-none grid grid-cols-1 gap-1.5 rounded-md border p-2 shadow-md">
+      <p className="text-muted-foreground text-xs">{formatDate(data.timestamp)}</p>
 
-function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+      <p className="text-base font-bold">{formatAmount(payload[0].value, data.currency, false)}</p>
+
+      {data.activities && data.activities.length > 0 && (
+        <>
+          <div className="border-border border-t" />
+          {data.activities.map((act) => {
+            const isBuy = act.activityType === "BUY";
+            return (
+              <div key={act.id} className="flex items-center justify-between space-x-2">
+                <div className="flex items-center space-x-1.5">
+                  <span
+                    className="block h-2.5 w-2.5 rounded-full"
+                    style={{
+                      backgroundColor: isBuy ? "var(--color-buy-dot)" : "var(--color-sell-dot)",
+                    }}
+                  />
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: isBuy ? "var(--color-buy-dot)" : "var(--color-sell-dot)" }}
+                  >
+                    {isBuy ? "Bought" : "Sold"}
+                  </span>
+                </div>
+                <span className="text-muted-foreground text-sm tabular-nums">
+                  {parseFloat(act.quantity || "0")} at{" "}
+                  {formatAmount(parseFloat(act.unitPrice || "0"), data.currency, false)}
+                </span>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
 }

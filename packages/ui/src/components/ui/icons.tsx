@@ -722,8 +722,8 @@ const IconsInternal = {
 
   BuyDot: ({ cx, cy }: IconProps) => (
     <g transform={`translate(${cx}, ${cy})`}>
-      <circle r={16} fill="var(--success)" opacity={0.15} />
-      <circle r={10} fill="var(--success)" />
+      <circle r={16} fill="var(--color-buy-dot)" opacity={0.15} />
+      <circle r={10} fill="var(--color-buy-dot)" />
       <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
         B
       </text>
@@ -733,8 +733,8 @@ const IconsInternal = {
   SellDot: ({ cx, cy }: IconProps) => {
     return (
       <g transform={`translate(${cx}, ${cy})`}>
-        <circle r={16} fill="#3b82f6" opacity={0.15} />
-        <circle r={10} fill="#3b82f6" />
+        <circle r={16} fill="var(--color-sell-dot)" opacity={0.15} />
+        <circle r={10} fill="var(--color-sell-dot)" />
         <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
           S
         </text>

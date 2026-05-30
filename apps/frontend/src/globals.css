@@ -260,6 +260,10 @@
   --color-chart-8: var(--chart-8);
   --color-chart-9: var(--chart-9);
 
+  /* Buy/sell dot colors */
+  --color-buy-dot: var(--buy-dot);
+  --color-sell-dot: var(--sell-dot);
+
   /* Sidebar colors */
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -435,6 +439,10 @@
   --chart-8: hsl(50 14% 83%);
   --chart-9: hsl(51 21% 88%);
 
+  /* Buy/sell dot colors */
+  --buy-dot: #22c55e;
+  --sell-dot: #3b82f6;
+
   /* Sidebar (full hsl colors) */
   --sidebar: hsl(var(--flexoki-bg));
   --sidebar-foreground: hsl(var(--flexoki-tx));
@@ -516,6 +524,7 @@
   --toast-info-fg: var(--color-blue-200);
   --toast-info-border: var(--color-blue-800);
 
+  --buy-dot: var(--success);
   --input: hsl(var(--flexoki-ui-2));
 }
 
