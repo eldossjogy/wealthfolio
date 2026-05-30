@@ -126,7 +126,7 @@ export default function HistoryChart({
       if (matchingActivities) {
         enrichedData.push({ ...point, activities: matchingActivities });
         for (const act of matchingActivities) {
-          activityMarkers.push({ index, act, pointData: point });
+          activityMarkers.push({ index, act, point });
         }
       } else {
         enrichedData.push(point);
@@ -177,11 +177,11 @@ export default function HistoryChart({
                 marker.act.activityType === "BUY" ? <Icons.BuyDot /> : <Icons.SellDot />;
               return (
                 <ReferenceDot
-                  key={marker.act.id}
-                  x={marker.index}
-                  y={marker.pointData.totalValue}
                   r={10}
+                  key={marker.act.id}
                   shape={shape}
+                  x={marker.index}
+                  y={marker.point.totalValue}
                 />
               );
             })}
@@ -195,7 +195,7 @@ export default function HistoryChart({
 interface ActivityMarker {
   index: number;
   act: ActivityEnrichment;
-  pointData: HistoryChartData;
+  point: HistoryChartData;
 }
 
 function dateKey(date: Date): string {
