@@ -363,7 +363,7 @@ impl RebalanceServiceTrait for RebalanceService {
                         Some((h, p))
                     })
                     .collect();
-                priced.sort_by(|a, b| a.1.cmp(&b.1));
+                priced.sort_by_key(|a| a.1);
 
                 'deploy_residue: loop {
                     let mut absorbed = false;
