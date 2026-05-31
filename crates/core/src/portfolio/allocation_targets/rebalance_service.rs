@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::errors::{Error as CoreError, Result as CoreResult};
 use crate::portfolio::allocation::AllocationServiceTrait;
+use crate::portfolio::holdings::HoldingSummary;
 
 use super::drift_service::DriftServiceTrait;
 use super::model::{
@@ -237,6 +238,9 @@ impl RebalanceServiceTrait for RebalanceService {
             let sleeve_total_value: Decimal = holdings.iter().map(|h| h.market_value).sum();
 
             let mut sleeve_deployed = Decimal::ZERO;
+            // Track holdings skipped in Phase 1 due to budget < price (whole-share mode).
+            // Emit a warning post-Phase-2 only if they are still un-funded.
+            let mut sleeve_skipped: Vec<(String, Decimal, Decimal)> = Vec::new();
 
             for holding in holdings {
                 // Proportional budget for this holding.
@@ -293,14 +297,9 @@ impl RebalanceServiceTrait for RebalanceService {
                 let (shares, amount) = if profile.whole_shares_only {
                     let whole = (holding_budget / price).floor();
                     if whole == Decimal::ZERO {
-                        warnings.push(RebalanceWarning {
-                            kind: RebalanceWarningKind::WholeShareResidue,
-                            category_id: sleeve.category_id.clone(),
-                            message: format!(
-                                "{}: ${:.2} budget insufficient for 1 whole share at ${:.2}. Skipped.",
-                                holding.symbol, holding_budget, price
-                            ),
-                        });
+                        // Skip emission for now — Phase 2 may rescue this holding from
+                        // sleeve residue. Warning is emitted post-Phase-2 if still skipped.
+                        sleeve_skipped.push((holding.symbol.clone(), holding_budget, price));
                         continue;
                     }
                     let amt = whole * price;
@@ -332,49 +331,59 @@ impl RebalanceServiceTrait for RebalanceService {
                 sleeve_deployed += amount;
             }
 
-            // --- Intra-sleeve budget optimisation (whole_shares_only) -----------
-            // After proportional round-lot allocation, rounding residue remains
-            // undeployed. Re-apply the same proportional weights to the residue
-            // iteratively until no further whole shares can be purchased. Using
-            // proportional weights (instead of price-ascending order) preserves
-            // sleeve composition — a cheap holding cannot absorb all the residue.
+            // --- Phase 2: Intra-sleeve residue absorption (whole_shares_only) ---
+            // After Phase 1 round-lot allocation, rounding residue remains. We
+            // redistribute it by buying ONE share at a time, cheapest-first.
+            //
+            // Rationale: a proportional `residue * weight / price` formula fails
+            // for small residues — each holding's slice is below its share price
+            // and the loop absorbs nothing. Buying one share per pass distributes
+            // the residue fairly without letting the cheapest holding absorb it
+            // all in a single shot.
+            //
+            // Side effect (intentional): a holding skipped in Phase 1 (budget <
+            // price) can be rescued here if the residue >= price. Holdings whose
+            // price exceeds the entire sleeve residue stay starved — see the
+            // post-loop warning below.
             if profile.whole_shares_only {
                 let mut residue = budget - sleeve_deployed;
 
+                // Build (holding, price) pairs filtered to those with a valid price,
+                // sorted by price ascending.
+                let mut priced: Vec<(&HoldingSummary, Decimal)> = holdings
+                    .iter()
+                    .filter_map(|h| {
+                        let p = h.unit_price.filter(|p| *p > Decimal::ZERO).or_else(|| {
+                            if h.quantity > Decimal::ZERO && h.market_value > Decimal::ZERO {
+                                Some(h.market_value / h.quantity)
+                            } else {
+                                None
+                            }
+                        })?;
+                        Some((h, p))
+                    })
+                    .collect();
+                priced.sort_by(|a, b| a.1.cmp(&b.1));
+
                 'deploy_residue: loop {
                     let mut absorbed = false;
-                    for holding in holdings.iter() {
+                    for (holding, price) in &priced {
                         if residue <= Decimal::ZERO {
                             break 'deploy_residue;
                         }
-                        let price = match holding.unit_price.filter(|p| *p > Decimal::ZERO) {
-                            Some(p) => p,
-                            None if holding.quantity > Decimal::ZERO
-                                && holding.market_value > Decimal::ZERO =>
-                            {
-                                holding.market_value / holding.quantity
-                            }
-                            _ => continue,
-                        };
-                        let weight = if sleeve_total_value > Decimal::ZERO {
-                            holding.market_value / sleeve_total_value
-                        } else {
-                            Decimal::ONE / Decimal::from(holdings.len() as i64)
-                        };
-                        let additional = (residue * weight / price).floor();
-                        if additional < Decimal::ONE {
+                        if residue < *price {
                             continue;
                         }
-                        let amt = additional * price;
-
+                        // Buy exactly 1 share per pass.
                         let existing = trades.iter_mut().rev().find(|t| {
                             t.asset_id.as_deref() == Some(holding.id.as_str())
                                 && t.category_id == sleeve.category_id
                         });
                         if let Some(t) = existing {
-                            t.quantity = t.quantity.map(|q| q + additional);
-                            t.estimated_amount += amt;
-                        } else if amt >= profile.min_trade_amount {
+                            t.quantity = t.quantity.map(|q| q + Decimal::ONE);
+                            t.estimated_amount += *price;
+                        } else if *price >= profile.min_trade_amount {
+                            // New trade (Phase 1 had skipped this holding).
                             trades.push(SuggestedManualTrade {
                                 action: "buy".to_string(),
                                 category_id: sleeve.category_id.clone(),
@@ -382,21 +391,44 @@ impl RebalanceServiceTrait for RebalanceService {
                                 asset_id: Some(holding.id.clone()),
                                 symbol: Some(holding.symbol.clone()),
                                 name: holding.name.clone(),
-                                quantity: Some(additional),
-                                estimated_price: Some(price),
-                                estimated_amount: amt,
+                                quantity: Some(Decimal::ONE),
+                                estimated_price: Some(*price),
+                                estimated_amount: *price,
                                 reason: format!(
                                     "{} is underweight in {}.",
                                     holding.symbol, sleeve.category_name
                                 ),
                             });
+                        } else {
+                            // Sub-min-trade new trade — skip and treat as undeployed.
+                            continue;
                         }
-                        sleeve_deployed += amt;
-                        residue -= amt;
+                        sleeve_deployed += *price;
+                        residue -= *price;
                         absorbed = true;
                     }
                     if !absorbed {
                         break;
+                    }
+                }
+
+                // Emit a warning for any Phase-1-skipped holding that Phase 2 did
+                // not rescue. Suggest the top-up amount needed to fund 1 share.
+                for (symbol, original_budget, price) in &sleeve_skipped {
+                    let funded = trades.iter().any(|t| {
+                        t.symbol.as_deref() == Some(symbol.as_str())
+                            && t.category_id == sleeve.category_id
+                    });
+                    if !funded {
+                        let topup = *price - *original_budget;
+                        warnings.push(RebalanceWarning {
+                            kind: RebalanceWarningKind::WholeShareResidue,
+                            category_id: sleeve.category_id.clone(),
+                            message: format!(
+                                "{}: proportional budget ${:.2} short of 1 share at ${:.2}. Add ~${:.2} more cash to fund 1 share, or {} will drift below target over time.",
+                                symbol, original_budget, price, topup, symbol
+                            ),
+                        });
                     }
                 }
             }
@@ -1029,6 +1061,124 @@ mod tests {
         assert!(
             (ratio - expected).abs() < dec!(0.01),
             "proportional weights: VTI should get 3x VXUS, got ratio {ratio}"
+        );
+    }
+
+    #[tokio::test]
+    async fn phase2_distributes_residue_one_share_at_a_time() {
+        // whole_shares_only ON. Equity sleeve underweight.
+        // Three holdings in sleeve, total market value = $420:
+        //   A: price $10, mv $100 (weight 23.81%)
+        //   B: price $30, mv $120 (weight 28.57%)
+        //   C: price $50, mv $200 (weight 47.62%)
+        // Cash $100 → sleeve budget $100 (scale_factor < 1).
+        //   Phase 1: A gets $23.81 → 2 shares × $10 = $20. B gets $28.57 → 0 (< $30 price), skipped.
+        //            C gets $47.62 → 0 (< $50 price), skipped. Deployed $20, residue $80.
+        // Phase 2 ASC (A 10, B 30, C 50), 1-share-at-a-time:
+        //   Pass 1: A +1 ($10), residue $70. B +1 ($30), residue $40. C: $40<$50 skip.
+        //   Pass 2: A +1 ($10), residue $30. B +1 ($30), residue $0.
+        // Final: A=4 shares, B=2 shares (rescued), C still starved.
+        //
+        // Verifies BOTH:
+        //  (a) Phase 2 absorbs residue (vs proportional Phase 2 which would absorb 0).
+        //  (b) Phase 2 does not give all residue to cheapest (vs original bug where A
+        //      would get floor(80/10)=8 shares and B would still be starved).
+        let total = dec!(10000);
+        let rows = vec![make_drift_row("equity", 4000, 8000, total)];
+        let report = make_report(rows, total);
+
+        let mut h = std::collections::HashMap::new();
+        h.insert(
+            "equity".to_string(),
+            vec![
+                make_holding("a", "A", dec!(10), dec!(100)),
+                make_holding("b", "B", dec!(4), dec!(120)),
+                make_holding("c", "C", dec!(4), dec!(200)),
+            ],
+        );
+
+        let svc = make_service(make_profile(RebalanceTo::ExactTarget, true), report, h);
+        let plan = svc.calculate_plan(make_input(dec!(100))).await.unwrap();
+
+        let a = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("A"))
+            .expect("A trade present");
+        let b = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("B"))
+            .expect("B trade present (rescued from skipped by Phase 2)");
+        let c = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("C"));
+
+        assert_eq!(
+            a.quantity,
+            Some(dec!(4)),
+            "A absorbs only what it needs (1 from Phase 1 + 3 from Phase 2), not all residue"
+        );
+        assert_eq!(
+            b.quantity,
+            Some(dec!(2)),
+            "B rescued from Phase 1 skip — Phase 2 buys 2 shares from residue"
+        );
+        assert!(
+            c.is_none(),
+            "C remains starved (price $50 never fits in residue once A and B consume their share)"
+        );
+        assert_eq!(
+            plan.cash_used,
+            dec!(100),
+            "Full $100 deployed across A and B"
+        );
+    }
+
+    #[tokio::test]
+    async fn phase2_emits_topup_warning_for_unrescued_starved_holding() {
+        // Single expensive holding X (price $240, only holding in sleeve).
+        // Cash $200 → sleeve budget $200 < $240 price.
+        // Phase 1: X skipped. Phase 2: residue $200 < $240 → cannot rescue.
+        // Warning emitted with topup = $240 - $200 = $40.
+        let total = dec!(10000);
+        let rows = vec![make_drift_row("equity", 5000, 8000, total)];
+        let report = make_report(rows, total);
+
+        let mut h = std::collections::HashMap::new();
+        h.insert(
+            "equity".to_string(),
+            vec![make_holding("x", "EXPENSIVE", dec!(5), dec!(1200))],
+        );
+
+        let svc = make_service(make_profile(RebalanceTo::ExactTarget, true), report, h);
+        let plan = svc.calculate_plan(make_input(dec!(200))).await.unwrap();
+
+        // No trade for EXPENSIVE.
+        assert!(
+            !plan
+                .trades
+                .iter()
+                .any(|t| t.symbol.as_deref() == Some("EXPENSIVE")),
+            "EXPENSIVE should be skipped (price $240 > sleeve budget $200)"
+        );
+
+        // Warning emitted with topup info.
+        let warn = plan
+            .warnings
+            .iter()
+            .find(|w| w.kind == RebalanceWarningKind::WholeShareResidue)
+            .expect("WholeShareResidue warning emitted for starved holding");
+        assert!(
+            warn.message.contains("EXPENSIVE"),
+            "warning names the symbol: {}",
+            warn.message
+        );
+        assert!(
+            warn.message.contains("40"),
+            "warning includes topup amount ($40 to fund 1 share): {}",
+            warn.message
         );
     }
 }
