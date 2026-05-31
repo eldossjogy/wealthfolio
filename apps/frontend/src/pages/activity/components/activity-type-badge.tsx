@@ -38,7 +38,7 @@ export function ActivityTypeBadge({ type, subtype, className }: ActivityTypeBadg
     : undefined;
 
   return (
-    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden">
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
       <Badge variant={variant} className={cn("rounded-sm", className)}>
         {ActivityTypeNames[type]}
       </Badge>

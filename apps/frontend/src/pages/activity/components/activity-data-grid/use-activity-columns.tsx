@@ -190,9 +190,7 @@ export function useActivityColumns({
               return (
                 <ActivityTypeBadge
                   type={value as ActivityType}
-                  subtype={
-                    shouldDisplaySubtype(transaction, value, subtype) ? subtype : undefined
-                  }
+                  subtype={shouldDisplaySubtype(transaction, value, subtype) ? subtype : undefined}
                   className="text-xs font-normal"
                 />
               );
@@ -235,7 +233,7 @@ export function useActivityColumns({
               return (
                 <Badge
                   variant="secondary"
-                  className="max-w-full min-w-0 rounded-sm px-1.5 text-xs"
+                  className="min-w-0 max-w-full rounded-sm px-1.5 text-xs"
                   title={displayLabel}
                 >
                   <span className="min-w-0 truncate">{displayLabel}</span>

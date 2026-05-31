@@ -242,9 +242,7 @@ export function TransactionsFilterBar({
       )}
       <span className="text-muted-foreground ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs tabular-nums">
         {countLabel}
-        {isRefreshing && (
-          <Icons.Spinner className="h-3 w-3 animate-spin" aria-label="Refreshing" />
-        )}
+        {isRefreshing && <Icons.Spinner className="h-3 w-3 animate-spin" aria-label="Refreshing" />}
       </span>
     </div>
   );
