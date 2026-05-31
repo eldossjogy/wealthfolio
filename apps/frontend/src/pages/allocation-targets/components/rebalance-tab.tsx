@@ -121,9 +121,14 @@ function copyToText(plan: RebalancePlan, currency: string) {
 
 function ModeSwitch({ currency }: { currency: string }) {
   const modes = [
-    { id: "full", label: "Full rebalance", hint: "buy + sell", soon: true },
-    { id: "cash", label: "Cash-only", hint: `deploy new ${currencySymbol(currency)}`, soon: false },
-    { id: "min", label: "Minimal trades", hint: "fewest moves", soon: true },
+    {
+      id: "cash",
+      label: "Cash-flow only",
+      hint: `deploy new ${currencySymbol(currency)}`,
+      soon: false,
+    },
+    { id: "sell", label: "Sell to rebalance", hint: "sells fund buys", soon: true },
+    { id: "hybrid", label: "Hybrid", hint: "cash + sells", soon: true },
   ] as const;
 
   return (
