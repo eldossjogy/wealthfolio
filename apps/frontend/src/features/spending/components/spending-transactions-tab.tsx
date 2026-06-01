@@ -715,6 +715,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           visibleCount={rows.length}
           totalCount={totalCount}
           isRefreshing={isRefreshing}
+          isMobile={isMobile}
         />
 
         {selectedRowIds.size > 0 && (

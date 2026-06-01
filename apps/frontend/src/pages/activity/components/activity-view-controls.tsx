@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ActivityType, ActivityTypeNames, INSTRUMENT_TYPE_OPTIONS } from "@/lib/constants";
 import { debounce } from "@/lib/debounce";
-import type { AccountScope } from "@/lib/types";
-import { AccountScopeSelector } from "@/components/account-filter-selector";
+import type { Account, AccountScope, PortfolioWithAccounts } from "@/lib/types";
 import {
   AnimatedToggleGroup,
   Button,
@@ -16,6 +15,8 @@ import type { ActivityStatusFilter } from "../hooks/use-activity-search";
 export type ActivityViewMode = "table" | "datagrid";
 
 interface ActivityViewControlsProps {
+  accounts: Account[];
+  portfolios: PortfolioWithAccounts[];
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   accountScope: AccountScope;
@@ -35,7 +36,24 @@ interface ActivityViewControlsProps {
   isFetching: boolean;
 }
 
+function accountIdsForScope(scope: AccountScope, portfolios: PortfolioWithAccounts[]): string[] {
+  if (scope.type === "account") return [scope.accountId];
+  if (scope.type === "accounts") return scope.accountIds;
+  if (scope.type === "portfolio") {
+    return portfolios.find((portfolio) => portfolio.id === scope.portfolioId)?.accountIds ?? [];
+  }
+  return [];
+}
+
+function scopeFromAccountIds(accountIds: string[]): AccountScope {
+  if (accountIds.length === 0) return { type: "all" };
+  if (accountIds.length === 1) return { type: "account", accountId: accountIds[0] };
+  return { type: "accounts", accountIds };
+}
+
 export function ActivityViewControls({
+  accounts,
+  portfolios,
   searchQuery,
   onSearchQueryChange,
   accountScope,
@@ -71,6 +89,30 @@ export function ActivityViewControls({
   useEffect(() => {
     setLocalSearch(searchQuery);
   }, [searchQuery]);
+
+  const accountOptions = useMemo(
+    () =>
+      accounts.map((account) => ({
+        value: account.id,
+        label: `${account.name} (${account.currency})`,
+      })),
+    [accounts],
+  );
+
+  const selectableAccountIds = useMemo(
+    () => new Set(accountOptions.map((option) => option.value)),
+    [accountOptions],
+  );
+
+  const selectedAccountIds = useMemo(
+    () =>
+      new Set(
+        accountIdsForScope(accountScope, portfolios).filter((accountId) =>
+          selectableAccountIds.has(accountId),
+        ),
+      ),
+    [accountScope, portfolios, selectableAccountIds],
+  );
 
   const activityOptions = useMemo(
     () =>
@@ -114,7 +156,15 @@ export function ActivityViewControls({
           className="w-[160px] lg:w-[240px]"
         />
 
-        <AccountScopeSelector value={accountScope} onChange={onAccountScopeChange} />
+        <FacetedFilter
+          title="Account"
+          contentClassName="w-72"
+          options={accountOptions}
+          selectedValues={selectedAccountIds}
+          onFilterChange={(values: Set<string>) =>
+            onAccountScopeChange(scopeFromAccountIds(Array.from(values)))
+          }
+        />
 
         <FacetedFilter
           title="Type"

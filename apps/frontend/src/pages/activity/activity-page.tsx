@@ -474,6 +474,8 @@ const ActivityPage = () => {
         />
       ) : (
         <ActivityViewControls
+          accounts={investmentAccounts}
+          portfolios={portfolios}
           searchQuery={searchInput}
           onSearchQueryChange={handleSearchChange}
           accountScope={accountScope}

@@ -38,6 +38,28 @@ const isTransferActivity = (activityType: string | undefined): boolean => {
   return activityType === ActivityType.TRANSFER_IN || activityType === ActivityType.TRANSFER_OUT;
 };
 
+const normalizeActivityToken = (value: string | null | undefined): string =>
+  value?.trim().toUpperCase() ?? "";
+
+const shouldDisplaySubtype = (
+  transaction: LocalTransaction | undefined,
+  activityType: string | undefined,
+  subtype: string | null | undefined,
+): boolean => {
+  const normalizedSubtype = normalizeActivityToken(subtype);
+  if (!normalizedSubtype) return false;
+
+  const normalizedActivityType = normalizeActivityToken(activityType);
+  return (
+    normalizedSubtype !== normalizedActivityType || (!!transaction && isPendingReview(transaction))
+  );
+};
+
+const getSubtypeDisplayLabel = (subtype: string, optionLabel?: string): string => {
+  const normalizedSubtype = normalizeActivityToken(subtype);
+  return optionLabel ?? SUBTYPE_DISPLAY_NAMES[normalizedSubtype] ?? subtype;
+};
+
 const UNIT_PRICE_HELP_TEXT =
   "For buys and sells, enter the trade price. For staking rewards and in-kind dividends, enter the fair market value per unit at receipt; it sets income amount and cost basis.";
 
@@ -161,13 +183,18 @@ export function useActivityColumns({
           cell: {
             variant: "select",
             options: activityTypeOptions,
-            valueRenderer: (value: string, _option, rowData) => (
-              <ActivityTypeBadge
-                type={value as ActivityType}
-                subtype={(rowData as LocalTransaction | undefined)?.subtype}
-                className="text-xs font-normal"
-              />
-            ),
+            valueRenderer: (value: string, _option, rowData) => {
+              const transaction = rowData as LocalTransaction | undefined;
+              const subtype = transaction?.subtype;
+
+              return (
+                <ActivityTypeBadge
+                  type={value as ActivityType}
+                  subtype={shouldDisplaySubtype(transaction, value, subtype) ? subtype : undefined}
+                  className="text-xs font-normal"
+                />
+              );
+            },
           },
         },
       },
@@ -195,6 +222,24 @@ export function useActivityColumns({
             }) as any,
             allowEmpty: true,
             emptyLabel: "None",
+            valueRenderer: (value: string, option, rowData) => {
+              const transaction = rowData as LocalTransaction | undefined;
+              if (!shouldDisplaySubtype(transaction, transaction?.activityType, value)) {
+                return null;
+              }
+
+              const displayLabel = getSubtypeDisplayLabel(value, option?.label);
+
+              return (
+                <Badge
+                  variant="secondary"
+                  className="min-w-0 max-w-full rounded-sm px-1.5 text-xs"
+                  title={displayLabel}
+                >
+                  <span className="min-w-0 truncate">{displayLabel}</span>
+                </Badge>
+              );
+            },
           },
         },
       },

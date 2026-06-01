@@ -17,6 +17,7 @@ import { cn } from "../../lib/utils";
 
 export interface FacetedFilterProps {
   title?: string;
+  contentClassName?: string;
   options: {
     label: string;
     value: string;
@@ -27,7 +28,13 @@ export interface FacetedFilterProps {
   onFilterChange: (values: Set<string>) => void;
 }
 
-export function FacetedFilter({ title, options, selectedValues, onFilterChange }: FacetedFilterProps) {
+export function FacetedFilter({
+  title,
+  contentClassName,
+  options,
+  selectedValues,
+  onFilterChange,
+}: FacetedFilterProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -70,7 +77,7 @@ export function FacetedFilter({ title, options, selectedValues, onFilterChange }
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-0" align="start">
+      <PopoverContent className={cn("w-[200px] p-0", contentClassName)} align="start">
         <Command>
           <CommandInput placeholder={title} />
           <CommandList>
