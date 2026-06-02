@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "@/pages/layouts/app-layout";
 import { OnboardingLayout } from "@/pages/layouts/onboarding-layout";
@@ -48,7 +48,6 @@ import GoalsDashboardPage from "@/features/goals/pages/goals-dashboard-page";
 import GoalNewPage from "@/features/goals/pages/goal-new-page";
 import GoalDetailPage from "@/features/goals/pages/goal-detail-page";
 import GoalRetirementGuidePage from "@/features/goals/pages/goal-retirement-guide-page";
-import { AllocationTargetsPage } from "@/pages/allocation-targets/allocation-targets-page";
 
 export function AppRoutes() {
   const [dynamicRoutes, setDynamicRoutes] = useState<
@@ -103,7 +102,10 @@ export function AppRoutes() {
           <Route path="health" element={<HealthPage />} />
           <Route path="assistant" element={<AiAssistantPage />} />
           <Route path="connect" element={<ConnectPage />} />
-          <Route path="allocation-targets" element={<AllocationTargetsPage />} />
+          <Route
+            path="allocation-targets"
+            element={<Navigate to="/insights?tab=overview" replace />}
+          />
           <Route path="goals" element={<GoalsDashboardPage />} />
           <Route path="goals/new" element={<GoalNewPage />} />
           <Route path="goals/:goalId/guide" element={<GoalRetirementGuidePage />} />

@@ -7,8 +7,8 @@ import PerformancePage from "@/pages/performance/performance-page";
 import { Icons } from "@wealthfolio/ui";
 import { Card, CardContent, CardHeader } from "@wealthfolio/ui/components/ui/card";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
-import { Suspense, useMemo, useState } from "react";
-import HoldingsInsightsPage from "../holdings/holdings-insights-page";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
+import { OverviewPage } from "./overview/overview-page";
 
 // Loading skeleton to show while the dashboard is loading
 const DashboardLoader = () => (
@@ -35,22 +35,29 @@ const DashboardLoader = () => (
 
 export default function PortfolioInsightsPage() {
   const [accountFilter, setAccountScope] = useState<AccountScope>({ type: "all" });
+  const [overviewToolbarActions, setOverviewToolbarActions] = useState<ReactNode | null>(null);
 
   const holdingsActions = useMemo(
-    () => <AccountScopeSelector value={accountFilter} onChange={setAccountScope} />,
-    [accountFilter],
+    () =>
+      overviewToolbarActions ?? (
+        <AccountScopeSelector value={accountFilter} onChange={setAccountScope} />
+      ),
+    [accountFilter, overviewToolbarActions],
   );
 
   // Define the views with icons
   const views: SwipablePageView[] = useMemo(
     () => [
       {
-        value: "holdings",
-        label: "Holdings",
+        value: "overview",
+        label: "Overview",
         icon: Icons.PieChart,
         content: (
           <Suspense fallback={<DashboardLoader />}>
-            <HoldingsInsightsPage filter={accountFilter} />
+            <OverviewPage
+              filter={accountFilter}
+              onToolbarActionsChange={setOverviewToolbarActions}
+            />
           </Suspense>
         ),
         actions: holdingsActions,
@@ -79,5 +86,5 @@ export default function PortfolioInsightsPage() {
     [accountFilter, holdingsActions],
   );
 
-  return <SwipablePage views={views} defaultView="holdings" withPadding={true} />;
+  return <SwipablePage views={views} defaultView="overview" withPadding={true} />;
 }
