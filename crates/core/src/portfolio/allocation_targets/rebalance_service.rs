@@ -52,10 +52,15 @@ impl RebalanceServiceTrait for RebalanceService {
         &self,
         input: CalculateRebalancePlanInput,
     ) -> CoreResult<RebalancePlan> {
-        debug!(
-            "Calculating rebalance plan for profile {} with {} available cash",
-            input.target_id, input.available_cash
-        );
+        debug!("Calculating rebalance plan for target {}", input.target_id);
+
+        if input.available_cash < Decimal::ZERO {
+            return Err(CoreError::Validation(
+                crate::errors::ValidationError::InvalidInput(
+                    "available_cash must be non-negative".to_string(),
+                ),
+            ));
+        }
 
         // --- 1. Load profile -------------------------------------------------
         let profile = self
@@ -184,7 +189,7 @@ impl RebalanceServiceTrait for RebalanceService {
                     kind: RebalanceWarningKind::NoBuyCandidate,
                     category_id: sleeve.category_id.clone(),
                     message: format!(
-                        "No holdings found in {}. Buy ${:.2} of this sleeve manually.",
+                        "No holdings found in {}. Allocate {:.2} to this sleeve manually.",
                         sleeve.category_name, budget
                     ),
                 });
@@ -401,7 +406,7 @@ impl RebalanceServiceTrait for RebalanceService {
                             kind: RebalanceWarningKind::WholeShareResidue,
                             category_id: sleeve.category_id.clone(),
                             message: format!(
-                                "{}: proportional budget ${:.2} short of 1 share at ${:.2}. Add ~${:.2} more cash to fund 1 share, or {} will drift below target over time.",
+                                "{}: budget {:.2} is short of 1 share at {:.2}. Add ~{:.2} more cash to fund 1 share, or {} will drift below target over time.",
                                 symbol, original_budget, price, topup, symbol
                             ),
                         });
@@ -416,21 +421,22 @@ impl RebalanceServiceTrait for RebalanceService {
         }
 
         // --- 6. Estimate max_drift_bps_after ---------------------------------
-        let total_value_after = total_value + total_cash_used;
-
-        let max_drift_bps_after = if total_value_after == Decimal::ZERO {
+        // Total value is constant (tracked cash moves within portfolio, not added from outside).
+        // Only consider required rows — matches DriftService.max_drift_bps semantics.
+        let max_drift_bps_after = if total_value == Decimal::ZERO {
             0
         } else {
             drift
                 .rows
                 .iter()
+                .filter(|row| row.is_required)
                 .map(|row| {
                     let deployed = deployed_per_sleeve
                         .get(&row.category_id)
                         .copied()
                         .unwrap_or(Decimal::ZERO);
                     let new_value = row.current_value + deployed;
-                    let new_bps = (new_value / total_value_after * bps_scale)
+                    let new_bps = (new_value / total_value * bps_scale)
                         .round()
                         .to_string()
                         .parse::<i32>()
@@ -444,9 +450,8 @@ impl RebalanceServiceTrait for RebalanceService {
         let cash_remaining = input.available_cash - total_cash_used;
 
         debug!(
-            "Plan: {} trades, ${} used, ${} remaining, max drift {} → {} bps",
+            "Rebalance plan: {} trades, {} remaining cash, max drift {} → {} bps",
             trades.len(),
-            total_cash_used,
             cash_remaining,
             max_drift_bps_before,
             max_drift_bps_after,

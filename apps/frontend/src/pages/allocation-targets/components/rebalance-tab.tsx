@@ -60,8 +60,24 @@ function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
     });
 }
 
+function csvCell(value: string): string {
+  const escaped = value.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
 function exportCsv(plan: RebalancePlan, currency: string) {
-  const header = "Action,Symbol,Name,Category,Amount,Shares,Last Price,Reason";
+  const header = [
+    "Action",
+    "Symbol",
+    "Name",
+    "Category",
+    `Amount (${currency})`,
+    "Shares",
+    `Last Price (${currency})`,
+    "Reason",
+  ]
+    .map(csvCell)
+    .join(",");
   const rows = plan.trades.map((t) =>
     [
       t.action,
@@ -71,8 +87,10 @@ function exportCsv(plan: RebalancePlan, currency: string) {
       t.estimatedAmount.toFixed(2),
       t.quantity != null ? t.quantity.toFixed(4) : "",
       t.estimatedPrice != null ? t.estimatedPrice.toFixed(2) : "",
-      `"${t.reason}"`,
-    ].join(","),
+      t.reason,
+    ]
+      .map(csvCell)
+      .join(","),
   );
   const csv = [header, ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
