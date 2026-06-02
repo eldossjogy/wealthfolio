@@ -2897,8 +2897,24 @@ impl PerformanceServiceTrait for PerformanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::portfolio::valuation::ExternalFlowSource;
+    use crate::assets::{
+        Asset, AssetKind, AssetRepositoryTrait, NewAsset, ProviderProfile, QuoteMode,
+        UpdateAssetProfile,
+    };
+    use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
+    use crate::lots::{AssetLotView, LotClosure};
+    use crate::portfolio::snapshot::{AccountStateSnapshot, HoldingsCalculator, Lot, Position};
+    use crate::portfolio::valuation::{
+        ExternalFlowSource, NegativeBalanceInfo, ValuationRecalcMode,
+    };
+    use crate::quotes::{
+        FetchDividendsParams, LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote,
+        QuoteImport, QuoteSyncState, ResolvedQuote, SymbolSearchResult, SymbolSyncPlan, SyncMode,
+        SyncResult,
+    };
     use chrono::{DateTime, Utc};
+    use std::collections::VecDeque;
+    use wealthfolio_market_data::DividendEvent;
 
     fn attribution_pnl(result: &PerformanceResult) -> Decimal {
         result.attribution.income
@@ -2972,6 +2988,968 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct TestValuationService {
+        history: Vec<DailyAccountValuation>,
+    }
+
+    impl TestValuationService {
+        fn new(history: Vec<DailyAccountValuation>) -> Self {
+            Self { history }
+        }
+
+        fn filtered_history(
+            &self,
+            start_date_opt: Option<NaiveDate>,
+            end_date_opt: Option<NaiveDate>,
+        ) -> Vec<DailyAccountValuation> {
+            self.history
+                .iter()
+                .filter(|valuation| {
+                    start_date_opt.is_none_or(|start| valuation.valuation_date >= start)
+                        && end_date_opt.is_none_or(|end| valuation.valuation_date <= end)
+                })
+                .cloned()
+                .collect()
+        }
+    }
+
+    #[async_trait]
+    impl ValuationServiceTrait for TestValuationService {
+        async fn calculate_valuation_history(
+            &self,
+            _account_id: &str,
+            _mode: ValuationRecalcMode,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_historical_valuations(
+            &self,
+            account_id: &str,
+            start_date_opt: Option<NaiveDate>,
+            end_date_opt: Option<NaiveDate>,
+        ) -> Result<Vec<DailyAccountValuation>> {
+            Ok(self
+                .filtered_history(start_date_opt, end_date_opt)
+                .into_iter()
+                .filter(|valuation| valuation.account_id == account_id)
+                .collect())
+        }
+
+        fn get_historical_valuations_for_accounts(
+            &self,
+            _scope_id: &str,
+            account_ids: &[String],
+            _base_currency: &str,
+            start_date_opt: Option<NaiveDate>,
+            end_date_opt: Option<NaiveDate>,
+        ) -> Result<Vec<DailyAccountValuation>> {
+            Ok(self
+                .filtered_history(start_date_opt, end_date_opt)
+                .into_iter()
+                .filter(|valuation| account_ids.contains(&valuation.account_id))
+                .collect())
+        }
+
+        fn get_latest_valuations(
+            &self,
+            account_ids: &[String],
+        ) -> Result<Vec<DailyAccountValuation>> {
+            Ok(account_ids
+                .iter()
+                .filter_map(|account_id| {
+                    self.history
+                        .iter()
+                        .rev()
+                        .find(|valuation| valuation.account_id == *account_id)
+                        .cloned()
+                })
+                .collect())
+        }
+
+        fn get_valuations_on_date(
+            &self,
+            account_ids: &[String],
+            date: NaiveDate,
+        ) -> Result<Vec<DailyAccountValuation>> {
+            Ok(self
+                .history
+                .iter()
+                .filter(|valuation| {
+                    valuation.valuation_date == date && account_ids.contains(&valuation.account_id)
+                })
+                .cloned()
+                .collect())
+        }
+
+        fn get_accounts_with_negative_balance(
+            &self,
+            _account_ids: &[String],
+        ) -> Result<Vec<NegativeBalanceInfo>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct TestQuoteService;
+
+    #[async_trait]
+    impl QuoteServiceTrait for TestQuoteService {
+        fn get_latest_quote(&self, _symbol: &str) -> Result<Quote> {
+            Err(errors::Error::Unexpected(
+                "TestQuoteService::get_latest_quote should not be called".to_string(),
+            ))
+        }
+
+        fn get_latest_quotes(&self, _symbols: &[String]) -> Result<HashMap<String, Quote>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_latest_quotes_as_of(
+            &self,
+            _symbols: &[String],
+            _as_of: NaiveDate,
+        ) -> Result<HashMap<String, Quote>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_latest_quotes_snapshot(
+            &self,
+            _asset_ids: &[String],
+        ) -> Result<HashMap<String, LatestQuoteSnapshot>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_latest_quotes_pair(
+            &self,
+            _symbols: &[String],
+        ) -> Result<HashMap<String, LatestQuotePair>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_historical_quotes(&self, _symbol: &str) -> Result<Vec<Quote>> {
+            Ok(Vec::new())
+        }
+
+        fn get_all_historical_quotes(&self) -> Result<HashMap<String, Vec<(NaiveDate, Quote)>>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_quotes_in_range(
+            &self,
+            _symbols: &HashSet<String>,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            Ok(Vec::new())
+        }
+
+        fn get_quotes_in_range_filled(
+            &self,
+            _symbols: &HashSet<String>,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_daily_quotes(
+            &self,
+            _asset_ids: &HashSet<String>,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<HashMap<NaiveDate, HashMap<String, Quote>>> {
+            Ok(HashMap::new())
+        }
+
+        async fn add_quote(&self, _quote: &Quote) -> Result<Quote> {
+            Err(errors::Error::Unexpected(
+                "TestQuoteService::add_quote should not be called".to_string(),
+            ))
+        }
+
+        async fn update_quote(&self, quote: Quote) -> Result<Quote> {
+            Ok(quote)
+        }
+
+        async fn delete_quote(&self, _quote_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn bulk_upsert_quotes(&self, _quotes: Vec<Quote>) -> Result<usize> {
+            Ok(0)
+        }
+
+        async fn search_symbol(&self, _query: &str) -> Result<Vec<SymbolSearchResult>> {
+            Ok(Vec::new())
+        }
+
+        async fn search_symbol_with_currency(
+            &self,
+            _query: &str,
+            _account_currency: Option<&str>,
+        ) -> Result<Vec<SymbolSearchResult>> {
+            Ok(Vec::new())
+        }
+
+        async fn resolve_symbol_quote(
+            &self,
+            _symbol: &str,
+            _exchange_mic: Option<&str>,
+            _instrument_type: Option<&crate::assets::InstrumentType>,
+            _quote_ccy: Option<&str>,
+            _preferred_provider: Option<&str>,
+        ) -> Result<ResolvedQuote> {
+            Ok(ResolvedQuote::default())
+        }
+
+        async fn get_asset_profile(&self, _asset: &Asset) -> Result<ProviderProfile> {
+            Ok(ProviderProfile::default())
+        }
+
+        async fn fetch_quotes_from_provider(
+            &self,
+            _asset_id: &str,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            Ok(Vec::new())
+        }
+
+        async fn fetch_quotes_for_symbol(
+            &self,
+            _asset_id: &str,
+            _currency: &str,
+            _start: NaiveDate,
+            _end: NaiveDate,
+        ) -> Result<Vec<Quote>> {
+            Ok(Vec::new())
+        }
+
+        async fn fetch_dividends(
+            &self,
+            _params: FetchDividendsParams,
+        ) -> Result<Vec<DividendEvent>> {
+            Ok(Vec::new())
+        }
+
+        async fn sync(
+            &self,
+            _mode: SyncMode,
+            _asset_ids: Option<Vec<String>>,
+        ) -> Result<SyncResult> {
+            Err(errors::Error::Unexpected(
+                "TestQuoteService::sync should not be called".to_string(),
+            ))
+        }
+
+        async fn resync(&self, _asset_ids: Option<Vec<String>>) -> Result<SyncResult> {
+            Err(errors::Error::Unexpected(
+                "TestQuoteService::resync should not be called".to_string(),
+            ))
+        }
+
+        async fn refresh_sync_state(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_sync_plan(&self) -> Result<Vec<SymbolSyncPlan>> {
+            Ok(Vec::new())
+        }
+
+        async fn handle_activity_created(
+            &self,
+            _symbol: &str,
+            _activity_date: NaiveDate,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn handle_activity_deleted(&self, _symbol: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_sync_state(&self, _symbol: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_symbols_needing_sync(&self) -> Result<Vec<QuoteSyncState>> {
+            Ok(Vec::new())
+        }
+
+        fn get_sync_state(&self, _symbol: &str) -> Result<Option<QuoteSyncState>> {
+            Ok(None)
+        }
+
+        async fn mark_profile_enriched(&self, _symbol: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_assets_needing_profile_enrichment(&self) -> Result<Vec<QuoteSyncState>> {
+            Ok(Vec::new())
+        }
+
+        fn get_sync_states_with_errors(&self) -> Result<Vec<QuoteSyncState>> {
+            Ok(Vec::new())
+        }
+
+        async fn reset_sync_errors(&self, _asset_ids: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        async fn reset_sync_state_for_profile_change(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn update_position_status_from_holdings(
+            &self,
+            _current_holdings: &HashMap<String, Decimal>,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_providers_info(&self) -> Result<Vec<ProviderInfo>> {
+            Ok(Vec::new())
+        }
+
+        async fn update_provider_settings(
+            &self,
+            _provider_id: &str,
+            _priority: i32,
+            _enabled: bool,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn check_quotes_import(
+            &self,
+            _content: &[u8],
+            _has_header_row: bool,
+        ) -> Result<Vec<QuoteImport>> {
+            Ok(Vec::new())
+        }
+
+        async fn import_quotes(
+            &self,
+            quotes: Vec<QuoteImport>,
+            _overwrite: bool,
+        ) -> Result<Vec<QuoteImport>> {
+            Ok(quotes)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct TestFxService;
+
+    #[async_trait]
+    impl FxServiceTrait for TestFxService {
+        fn initialize(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_historical_rates(
+            &self,
+            _from_currency: &str,
+            _to_currency: &str,
+            _days: i64,
+        ) -> Result<Vec<ExchangeRate>> {
+            Ok(Vec::new())
+        }
+
+        fn get_latest_exchange_rate(
+            &self,
+            from_currency: &str,
+            to_currency: &str,
+        ) -> Result<Decimal> {
+            if from_currency == to_currency {
+                Ok(Decimal::ONE)
+            } else {
+                Err(errors::Error::Unexpected(
+                    "TestFxService only supports same-currency conversion".to_string(),
+                ))
+            }
+        }
+
+        fn get_exchange_rate_for_date(
+            &self,
+            from_currency: &str,
+            to_currency: &str,
+            _date: NaiveDate,
+        ) -> Result<Decimal> {
+            self.get_latest_exchange_rate(from_currency, to_currency)
+        }
+
+        fn convert_currency(
+            &self,
+            amount: Decimal,
+            from_currency: &str,
+            to_currency: &str,
+        ) -> Result<Decimal> {
+            self.convert_currency_for_date(amount, from_currency, to_currency, date("2026-05-01"))
+        }
+
+        fn convert_currency_for_date(
+            &self,
+            amount: Decimal,
+            from_currency: &str,
+            to_currency: &str,
+            _date: NaiveDate,
+        ) -> Result<Decimal> {
+            if from_currency == to_currency {
+                Ok(amount)
+            } else {
+                Err(errors::Error::Unexpected(
+                    "TestFxService only supports same-currency conversion".to_string(),
+                ))
+            }
+        }
+
+        fn get_latest_exchange_rates(&self) -> Result<Vec<ExchangeRate>> {
+            Ok(Vec::new())
+        }
+
+        async fn add_exchange_rate(&self, _new_rate: NewExchangeRate) -> Result<ExchangeRate> {
+            Err(errors::Error::Unexpected(
+                "TestFxService::add_exchange_rate should not be called".to_string(),
+            ))
+        }
+
+        async fn update_exchange_rate(
+            &self,
+            _from_currency: &str,
+            _to_currency: &str,
+            _rate: Decimal,
+        ) -> Result<ExchangeRate> {
+            Err(errors::Error::Unexpected(
+                "TestFxService::update_exchange_rate should not be called".to_string(),
+            ))
+        }
+
+        async fn delete_exchange_rate(&self, _rate_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn register_currency_pair(
+            &self,
+            _from_currency: &str,
+            _to_currency: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn register_currency_pair_manual(
+            &self,
+            _from_currency: &str,
+            _to_currency: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn ensure_fx_pairs(&self, _pairs: Vec<(String, String)>) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct TestAssetRepository;
+
+    #[async_trait]
+    impl AssetRepositoryTrait for TestAssetRepository {
+        async fn create(&self, _new_asset: NewAsset) -> Result<Asset> {
+            Err(errors::Error::Unexpected(
+                "TestAssetRepository::create should not be called".to_string(),
+            ))
+        }
+
+        async fn create_batch(&self, _new_assets: Vec<NewAsset>) -> Result<Vec<Asset>> {
+            Err(errors::Error::Unexpected(
+                "TestAssetRepository::create_batch should not be called".to_string(),
+            ))
+        }
+
+        async fn update_profile(
+            &self,
+            _asset_id: &str,
+            _payload: UpdateAssetProfile,
+        ) -> Result<Asset> {
+            Err(errors::Error::Unexpected(
+                "TestAssetRepository::update_profile should not be called".to_string(),
+            ))
+        }
+
+        async fn update_quote_mode(&self, _asset_id: &str, _quote_mode: &str) -> Result<Asset> {
+            Err(errors::Error::Unexpected(
+                "TestAssetRepository::update_quote_mode should not be called".to_string(),
+            ))
+        }
+
+        fn get_by_id(&self, asset_id: &str) -> Result<Asset> {
+            if asset_id == "AAPL" {
+                Ok(Asset {
+                    id: "AAPL".to_string(),
+                    display_code: Some("AAPL".to_string()),
+                    quote_ccy: "USD".to_string(),
+                    name: Some("Apple Inc.".to_string()),
+                    kind: AssetKind::Investment,
+                    quote_mode: QuoteMode::Market,
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                    ..Default::default()
+                })
+            } else {
+                Err(errors::Error::Repository(format!(
+                    "Test asset not found: {}",
+                    asset_id
+                )))
+            }
+        }
+
+        fn list(&self) -> Result<Vec<Asset>> {
+            Ok(vec![self.get_by_id("AAPL")?])
+        }
+
+        fn list_by_asset_ids(&self, asset_ids: &[String]) -> Result<Vec<Asset>> {
+            Ok(asset_ids
+                .iter()
+                .filter_map(|asset_id| self.get_by_id(asset_id).ok())
+                .collect())
+        }
+
+        async fn delete(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn search_by_symbol(&self, _query: &str) -> Result<Vec<Asset>> {
+            Ok(Vec::new())
+        }
+
+        fn find_by_instrument_key(&self, _instrument_key: &str) -> Result<Option<Asset>> {
+            Ok(None)
+        }
+
+        async fn cleanup_legacy_metadata(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn deactivate(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn reactivate(&self, _asset_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn copy_user_metadata(&self, _source_id: &str, _target_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        async fn deactivate_orphaned_investments(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestLotRepository {
+        disposals: Vec<LotDisposal>,
+    }
+
+    #[async_trait]
+    impl LotRepositoryTrait for TestLotRepository {
+        async fn replace_lots_for_account(
+            &self,
+            _account_id: &str,
+            _lots: &[LotRecord],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_open_lots_for_account(&self, _account_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_open_lots(&self) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_as_of_date(
+            &self,
+            _account_ids: &[String],
+            _date: NaiveDate,
+        ) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots_for_account(&self, _account_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_lots_for_asset(&self, _asset_id: &str) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_asset_lot_view(
+            &self,
+            _asset_id: &str,
+            _include_snapshot_positions: bool,
+        ) -> Result<Vec<AssetLotView>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_all_lots(&self) -> Result<Vec<LotRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn sync_lots_for_account(
+            &self,
+            _account_id: &str,
+            _open_lots: &[LotRecord],
+            _closures: &[LotClosure],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn get_lot_disposals_for_account(
+            &self,
+            account_id: &str,
+        ) -> Result<Vec<LotDisposal>> {
+            Ok(self
+                .disposals
+                .iter()
+                .filter(|disposal| disposal.account_id == account_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>> {
+            Ok(HashMap::new())
+        }
+
+        fn count_lots(&self) -> Result<i64> {
+            Ok(0)
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestActivityRepository {
+        activities: Vec<Activity>,
+    }
+
+    impl TestActivityRepository {
+        fn new(activities: Vec<Activity>) -> Self {
+            Self { activities }
+        }
+    }
+
+    #[async_trait]
+    impl ActivityRepositoryTrait for TestActivityRepository {
+        fn get_activity(&self, activity_id: &str) -> Result<Activity> {
+            self.activities
+                .iter()
+                .find(|activity| activity.id == activity_id)
+                .cloned()
+                .ok_or_else(|| {
+                    errors::Error::Unexpected(format!("activity {} not found", activity_id))
+                })
+        }
+
+        fn get_activities(&self) -> Result<Vec<Activity>> {
+            Ok(self.activities.clone())
+        }
+
+        fn get_activities_by_account_id(&self, account_id: &str) -> Result<Vec<Activity>> {
+            Ok(self
+                .activities
+                .iter()
+                .filter(|activity| activity.account_id == account_id)
+                .cloned()
+                .collect())
+        }
+
+        fn get_activities_by_account_ids(&self, account_ids: &[String]) -> Result<Vec<Activity>> {
+            Ok(self
+                .activities
+                .iter()
+                .filter(|activity| account_ids.contains(&activity.account_id))
+                .cloned()
+                .collect())
+        }
+
+        fn get_trading_activities(&self) -> Result<Vec<Activity>> {
+            Ok(self
+                .activities
+                .iter()
+                .filter(|activity| {
+                    matches!(
+                        activity.effective_type(),
+                        crate::activities::ACTIVITY_TYPE_BUY
+                            | crate::activities::ACTIVITY_TYPE_SELL
+                            | crate::activities::ACTIVITY_TYPE_SPLIT
+                    )
+                })
+                .cloned()
+                .collect())
+        }
+
+        fn get_income_activities(&self) -> Result<Vec<Activity>> {
+            Ok(self
+                .activities
+                .iter()
+                .filter(|activity| {
+                    matches!(
+                        activity.effective_type(),
+                        crate::activities::ACTIVITY_TYPE_DIVIDEND
+                            | crate::activities::ACTIVITY_TYPE_INTEREST
+                    )
+                })
+                .cloned()
+                .collect())
+        }
+
+        fn get_contribution_activities(
+            &self,
+            _account_ids: &[String],
+            _start_utc: DateTime<Utc>,
+            _end_exclusive_utc: DateTime<Utc>,
+        ) -> Result<Vec<crate::limits::ContributionActivity>> {
+            Ok(Vec::new())
+        }
+
+        fn search_activities(
+            &self,
+            _page: i64,
+            _page_size: i64,
+            _account_id_filter: Option<Vec<String>>,
+            _activity_type_filter: Option<Vec<String>>,
+            _asset_id_keyword: Option<String>,
+            _sort: Option<crate::activities::Sort>,
+            _needs_review_filter: Option<bool>,
+            _date_from: Option<NaiveDate>,
+            _date_to: Option<NaiveDate>,
+            _instrument_type_filter: Option<Vec<String>>,
+        ) -> Result<crate::activities::ActivitySearchResponse> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::search_activities should not be called".to_string(),
+            ))
+        }
+
+        async fn create_activity(
+            &self,
+            _new_activity: crate::activities::NewActivity,
+        ) -> Result<Activity> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::create_activity should not be called".to_string(),
+            ))
+        }
+
+        async fn update_activity(
+            &self,
+            _activity_update: crate::activities::ActivityUpdate,
+        ) -> Result<Activity> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::update_activity should not be called".to_string(),
+            ))
+        }
+
+        async fn delete_activity(&self, _activity_id: String) -> Result<Activity> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::delete_activity should not be called".to_string(),
+            ))
+        }
+
+        async fn link_transfer_activities(
+            &self,
+            _activity_a_id: String,
+            _activity_b_id: String,
+        ) -> Result<(Activity, Activity)> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::link_transfer_activities should not be called".to_string(),
+            ))
+        }
+
+        async fn unlink_transfer_activities(
+            &self,
+            _activity_a_id: String,
+            _activity_b_id: String,
+        ) -> Result<(Activity, Activity)> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::unlink_transfer_activities should not be called"
+                    .to_string(),
+            ))
+        }
+
+        async fn bulk_mutate_activities(
+            &self,
+            _creates: Vec<crate::activities::NewActivity>,
+            _updates: Vec<crate::activities::ActivityUpdate>,
+            _delete_ids: Vec<String>,
+        ) -> Result<crate::activities::ActivityBulkMutationResult> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::bulk_mutate_activities should not be called".to_string(),
+            ))
+        }
+
+        async fn create_activities(
+            &self,
+            _activities: Vec<crate::activities::NewActivity>,
+        ) -> Result<usize> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::create_activities should not be called".to_string(),
+            ))
+        }
+
+        fn get_first_activity_date(
+            &self,
+            account_ids: Option<&[String]>,
+        ) -> Result<Option<DateTime<Utc>>> {
+            let first = self
+                .activities
+                .iter()
+                .filter(|activity| {
+                    account_ids
+                        .map(|ids| ids.contains(&activity.account_id))
+                        .unwrap_or(true)
+                })
+                .map(|activity| activity.activity_date)
+                .min();
+            Ok(first)
+        }
+
+        fn get_import_mapping(
+            &self,
+            _account_id: &str,
+            _context_kind: &str,
+        ) -> Result<Option<crate::activities::ImportMapping>> {
+            Ok(None)
+        }
+
+        async fn save_import_mapping(
+            &self,
+            _mapping: &crate::activities::ImportMapping,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn link_account_template(
+            &self,
+            _account_id: &str,
+            _template_id: &str,
+            _context_kind: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn list_import_templates(&self) -> Result<Vec<crate::activities::ImportTemplate>> {
+            Ok(Vec::new())
+        }
+
+        fn get_import_template(
+            &self,
+            _template_id: &str,
+        ) -> Result<Option<crate::activities::ImportTemplate>> {
+            Ok(None)
+        }
+
+        async fn save_import_template(
+            &self,
+            _template: &crate::activities::ImportTemplate,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_import_template(&self, _template_id: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_broker_sync_profile(
+            &self,
+            _account_id: &str,
+            _source_system: &str,
+        ) -> Result<Option<crate::activities::ImportTemplate>> {
+            Ok(None)
+        }
+
+        async fn save_broker_sync_profile(
+            &self,
+            _template: &crate::activities::ImportTemplate,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn link_broker_sync_profile(
+            &self,
+            _account_id: &str,
+            _template_id: &str,
+            _source_system: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn calculate_average_cost(&self, _account_id: &str, _asset_id: &str) -> Result<Decimal> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::calculate_average_cost should not be called".to_string(),
+            ))
+        }
+
+        fn get_income_activities_data(
+            &self,
+            _account_ids: Option<&[String]>,
+        ) -> Result<Vec<crate::activities::IncomeData>> {
+            Ok(Vec::new())
+        }
+
+        fn get_first_activity_date_overall(&self) -> Result<DateTime<Utc>> {
+            self.activities
+                .iter()
+                .map(|activity| activity.activity_date)
+                .min()
+                .ok_or_else(|| errors::Error::Unexpected("no activities".to_string()))
+        }
+
+        fn get_activity_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+        ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>> {
+            Ok(HashMap::new())
+        }
+
+        fn get_holdings_snapshot_bounds_for_assets(
+            &self,
+            _asset_ids: &[String],
+        ) -> Result<HashMap<String, (Option<NaiveDate>, Option<NaiveDate>)>> {
+            Ok(HashMap::new())
+        }
+
+        fn check_existing_duplicates(
+            &self,
+            _idempotency_keys: &[String],
+        ) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+
+        async fn bulk_upsert(
+            &self,
+            _activities: Vec<crate::activities::ActivityUpsert>,
+        ) -> Result<crate::activities::BulkUpsertResult> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::bulk_upsert should not be called".to_string(),
+            ))
+        }
+
+        async fn reassign_asset(&self, _old_asset_id: &str, _new_asset_id: &str) -> Result<u32> {
+            Err(errors::Error::Unexpected(
+                "TestActivityRepository::reassign_asset should not be called".to_string(),
+            ))
+        }
+
+        async fn get_activity_accounts_and_currencies_by_asset_id(
+            &self,
+            _asset_id: &str,
+        ) -> Result<(Vec<String>, Vec<String>)> {
+            Ok((Vec::new(), Vec::new()))
+        }
+    }
+
     /// Build the fixture used by the divergence / invariant tests: Feb 15 seed
     /// of 100 CAD, Mar 15 deposit of 2000 CAD + buy of 7 × 260, then a synthetic
     /// linear drift in holdings value to 1809.16 by Apr 14. Mirrors the shape
@@ -3030,6 +4008,446 @@ mod tests {
 
     fn date(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    fn activity_time(date_str: &str) -> DateTime<Utc> {
+        date(date_str).and_hms_opt(0, 0, 0).unwrap().and_utc()
+    }
+
+    fn test_activity(
+        id: &str,
+        account_id: &str,
+        activity_type: ActivityType,
+        date_str: &str,
+    ) -> Activity {
+        let activity_time = activity_time(date_str);
+        Activity {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            asset_id: None,
+            activity_type: activity_type.as_str().to_string(),
+            activity_type_override: None,
+            source_type: None,
+            subtype: None,
+            status: crate::activities::ActivityStatus::Posted,
+            activity_date: activity_time,
+            settlement_date: None,
+            quantity: None,
+            unit_price: None,
+            amount: None,
+            fee: Some(Decimal::ZERO),
+            currency: "USD".to_string(),
+            fx_rate: None,
+            notes: None,
+            metadata: None,
+            source_system: None,
+            source_record_id: None,
+            source_group_id: None,
+            idempotency_key: None,
+            import_run_id: None,
+            is_user_modified: false,
+            needs_review: false,
+            created_at: activity_time,
+            updated_at: activity_time,
+        }
+    }
+
+    fn sell_activity_on(
+        id: &str,
+        account_id: &str,
+        date_str: &str,
+        quantity: Decimal,
+        price: Decimal,
+    ) -> Activity {
+        let mut activity = test_activity(id, account_id, ActivityType::Sell, date_str);
+        activity.asset_id = Some("AAPL".to_string());
+        activity.quantity = Some(quantity);
+        activity.unit_price = Some(price);
+        activity
+    }
+
+    fn sell_activity(id: &str, account_id: &str, quantity: Decimal, price: Decimal) -> Activity {
+        sell_activity_on(id, account_id, "2026-05-02", quantity, price)
+    }
+
+    fn split_activity_on(id: &str, account_id: &str, date_str: &str, ratio: Decimal) -> Activity {
+        let mut activity = test_activity(id, account_id, ActivityType::Split, date_str);
+        activity.asset_id = Some("AAPL".to_string());
+        activity.amount = Some(ratio);
+        activity
+    }
+
+    fn income_activity_on(
+        id: &str,
+        account_id: &str,
+        date_str: &str,
+        activity_type: ActivityType,
+        amount: Decimal,
+    ) -> Activity {
+        let mut activity = test_activity(id, account_id, activity_type, date_str);
+        activity.amount = Some(amount);
+        activity
+    }
+
+    fn generate_fifo_sell_disposal() -> LotDisposal {
+        let account_id = "acct";
+        let start_date = date("2026-05-01");
+        let sell_date = date("2026-05-02");
+        let acquisition_time = start_date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+
+        let mut position = Position::new(
+            account_id.to_string(),
+            "AAPL".to_string(),
+            "USD".to_string(),
+            acquisition_time,
+        );
+        position.quantity = dec!(10);
+        position.average_cost = dec!(100);
+        position.total_cost_basis = dec!(1000);
+        position.lots = VecDeque::from([Lot {
+            id: "lot-1".to_string(),
+            position_id: position.id.clone(),
+            acquisition_date: acquisition_time,
+            quantity: dec!(10),
+            original_quantity: dec!(10),
+            cost_basis: dec!(1000),
+            acquisition_price: dec!(100),
+            acquisition_fees: Decimal::ZERO,
+            original_acquisition_fees: Decimal::ZERO,
+            fx_rate_to_position: None,
+            source_activity_id: Some("buy-1".to_string()),
+            split_ratio: Decimal::ONE,
+        }]);
+
+        let previous_snapshot = AccountStateSnapshot {
+            id: AccountStateSnapshot::stable_id(account_id, start_date),
+            account_id: account_id.to_string(),
+            snapshot_date: start_date,
+            currency: "USD".to_string(),
+            positions: HashMap::from([("AAPL".to_string(), position)]),
+            cost_basis: dec!(1000),
+            net_contribution: dec!(1000),
+            net_contribution_base: dec!(1000),
+            calculated_at: start_date.and_hms_opt(0, 0, 0).unwrap(),
+            ..Default::default()
+        };
+
+        let calculator = HoldingsCalculator::new(
+            Arc::new(TestFxService),
+            Arc::new(RwLock::new("USD".to_string())),
+            Arc::new(TestAssetRepository),
+        );
+        let result = calculator
+            .calculate_next_holdings(
+                &previous_snapshot,
+                &[sell_activity("sell-1", account_id, dec!(4), dec!(120))],
+                sell_date,
+            )
+            .expect("sell should reduce FIFO lots");
+
+        let position = result
+            .snapshot
+            .positions
+            .get("AAPL")
+            .expect("remaining AAPL position should exist");
+        assert_eq!(position.quantity, dec!(6));
+        assert_eq!(position.total_cost_basis, dec!(600));
+
+        let disposals = calculator.take_lot_disposals(account_id, "FIFO");
+        assert_eq!(disposals.len(), 1);
+        disposals.into_iter().next().unwrap()
+    }
+
+    fn generate_split_sell_disposal() -> LotDisposal {
+        let account_id = "acct";
+        let start_date = date("2026-05-01");
+        let split_date = date("2026-05-02");
+        let sell_date = date("2026-05-03");
+        let acquisition_time = activity_time("2026-05-01");
+
+        let mut position = Position::new(
+            account_id.to_string(),
+            "AAPL".to_string(),
+            "USD".to_string(),
+            acquisition_time,
+        );
+        position.quantity = dec!(10);
+        position.average_cost = dec!(100);
+        position.total_cost_basis = dec!(1000);
+        position.lots = VecDeque::from([Lot {
+            id: "lot-1".to_string(),
+            position_id: position.id.clone(),
+            acquisition_date: acquisition_time,
+            quantity: dec!(10),
+            original_quantity: dec!(10),
+            cost_basis: dec!(1000),
+            acquisition_price: dec!(100),
+            acquisition_fees: Decimal::ZERO,
+            original_acquisition_fees: Decimal::ZERO,
+            fx_rate_to_position: None,
+            source_activity_id: Some("buy-1".to_string()),
+            split_ratio: Decimal::ONE,
+        }]);
+
+        let previous_snapshot = AccountStateSnapshot {
+            id: AccountStateSnapshot::stable_id(account_id, start_date),
+            account_id: account_id.to_string(),
+            snapshot_date: start_date,
+            currency: "USD".to_string(),
+            positions: HashMap::from([("AAPL".to_string(), position)]),
+            cost_basis: dec!(1000),
+            net_contribution: dec!(1000),
+            net_contribution_base: dec!(1000),
+            calculated_at: start_date.and_hms_opt(0, 0, 0).unwrap(),
+            ..Default::default()
+        };
+
+        let calculator = HoldingsCalculator::new(
+            Arc::new(TestFxService),
+            Arc::new(RwLock::new("USD".to_string())),
+            Arc::new(TestAssetRepository),
+        );
+        let split_result = calculator
+            .calculate_next_holdings(
+                &previous_snapshot,
+                &[split_activity_on(
+                    "split-1",
+                    account_id,
+                    "2026-05-02",
+                    dec!(2),
+                )],
+                split_date,
+            )
+            .expect("split should adjust the open lot");
+        let split_position = split_result
+            .snapshot
+            .positions
+            .get("AAPL")
+            .expect("split AAPL position should exist");
+        assert_eq!(split_position.quantity, dec!(20));
+        assert_eq!(split_position.average_cost, dec!(50));
+        assert_eq!(split_position.total_cost_basis, dec!(1000));
+        assert_eq!(split_position.lots[0].quantity, dec!(10));
+        assert_eq!(split_position.lots[0].split_ratio, dec!(2));
+
+        let sell_result = calculator
+            .calculate_next_holdings(
+                &split_result.snapshot,
+                &[sell_activity_on(
+                    "sell-split-1",
+                    account_id,
+                    "2026-05-03",
+                    dec!(6),
+                    dec!(70),
+                )],
+                sell_date,
+            )
+            .expect("post-split sell should reduce FIFO lots");
+        let position = sell_result
+            .snapshot
+            .positions
+            .get("AAPL")
+            .expect("remaining AAPL position should exist");
+        assert_eq!(position.quantity, dec!(14));
+        assert_eq!(position.average_cost, dec!(50));
+        assert_eq!(position.total_cost_basis, dec!(700));
+        assert_eq!(position.lots[0].quantity, dec!(7));
+        assert_eq!(position.lots[0].split_ratio, dec!(2));
+
+        let disposals = calculator.take_lot_disposals(account_id, "FIFO");
+        assert_eq!(disposals.len(), 1);
+        disposals.into_iter().next().unwrap()
+    }
+
+    #[tokio::test]
+    async fn sell_lot_disposal_feeds_realized_pnl_and_cashflow_into_performance() {
+        let disposal = generate_fifo_sell_disposal();
+        assert_eq!(disposal.disposal_activity_id, "sell-1");
+        assert_eq!(disposal.cost_basis_method, "FIFO");
+        assert_eq!(Decimal::from_str(&disposal.proceeds).unwrap(), dec!(480));
+        assert_eq!(Decimal::from_str(&disposal.cost_basis).unwrap(), dec!(400));
+        assert_eq!(Decimal::from_str(&disposal.realized_pnl).unwrap(), dec!(80));
+        assert_eq!(
+            Decimal::from_str(&disposal.proceeds_base).unwrap(),
+            dec!(480)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.cost_basis_base).unwrap(),
+            dec!(400)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl_base).unwrap(),
+            dec!(80)
+        );
+
+        let mut start = valuation("2026-05-01", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
+        start.account_currency = "USD".to_string();
+        start.base_currency = "USD".to_string();
+        start.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut after_sell = valuation("2026-05-02", dec!(1200), dec!(1000), dec!(720), dec!(600));
+        after_sell.account_currency = "USD".to_string();
+        after_sell.base_currency = "USD".to_string();
+        after_sell.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut after_withdrawal =
+            valuation("2026-05-03", dec!(1000), dec!(800), dec!(720), dec!(600));
+        after_withdrawal.account_currency = "USD".to_string();
+        after_withdrawal.base_currency = "USD".to_string();
+        after_withdrawal.external_outflow_base = dec!(200);
+        after_withdrawal.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let valuation_service = Arc::new(TestValuationService::new(vec![
+            start,
+            after_sell,
+            after_withdrawal,
+        ]));
+        let performance_service =
+            PerformanceService::new(valuation_service, Arc::new(TestQuoteService))
+                .with_lot_repository(Arc::new(TestLotRepository {
+                    disposals: vec![disposal],
+                }));
+        let account_ids = vec!["acct".to_string()];
+
+        let performance = performance_service
+            .calculate_performance_history_for_accounts(
+                "scope:acct",
+                &account_ids,
+                "USD",
+                &HashMap::new(),
+                Some(date("2026-05-01")),
+                Some(date("2026-05-03")),
+            )
+            .await
+            .expect("performance should include lot disposal attribution");
+
+        assert_eq!(performance.attribution.contributions, Decimal::ZERO);
+        assert_eq!(performance.attribution.distributions, dec!(200));
+        assert_eq!(performance.attribution.realized_pnl, dec!(80));
+        assert_eq!(performance.attribution.unrealized_pnl_change, dec!(120));
+        assert_eq!(performance.attribution.residual, Decimal::ZERO);
+        assert_eq!(attribution_pnl(&performance), dec!(200));
+        assert_eq!(performance.returns.twr.unwrap().round_dp(4), dec!(0.2));
+        assert_eq!(
+            performance.returns.value_return.unwrap().round_dp(4),
+            dec!(0.2)
+        );
+        assert_eq!(
+            performance.series.last().unwrap().value.round_dp(4),
+            dec!(0.2)
+        );
+    }
+
+    #[tokio::test]
+    async fn split_sell_disposal_dividend_and_interest_feed_performance_attribution() {
+        let disposal = generate_split_sell_disposal();
+        assert_eq!(disposal.disposal_activity_id, "sell-split-1");
+        assert_eq!(disposal.cost_basis_method, "FIFO");
+        assert_eq!(Decimal::from_str(&disposal.quantity).unwrap(), dec!(6));
+        assert_eq!(Decimal::from_str(&disposal.proceeds).unwrap(), dec!(420));
+        assert_eq!(Decimal::from_str(&disposal.cost_basis).unwrap(), dec!(300));
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl).unwrap(),
+            dec!(120)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.proceeds_base).unwrap(),
+            dec!(420)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.cost_basis_base).unwrap(),
+            dec!(300)
+        );
+        assert_eq!(
+            Decimal::from_str(&disposal.realized_pnl_base).unwrap(),
+            dec!(120)
+        );
+
+        let mut start = valuation("2026-05-01", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
+        start.account_currency = "USD".to_string();
+        start.base_currency = "USD".to_string();
+        start.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut after_split =
+            valuation("2026-05-02", dec!(1000), dec!(1000), dec!(1000), dec!(1000));
+        after_split.account_currency = "USD".to_string();
+        after_split.base_currency = "USD".to_string();
+        after_split.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut after_sell = valuation("2026-05-03", dec!(1470), dec!(1000), dec!(1050), dec!(700));
+        after_sell.account_currency = "USD".to_string();
+        after_sell.base_currency = "USD".to_string();
+        after_sell.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let mut after_income_withdrawal =
+            valuation("2026-05-04", dec!(1420), dec!(900), dec!(1050), dec!(700));
+        after_income_withdrawal.account_currency = "USD".to_string();
+        after_income_withdrawal.base_currency = "USD".to_string();
+        after_income_withdrawal.external_outflow_base = dec!(100);
+        after_income_withdrawal.external_flow_source = ExternalFlowSource::ActivityDerived;
+
+        let valuation_service = Arc::new(TestValuationService::new(vec![
+            start,
+            after_split,
+            after_sell,
+            after_income_withdrawal,
+        ]));
+        let activity_repo = Arc::new(TestActivityRepository::new(vec![
+            split_activity_on("split-1", "acct", "2026-05-02", dec!(2)),
+            sell_activity_on("sell-split-1", "acct", "2026-05-03", dec!(6), dec!(70)),
+            income_activity_on(
+                "dividend-1",
+                "acct",
+                "2026-05-04",
+                ActivityType::Dividend,
+                dec!(30),
+            ),
+            income_activity_on(
+                "interest-1",
+                "acct",
+                "2026-05-04",
+                ActivityType::Interest,
+                dec!(20),
+            ),
+        ]));
+        let performance_service =
+            PerformanceService::new(valuation_service, Arc::new(TestQuoteService))
+                .with_lot_repository(Arc::new(TestLotRepository {
+                    disposals: vec![disposal],
+                }))
+                .with_activity_repository(activity_repo, Arc::new(TestFxService));
+        let account_ids = vec!["acct".to_string()];
+
+        let performance = performance_service
+            .calculate_performance_history_for_accounts(
+                "scope:acct",
+                &account_ids,
+                "USD",
+                &HashMap::new(),
+                Some(date("2026-05-01")),
+                Some(date("2026-05-04")),
+            )
+            .await
+            .expect("performance should include split-aware disposal and income attribution");
+
+        assert_eq!(performance.attribution.contributions, Decimal::ZERO);
+        assert_eq!(performance.attribution.distributions, dec!(100));
+        assert_eq!(performance.attribution.income, dec!(50));
+        assert_eq!(performance.attribution.realized_pnl, dec!(120));
+        assert_eq!(performance.attribution.unrealized_pnl_change, dec!(350));
+        assert_eq!(performance.attribution.fees, Decimal::ZERO);
+        assert_eq!(performance.attribution.taxes, Decimal::ZERO);
+        assert_eq!(performance.attribution.residual, Decimal::ZERO);
+        assert_eq!(attribution_pnl(&performance), dec!(520));
+        assert_eq!(performance.returns.twr.unwrap().round_dp(4), dec!(0.52));
+        assert_eq!(
+            performance.returns.value_return.unwrap().round_dp(4),
+            dec!(0.52)
+        );
+        assert_eq!(
+            performance.series.last().unwrap().value.round_dp(4),
+            dec!(0.52)
+        );
     }
 
     fn activity_fixture(activity_type: ActivityType, amount: Decimal, fee: Decimal) -> Activity {
