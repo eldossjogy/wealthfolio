@@ -58,16 +58,16 @@ function buildCategoryTree(categories: TaxonomyCategory[]): CategoryNode[] {
     }
   });
 
-  const sortNodes = (nodes: CategoryNode[]): CategoryNode[] => {
+  const sortWeights = (nodes: CategoryNode[]): CategoryNode[] => {
     return nodes
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((node) => ({
         ...node,
-        children: sortNodes(node.children),
+        children: sortWeights(node.children),
       }));
   };
 
-  return sortNodes(roots);
+  return sortWeights(roots);
 }
 
 function flattenTree(nodes: CategoryNode[]): CategoryNode[] {

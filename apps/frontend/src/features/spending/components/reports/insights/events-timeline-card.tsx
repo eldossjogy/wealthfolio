@@ -222,7 +222,7 @@ export const EventsTimelineCard: FC<EventsTimelineCardProps> = ({
   }, [events]);
 
   return (
-    <div className={cn(CARD_CLASS, "font-mono")} ref={containerRef}>
+    <div className={CARD_CLASS} ref={containerRef}>
       {/* HEADER */}
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>

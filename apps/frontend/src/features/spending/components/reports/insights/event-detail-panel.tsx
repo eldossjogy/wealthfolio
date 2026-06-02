@@ -129,7 +129,7 @@ export const EventDetailPanel: FC<EventDetailPanelProps> = ({
   };
 
   return (
-    <div className={cn(CARD_CLASS, "font-mono")}>
+    <div className={CARD_CLASS}>
       {/* HEADER */}
       <div className="mb-3">
         <div className="flex items-center justify-between gap-2">

@@ -30,7 +30,7 @@ export const EventsCalendarCard: FC<Props> = ({ events, currency, selectedId, on
   const { monthLabel, monthStart, monthEnd, weeks, monthEvents } = useMonthCalendar(events, cursor);
 
   return (
-    <div className={cn(CARD_CLASS, "font-mono")}>
+    <div className={CARD_CLASS}>
       {/* Header */}
       <div className="mb-3">
         <div className="flex items-center justify-between gap-2">
