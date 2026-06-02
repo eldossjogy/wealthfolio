@@ -1,242 +1,352 @@
-# SOTA Performance Pipeline Plan With Acceptance Criteria
+# Performance Metrics Reference
 
-## Summary
+This document describes the performance metrics Wealthfolio calculates, when
+each metric applies, and the calculation conventions used by the backend
+performance engine.
 
-Build one typed performance engine for accounts, dashboard groups, saved
-portfolios, assets, and the performance page. Drop the legacy Dietz-style
-flow-adjusted return completely. Use TWR for comparison, true IRR for personal
-cash-flow return, value/P&L for holdings-only scopes, and attribution/risk from
-the same ledger.
+The performance engine returns a typed `PerformanceResult` for account,
+portfolio, dashboard group, saved portfolio, and symbol scopes. Frontend, Tauri,
+web, addon, and AI surfaces should use these backend results directly instead of
+rolling up returns in the client.
 
-Public behavior defaults:
+## Result Shape
 
-- **Transaction scopes:** show TWR, IRR, attribution, volatility, drawdown.
-- **Holdings-only scopes:** show value return, total P&L, volatility, drawdown;
-  no TWR/IRR.
-- **Mixed scopes:** show value return/P&L plus warning; no TWR/IRR in v1.
-- **Symbols/assets:** show price/value return and P&L; IRR only when scoped to
-  user transactions.
-- **Dashboard/account groups/portfolios:** all returns/risk/attribution come
-  from backend scoped performance, not frontend rollups.
+`PerformanceResult` contains:
 
-## API And Model Changes
+- `scope`: stable scope identifier and display currency.
+- `period`: actual start and end valuation dates used for the calculation.
+- `mode`: the primary return method for the scope.
+- `returns`: TWR, IRR, value return, and annualized variants.
+- `attribution`: cash flows and P&L components explaining period value change.
+- `risk`: volatility and drawdown metrics.
+- `dataQuality`: warnings and reasons for missing or partial metrics.
+- `series`: cumulative return points for charting when history is requested.
+- `isHoldingsMode` / `isMixedTrackingMode`: scope applicability flags.
 
-- Replace the old scalar-first performance result with `PerformanceResult`:
-  - `scope`, `period`, `mode`
-  - `returns`: `twr`, `annualizedTwr`, `irr`, `annualizedIrr`, `valueReturn`
-  - `attribution`: `contributions`, `distributions`, `income`, `realizedPnl`,
-    `unrealizedPnlChange`, `fxEffect`, `fees`, `taxes`, `residual`
-  - `risk`: `volatility`, `maxDrawdown`, `peakDate`, `troughDate`,
-    `recoveryDate`, `drawdownDurationDays`
-  - `dataQuality`: `status`, `warnings[]`, `notApplicableReasons[]`
-- Remove legacy Dietz-style fields and semantics from Rust, TS, addon SDK, AI
-  tool UI, desktop commands, and web API.
-- Add batch scoped summary command/API:
-  - `get_performance_summaries(scopes[], period)`
-  - Scope key is stable and derived from sorted account IDs, not group name.
-- Add `lot_disposals` read model for every disposal slice, including partial
-  sells.
-- Extend lots with dual-currency basis: local cost basis, base cost basis, and
-  FX at acquisition.
-- Keep settings flat: add `defaultReturnMetric`, no nested setting shape.
+All return rates are decimals, not percentages. For example, `0.125` means
+`12.5%`.
 
-## Implementation Checkpoints And Acceptance Criteria
+## Scope Behavior
 
-### Checkpoint 1: Contract And Terminology
+### Transaction Scopes
 
-Implement the new result types and remove legacy Dietz-style terminology from
-public UI/API language.
+Transaction-mode accounts and all-transaction grouped scopes use transaction
+cash flows.
 
-Acceptance criteria:
+- Primary comparison metric: `returns.twr`
+- Personal cash-flow metric: `returns.irr`
+- Annualized fields: populated in full profile results
+- Attribution: contributions, distributions, income, realized P&L, unrealized
+  P&L, FX effect, fees, taxes, residual
+- Risk: volatility and max drawdown in full profile results
 
-- No user-facing label, tooltip, enum variant, TS type, addon SDK type, AI
-  display, or docs page exposes legacy Dietz-style terminology.
-- Old money-weighted aliases are not reused for fake MWR.
-- Existing frontend callers compile against `PerformanceResult`.
-- Empty/no-data responses return `null` metrics with `dataQuality`, not zero
-  returns.
-- `pnpm type-check` passes.
+Transaction scopes are the only scopes where TWR and IRR are meaningful.
 
-### Checkpoint 2: TWR And IRR Engine
+### Holdings-Only Scopes
 
-Keep GIPS-style daily TWR, add true XIRR, and remove legacy fallback behavior.
+Holdings-only accounts do not have full transaction cash-flow history.
 
-Acceptance criteria:
+- Primary return metric: `returns.valueReturn`
+- TWR: `null`
+- IRR: `null`
+- Risk: calculated from value-return samples in full profile results
+- Attribution: limited to available value, cost-basis, and FX facts
 
-- TWR uses start-of-day external inflows and end-of-day external outflows.
-- TWR chain starts only once opening value is positive and denominator is at
-  least 1 base currency unit.
-- Tiny/zero denominator periods produce `null` TWR with a clear not-applicable
-  reason.
-- IRR uses ACT/365.25 dated cash flows:
-  - beginning value and contributions are negative
-  - distributions and ending value are positive
-- `returns.annualized_irr` stores annualized XIRR; `returns.irr` stores the
-  selected-period money-weighted return derived from that XIRR.
-- IRR returns `null` with warning for no sign change, insufficient data, or
-  non-convergence.
-- Transaction-mode account summary uses TWR as comparison return and IRR as
-  personal return.
-- Unit tests cover zero-start accounts, early deposits, same-period withdrawals,
-  no sign change, and convergence failure.
-- `cargo test -p wealthfolio-core performance` passes.
+For all-time holdings-only returns, the denominator is ending cost basis. For a
+selected period, the denominator is starting market value.
 
-### Checkpoint 3: Typed Daily Flow Ledger
+### Mixed Tracking Scopes
 
-Make account and scoped performance use gross typed external flows.
+Mixed scopes contain both transaction-mode and holdings-only accounts.
 
-Acceptance criteria:
+- Primary return metric: `returns.valueReturn`
+- TWR: `null`
+- IRR: `null`
+- Data quality: warning explaining the mixed tracking-mode limitation
+- Risk: calculated in full profile results
 
-- Single-account valuation populates `external_inflow_base` and
-  `external_outflow_base` from activity classification, not only net
-  contribution deltas.
-- Same-day deposit and withdrawal remain two gross flows for IRR/attribution.
-- Scoped account, group, and portfolio calculations use the same flow source.
-- Internal transfers are excluded from external performance flows.
-- Unit tests prove same-day deposit + withdrawal does not collapse to net.
-- Existing valuation tests still pass.
+Mixed scopes use value return because there is no single complete cash-flow
+ledger for TWR or IRR.
 
-### Checkpoint 4: Lot Disposals And Attribution
+### Symbol And Price Scopes
 
-Persist disposal events and build the attribution identity.
+Symbol-only performance uses market price history.
 
-Acceptance criteria:
+- Primary return metric: `returns.valueReturn`
+- TWR: `null`
+- IRR: `null`
+- Attribution: not portfolio cash-flow based
+- Risk: calculated from quoted price returns when enough samples exist
 
-- Every sell creates deterministic `lot_disposals` rows for each FIFO lot slice.
-- Partial sells no longer lose realized P&L history.
-- Migration/rebuild path deterministically replays existing activities to
-  populate disposals.
-- Attribution identity closes:
+Dividends and distributions are excluded unless the quote series itself is
+total-return adjusted.
 
-  ```txt
-  delta_total_value_base
-    = contributions - distributions
-    + income
-    + realized_pnl + unrealized_pnl_change
-    + fx_effect
-    - fees - taxes
-    + residual
-  ```
+## Return Metrics
 
-- Residual is a loud warning when
-  `abs(residual) > max(1 base unit, 0.1% of max(abs(delta), ending value, 1))`.
-- `Holding.realized_gain` is wired end-to-end instead of mostly returning
-  `None`.
-- Unit fixture includes one foreign-currency security, one dividend, one partial
-  sale, one FX move, and verifies attribution identity.
+### Time-Weighted Return
 
-### Checkpoint 5: Risk Metrics
+Field: `returns.twr`
 
-Update volatility and drawdown semantics.
+TWR measures investment performance while neutralizing the size and timing of
+external cash flows. Use it to compare manager, account, portfolio, or benchmark
+performance.
 
-Acceptance criteria:
+Method:
 
-- Volatility uses log returns from valid market-movement days.
-- Annualization uses `sqrt(252)`.
-- Crypto-only or calendar-daily scopes get a data-quality note that
-  annualization is equity-style.
-- Max drawdown API returns a signed negative rate.
-- Drawdown includes peak date, trough date, recovery date if recovered, and
-  duration.
-- Unit tests cover unrecovered drawdown, recovered drawdown, flat series, and
-  missing values.
+- Build daily valuation periods from stored daily valuation rows.
+- Treat external inflows as start-of-day flows.
+- Treat external outflows as end-of-day flows.
+- Link valid daily returns geometrically.
+- Start compounding only once opening value is positive and the denominator is
+  at least 1 base currency unit.
+- Exclude tiny or invalid denominator periods from compounding and report a
+  not-applicable reason when the chain cannot start.
 
-### Checkpoint 6: Dashboard, Groups, And Portfolios
+TWR is unavailable for holdings-only, mixed tracking, and symbol-only scopes.
 
-Move dashboard performance to backend scoped results.
+### Annualized TWR
 
-Acceptance criteria:
+Field: `returns.annualizedTwr`
 
-- Dashboard hero no longer uses frontend valuation-row return rollups.
-- Account rows use account-scope backend results.
-- Group rows use backend group-scope results.
-- Saved portfolio rows use backend portfolio-scope results.
-- Frontend may sum current values, but not returns/risk/attribution.
-- Mixed transaction + holdings groups show value return/P&L and warning; TWR/IRR
-  are `N/A`.
-- Groups with missing valuations show partial-data warning.
-- Portfolios with non-performance or deleted/archived accounts show
-  excluded-account warning.
-- Empty eligible scope shows `N/A`, not zero.
-- Multi-currency groups display base-currency performance.
-- Dashboard uses batch scoped summaries to avoid N+1 calls.
+Annualized TWR converts selected-period TWR to an annual rate:
 
-### Checkpoint 7: Account, Asset, And Performance Pages
+```txt
+annualized_twr = (1 + twr)^(365.25 / period_days) - 1
+```
 
-Update page-level metric display.
+The engine caps returns at `-100%` when the compounding base would be zero or
+negative. For same-day periods, the selected-period return is returned as-is.
 
-Acceptance criteria:
+### Internal Rate Of Return
 
-- Account page transaction-mode cards show TWR, IRR, volatility, max drawdown.
-- Account page holdings-mode cards show value return, total P&L, volatility, max
-  drawdown.
-- Account page mixed/partial-data state shows `N/A` with reason, not silent
-  zeroes.
-- Asset page separates market value, unrealized P&L, realized P&L, income, FX
-  effect, and price return.
-- Performance page has metric selection for TWR, IRR, value return, volatility,
-  drawdown.
-- Performance page benchmark comparison uses TWR only.
-- Performance page attribution section explains the period gain/loss by
-  components.
-- Symbol-only performance hides IRR unless user transaction scope is available.
-- Privacy mode hides attribution amounts consistently with hidden balances.
+Field: `returns.irr`
 
-### Checkpoint 8: Addon, AI, Sync, Export, Docs
+IRR is the selected-period money-weighted return. It measures the investor's
+return after considering the amount and timing of external cash flows. Use it as
+the personal performance metric for transaction scopes.
 
-Update all external and secondary surfaces.
+The backend solves annualized XIRR first, then converts it back to the selected
+period:
 
-Acceptance criteria:
+```txt
+irr = (1 + annualized_irr)^(period_days / 365.25) - 1
+```
 
-- Addon SDK exposes `PerformanceResult` and no legacy flow-adjusted return
-  fields.
-- Addon docs and README examples compile against the new type.
-- AI performance tool output and UI show TWR/IRR/value return, not legacy
-  flow-adjusted return labels.
-- Tauri and web APIs return the same shape.
-- Device sync includes `lot_disposals` where app-sync table filters require
-  explicit inclusion.
-- Backup/export behavior includes the new schema or is verified as
-  whole-database safe.
-- Query invalidation covers activity import/edit/delete, quote updates, FX
-  updates, account tracking mode changes, base currency changes, and portfolio
-  membership changes.
-- `/Users/aziz/Workspace/wealthfolio-project/wealthfolio-app/wealthfolio/docs/performance-calculation-research.md`
-  is updated to describe the new model.
+For a one-year period, `irr` and `annualizedIrr` will usually be the same. For
+sub-year or multi-year periods, `irr` is the actual selected-period result and
+`annualizedIrr` is the yearly equivalent.
 
-## Validation Plan
+IRR is unavailable when cash flows have no sign change, when there are not
+enough dated cash flows, or when the solver cannot converge.
 
-Run these at the final checkpoint, and at smaller checkpoints when touching the
-relevant layer:
+### Annualized IRR
 
-- Rust:
-  - `cargo test -p wealthfolio-core performance`
-  - `cargo test -p wealthfolio-core valuation`
-  - `cargo test -p wealthfolio-core holdings`
-  - `cargo test`
-- Frontend:
-  - `pnpm type-check`
-  - `pnpm test`
-  - targeted tests for dashboard account groups, account cards, performance page
-    selection, AI performance tool UI, and addon type bridge
-- E2E:
-  - `pnpm test:e2e`
-  - specifically validate
-    `/Users/aziz/Workspace/wealthfolio-project/wealthfolio-app/wealthfolio/e2e/01-happy-path.spec.ts`
-  - specifically validate
-    `/Users/aziz/Workspace/wealthfolio-project/wealthfolio-app/wealthfolio/e2e/08-holdings-and-performance.spec.ts`
-- Full repo:
-  - `pnpm check`
-  - desktop and web compile through existing shared command paths
+Field: `returns.annualizedIrr`
 
-## Assumptions And Defaults
+Annualized IRR is the XIRR result using dated cash flows and an ACT/365.25 year
+basis.
 
-- No backward compatibility for legacy flow-adjusted return fields.
-- TWR is the default comparison metric.
-- IRR is shown as personal cash-flow return, not used for benchmark comparison.
-- Mixed transaction + holdings scopes do not get TWR/IRR in v1.
-- All displayed money performance for grouped scopes is in base currency.
-- Backend owns performance math; frontend only formats and chooses applicable
-  cards.
-- Residual warnings are visible enough to tell users the performance result is
-  partially unreliable.
+Cash-flow signs:
+
+- Beginning value: negative
+- External contributions/inflows: negative
+- External distributions/outflows: positive
+- Ending value: positive
+
+This field is useful when comparing money-weighted returns across periods of
+different lengths.
+
+### Value Return
+
+Field: `returns.valueReturn`
+
+Value return measures period value growth after adjusting for external cash
+flows. It is not time weighted and should not be used as a manager-comparison
+metric when transaction cash flows are available.
+
+Transaction and mixed scopes:
+
+```txt
+value_return = (ending_value - starting_value - net_external_flow) / starting_value
+```
+
+Holdings-only scopes:
+
+- All-time: unrealized P&L divided by ending cost basis.
+- Selected period: value change divided by starting market value.
+
+Value return is the primary return metric for holdings-only, mixed tracking, and
+symbol price scopes.
+
+### Annualized Value Return
+
+Field: `returns.annualizedValueReturn`
+
+Annualized value return uses the same annualization method as annualized TWR:
+
+```txt
+annualized_value_return = (1 + value_return)^(365.25 / period_days) - 1
+```
+
+It is populated only when the selected scope and profile calculate annualized
+returns.
+
+## Attribution Metrics
+
+Attribution explains how total value changed during the period.
+
+Fields:
+
+- `contributions`: external inflows into the scope.
+- `distributions`: external outflows from the scope.
+- `income`: dividends, interest, and other income.
+- `realizedPnl`: realized gain/loss from lot disposals.
+- `unrealizedPnlChange`: change in unrealized gain/loss.
+- `fxEffect`: base-currency effect from exchange-rate movement.
+- `fees`: fees charged during the period.
+- `taxes`: taxes charged during the period.
+- `residual`: unexplained amount after known components are applied.
+
+Identity:
+
+```txt
+ending_value - starting_value
+  = contributions - distributions
+  + income
+  + realized_pnl
+  + unrealized_pnl_change
+  + fx_effect
+  - fees
+  - taxes
+  + residual
+```
+
+The engine emits a warning when residual is larger than:
+
+```txt
+max(1 base currency unit, 0.1% of max(abs(delta), ending_value, 1))
+```
+
+Realized P&L comes from persisted lot-disposal slices. This includes partial
+sells and split-adjusted lots. Dividends and interest are income, not external
+cash flows.
+
+## Risk Metrics
+
+### Volatility
+
+Field: `risk.volatility`
+
+Volatility measures dispersion of daily returns. The engine:
+
+- uses valid daily return samples from the selected scope;
+- converts daily simple returns to log returns;
+- uses sample variance;
+- annualizes with `sqrt(365.25)`;
+- returns `null` when fewer than two valid log-return samples exist.
+
+Volatility is available only in full profile results.
+
+### Max Drawdown
+
+Fields:
+
+- `risk.maxDrawdown`
+- `risk.peakDate`
+- `risk.troughDate`
+- `risk.recoveryDate`
+- `risk.drawdownDurationDays`
+
+Max drawdown is the largest peak-to-trough percentage decline over the selected
+return series. The value is returned as a signed negative decimal. Recovery date
+is populated when the series recovers to the prior peak.
+
+Drawdown is available only in full profile results.
+
+## Data Quality
+
+`dataQuality.status` can be:
+
+- `ok`: metrics are complete for the selected scope.
+- `partial`: scope or valuation history is incomplete.
+- `noData`: there is not enough valuation or quote history.
+- `notApplicable`: requested metrics do not apply to the scope.
+
+`warnings` describe reliability concerns, such as fallback flow inference, mixed
+tracking mode, incomplete history, or large attribution residuals.
+
+`notApplicableReasons` explain why individual metrics are `null`, such as:
+
+- holdings-only scopes do not have TWR or IRR;
+- mixed tracking scopes do not have a complete cash-flow ledger;
+- IRR cash flows do not change sign;
+- starting value is zero or negative;
+- denominator is below the minimum threshold.
+
+Consumers should show `null` metrics as unavailable, not as zero.
+
+## API Usage
+
+### History
+
+Use history APIs for detail pages and charts.
+
+- Tauri: `calculate_performance_history`
+- Frontend adapter: `calculatePerformanceHistory`
+- Addon API: `ctx.api.performance.calculateHistory`
+
+History responses use the full profile and include return series, annualized
+returns, IRR, risk, attribution, and data-quality details.
+
+### Summary
+
+Use summary APIs for cards, tables, dashboard rows, and saved portfolio lists.
+
+- Tauri: `calculate_performance_summary`
+- Tauri batch: `get_performance_summaries`
+- Frontend adapters: `calculatePerformanceSummary`,
+  `calculatePerformanceSummaries`
+- Addon API: `ctx.api.performance.calculateSummary`
+
+Tauri, web, and frontend summary APIs support two profiles:
+
+- `full`: rich scalar metrics without chart series.
+- `headline`: dashboard-focused metrics that omit unused IRR, annualized
+  returns, and risk work.
+
+Use `headline` only when the UI needs headline return/P&L and data-quality
+messaging. Use `full` when the UI displays IRR, annualized returns, volatility,
+drawdown, or detailed attribution.
+
+Addon `calculateSummary` uses the default full summary profile.
+
+### Simple Account Performance
+
+Use `calculateAccountsSimplePerformance` only for lightweight account lists and
+allocation views. It is not a replacement for `PerformanceResult` when the UI
+needs TWR, IRR, risk, attribution, or data-quality detail.
+
+## Metric Selection Guidelines
+
+- Use TWR for investment comparison and benchmark comparison.
+- Use IRR for personal money-weighted return on transaction scopes.
+- Use value return for holdings-only, mixed tracking, and symbol price scopes.
+- Use annualized fields only when comparing periods of different lengths.
+- Use attribution amounts to explain P&L, not as replacement return metrics.
+- Use data-quality messages whenever a metric is unavailable or partially
+  reliable.
+
+## Cache And Invalidation
+
+Performance results depend on:
+
+- activity import, edit, and delete;
+- quote updates;
+- exchange-rate updates;
+- account tracking-mode changes;
+- base-currency changes;
+- portfolio membership changes;
+- lot disposal rebuilds.
+
+Any mutation that changes those inputs should invalidate performance queries and
+dashboard scoped summary queries.
