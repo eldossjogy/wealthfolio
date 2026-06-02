@@ -19,19 +19,45 @@ import { EmptyPlaceholder } from "@wealthfolio/ui/components/ui/empty-placeholde
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { format, parseISO } from "date-fns";
 import React, { useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
+import { Area, Bar, BarChart, CartesianGrid, ComposedChart, XAxis, YAxis } from "recharts";
 
-function getNiceTicks(maxValue: number, count = 5): number[] {
-  if (maxValue <= 0) return [0];
-  const rawStep = maxValue / (count - 1);
+// Round a raw step up to a "nice" value (1, 2, 2.5, 5, 10 × 10ⁿ).
+function niceStep(rawStep: number): number {
+  if (rawStep <= 0) return 0;
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
   const residual = rawStep / magnitude;
-  let niceStep: number;
-  if (residual <= 1) niceStep = magnitude;
-  else if (residual <= 2) niceStep = 2 * magnitude;
-  else if (residual <= 5) niceStep = 5 * magnitude;
-  else niceStep = 10 * magnitude;
-  return Array.from({ length: count }, (_, i) => i * niceStep);
+  let mult: number;
+  if (residual <= 1) mult = 1;
+  else if (residual <= 2) mult = 2;
+  else if (residual <= 2.5) mult = 2.5;
+  else if (residual <= 5) mult = 5;
+  else mult = 10;
+  return mult * magnitude;
+}
+
+// Ticks from 0 to just above maxValue — the top tick is the first nice step past
+// the data so the plot isn't left with a tall empty band of headroom.
+function getNiceTicks(maxValue: number, count = 5): number[] {
+  if (maxValue <= 0) return [0];
+  const step = niceStep(maxValue / (count - 1));
+  const tickCount = Math.floor(maxValue / step) + 2;
+  return Array.from({ length: tickCount }, (_, i) => i * step);
+}
+
+// Right-axis ticks that reuse the left axis's tick count so the gridlines align.
+function getAlignedTicks(maxValue: number, tickCount: number): number[] {
+  if (maxValue <= 0 || tickCount <= 1) return [0];
+  const step = niceStep(maxValue / (tickCount - 1));
+  return Array.from({ length: tickCount }, (_, i) => i * step);
+}
+
+function formatK(value: number): string {
+  if (value === 0) return "0";
+  if (Math.abs(value) >= 1000) {
+    const k = value / 1000;
+    return `${Number.isInteger(k) ? k : k.toFixed(1)}k`;
+  }
+  return value.toString();
 }
 
 interface IncomeHistoryChartProps {
@@ -68,21 +94,29 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const chartData = monthlyIncomeData.map(([month, income], index) => {
+  // Compute cumulative over the full series first, then drop leading months that
+  // have no activity at all so the chart doesn't waste horizontal space on a flat
+  // run of zeros before the first income.
+  const fullChartData = monthlyIncomeData.map(([month, income], index) => {
     const cumulative = monthlyIncomeData.slice(0, index + 1).reduce((sum, [, value]) => {
-      const numericValue = Number(value) || 0;
-      return sum + numericValue;
+      return sum + (Number(value) || 0);
     }, 0);
 
-    const dataPoint = {
+    return {
       month,
       income: Number(income) || 0,
-      cumulative: cumulative,
+      cumulative,
       previousIncome: Number(previousMonthlyIncomeData[index]?.[1]) || 0,
     };
-
-    return dataPoint;
   });
+
+  const firstActiveIndex = (() => {
+    const idx = fullChartData.findIndex((d) => d.income !== 0 || d.previousIncome !== 0);
+    return idx === -1 ? 0 : idx;
+  })();
+
+  const chartData = fullChartData.slice(firstActiveIndex);
+  const trimmedMonths = chartData.map((d) => d.month);
 
   const accounts = useMemo(
     () => (byAccount ? Object.values(byAccount).sort((a, b) => b.total - a.total) : []),
@@ -94,14 +128,14 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
 
   const byAccountChartData = useMemo(() => {
     if (!byAccount || accounts.length === 0) return [];
-    return monthlyIncomeData.map(([month]) => {
+    return trimmedMonths.map((month) => {
       const point: Record<string, string | number> = { month };
       for (const acc of accounts) {
         point[acc.accountId] = acc.byMonth[month] ?? 0;
       }
       return point;
     });
-  }, [monthlyIncomeData, byAccount, accounts]);
+  }, [trimmedMonths, byAccount, accounts]);
 
   const accountChartConfig = useMemo(
     () =>
@@ -117,11 +151,18 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
   const periodDescription =
     selectedPeriod === "ALL" ? "All Time" : selectedPeriod === "YTD" ? "Year to Date" : "Last Year";
 
+  // Render evenly-spaced labels (every Nth month) instead of letting Recharts
+  // auto-thin, which produced irregular 2-then-3-month gaps.
+  const xTickStep = Math.max(1, Math.ceil(trimmedMonths.length / (isMobile ? 5 : 9)));
+  const xTicks = trimmedMonths.filter((_, i) => i % xTickStep === 0);
+
   const xAxisProps = {
     dataKey: "month" as const,
     tickLine: false,
     tickMargin: 8,
     axisLine: false,
+    ticks: xTicks,
+    interval: 0 as const,
     tick: { fontSize: isMobile ? 11 : 12 },
     tickFormatter: (value: string) => {
       const date = parseISO(`${value}-01`);
@@ -143,7 +184,11 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
     );
   })();
   const yTicks = getNiceTicks(dataMax);
-  const tickStep = yTicks.length > 1 ? yTicks[1] : 0;
+
+  // Right axis (cumulative) — match the left axis tick count so the gridlines
+  // line up, and format with the same "k" convention.
+  const cumulativeMax = chartData.length ? Math.max(...chartData.map((d) => d.cumulative)) : 0;
+  const rightTicks = getAlignedTicks(cumulativeMax, yTicks.length);
 
   const yAxisProps = {
     tickLine: false,
@@ -152,14 +197,7 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
     width: isMobile ? 45 : 60,
     ticks: yTicks,
     domain: [0, yTicks[yTicks.length - 1] || 0] as [number, number],
-    tickFormatter: (value: number) => {
-      if (value === 0) return "0";
-      if (tickStep >= 1000) {
-        const k = value / 1000;
-        return `${Number.isInteger(k) ? k : k.toFixed(1)}k`;
-      }
-      return value.toString();
-    },
+    tickFormatter: formatK,
   };
 
   const tooltipLabelFormatter = (label: unknown) => {
@@ -168,7 +206,7 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
   };
 
   return (
-    <Card className="md:col-span-2">
+    <Card className="flex flex-col md:col-span-2">
       <CardHeader className="pb-4 md:pb-6">
         <div className="flex items-center justify-between">
           <div>
@@ -199,7 +237,7 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
           )}
         </div>
       </CardHeader>
-      <CardContent className="px-4 pt-0 md:px-6">
+      <CardContent className="flex flex-1 flex-col px-4 pt-0 md:px-6">
         {chartData.length === 0 ? (
           <EmptyPlaceholder
             className="mx-auto flex h-[250px] max-w-[420px] items-center justify-center md:h-[300px]"
@@ -210,7 +248,7 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
         ) : effectiveViewMode === "byAccount" ? (
           <ChartContainer
             config={accountChartConfig}
-            className={cn("h-[280px] w-full md:h-[380px]")}
+            className={cn("h-full min-h-[280px] w-full flex-1 md:min-h-[380px]")}
             data-no-swipe-drag
           >
             <BarChart
@@ -284,14 +322,14 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
               },
               cumulative: {
                 label: "Cumulative Income",
-                color: "var(--chart-5)",
+                color: "var(--chart-2)",
               },
               previousIncome: {
                 label: "Previous Period Income",
-                color: "var(--chart-5)",
+                color: "var(--chart-stone)",
               },
             }}
-            className={cn("h-[280px] w-full md:h-[380px]")}
+            className={cn("h-full min-h-[280px] w-full flex-1 md:min-h-[380px]")}
             data-no-swipe-drag
           >
             <ComposedChart
@@ -307,7 +345,17 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
               <XAxis {...xAxisProps} />
               <YAxis yAxisId="left" {...yAxisProps} />
               {!isMobile && (
-                <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  ticks={rightTicks}
+                  domain={[0, rightTicks[rightTicks.length - 1] || 0]}
+                  tick={{ fontSize: 12, fill: "var(--chart-2)" }}
+                  tickFormatter={formatK}
+                />
               )}
               <ChartTooltip
                 content={
@@ -352,30 +400,39 @@ export const IncomeHistoryChart: React.FC<IncomeHistoryChartProps> = ({
                 }
               />
               {!isMobile && <ChartLegend content={<ChartLegendContent payload={[]} />} />}
-              <Bar
-                yAxisId="left"
-                dataKey="income"
-                fill="var(--color-income)"
-                radius={[isMobile ? 4 : 8, isMobile ? 4 : 8, 0, 0]}
-                barSize={isMobile ? 16 : 25}
-              />
-              <Line
+              <defs>
+                <linearGradient id="incomeCumulativeFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-cumulative)" stopOpacity={0.18} />
+                  <stop offset="100%" stopColor="var(--color-cumulative)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              {/* Cumulative — a single Area drawn first so its fill sits behind the
+                  bars as background context, with its own stroke acting as the line.
+                  One element means exactly one legend/tooltip entry. */}
+              <Area
                 yAxisId={isMobile ? "left" : "right"}
                 type="monotone"
                 dataKey="cumulative"
                 stroke="var(--color-cumulative)"
-                strokeWidth={isMobile ? 1.5 : 2}
+                strokeWidth={isMobile ? 1.5 : 2.25}
+                fill="url(#incomeCumulativeFill)"
                 dot={false}
               />
-              <Line
+              {/* Prior vs. current period as grouped bars (prior on the left).
+                  Prior period is the calmer neutral so the current reads as primary. */}
+              <Bar
                 yAxisId="left"
-                type="monotone"
                 dataKey="previousIncome"
-                stroke="var(--color-previousIncome)"
-                strokeWidth={isMobile ? 1.5 : 2}
-                dot={false}
-                strokeDasharray="3 3"
-                opacity={0.6}
+                fill="var(--color-previousIncome)"
+                radius={[isMobile ? 3 : 4, isMobile ? 3 : 4, 0, 0]}
+                barSize={isMobile ? 11 : 18}
+              />
+              <Bar
+                yAxisId="left"
+                dataKey="income"
+                fill="var(--color-income)"
+                radius={[isMobile ? 3 : 4, isMobile ? 3 : 4, 0, 0]}
+                barSize={isMobile ? 11 : 18}
               />
             </ComposedChart>
           </ChartContainer>
