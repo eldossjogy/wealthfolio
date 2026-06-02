@@ -1,5 +1,6 @@
 import { createPortfolio, deletePortfolio, getPortfolios, updatePortfolioEntry } from "@/adapters";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import type { NewPortfolio, PortfolioWithAccounts } from "@/lib/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ export function usePortfolioMutations() {
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIOS] });
+    invalidatePerformanceCaches(queryClient);
   };
 
   const createMutation = useMutation({

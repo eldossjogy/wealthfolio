@@ -1,3 +1,4 @@
+use super::activities_constants::{ACTIVITY_TYPE_TRANSFER_IN, ACTIVITY_TYPE_TRANSFER_OUT};
 use super::activities_model::*;
 use crate::limits::ContributionActivity;
 use crate::Result;
@@ -29,10 +30,73 @@ pub trait ActivityRepositoryTrait: Send + Sync {
         start_utc: DateTime<Utc>,
         end_utc: DateTime<Utc>,
     ) -> Result<Vec<Activity>> {
-        let mut activities = self.get_activities_by_account_ids(account_ids)?;
+        let requested_accounts: HashSet<&str> = account_ids.iter().map(String::as_str).collect();
+        let mut activities = self.get_activities()?;
         activities.retain(|activity| {
-            activity.activity_date >= start_utc && activity.activity_date <= end_utc
+            requested_accounts.contains(activity.account_id.as_str())
+                && activity.activity_date >= start_utc
+                && activity.activity_date <= end_utc
         });
+        Ok(activities)
+    }
+    fn get_transfer_activities_touching_account_ids_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_utc: Option<DateTime<Utc>>,
+        end_exclusive_utc: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Activity>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let requested_accounts: HashSet<&str> = account_ids.iter().map(String::as_str).collect();
+        let mut scoped_transfers = self.get_activities()?;
+        scoped_transfers.retain(|activity| {
+            requested_accounts.contains(activity.account_id.as_str())
+                && activity.is_posted()
+                && matches!(
+                    activity.effective_type(),
+                    ACTIVITY_TYPE_TRANSFER_IN | ACTIVITY_TYPE_TRANSFER_OUT
+                )
+                && start_utc
+                    .map(|start| activity.activity_date >= start)
+                    .unwrap_or(true)
+                && end_exclusive_utc
+                    .map(|end| activity.activity_date < end)
+                    .unwrap_or(true)
+        });
+
+        let group_ids: HashSet<String> = scoped_transfers
+            .iter()
+            .filter_map(|activity| activity.source_group_id.clone())
+            .collect();
+        let mut by_id: HashMap<String, Activity> = scoped_transfers
+            .into_iter()
+            .map(|activity| (activity.id.clone(), activity))
+            .collect();
+
+        if !group_ids.is_empty() {
+            for activity in self.get_activities()? {
+                if !activity.is_posted()
+                    || !matches!(
+                        activity.effective_type(),
+                        ACTIVITY_TYPE_TRANSFER_IN | ACTIVITY_TYPE_TRANSFER_OUT
+                    )
+                {
+                    continue;
+                }
+                if activity
+                    .source_group_id
+                    .as_ref()
+                    .is_some_and(|group_id| group_ids.contains(group_id))
+                {
+                    by_id.entry(activity.id.clone()).or_insert(activity);
+                }
+            }
+        }
+
+        let mut activities: Vec<Activity> = by_id.into_values().collect();
+        activities.sort_by_key(|activity| activity.activity_date);
         Ok(activities)
     }
     fn get_trading_activities(&self) -> Result<Vec<Activity>>;

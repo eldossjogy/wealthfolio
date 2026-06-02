@@ -5,9 +5,12 @@ import type {
   AllocationHoldings,
   IncomeSummary,
   AccountValuation,
-  PerformanceMetrics,
+  PerformanceSummaryMap,
+  PerformanceSummaryProfile,
+  PerformanceSummaryScope,
+  PerformanceResult,
   PortfolioAllocations,
-  SimplePerformanceMetrics,
+  SimplePerformanceResult,
   HoldingsSnapshotInput,
   ImportHoldingsCsvResult,
   CheckHoldingsImportResult,
@@ -63,13 +66,13 @@ export const calculatePerformanceHistory = async (
   endDate: string | undefined,
   trackingMode?: "HOLDINGS" | "TRANSACTIONS",
   filter?: AccountScope,
-): Promise<PerformanceMetrics> => {
+): Promise<PerformanceResult> => {
   const args: Record<string, unknown> = { itemType, itemId };
   if (startDate) args.startDate = startDate;
   if (endDate) args.endDate = endDate;
   if (trackingMode) args.trackingMode = trackingMode;
   if (filter) args.filter = filter;
-  const response = await invoke<PerformanceMetrics>("calculate_performance_history", args);
+  const response = await invoke<PerformanceResult>("calculate_performance_history", args);
 
   if (typeof response === "string" || !response || Object.keys(response).length === 0) {
     throw new Error(
@@ -87,6 +90,7 @@ interface CalculatePerformanceSummaryArgs {
   endDate?: string | null;
   trackingMode?: "HOLDINGS" | "TRANSACTIONS";
   filter?: AccountScope;
+  profile?: PerformanceSummaryProfile;
 }
 
 export const calculatePerformanceSummary = async ({
@@ -96,7 +100,8 @@ export const calculatePerformanceSummary = async ({
   endDate,
   trackingMode,
   filter,
-}: CalculatePerformanceSummaryArgs): Promise<PerformanceMetrics> => {
+  profile,
+}: CalculatePerformanceSummaryArgs): Promise<PerformanceResult> => {
   const args: Record<string, unknown> = {
     itemType,
     itemId,
@@ -113,10 +118,13 @@ export const calculatePerformanceSummary = async ({
   if (filter) {
     args.filter = filter;
   }
+  if (profile) {
+    args.profile = profile;
+  }
 
-  const response = await invoke<PerformanceMetrics>("calculate_performance_summary", args);
+  const response = await invoke<PerformanceResult>("calculate_performance_summary", args);
 
-  if (!response || typeof response !== "object" || !response.id) {
+  if (!response || typeof response !== "object" || !response.scope?.id) {
     logger.error(
       `Invalid data received from calculate_performance_summary. Response: ${JSON.stringify(response)}`,
     );
@@ -126,10 +134,32 @@ export const calculatePerformanceSummary = async ({
   return response;
 };
 
+export const performanceSummaryScopeKey = (accountIds: string[]): string => {
+  const sortedAccountIds = [...new Set(accountIds)].sort();
+  return `accounts:${sortedAccountIds.join(",")}`;
+};
+
+export const calculatePerformanceSummaries = async (
+  scopes: PerformanceSummaryScope[],
+  startDate?: string | null,
+  endDate?: string | null,
+  profile?: PerformanceSummaryProfile,
+): Promise<PerformanceSummaryMap> => {
+  const args: Record<string, unknown> = {
+    scopes,
+    startDate,
+    endDate,
+  };
+  if (profile) {
+    args.profile = profile;
+  }
+  return invoke<PerformanceSummaryMap>("get_performance_summaries", args);
+};
+
 export const calculateAccountsSimplePerformance = async (
   accountIds: string[],
-): Promise<SimplePerformanceMetrics[]> => {
-  return invoke<SimplePerformanceMetrics[]>("calculate_accounts_simple_performance", {
+): Promise<SimplePerformanceResult[]> => {
+  return invoke<SimplePerformanceResult[]>("calculate_accounts_simple_performance", {
     accountIds,
   });
 };

@@ -12,7 +12,7 @@ use crate::portfolio::snapshot::{
     AccountStateSnapshot, Position, SnapshotRepositoryTrait, SnapshotSource,
 };
 use crate::portfolio::valuation::{
-    DailyAccountValuation, NegativeBalanceInfo, ValuationRepositoryTrait,
+    DailyAccountValuation, ExternalFlowSource, NegativeBalanceInfo, ValuationRepositoryTrait,
 };
 use crate::quotes::{
     LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
@@ -1036,6 +1036,7 @@ fn create_total_valuation(
         net_contribution_base: net_contribution,
         external_inflow_base: Decimal::ZERO,
         external_outflow_base: Decimal::ZERO,
+        external_flow_source: ExternalFlowSource::Unknown,
         performance_eligible_value_base: total_value,
         calculated_at: Utc::now(),
     }
@@ -1065,6 +1066,7 @@ fn create_account_valuation(
         net_contribution_base: Decimal::ZERO,
         external_inflow_base: Decimal::ZERO,
         external_outflow_base: Decimal::ZERO,
+        external_flow_source: ExternalFlowSource::Unknown,
         performance_eligible_value_base: total_value,
         calculated_at: Utc::now(),
     }

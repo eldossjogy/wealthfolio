@@ -8,10 +8,7 @@ use std::sync::Arc;
 
 use crate::env::AiEnvironment;
 use crate::error::AiError;
-use wealthfolio_core::{
-    accounts::{account_supports_purpose, AccountPurpose},
-    performance::ReturnMethod,
-};
+use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 
 // ============================================================================
 // Tool Arguments and Output
@@ -34,60 +31,79 @@ fn default_period() -> String {
     "YTD".to_string()
 }
 
-/// Output for the get_performance tool.
-/// Field names match what the frontend expects.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPerformanceOutput {
-    /// Account or portfolio ID.
     pub id: String,
-    /// Period start date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub period_start_date: Option<String>,
-    /// Period end date.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub period_end_date: Option<String>,
-    /// Base currency.
     pub currency: String,
-    /// Cumulative time-weighted return (decimal, e.g., 0.05 = 5%).
+    pub mode: String,
+    pub returns: PerformanceReturnsOutput,
+    pub attribution: PerformanceAttributionOutput,
+    pub risk: PerformanceRiskOutput,
+    pub data_quality: PerformanceDataQualityOutput,
+    pub is_mixed_tracking_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceReturnsOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cumulative_twr: Option<f64>,
-    /// Absolute gain/loss amount.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gain_loss_amount: Option<f64>,
-    /// Headline return for the selected period.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub period_return: Option<f64>,
-    /// Annualized TWR.
+    pub twr: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annualized_twr: Option<f64>,
-    /// Simple return (decimal).
-    pub simple_return: f64,
-    /// Annualized simple return.
-    pub annualized_simple_return: f64,
-    /// Cumulative money-weighted return.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cumulative_modified_dietz: Option<f64>,
-    /// Annualized Modified Dietz.
+    pub irr: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annualized_modified_dietz: Option<f64>,
-    /// Legacy alias for Modified Dietz.
+    pub annualized_irr: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cumulative_mwr: Option<f64>,
-    /// Legacy alias for annualized Modified Dietz.
+    pub value_return: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub annualized_mwr: Option<f64>,
-    /// Portfolio volatility (annualized).
-    pub volatility: f64,
-    /// Maximum drawdown.
-    pub max_drawdown: f64,
-    /// Method used for the headline return.
-    pub return_method: String,
-    /// True when the result combines transaction-mode and holdings-mode accounts.
-    pub is_mixed_tracking_mode: bool,
-    /// Caveats for unavailable metrics.
+    pub annualized_value_return: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceAttributionOutput {
+    pub contributions: f64,
+    pub distributions: f64,
+    pub income: f64,
+    pub realized_pnl: f64,
+    pub unrealized_pnl_change: f64,
+    pub fx_effect: f64,
+    pub fees: f64,
+    pub taxes: f64,
+    pub residual: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceRiskOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volatility: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_drawdown: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trough_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawdown_duration_days: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceDataQualityOutput {
+    pub status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_applicable_reasons: Vec<String>,
 }
 
 // ============================================================================
@@ -137,7 +153,7 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Get portfolio performance metrics including TWR, Modified Dietz, volatility, and max drawdown. Omit accountId for aggregate performance across all accounts.".to_string(),
+            description: "Get portfolio performance metrics including TWR, IRR, value return, attribution, volatility, and max drawdown. Omit accountId for aggregate performance across all accounts.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -171,12 +187,23 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
                 .account_service()
                 .get_account(account_id)
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?;
-            if !account_supports_purpose(&account.account_type, AccountPurpose::Performance) {
+            if !account.is_active
+                || account.is_archived
+                || !account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+            {
                 return Ok(GetPerformanceOutput {
                     id: account_id.to_string(),
                     period_start_date: start_date.map(|d| d.to_string()),
                     period_end_date: Some(end_date.to_string()),
                     currency: account.currency,
+                    mode: "notApplicable".to_string(),
+                    data_quality: PerformanceDataQualityOutput {
+                        status: "noData".to_string(),
+                        warnings: Vec::new(),
+                        not_applicable_reasons: vec![
+                            "Performance unavailable for this account type.".to_string(),
+                        ],
+                    },
                     ..Default::default()
                 });
             }
@@ -187,7 +214,7 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
                     account_id,
                     start_date,
                     Some(end_date),
-                    None,
+                    Some(account.tracking_mode),
                 )
                 .await
                 .map_err(|e| AiError::ToolExecutionFailed(e.to_string()))?
@@ -223,37 +250,61 @@ impl<E: AiEnvironment + 'static> Tool for GetPerformanceTool<E> {
         };
 
         Ok(GetPerformanceOutput {
-            id: metrics.id,
-            period_start_date: metrics.period_start_date.map(|d| d.to_string()),
-            period_end_date: metrics.period_end_date.map(|d| d.to_string()),
-            currency: if metrics.currency.is_empty() {
+            id: metrics.scope.id,
+            period_start_date: metrics.period.start_date.map(|d| d.to_string()),
+            period_end_date: metrics.period.end_date.map(|d| d.to_string()),
+            currency: if metrics.scope.currency.is_empty() {
                 self.base_currency.clone()
             } else {
-                metrics.currency
+                metrics.scope.currency
             },
-            cumulative_twr: metrics.cumulative_twr.and_then(|v| v.to_f64()),
-            gain_loss_amount: metrics.gain_loss_amount.and_then(|v| v.to_f64()),
-            period_return: metrics.period_return.and_then(|v| v.to_f64()),
-            annualized_twr: metrics.annualized_twr.and_then(|v| v.to_f64()),
-            simple_return: metrics.simple_return.to_f64().unwrap_or(0.0),
-            annualized_simple_return: metrics.annualized_simple_return.to_f64().unwrap_or(0.0),
-            cumulative_modified_dietz: metrics.cumulative_modified_dietz.and_then(|v| v.to_f64()),
-            annualized_modified_dietz: metrics.annualized_modified_dietz.and_then(|v| v.to_f64()),
-            cumulative_mwr: metrics.cumulative_mwr.and_then(|v| v.to_f64()),
-            annualized_mwr: metrics.annualized_mwr.and_then(|v| v.to_f64()),
-            volatility: metrics.volatility.to_f64().unwrap_or(0.0),
-            max_drawdown: metrics.max_drawdown.to_f64().unwrap_or(0.0),
-            return_method: match metrics.return_method {
-                ReturnMethod::TimeWeighted => "timeWeighted",
-                ReturnMethod::MoneyWeighted => "moneyWeighted",
-                ReturnMethod::ModifiedDietz => "modifiedDietz",
-                ReturnMethod::SimpleReturn => "simpleReturn",
-                ReturnMethod::SymbolPriceBased => "symbolPriceBased",
-                ReturnMethod::NotApplicable => "notApplicable",
-            }
-            .to_string(),
+            mode: serde_json::to_value(metrics.mode)
+                .ok()
+                .and_then(|value| value.as_str().map(ToString::to_string))
+                .unwrap_or_else(|| "notApplicable".to_string()),
+            returns: PerformanceReturnsOutput {
+                twr: metrics.returns.twr.and_then(|v| v.to_f64()),
+                annualized_twr: metrics.returns.annualized_twr.and_then(|v| v.to_f64()),
+                irr: metrics.returns.irr.and_then(|v| v.to_f64()),
+                annualized_irr: metrics.returns.annualized_irr.and_then(|v| v.to_f64()),
+                value_return: metrics.returns.value_return.and_then(|v| v.to_f64()),
+                annualized_value_return: metrics
+                    .returns
+                    .annualized_value_return
+                    .and_then(|v| v.to_f64()),
+            },
+            attribution: PerformanceAttributionOutput {
+                contributions: metrics.attribution.contributions.to_f64().unwrap_or(0.0),
+                distributions: metrics.attribution.distributions.to_f64().unwrap_or(0.0),
+                income: metrics.attribution.income.to_f64().unwrap_or(0.0),
+                realized_pnl: metrics.attribution.realized_pnl.to_f64().unwrap_or(0.0),
+                unrealized_pnl_change: metrics
+                    .attribution
+                    .unrealized_pnl_change
+                    .to_f64()
+                    .unwrap_or(0.0),
+                fx_effect: metrics.attribution.fx_effect.to_f64().unwrap_or(0.0),
+                fees: metrics.attribution.fees.to_f64().unwrap_or(0.0),
+                taxes: metrics.attribution.taxes.to_f64().unwrap_or(0.0),
+                residual: metrics.attribution.residual.to_f64().unwrap_or(0.0),
+            },
+            risk: PerformanceRiskOutput {
+                volatility: metrics.risk.volatility.and_then(|v| v.to_f64()),
+                max_drawdown: metrics.risk.max_drawdown.and_then(|v| v.to_f64()),
+                peak_date: metrics.risk.peak_date.map(|d| d.to_string()),
+                trough_date: metrics.risk.trough_date.map(|d| d.to_string()),
+                recovery_date: metrics.risk.recovery_date.map(|d| d.to_string()),
+                drawdown_duration_days: metrics.risk.drawdown_duration_days,
+            },
+            data_quality: PerformanceDataQualityOutput {
+                status: serde_json::to_value(metrics.data_quality.status)
+                    .ok()
+                    .and_then(|value| value.as_str().map(ToString::to_string))
+                    .unwrap_or_else(|| "partial".to_string()),
+                warnings: metrics.data_quality.warnings,
+                not_applicable_reasons: metrics.data_quality.not_applicable_reasons,
+            },
             is_mixed_tracking_mode: metrics.is_mixed_tracking_mode,
-            warnings: metrics.warnings,
         })
     }
 }
@@ -319,8 +370,8 @@ mod tests {
 
         assert_eq!(output.id, "card-1");
         assert_eq!(output.currency, "USD");
-        assert_eq!(output.simple_return, 0.0);
-        assert_eq!(output.cumulative_twr, None);
+        assert_eq!(output.returns.twr, None);
+        assert_eq!(output.returns.irr, None);
     }
 
     #[tokio::test]

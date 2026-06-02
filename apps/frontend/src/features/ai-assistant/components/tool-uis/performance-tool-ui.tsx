@@ -24,21 +24,30 @@ interface PerformanceResult {
   periodStartDate?: string | null;
   periodEndDate?: string | null;
   currency: string;
-  cumulativeTwr?: number | null;
-  periodReturn?: number | null;
-  gainLossAmount?: number | null;
+  mode?: string;
+  twr?: number | null;
   annualizedTwr?: number | null;
-  simpleReturn: number;
-  annualizedSimpleReturn: number;
-  cumulativeModifiedDietz?: number | null;
-  annualizedModifiedDietz?: number | null;
-  cumulativeMwr?: number | null;
-  annualizedMwr?: number | null;
-  volatility: number;
-  maxDrawdown: number;
-  returnMethod?: string;
+  irr?: number | null;
+  annualizedIrr?: number | null;
+  valueReturn?: number | null;
+  annualizedValueReturn?: number | null;
+  attribution?: PerformanceAttribution | null;
+  volatility?: number | null;
+  maxDrawdown?: number | null;
   isMixedTrackingMode?: boolean;
   warnings?: string[];
+  notApplicableReasons?: string[];
+  dataQualityStatus?: string;
+}
+
+interface PerformanceAttribution {
+  income: number;
+  realizedPnl: number;
+  unrealizedPnlChange: number;
+  fxEffect: number;
+  fees: number;
+  taxes: number;
+  residual: number;
 }
 
 // ============================================================================
@@ -84,83 +93,122 @@ function normalizeResult(result: unknown, fallbackCurrency: string): Performance
     return normalizeResult(candidate.data, fallbackCurrency);
   }
 
-  // Extract and normalize fields (handle both camelCase and snake_case)
+  const scope = (candidate.scope ?? candidate.Scope) as Record<string, unknown> | undefined;
+  const period = (candidate.period ?? candidate.Period) as Record<string, unknown> | undefined;
+  const returns = (candidate.returns ?? candidate.Returns) as Record<string, unknown> | undefined;
+  const attribution = (candidate.attribution ?? candidate.Attribution) as
+    | Record<string, unknown>
+    | undefined;
+  const risk = (candidate.risk ?? candidate.Risk) as Record<string, unknown> | undefined;
+  const dataQuality = (candidate.dataQuality ?? candidate.data_quality ?? candidate.DataQuality) as
+    | Record<string, unknown>
+    | undefined;
+  const warnings = Array.isArray(dataQuality?.warnings)
+    ? (dataQuality.warnings as string[])
+    : Array.isArray(candidate.warnings)
+      ? (candidate.warnings as string[])
+      : [];
+  const notApplicableReasons = Array.isArray(dataQuality?.notApplicableReasons)
+    ? (dataQuality.notApplicableReasons as string[])
+    : Array.isArray(dataQuality?.not_applicable_reasons)
+      ? (dataQuality.not_applicable_reasons as string[])
+      : [];
+
   return {
-    id: safeString(candidate.id ?? candidate.Id, ""),
+    id: safeString(candidate.id ?? candidate.Id ?? scope?.id, ""),
     periodStartDate:
       (candidate.periodStartDate as string | undefined) ??
       (candidate.period_start_date as string | undefined) ??
+      (period?.startDate as string | undefined) ??
+      (period?.start_date as string | undefined) ??
       null,
     periodEndDate:
       (candidate.periodEndDate as string | undefined) ??
       (candidate.period_end_date as string | undefined) ??
+      (period?.endDate as string | undefined) ??
+      (period?.end_date as string | undefined) ??
       null,
     currency:
       (candidate.currency as string | undefined) ??
       (candidate.Currency as string | undefined) ??
+      (scope?.currency as string | undefined) ??
       fallbackCurrency,
-    cumulativeTwr:
-      candidate.cumulativeTwr != null || candidate.cumulative_twr != null
-        ? Number(candidate.cumulativeTwr ?? candidate.cumulative_twr)
-        : null,
-    periodReturn:
-      candidate.periodReturn != null || candidate.period_return != null
-        ? Number(candidate.periodReturn ?? candidate.period_return)
-        : null,
-    gainLossAmount:
-      candidate.gainLossAmount != null || candidate.gain_loss_amount != null
-        ? Number(candidate.gainLossAmount ?? candidate.gain_loss_amount)
-        : null,
+    mode: (candidate.mode as string | undefined) ?? (candidate.Mode as string | undefined),
+    twr: returns?.twr != null || returns?.Twr != null ? Number(returns.twr ?? returns.Twr) : null,
     annualizedTwr:
-      candidate.annualizedTwr != null || candidate.annualized_twr != null
-        ? Number(candidate.annualizedTwr ?? candidate.annualized_twr)
+      returns?.annualizedTwr != null || returns?.annualized_twr != null
+        ? Number(returns.annualizedTwr ?? returns.annualized_twr)
         : null,
-    simpleReturn: Number(candidate.simpleReturn ?? candidate.simple_return ?? 0),
-    annualizedSimpleReturn: Number(
-      candidate.annualizedSimpleReturn ?? candidate.annualized_simple_return ?? 0,
-    ),
-    cumulativeModifiedDietz:
-      candidate.cumulativeModifiedDietz != null ||
-      candidate.cumulative_modified_dietz != null ||
-      candidate.cumulativeMwr != null ||
-      candidate.cumulative_mwr != null
-        ? Number(
-            candidate.cumulativeModifiedDietz ??
-              candidate.cumulative_modified_dietz ??
-              candidate.cumulativeMwr ??
-              candidate.cumulative_mwr,
-          )
+    irr: returns?.irr != null || returns?.Irr != null ? Number(returns.irr ?? returns.Irr) : null,
+    annualizedIrr:
+      returns?.annualizedIrr != null || returns?.annualized_irr != null
+        ? Number(returns.annualizedIrr ?? returns.annualized_irr)
         : null,
-    annualizedModifiedDietz:
-      candidate.annualizedModifiedDietz != null ||
-      candidate.annualized_modified_dietz != null ||
-      candidate.annualizedMwr != null ||
-      candidate.annualized_mwr != null
-        ? Number(
-            candidate.annualizedModifiedDietz ??
-              candidate.annualized_modified_dietz ??
-              candidate.annualizedMwr ??
-              candidate.annualized_mwr,
-          )
+    valueReturn:
+      returns?.valueReturn != null || returns?.value_return != null
+        ? Number(returns.valueReturn ?? returns.value_return)
         : null,
-    cumulativeMwr:
-      candidate.cumulativeMwr != null || candidate.cumulative_mwr != null
-        ? Number(candidate.cumulativeMwr ?? candidate.cumulative_mwr)
+    annualizedValueReturn:
+      returns?.annualizedValueReturn != null || returns?.annualized_value_return != null
+        ? Number(returns.annualizedValueReturn ?? returns.annualized_value_return)
         : null,
-    annualizedMwr:
-      candidate.annualizedMwr != null || candidate.annualized_mwr != null
-        ? Number(candidate.annualizedMwr ?? candidate.annualized_mwr)
+    attribution: attribution
+      ? {
+          income: Number(attribution.income ?? attribution.Income ?? 0),
+          realizedPnl: Number(attribution.realizedPnl ?? attribution.realized_pnl ?? 0),
+          unrealizedPnlChange: Number(
+            attribution.unrealizedPnlChange ?? attribution.unrealized_pnl_change ?? 0,
+          ),
+          fxEffect: Number(attribution.fxEffect ?? attribution.fx_effect ?? 0),
+          fees: Number(attribution.fees ?? attribution.Fees ?? 0),
+          taxes: Number(attribution.taxes ?? attribution.Taxes ?? 0),
+          residual: Number(attribution.residual ?? attribution.Residual ?? 0),
+        }
+      : null,
+    volatility:
+      risk?.volatility != null || risk?.Volatility != null
+        ? Number(risk.volatility ?? risk.Volatility)
         : null,
-    volatility: Number(candidate.volatility ?? candidate.Volatility ?? 0),
-    maxDrawdown: Number(candidate.maxDrawdown ?? candidate.max_drawdown ?? 0),
-    returnMethod:
-      (candidate.returnMethod as string | undefined) ??
-      (candidate.return_method as string | undefined),
+    maxDrawdown:
+      risk?.maxDrawdown != null || risk?.max_drawdown != null
+        ? Number(risk.maxDrawdown ?? risk.max_drawdown)
+        : null,
     isMixedTrackingMode: Boolean(
       candidate.isMixedTrackingMode ?? candidate.is_mixed_tracking_mode ?? false,
     ),
-    warnings: Array.isArray(candidate.warnings) ? (candidate.warnings as string[]) : [],
+    warnings,
+    notApplicableReasons,
+    dataQualityStatus:
+      (dataQuality?.status as string | undefined) ??
+      (dataQuality?.Status as string | undefined) ??
+      undefined,
   };
+}
+
+function headlineReturn(result: PerformanceResult): number | null {
+  if (result.mode === "timeWeighted") return result.twr ?? null;
+  if (result.mode === "valueReturn" || result.mode === "symbolPriceBased") {
+    return result.valueReturn ?? null;
+  }
+  return result.twr ?? result.valueReturn ?? result.irr ?? null;
+}
+
+function periodPnl(result: PerformanceResult): number | null {
+  if (result.mode === "notApplicable" || result.dataQualityStatus === "noData") {
+    return null;
+  }
+  if (!result.attribution) return null;
+
+  const value =
+    result.attribution.income +
+    result.attribution.realizedPnl +
+    result.attribution.unrealizedPnlChange +
+    result.attribution.fxEffect -
+    result.attribution.fees -
+    result.attribution.taxes +
+    result.attribution.residual;
+
+  return Number.isFinite(value) ? value : null;
 }
 
 // ============================================================================
@@ -259,12 +307,6 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
 
   const isLoading = status?.type === "running";
   const isIncomplete = status?.type === "incomplete";
-  const isComplete = status?.type === "complete";
-
-  // Compact mode — just show a one-liner when used as a prerequisite
-  if (args?.displayMode === "compact" && parsed && !isLoading) {
-    return <CompactToolCard label="Fetched performance metrics" />;
-  }
 
   // Format values
   const { formatCurrency, formatPercent, formatPercentSigned } = useMemo(() => {
@@ -315,6 +357,11 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
     return `${start} - ${end}`;
   }, [parsed?.periodStartDate, parsed?.periodEndDate]);
 
+  // Compact mode — just show a one-liner when used as a prerequisite
+  if (args?.displayMode === "compact" && parsed && !isLoading) {
+    return <CompactToolCard label="Fetched performance metrics" />;
+  }
+
   // Show loading skeleton while running
   if (isLoading) {
     return <PerformanceLoadingSkeleton />;
@@ -326,7 +373,7 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
   }
 
   // Show empty state if no valid data
-  if (!parsed || (!isComplete && !parsed.cumulativeTwr && !parsed.gainLossAmount)) {
+  if (!parsed) {
     return <EmptyState />;
   }
 
@@ -336,8 +383,11 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     accountLabel,
   );
-  const headlineReturn = parsed.periodReturn ?? parsed.cumulativeTwr ?? parsed.simpleReturn;
-  const isPositiveReturn = headlineReturn >= 0;
+  const headlineReturnValue = headlineReturn(parsed);
+  const periodPnlAmount = periodPnl(parsed);
+  const annualizedReturn = parsed.annualizedTwr ?? parsed.annualizedValueReturn;
+  const annualizedLabel = parsed.annualizedTwr == null ? "Annualized Return" : "Annualized TWR";
+  const isPositiveReturn = headlineReturnValue == null ? null : headlineReturnValue >= 0;
   const TrendIcon = isPositiveReturn ? Icons.TrendingUp : Icons.TrendingDown;
 
   return (
@@ -364,19 +414,25 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
         {/* Primary Return Display */}
         <div className="flex flex-wrap items-baseline gap-3">
           <div className="flex items-center gap-2">
-            <TrendIcon
-              className={cn("size-6", isPositiveReturn ? "text-success" : "text-destructive")}
-            />
+            {headlineReturnValue != null && (
+              <TrendIcon
+                className={cn("size-6", isPositiveReturn ? "text-success" : "text-destructive")}
+              />
+            )}
             <span
               className={cn(
                 "text-3xl font-bold tabular-nums",
-                isPositiveReturn ? "text-success" : "text-destructive",
+                headlineReturnValue == null
+                  ? "text-muted-foreground"
+                  : isPositiveReturn
+                    ? "text-success"
+                    : "text-destructive",
               )}
             >
-              {formatPercentSigned(headlineReturn)}
+              {headlineReturnValue == null ? "N/A" : formatPercentSigned(headlineReturnValue)}
             </span>
           </div>
-          {parsed.gainLossAmount != null && (
+          {periodPnlAmount != null && (
             <span
               className={cn(
                 "text-lg font-medium tabular-nums",
@@ -387,7 +443,7 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
                     : "text-destructive",
               )}
             >
-              {formatCurrency(parsed.gainLossAmount)}
+              {formatCurrency(periodPnlAmount)}
             </span>
           )}
         </div>
@@ -395,41 +451,40 @@ function PerformanceToolUIContentImpl({ args, result, status }: PerformanceToolU
         {/* Metrics Grid */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <MetricCard
-            label="Annualized TWR"
-            value={parsed.annualizedTwr == null ? "n/a" : formatPercentSigned(parsed.annualizedTwr)}
-            isPositive={parsed.annualizedTwr == null ? null : parsed.annualizedTwr >= 0}
+            label={annualizedLabel}
+            value={annualizedReturn == null ? "n/a" : formatPercentSigned(annualizedReturn)}
+            isPositive={annualizedReturn == null ? null : annualizedReturn >= 0}
           />
           <MetricCard
-            label="Modified Dietz"
-            value={
-              parsed.cumulativeModifiedDietz == null
-                ? "n/a"
-                : formatPercentSigned(parsed.cumulativeModifiedDietz)
-            }
+            label="IRR"
+            value={parsed.irr == null ? "n/a" : formatPercentSigned(parsed.irr)}
             subValue={
-              parsed.annualizedModifiedDietz == null
+              parsed.annualizedIrr == null
                 ? undefined
-                : `${formatPercentSigned(parsed.annualizedModifiedDietz)} ann.`
+                : `${formatPercentSigned(parsed.annualizedIrr)} ann.`
             }
-            isPositive={
-              parsed.cumulativeModifiedDietz == null ? null : parsed.cumulativeModifiedDietz >= 0
-            }
+            isPositive={parsed.irr == null ? null : parsed.irr >= 0}
           />
           <MetricCard
             label="Volatility"
-            value={formatPercent(parsed.volatility)}
+            value={parsed.volatility == null ? "n/a" : formatPercent(parsed.volatility)}
             isPositive={null}
           />
           <MetricCard
             label="Max Drawdown"
-            value={formatPercent(parsed.maxDrawdown)}
-            isPositive={parsed.maxDrawdown > 0 ? false : null}
+            value={parsed.maxDrawdown == null ? "n/a" : formatPercent(parsed.maxDrawdown)}
+            isPositive={parsed.maxDrawdown == null ? null : false}
           />
         </div>
 
         {/* Currency Badge */}
         {parsed.currency && (
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {!!parsed.notApplicableReasons?.length && (
+              <span className="text-muted-foreground text-xs">
+                {parsed.notApplicableReasons[0]}
+              </span>
+            )}
             <Badge variant="secondary" className="text-xs uppercase">
               {parsed.currency}
             </Badge>

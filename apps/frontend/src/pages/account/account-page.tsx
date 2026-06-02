@@ -34,6 +34,7 @@ import {
   HoldingType,
   isLiabilityAccountType,
 } from "@/lib/constants";
+import { performanceHeadlineReturn, performancePeriodPnl } from "@/lib/performance";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 import {
@@ -291,9 +292,13 @@ const AccountPage = () => {
 
   const currentValuation = valuationHistory?.[valuationHistory.length - 1];
 
-  // Use period gain and return from backend (SOTA calculations for HOLDINGS mode)
-  const frontendGainLossAmount = accountPerformance?.periodGain ?? 0;
-  const frontendSimpleReturn = accountPerformance?.periodReturn ?? 0;
+  const frontendGainLossAmount = performancePeriodPnl(accountPerformance);
+  const frontendSimpleReturn = performanceHeadlineReturn(accountPerformance);
+  const displayedValueCurrency =
+    account?.currency ?? currentValuation?.accountCurrency ?? baseCurrency;
+  const performanceCurrency = accountPerformance?.scope.currency ?? baseCurrency;
+  const showPerformanceCurrency =
+    performanceCurrency.toUpperCase() !== displayedValueCurrency.toUpperCase();
 
   const chartData: HistoryChartData[] = useMemo(() => {
     if (!valuationHistory) return [];
@@ -318,19 +323,17 @@ const AccountPage = () => {
   };
 
   const percentageToDisplay = useMemo(() => {
-    // For HOLDINGS mode, always use simple return since flow-adjusted returns are not meaningful
-    // (they require transaction history to track cash flows)
+    // Holdings mode has no transaction cash-flow history, so show value return.
     if (isHoldingsMode) {
       return frontendSimpleReturn;
     }
     if (selectedIntervalCode === "ALL") {
       return frontendSimpleReturn;
     }
-    // For other intervals, use Modified Dietz with the legacy MWR alias as fallback.
     if (accountPerformance) {
-      return accountPerformance.cumulativeModifiedDietz ?? accountPerformance.cumulativeMwr ?? 0;
+      return performanceHeadlineReturn(accountPerformance);
     }
-    return 0; // Default if no specific logic matches or data is unavailable
+    return null;
   }, [accountPerformance, selectedIntervalCode, frontendSimpleReturn, isHoldingsMode]);
 
   const handleAccountSwitch = (selectedAccount: Account) => {
@@ -575,22 +578,34 @@ const AccountPage = () => {
                           <p className="pt-3 text-xl font-bold">
                             <PrivacyAmount
                               value={currentValuation?.totalValue ?? 0}
-                              currency={account?.currency ?? baseCurrency}
+                              currency={displayedValueCurrency}
                             />
                           </p>
                           {!hasPerformanceError && (
                             <div className="flex items-center gap-2 text-sm">
-                              <GainAmount
-                                className="text-sm font-light"
-                                value={frontendGainLossAmount}
-                                currency={account?.currency ?? baseCurrency}
-                                displayCurrency={false}
-                              />
-                              <GainPercent
-                                value={percentageToDisplay}
-                                variant="badge"
-                                className="text-xs"
-                              />
+                              {frontendGainLossAmount == null ? (
+                                <span className="text-muted-foreground text-sm font-light">
+                                  N/A
+                                </span>
+                              ) : (
+                                <GainAmount
+                                  className="text-sm font-light"
+                                  value={frontendGainLossAmount}
+                                  currency={performanceCurrency}
+                                  displayCurrency={showPerformanceCurrency}
+                                />
+                              )}
+                              {percentageToDisplay == null ? (
+                                <span className="text-muted-foreground bg-foreground/10 rounded-md px-2 py-px text-xs font-light">
+                                  N/A
+                                </span>
+                              ) : (
+                                <GainPercent
+                                  value={percentageToDisplay}
+                                  variant="badge"
+                                  className="text-xs"
+                                />
+                              )}
                             </div>
                           )}
                         </div>

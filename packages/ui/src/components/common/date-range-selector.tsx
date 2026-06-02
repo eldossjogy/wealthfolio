@@ -64,14 +64,19 @@ const ranges = [
     name: "All Time",
     getValue: () => ({ from: new Date(1970, 0, 1), to: new Date() }),
   },
-];
+] as const;
+
+type DateRangePresetLabel = (typeof ranges)[number]["label"];
 
 interface DateRangeSelectorProps {
   value: DateRange | undefined;
   onChange: (range: DateRange | undefined) => void;
+  hiddenRanges?: readonly DateRangePresetLabel[];
 }
 
-export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
+export function DateRangeSelector({ value, onChange, hiddenRanges = [] }: DateRangeSelectorProps) {
+  const visibleRanges = ranges.filter((range) => !hiddenRanges.includes(range.label));
+
   // Helper function to compare dates ignoring time
   const compareDates = (date1: Date | undefined, date2: Date | undefined) => {
     if (!date1 || !date2) return false;
@@ -80,7 +85,7 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
 
   // Check if current range matches any predefined range and get the selected label
   const getSelectedRange = () => {
-    const selected = ranges.find((range) => {
+    const selected = visibleRanges.find((range) => {
       const predefinedRange = range.getValue();
       return compareDates(value?.from, predefinedRange.from) && compareDates(value?.to, predefinedRange.to);
     });
@@ -93,7 +98,7 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
   return (
     <div className="flex items-center space-x-1">
       <AnimatedToggleGroup
-        items={ranges.map((range) => ({
+        items={visibleRanges.map((range) => ({
           value: range.label,
           label: range.label,
           title: range.name,
@@ -103,7 +108,7 @@ export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
           if (!newValue) {
             return;
           }
-          const selectedRange = ranges.find((r) => r.label === newValue);
+          const selectedRange = visibleRanges.find((r) => r.label === newValue);
           if (selectedRange) {
             onChange(selectedRange.getValue());
           }

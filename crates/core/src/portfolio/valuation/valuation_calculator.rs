@@ -2,7 +2,7 @@ use crate::errors::{Error, Result};
 use crate::fx::currency::{normalize_amount, normalize_currency_code};
 use crate::fx::FxError;
 use crate::portfolio::snapshot::AccountStateSnapshot;
-use crate::portfolio::valuation::DailyAccountValuation;
+use crate::portfolio::valuation::{DailyAccountValuation, ExternalFlowSource};
 use crate::quotes::Quote;
 
 use chrono::{NaiveDate, Utc};
@@ -124,6 +124,7 @@ pub fn calculate_valuation(
         net_contribution_base,
         external_inflow_base: Decimal::ZERO,
         external_outflow_base: Decimal::ZERO,
+        external_flow_source: ExternalFlowSource::Unknown,
         performance_eligible_value_base,
         calculated_at: Utc::now(),
     };

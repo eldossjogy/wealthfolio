@@ -4,6 +4,7 @@ use crate::assets::{
 use crate::constants::DECIMAL_PRECISION;
 use crate::errors::{CalculatorError, Error as CoreError, Result};
 use crate::fx::currency::{get_normalization_rule, normalize_currency_code};
+use crate::lots::LotRepositoryTrait;
 use crate::portfolio::holdings::holdings_model::{Holding, HoldingType, Instrument, MonetaryValue};
 use crate::portfolio::snapshot::{self, SnapshotServiceTrait};
 use crate::utils::time_utils::{parse_user_timezone_or_default, user_today};
@@ -56,6 +57,7 @@ pub struct HoldingsService {
     valuation_service: Arc<dyn HoldingsValuationServiceTrait>,
     classification_service: Arc<AssetClassificationService>,
     timezone: Arc<RwLock<String>>,
+    lot_repository: Option<Arc<dyn LotRepositoryTrait>>,
 }
 
 struct AssetInfo {
@@ -133,7 +135,13 @@ impl HoldingsService {
             valuation_service,
             classification_service,
             timezone,
+            lot_repository: None,
         }
+    }
+
+    pub fn with_lot_repository(mut self, lot_repository: Arc<dyn LotRepositoryTrait>) -> Self {
+        self.lot_repository = Some(lot_repository);
+        self
     }
 
     fn today_in_user_timezone(&self) -> chrono::NaiveDate {
@@ -368,6 +376,100 @@ impl HoldingsService {
             );
         }
     }
+
+    async fn apply_realized_gains_best_effort(&self, account_id: &str, holdings: &mut [Holding]) {
+        let Some(lot_repository) = &self.lot_repository else {
+            return;
+        };
+        let disposals = match lot_repository
+            .get_lot_disposals_for_account(account_id)
+            .await
+        {
+            Ok(disposals) => disposals,
+            Err(e) => {
+                warn!(
+                    "Failed to load lot disposals for account {} while calculating realized gains: {}",
+                    account_id, e
+                );
+                return;
+            }
+        };
+        if disposals.is_empty() {
+            return;
+        }
+
+        #[derive(Default)]
+        struct Totals {
+            realized_local: Decimal,
+            realized_base: Decimal,
+            disposed_cost_base: Decimal,
+        }
+
+        let mut totals_by_asset: HashMap<String, Totals> = HashMap::new();
+        for disposal in disposals {
+            let totals = totals_by_asset.entry(disposal.asset_id).or_default();
+            totals.realized_local += parse_decimal_lossy(&disposal.realized_pnl);
+            totals.realized_base += parse_decimal_lossy(&disposal.realized_pnl_base);
+            totals.disposed_cost_base += parse_decimal_lossy(&disposal.cost_basis_base);
+        }
+
+        for holding in holdings {
+            if !matches!(
+                holding.holding_type,
+                HoldingType::Security | HoldingType::AlternativeAsset
+            ) {
+                continue;
+            }
+            let Some(asset_id) = holding
+                .instrument
+                .as_ref()
+                .map(|instrument| instrument.id.clone())
+            else {
+                continue;
+            };
+            let Some(totals) = totals_by_asset.get(&asset_id) else {
+                continue;
+            };
+
+            let realized = MonetaryValue {
+                local: totals.realized_local,
+                base: totals.realized_base,
+            };
+            holding.realized_gain = Some(realized.clone());
+            holding.realized_gain_pct = if totals.disposed_cost_base > Decimal::ZERO {
+                Some((realized.base / totals.disposed_cost_base).round_dp(DECIMAL_PRECISION))
+            } else if !realized.base.is_zero() {
+                Some(dec!(1.0))
+            } else {
+                Some(Decimal::ZERO)
+            };
+
+            let mut total_gain = realized;
+            if let Some(unrealized) = &holding.unrealized_gain {
+                total_gain.local += unrealized.local;
+                total_gain.base += unrealized.base;
+            }
+            holding.total_gain = Some(total_gain.clone());
+
+            let open_cost_base = holding
+                .cost_basis
+                .as_ref()
+                .map(|cost_basis| cost_basis.base)
+                .unwrap_or(Decimal::ZERO);
+            let total_cost_base = open_cost_base + totals.disposed_cost_base;
+            holding.total_gain_pct = if total_cost_base > Decimal::ZERO {
+                Some((total_gain.base / total_cost_base).round_dp(DECIMAL_PRECISION))
+            } else if !total_gain.base.is_zero() {
+                Some(dec!(1.0))
+            } else {
+                Some(Decimal::ZERO)
+            };
+        }
+    }
+}
+
+fn parse_decimal_lossy(value: &str) -> Decimal {
+    value.parse::<Decimal>().unwrap_or(Decimal::ZERO)
 }
 
 fn add_monetary(acc: &mut MonetaryValue, other: &MonetaryValue) {
@@ -618,6 +720,8 @@ impl HoldingsServiceTrait for HoldingsService {
             .await;
         self.value_holdings_best_effort(account_id, &mut holdings)
             .await;
+        self.apply_realized_gains_best_effort(account_id, &mut holdings)
+            .await;
         apply_portfolio_weights(account_id, &mut holdings);
 
         // Load taxonomy classifications for all holdings
@@ -809,6 +913,8 @@ impl HoldingsServiceTrait for HoldingsService {
             )
             .await;
         self.value_holdings_best_effort(account_id, &mut holdings)
+            .await;
+        self.apply_realized_gains_best_effort(account_id, &mut holdings)
             .await;
         apply_portfolio_weights(account_id, &mut holdings);
         for holding in &mut holdings {

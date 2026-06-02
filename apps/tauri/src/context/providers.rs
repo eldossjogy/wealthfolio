@@ -403,21 +403,28 @@ pub async fn initialize_context(
         .with_activity_repository(activity_repository.clone(), timezone.clone()),
     );
 
-    let performance_service = Arc::new(PerformanceService::new_with_timezone(
-        valuation_service.clone(),
-        quote_service.clone(),
-        timezone.clone(),
-    ));
+    let performance_service = Arc::new(
+        PerformanceService::new_with_timezone(
+            valuation_service.clone(),
+            quote_service.clone(),
+            timezone.clone(),
+        )
+        .with_activity_repository(activity_repository.clone(), fx_service.clone())
+        .with_lot_repository(lots_repository.clone()),
+    );
 
     let classification_service =
         Arc::new(AssetClassificationService::new(taxonomy_service.clone()));
-    let holdings_service = Arc::new(HoldingsService::new_with_timezone(
-        asset_service.clone(),
-        snapshot_service.clone(),
-        holdings_valuation_service.clone(),
-        classification_service.clone(),
-        timezone.clone(),
-    ));
+    let holdings_service = Arc::new(
+        HoldingsService::new_with_timezone(
+            asset_service.clone(),
+            snapshot_service.clone(),
+            holdings_valuation_service.clone(),
+            classification_service.clone(),
+            timezone.clone(),
+        )
+        .with_lot_repository(lots_repository.clone()),
+    );
 
     let allocation_service = Arc::new(AllocationService::new(
         holdings_service.clone(),

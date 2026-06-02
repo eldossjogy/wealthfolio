@@ -4,6 +4,53 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ExternalFlowSource {
+    #[default]
+    Unknown,
+    ActivityDerived,
+    StoredGross,
+    NetContributionFallback,
+    Mixed,
+}
+
+impl ExternalFlowSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "UNKNOWN",
+            Self::ActivityDerived => "ACTIVITY_DERIVED",
+            Self::StoredGross => "STORED_GROSS",
+            Self::NetContributionFallback => "NET_CONTRIBUTION_FALLBACK",
+            Self::Mixed => "MIXED",
+        }
+    }
+
+    pub fn from_code(value: &str) -> Self {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "ACTIVITY_DERIVED" => Self::ActivityDerived,
+            "STORED_GROSS" => Self::StoredGross,
+            "NET_CONTRIBUTION_FALLBACK" => Self::NetContributionFallback,
+            "MIXED" => Self::Mixed,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub fn is_explicit_gross(self) -> bool {
+        matches!(
+            self,
+            Self::ActivityDerived | Self::StoredGross | Self::Mixed
+        )
+    }
+
+    pub fn is_degraded(self) -> bool {
+        matches!(
+            self,
+            Self::Unknown | Self::NetContributionFallback | Self::Mixed
+        )
+    }
+}
+
 /// Details about an account that has a negative total_value in its history.
 #[derive(Debug, Clone)]
 pub struct NegativeBalanceInfo {
@@ -40,6 +87,7 @@ pub struct DailyAccountValuation {
     pub net_contribution_base: Decimal,
     pub external_inflow_base: Decimal,
     pub external_outflow_base: Decimal,
+    pub external_flow_source: ExternalFlowSource,
     pub performance_eligible_value_base: Decimal,
     pub calculated_at: DateTime<Utc>,
 }

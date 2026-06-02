@@ -15,9 +15,17 @@ interface AssetDetail {
   portfolioPercent: number;
   todaysReturn: number | null;
   todaysReturnPercent: number | null;
-  totalReturn: number;
-  totalReturnPercent: number;
+  unrealizedPnl: number | null;
+  unrealizedPnlPercent: number | null;
+  realizedPnl: number | null;
+  realizedPnlPercent: number | null;
+  income: number | null;
+  fxEffect: number | null;
+  priceReturnPercent: number | null;
+  totalPnl: number | null;
+  totalPnlPercent: number | null;
   currency: string;
+  baseCurrency: string;
   quoteCurrency?: string | null;
   quote?: {
     open: number;
@@ -56,14 +64,37 @@ const AssetDetailCard: React.FC<AssetDetailProps> = ({ assetData, className }) =
     portfolioPercent,
     todaysReturn,
     todaysReturnPercent,
-    totalReturn,
-    totalReturnPercent,
+    unrealizedPnl,
+    unrealizedPnlPercent,
+    realizedPnl,
+    realizedPnlPercent,
+    income,
+    fxEffect,
+    priceReturnPercent,
+    totalPnl,
+    totalPnlPercent,
     currency,
+    baseCurrency,
     quoteCurrency,
     quote,
     bondSpec,
     optionSpec,
   } = assetData;
+
+  const renderAmountWithPercent = (amount: number | null, percent: number | null) => {
+    if (amount == null) return <span className="text-muted-foreground">N/A</span>;
+    return (
+      <>
+        <AmountDisplay value={amount} currency={currency} isHidden={isBalanceHidden} />
+        {percent != null && <> ({formatPercent(percent)})</>}
+      </>
+    );
+  };
+
+  const amountTone = (amount: number | null) => {
+    if (amount == null || amount === 0) return "";
+    return amount < 0 ? "text-destructive" : "text-success";
+  };
 
   const holdingRows = [
     {
@@ -94,14 +125,49 @@ const AssetDetailCard: React.FC<AssetDetailProps> = ({ assetData, className }) =
         ]
       : []),
     {
-      label: "Total return",
-      value: (
-        <>
-          <AmountDisplay value={totalReturn} currency={currency} isHidden={isBalanceHidden} /> (
-          {formatPercent(totalReturnPercent)})
-        </>
-      ),
-      color: totalReturn < 0 ? "text-destructive" : "text-success",
+      label: "Unrealized P&L",
+      value: renderAmountWithPercent(unrealizedPnl, unrealizedPnlPercent),
+      color: amountTone(unrealizedPnl),
+    },
+    {
+      label: "Realized P&L",
+      value: renderAmountWithPercent(realizedPnl, realizedPnlPercent),
+      color: amountTone(realizedPnl),
+    },
+    {
+      label: "Income",
+      value:
+        income == null ? (
+          <span className="text-muted-foreground">N/A</span>
+        ) : (
+          <AmountDisplay value={income} currency={currency} isHidden={isBalanceHidden} />
+        ),
+      color: amountTone(income),
+    },
+    {
+      label: "FX effect",
+      value:
+        fxEffect == null ? (
+          <span className="text-muted-foreground">N/A</span>
+        ) : (
+          <AmountDisplay value={fxEffect} currency={baseCurrency} isHidden={isBalanceHidden} />
+        ),
+      color: amountTone(fxEffect),
+    },
+    {
+      label: "Price return",
+      value:
+        priceReturnPercent == null ? (
+          <span className="text-muted-foreground">N/A</span>
+        ) : (
+          formatPercent(priceReturnPercent)
+        ),
+      color: amountTone(priceReturnPercent),
+    },
+    {
+      label: "Total P&L",
+      value: renderAmountWithPercent(totalPnl, totalPnlPercent),
+      color: amountTone(totalPnl),
     },
   ];
 

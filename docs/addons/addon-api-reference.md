@@ -480,10 +480,12 @@ to see these APIs in action.
 ## Performance API
 
 Calculate portfolio and account performance metrics with historical analysis.
+`returns.irr` is the selected-period money-weighted return. `returns.annualizedIrr`
+is the annualized XIRR on the same dated cash flows.
 
 ### Methods
 
-#### `calculateHistory(itemType: 'account' | 'symbol', itemId: string, startDate: string, endDate: string): Promise<PerformanceMetrics>`
+#### `calculateHistory(itemType: 'account' | 'symbol', itemId: string, startDate: string, endDate: string): Promise<PerformanceResult>`
 Calculates detailed performance history for charts and analysis.
 
 ```typescript
@@ -493,9 +495,10 @@ const history = await ctx.api.performance.calculateHistory(
   '2024-01-01',
   '2024-12-31'
 );
+console.log(history.returns.twr, history.returns.irr, history.series);
 ````
 
-#### `calculateSummary(args: { itemType: 'account' | 'symbol'; itemId: string; startDate?: string | null; endDate?: string | null; }): Promise<PerformanceMetrics>`
+#### `calculateSummary(args: { itemType: 'account' | 'symbol'; itemId: string; startDate?: string | null; endDate?: string | null; }): Promise<PerformanceResult>`
 
 Calculates comprehensive performance summary with key metrics.
 
@@ -506,9 +509,14 @@ const summary = await ctx.api.performance.calculateSummary({
   startDate: "2024-01-01",
   endDate: "2024-12-31",
 });
+console.log(
+  summary.returns.twr ?? summary.returns.valueReturn,
+  summary.returns.irr,
+  summary.risk.maxDrawdown,
+);
 ```
 
-#### `calculateAccountsSimple(accountIds: string[]): Promise<SimplePerformanceMetrics[]>`
+#### `calculateAccountsSimple(accountIds: string[]): Promise<SimplePerformanceResult[]>`
 
 Calculates simple performance metrics for multiple accounts efficiently.
 

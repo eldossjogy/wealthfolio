@@ -4,7 +4,7 @@ import { gotoActivities } from "./helpers";
 test.describe.configure({ mode: "serial" });
 
 test.describe("FX Cash Balance - Cross-currency Buy", () => {
-  const BASE_URL = "http://localhost:1420";
+  const BASE_URL = process.env.WF_E2E_BASE_URL || "http://localhost:1420";
   const TEST_PASSWORD = "password001";
   let page: Page;
 

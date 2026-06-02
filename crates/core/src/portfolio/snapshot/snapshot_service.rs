@@ -1,6 +1,8 @@
 use super::holdings_calculator::HoldingsCalculator;
 use super::SnapshotRepositoryTrait;
-use crate::accounts::{Account, AccountRepositoryTrait, TrackingMode};
+use crate::accounts::{
+    Account, AccountAccountingSettings, AccountRepositoryTrait, CostBasisMethod, TrackingMode,
+};
 use crate::activities::{
     Activity, ActivityCompiler, ActivityRepositoryTrait, DefaultActivityCompiler,
 };
@@ -8,7 +10,7 @@ use crate::assets::AssetRepositoryTrait;
 use crate::errors::{CalculatorError, Error, Result};
 use crate::events::{DomainEvent, DomainEventSink, NoOpDomainEventSink};
 use crate::fx::FxServiceTrait;
-use crate::lots::{check_lot_quantity_consistency, extract_lot_records, LotRepositoryTrait};
+use crate::lots::{check_lot_quantity_consistency, LotRepositoryTrait};
 use crate::portfolio::snapshot::{
     AccountStateSnapshot, HoldingsCalculationWarning, SnapshotSource,
 };
@@ -230,6 +232,74 @@ impl SnapshotService {
         )))
     }
 
+    fn affected_activity_ids_for_account(
+        activities_by_account_date: &ActivitiesByAccount,
+        account_id: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Vec<String> {
+        activities_by_account_date
+            .get(account_id)
+            .map(|by_date| {
+                by_date
+                    .range(start_date..=end_date)
+                    .flat_map(|(_, activities)| {
+                        activities.iter().map(|activity| activity.id.clone())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    async fn affected_disposal_activity_ids_for_account(
+        lot_repository: &(dyn LotRepositoryTrait + Send + Sync),
+        activities_by_account_date: &ActivitiesByAccount,
+        account_id: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Vec<String> {
+        let mut activity_ids = Self::affected_activity_ids_for_account(
+            activities_by_account_date,
+            account_id,
+            start_date,
+            end_date,
+        );
+
+        match lot_repository
+            .get_lot_disposals_for_account(account_id)
+            .await
+        {
+            Ok(existing_disposals) => {
+                activity_ids.extend(existing_disposals.into_iter().filter_map(|disposal| {
+                    let disposal_date =
+                        NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d").ok()?;
+                    (disposal_date >= start_date && disposal_date <= end_date)
+                        .then_some(disposal.disposal_activity_id)
+                }));
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to inspect existing lot disposals for account {}: {}",
+                    account_id, err
+                );
+            }
+        }
+
+        activity_ids.sort();
+        activity_ids.dedup();
+        activity_ids
+    }
+
+    fn accounting_method_for_account<'a>(
+        accounting_settings: &'a HashMap<String, AccountAccountingSettings>,
+        account_id: &str,
+    ) -> &'a str {
+        accounting_settings
+            .get(account_id)
+            .map(|settings| settings.cost_basis_method.as_str())
+            .unwrap_or(CostBasisMethod::Fifo.as_str())
+    }
+
     async fn clear_stale_account_state(
         &self,
         account_ids: &[String],
@@ -253,6 +323,16 @@ impl SnapshotService {
                         acc_id, e
                     );
                     lot_sync_errors.push(format!("{}: {}", acc_id, e));
+                }
+                if let Err(e) = lot_repo
+                    .sync_lot_disposals_for_account(acc_id, &[], &[], true)
+                    .await
+                {
+                    error!(
+                        "Failed to clear lot disposals for account {} after activity deletion: {}",
+                        acc_id, e
+                    );
+                    lot_sync_errors.push(format!("{} disposals: {}", acc_id, e));
                 }
             }
         }
@@ -298,6 +378,9 @@ impl SnapshotService {
                 if let Some(lot_repo) = &self.lot_repository {
                     for acc_id in &ids_to_delete {
                         lot_repo.replace_lots_for_account(acc_id, &[]).await?;
+                        lot_repo
+                            .sync_lot_disposals_for_account(acc_id, &[], &[], true)
+                            .await?;
                     }
                 }
             }
@@ -351,9 +434,23 @@ impl SnapshotService {
             return Ok(0);
         }
 
+        let account_ids_needing_calculation: Vec<String> =
+            accounts_needing_calculation.keys().cloned().collect();
+        let accounting_settings = self
+            .account_repository
+            .get_accounting_settings_by_account_ids(&account_ids_needing_calculation)?;
+        for acc_id in &account_ids_needing_calculation {
+            accounting_settings
+                .get(acc_id)
+                .cloned()
+                .unwrap_or_else(|| AccountAccountingSettings::default_for_account(acc_id.clone()))
+                .ensure_supported_for_calculation()?;
+        }
+
         let (final_holdings_states, keyframes_to_save, calculation_warnings) = self
             .calculate_daily_holdings_snapshots(
                 &accounts_needing_calculation,
+                &accounting_settings,
                 &activities_by_account_date,
                 &start_keyframes,
                 &effective_start_dates,
@@ -420,9 +517,33 @@ impl SnapshotService {
             // rows from latest snapshots, not persisted as synthetic tax lots.
             if let Some(lot_repo) = &self.lot_repository {
                 if let Some(snapshot) = final_holdings_states.get(acc_id) {
-                    let open_lots = extract_lot_records(snapshot);
+                    let cost_basis_method =
+                        Self::accounting_method_for_account(&accounting_settings, acc_id);
+                    let open_lots = self
+                        .holdings_calculator
+                        .extract_lot_records_with_base(snapshot, cost_basis_method);
                     let _ = check_lot_quantity_consistency(snapshot, &open_lots);
-                    let closures = self.holdings_calculator.take_disposed_lots(acc_id);
+                    let closures = self
+                        .holdings_calculator
+                        .take_disposed_lots(acc_id, cost_basis_method);
+                    let disposals = self
+                        .holdings_calculator
+                        .take_lot_disposals(acc_id, cost_basis_method);
+                    let is_full = matches!(mode, SnapshotRecalcMode::Full);
+                    let affected_disposal_activity_ids = if is_full {
+                        Vec::new()
+                    } else {
+                        Self::affected_disposal_activity_ids_for_account(
+                            lot_repo.as_ref(),
+                            &activities_by_account_date,
+                            acc_id,
+                            *effective_start_dates
+                                .get(acc_id)
+                                .unwrap_or(&calculation_min_date),
+                            calculation_end_date,
+                        )
+                        .await
+                    };
 
                     // Special case: a Full recalc that produced zero open
                     // lots, zero closures, AND zero positions is the
@@ -441,7 +562,6 @@ impl SnapshotService {
                     // produce no NEW lots while carrying historical ones —
                     // we can't tell stale from genuine in that case, so the
                     // safety stays.
-                    let is_full = matches!(mode, SnapshotRecalcMode::Full);
                     let calculator_says_empty = open_lots.is_empty()
                         && closures.is_empty()
                         && snapshot.positions.is_empty();
@@ -456,6 +576,21 @@ impl SnapshotService {
                     if let Err(e) = result {
                         error!("Failed to sync lot rows for account {}: {}", acc_id, e);
                         lot_sync_errors.push(format!("{}: {}", acc_id, e));
+                    }
+                    if let Err(e) = lot_repo
+                        .sync_lot_disposals_for_account(
+                            acc_id,
+                            &affected_disposal_activity_ids,
+                            &disposals,
+                            is_full,
+                        )
+                        .await
+                    {
+                        error!(
+                            "Failed to sync lot disposal rows for account {}: {}",
+                            acc_id, e
+                        );
+                        lot_sync_errors.push(format!("{} disposals: {}", acc_id, e));
                     }
                 }
             }
@@ -800,10 +935,11 @@ impl SnapshotService {
     // --- Step 7: Calculate daily holdings snapshots (in memory) and identify keyframes ---
     // Iterates through dates and calculates holdings for each real account needing processing.
     // Returns (final_states, keyframes, warnings) - warnings contain info about activities that couldn't be processed.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn calculate_daily_holdings_snapshots(
         &self,
         accounts_needing_calculation: &AccountsMap, // Actual accounts to process
+        accounting_settings: &HashMap<String, AccountAccountingSettings>,
         activities_by_account_date: &ActivitiesByAccount,
         start_keyframes: &StartSnapshotsMap, // Initial states for accounts needing calculation
         effective_start_dates: &StartDatesMap, // Start dates for accounts needing calculation
@@ -822,6 +958,12 @@ impl SnapshotService {
         // Clear lot-level caches from any previous run
         self.holdings_calculator.clear_transfer_lots_cache();
         self.holdings_calculator.clear_disposed_lots();
+        for account_id in accounts_needing_calculation.keys() {
+            self.holdings_calculator.set_cost_basis_method_for_account(
+                account_id,
+                Self::accounting_method_for_account(accounting_settings, account_id),
+            );
+        }
 
         for current_date in date_range {
             // Process only accounts whose effective start date is today or earlier.

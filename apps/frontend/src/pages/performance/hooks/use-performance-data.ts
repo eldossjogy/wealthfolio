@@ -57,8 +57,8 @@ export function useCalculatePerformanceHistory({
           calculatePerformanceHistory(
             item.type,
             item.id,
-            startDate!,
-            endDate!,
+            startDate,
+            endDate,
             // Only pass trackingMode for accounts, not for symbols
             item.type === "account" ? trackingMode : undefined,
             accountFilter,
@@ -86,11 +86,13 @@ export function useCalculatePerformanceHistory({
       if (query.isError || !query.data) return null;
 
       const item = validItems[index];
+      const symbolName =
+        item.type === "symbol" && item.name !== item.id ? `${item.name} (${item.id})` : item.name;
       return {
         ...query.data,
         id: item.id,
         type: item.type,
-        name: item.type === "symbol" ? `${item.name} (${item.id})` : item.name,
+        name: item.type === "symbol" ? symbolName : item.name,
       };
     })
     .filter(Boolean);

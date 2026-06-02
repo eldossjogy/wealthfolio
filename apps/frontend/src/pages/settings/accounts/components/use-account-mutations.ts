@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { createAccount, updateAccount, deleteAccount, logger } from "@/adapters";
 import { shouldInvalidateAfterPortfolioUpdate } from "@/lib/query-invalidation";
+
 interface UseAccountMutationsProps {
   onSuccess?: () => void;
 }

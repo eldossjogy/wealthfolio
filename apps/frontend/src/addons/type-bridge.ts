@@ -31,12 +31,12 @@ import type {
   IncomeSummary,
   MarketDataProviderInfo,
   NewContributionLimit,
-  PerformanceMetrics,
+  PerformanceResult,
   Quote,
   SnapshotInfo,
   SymbolSearchResult,
   Settings,
-  SimplePerformanceMetrics,
+  SimplePerformanceResult,
   UpdateAssetProfile,
 } from "@/lib/types";
 import type { HoldingInput } from "@/adapters";
@@ -118,14 +118,14 @@ export interface InternalHostAPI {
     itemId: string,
     startDate: string,
     endDate: string,
-  ): Promise<PerformanceMetrics>;
+  ): Promise<PerformanceResult>;
   calculatePerformanceSummary(args: {
     itemType: "account" | "symbol";
     itemId: string;
     startDate?: string | null;
     endDate?: string | null;
-  }): Promise<PerformanceMetrics>;
-  calculateAccountsSimplePerformance(accountIds: string[]): Promise<SimplePerformanceMetrics[]>;
+  }): Promise<PerformanceResult>;
+  calculateAccountsSimplePerformance(accountIds: string[]): Promise<SimplePerformanceResult[]>;
   getHolding(accountId: string, assetId: string): Promise<Holding | null>;
 
   // Settings
