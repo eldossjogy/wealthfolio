@@ -192,7 +192,13 @@ mod migration_tests {
             );
 
             CREATE TABLE activities (
-                id TEXT PRIMARY KEY NOT NULL
+                id TEXT PRIMARY KEY NOT NULL,
+                account_id TEXT,
+                activity_date TEXT,
+                status TEXT,
+                activity_type TEXT,
+                activity_type_override TEXT,
+                source_group_id TEXT
             );
 
             CREATE TABLE lots (

@@ -1,3 +1,6 @@
+DROP INDEX IF EXISTS ix_activities_transfer_scope;
+DROP INDEX IF EXISTS ix_activities_source_group_id;
+
 DROP TABLE IF EXISTS lot_disposals;
 
 ALTER TABLE daily_account_valuation DROP COLUMN external_flow_source;
