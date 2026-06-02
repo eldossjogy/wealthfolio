@@ -246,7 +246,7 @@ function TargetEditor({
   onAccountScopeChange?: (scope: AccountScope) => void;
   allocations?: PortfolioAllocations;
   actionsPlacement?: "inline" | "page-header";
-  onSaved: (targetId: string) => void;
+  onSaved: (target: AllocationTarget) => void;
   onCancel: () => void;
   onDelete?: () => void;
   onUnsavedChange?: (dirty: boolean) => void;
@@ -439,7 +439,7 @@ function TargetEditor({
       setHasUnsavedChanges(false);
       onUnsavedChange?.(false);
       toast.success(target ? "Target saved" : "Target created");
-      onSaved(saved.target.id);
+      onSaved(saved.target);
     } catch (error) {
       toast.error(target ? "Failed to save target" : "Failed to create target");
       console.error(error);
@@ -717,7 +717,7 @@ interface TargetsTabProps {
   actionsPlacement?: "inline" | "page-header";
   onUnsavedChange?: (dirty: boolean) => void;
   onCancel?: () => void;
-  onSaved?: (targetId: string) => void;
+  onSaved?: (target: AllocationTarget) => void;
 }
 
 export function TargetsTab({
@@ -805,10 +805,10 @@ export function TargetsTab({
     onAccountScopeChange?.(nextScope);
   }
 
-  function handleEditorSaved(targetId: string) {
-    onTargetChange(targetId);
-    setMode({ kind: "edit", targetId });
-    onSaved?.(targetId);
+  function handleEditorSaved(target: AllocationTarget) {
+    onTargetChange(target.id);
+    setMode({ kind: "edit", targetId: target.id });
+    onSaved?.(target);
   }
 
   function handleEditorCancel() {

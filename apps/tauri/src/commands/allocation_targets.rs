@@ -2,14 +2,42 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use wealthfolio_core::portfolio::allocation_targets::{
-    AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
-    NewAllocationTargetWeight, SaveAllocationTargetResult,
+use wealthfolio_core::{
+    portfolio::allocation_targets::{
+        AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
+        NewAllocationTargetWeight, SaveAllocationTargetResult, ScopeType,
+    },
+    portfolios::AccountScope,
 };
 
 use crate::context::ServiceContext;
 
 use super::portfolio::{holdings_account_ids, AccountScopeInput};
+
+fn scope_id_for_target(target: &AllocationTarget) -> Result<String, String> {
+    target
+        .scope_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Allocation target {} is missing scope_id for scoped drift",
+                target.id
+            )
+        })
+}
+
+fn account_scope_for_target(target: &AllocationTarget) -> Result<AccountScope, String> {
+    match &target.scope_type {
+        ScopeType::All => Ok(AccountScope::All),
+        ScopeType::Account => Ok(AccountScope::Account {
+            account_id: scope_id_for_target(target)?,
+        }),
+        ScopeType::Portfolio => Ok(AccountScope::Portfolio {
+            portfolio_id: scope_id_for_target(target)?,
+        }),
+    }
+}
 
 // ── Target CRUD ──────────────────────────────────────────────────────────────
 
@@ -132,8 +160,14 @@ pub async fn get_allocation_target_drift(
     filter: AccountScopeInput,
     include_holdings: Option<bool>,
 ) -> Result<DriftReport, String> {
-    let filter = filter.into_account_filter()?;
+    let _ = filter;
     let base_currency = state.get_base_currency();
+    let target = state
+        .allocation_target_service()
+        .get_target(&target_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("AllocationTarget {} not found", target_id))?;
+    let filter = account_scope_for_target(&target)?;
 
     let resolved = wealthfolio_core::portfolios::PortfolioServiceTrait::resolve_account_scope(
         state.portfolio_service.as_ref(),

@@ -56,6 +56,7 @@ export default function PortfolioInsightsPage() {
           <Suspense fallback={<DashboardLoader />}>
             <OverviewPage
               filter={accountFilter}
+              onFilterChange={setAccountScope}
               onToolbarActionsChange={setOverviewToolbarActions}
             />
           </Suspense>

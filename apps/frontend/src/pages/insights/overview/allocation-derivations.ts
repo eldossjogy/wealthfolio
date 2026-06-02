@@ -37,8 +37,6 @@ export interface LensItem {
 
 export interface ValueStripData {
   total: number;
-  dayChange: number;
-  dayChangePercent: number;
   cash: number;
   invested: number;
   investedPercent: number;
@@ -90,8 +88,6 @@ function isCash(holding: Holding): boolean {
 /** Headline figures for the value strip, derived from real holdings. */
 export function computeValueStrip(holdings: Holding[], accounts: Account[]): ValueStripData {
   let total = 0;
-  let dayChange = 0;
-  let prevTotal = 0;
   let cash = 0;
   const accountIds = new Set<string>();
   const byCurrency = new Map<string, number>();
@@ -99,11 +95,7 @@ export function computeValueStrip(holdings: Holding[], accounts: Account[]): Val
 
   for (const holding of holdings) {
     const base = num(holding.marketValue?.base);
-    const change = num(holding.dayChange?.base);
     total += base;
-    dayChange += change;
-    prevTotal +=
-      holding.prevCloseValue?.base != null ? num(holding.prevCloseValue.base) : base - change;
     if (holding.accountId) accountIds.add(holding.accountId);
     const currency = holding.localCurrency || holding.baseCurrency;
     byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + base);
@@ -140,8 +132,6 @@ export function computeValueStrip(holdings: Holding[], accounts: Account[]): Val
 
   return {
     total,
-    dayChange,
-    dayChangePercent: prevTotal > 0 ? (dayChange / prevTotal) * 100 : 0,
     cash,
     invested,
     investedPercent: total > 0 ? (invested / total) * 100 : 0,

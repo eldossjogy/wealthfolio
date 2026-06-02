@@ -3,7 +3,10 @@ import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { cn } from "@/lib/utils";
 import type { DriftReport, DriftRow, AllocationTarget } from "@/lib/types";
 import { Button, Card, Icons, Skeleton } from "@wealthfolio/ui";
-import { allocationTargetColor } from "@/pages/allocation-targets/components/allocation-target-colors";
+import {
+  allocationTargetColorForRow,
+  buildAllocationTargetColorMap,
+} from "@/pages/allocation-targets/components/allocation-target-colors";
 import { formatTolerance } from "@/pages/allocation-targets/components/drift-copy";
 import { resolveDriftReportCategories } from "@/pages/allocation-targets/components/drift-report-resolver";
 import {
@@ -48,6 +51,9 @@ export function TargetRailsCard({
   const resolvedDriftReport = driftReport
     ? resolveDriftReportCategories(driftReport, taxonomy?.categories)
     : null;
+  const colorByCategory = resolvedDriftReport
+    ? buildAllocationTargetColorMap(resolvedDriftReport.rows)
+    : undefined;
 
   if (isLoading) {
     return (
@@ -76,7 +82,7 @@ export function TargetRailsCard({
   const moves = rows
     .map((row, index) => ({
       row,
-      color: allocationTargetColor(row.categoryId, row.categoryName, index),
+      color: allocationTargetColorForRow(row, colorByCategory, index),
     }))
     .filter(({ row }) => isOutOfBand(row))
     .sort((a, b) => Math.abs(b.row.valueDelta) - Math.abs(a.row.valueDelta));
@@ -131,7 +137,7 @@ export function TargetRailsCard({
             {rows.map((row, index) => {
               const cur = row.currentBps / 100;
               const tgt = row.targetBps / 100;
-              const color = allocationTargetColor(row.categoryId, row.categoryName, index);
+              const color = allocationTargetColorForRow(row, colorByCategory, index);
               return (
                 <div
                   key={row.categoryId}

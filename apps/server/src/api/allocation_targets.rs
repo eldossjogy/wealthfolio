@@ -10,12 +10,41 @@ use serde::Deserialize;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
         AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
-        NewAllocationTargetWeight, SaveAllocationTargetResult,
+        NewAllocationTargetWeight, SaveAllocationTargetResult, ScopeType,
     },
     portfolios::AccountScope,
 };
 
-use crate::{api::shared::holdings_account_ids, error::ApiResult, main_lib::AppState};
+use crate::{
+    api::shared::holdings_account_ids,
+    error::{ApiError, ApiResult},
+    main_lib::AppState,
+};
+
+fn scope_id_for_target(target: &AllocationTarget) -> ApiResult<String> {
+    target
+        .scope_id
+        .clone()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!(
+                "Allocation target {} is missing scope_id for scoped drift",
+                target.id
+            ))
+        })
+}
+
+fn account_scope_for_target(target: &AllocationTarget) -> ApiResult<AccountScope> {
+    match &target.scope_type {
+        ScopeType::All => Ok(AccountScope::All),
+        ScopeType::Account => Ok(AccountScope::Account {
+            account_id: scope_id_for_target(target)?,
+        }),
+        ScopeType::Portfolio => Ok(AccountScope::Portfolio {
+            portfolio_id: scope_id_for_target(target)?,
+        }),
+    }
+}
 
 // ── Target CRUD ──────────────────────────────────────────────────────────────
 
@@ -132,9 +161,15 @@ async fn get_drift_for_target(
     Json(body): Json<DriftBody>,
 ) -> ApiResult<Json<DriftReport>> {
     let base_currency = state.base_currency.read().unwrap().clone();
+    let _ = &body.filter;
+    let target = state
+        .allocation_target_service
+        .get_target(&target_id)?
+        .ok_or(ApiError::NotFound)?;
+    let filter = account_scope_for_target(&target)?;
     let resolved = state
         .portfolio_service
-        .resolve_account_scope(&body.filter, &base_currency)
+        .resolve_account_scope(&filter, &base_currency)
         .map_err(crate::error::ApiError::from)?;
 
     let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;

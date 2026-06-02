@@ -4,7 +4,7 @@ import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { usePortfolios } from "@/hooks/use-portfolios";
 import { isAlternativeAssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { AccountScope, TaxonomyAllocation } from "@/lib/types";
+import type { AccountScope, AllocationTarget, TaxonomyAllocation } from "@/lib/types";
 import { OverviewTab } from "@/pages/allocation-targets/components/overview-tab";
 import {
   TargetDetailHeader,
@@ -32,13 +32,18 @@ import { ValueStrip } from "./value-strip";
 
 interface OverviewPageProps {
   filter?: AccountScope;
+  onFilterChange?: (filter: AccountScope) => void;
   onToolbarActionsChange?: (actions: ReactNode | null) => void;
 }
 
 type WorkspaceView = "current" | "details" | "targets";
 type TargetEditorMode = "create" | "edit";
 
-export function OverviewPage({ filter: filterProp, onToolbarActionsChange }: OverviewPageProps) {
+export function OverviewPage({
+  filter: filterProp,
+  onFilterChange,
+  onToolbarActionsChange,
+}: OverviewPageProps) {
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
@@ -201,10 +206,14 @@ export function OverviewPage({ filter: filterProp, onToolbarActionsChange }: Ove
     setWorkspaceView(fallbackTargetId ? "details" : "current");
   }
 
-  function handleTargetEditorSaved(targetId: string) {
+  function handleTargetEditorSaved(target: AllocationTarget) {
+    const savedScope = accountScopeFromTarget(target);
+    if (savedScope && accountScopeKey(savedScope) !== selectedAccountScopeKey) {
+      onFilterChange?.(savedScope);
+    }
     setTargetEditorDirty(false);
     setTargetEditorMode("edit");
-    setSelectedTargetId(targetId);
+    setSelectedTargetId(target.id);
     setWorkspaceView("details");
   }
 
@@ -270,6 +279,7 @@ export function OverviewPage({ filter: filterProp, onToolbarActionsChange }: Ove
               }}
               editorMode={targetEditorMode}
               accountScope={targetEditorAccountScope}
+              onAccountScopeChange={onFilterChange}
               onUnsavedChange={setTargetEditorDirty}
               onCancel={handleTargetEditorCancel}
               onSaved={handleTargetEditorSaved}
