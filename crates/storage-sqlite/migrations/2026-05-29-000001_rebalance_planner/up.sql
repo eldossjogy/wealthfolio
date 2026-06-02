@@ -1,3 +1,0 @@
--- M2: execution policy fields (rebalance_goal, min_trade_amount, whole_shares_only)
--- are already part of allocation_targets (added in migration 2026-05-25-000002).
--- No additional schema changes required.

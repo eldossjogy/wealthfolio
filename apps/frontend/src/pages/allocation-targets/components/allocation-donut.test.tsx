@@ -22,6 +22,7 @@ function row(
     status: "in_band",
     isRequired: true,
     isZeroCurrent: false,
+    isCash: false,
     ...rest,
   };
 }

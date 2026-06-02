@@ -50,10 +50,14 @@ function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
   return driftReport.rows
     .filter((r) => r.status !== "not_targeted")
     .map((row, i) => {
+      // Deploying cash moves value out of the cash sleeve into buy sleeves.
+      // Total value is unchanged, so the cash row sheds cash_used.
       const deployed = plan.trades
         .filter((t) => t.categoryId === row.categoryId)
         .reduce((sum, t) => sum + t.estimatedAmount, 0);
-      const afterValue = row.currentValue + deployed;
+      const afterValue = row.isCash
+        ? Math.max(row.currentValue - plan.cashUsed, 0)
+        : row.currentValue + deployed;
       const afterBps = total > 0 ? Math.round((afterValue / total) * 10000) : 0;
       return {
         categoryId: row.categoryId,

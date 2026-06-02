@@ -177,6 +177,10 @@ pub struct DriftRow {
     pub status: DriftStatus,
     pub is_required: bool,
     pub is_zero_current: bool,
+    /// True when this category holds only cash. The rebalance planner reduces
+    /// this row by the deployed cash when estimating after-drift.
+    #[serde(default)]
+    pub is_cash: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

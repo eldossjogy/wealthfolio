@@ -18,6 +18,7 @@ function driftRow(overrides: Partial<DriftRow> & Pick<DriftRow, "categoryId">): 
     status: "in_band",
     isRequired: true,
     isZeroCurrent: false,
+    isCash: false,
     ...rest,
   };
 }

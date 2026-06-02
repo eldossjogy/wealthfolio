@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::errors::{Error as CoreError, Result as CoreResult};
 use crate::portfolio::allocation::AllocationServiceTrait;
-use crate::portfolio::holdings::HoldingSummary;
+use crate::portfolio::holdings::{HoldingSummary, HoldingType, HoldingsServiceTrait};
 
 use super::drift_service::DriftServiceTrait;
 use super::model::{
@@ -30,6 +30,7 @@ pub struct RebalanceService {
     allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
     drift_service: Arc<dyn DriftServiceTrait>,
     allocation_service: Arc<dyn AllocationServiceTrait>,
+    holdings_service: Arc<dyn HoldingsServiceTrait>,
 }
 
 impl RebalanceService {
@@ -37,11 +38,13 @@ impl RebalanceService {
         allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
         drift_service: Arc<dyn DriftServiceTrait>,
         allocation_service: Arc<dyn AllocationServiceTrait>,
+        holdings_service: Arc<dyn HoldingsServiceTrait>,
     ) -> Self {
         Self {
             allocation_target_service,
             drift_service,
             allocation_service,
+            holdings_service,
         }
     }
 }
@@ -58,6 +61,30 @@ impl RebalanceServiceTrait for RebalanceService {
             return Err(CoreError::Validation(
                 crate::errors::ValidationError::InvalidInput(
                     "available_cash must be non-negative".to_string(),
+                ),
+            ));
+        }
+
+        // M2 deploys tracked cash only. Compute the cash in scope from holdings
+        // (authoritative — does not trust a client-supplied figure) and reject
+        // attempts to deploy more than is actually held.
+        let cash_in_scope: Decimal = self
+            .holdings_service
+            .get_holdings_for_accounts(
+                &input.account_ids,
+                &input.base_currency,
+                &input.aggregated_account_id,
+            )
+            .await?
+            .iter()
+            .filter(|holding| holding.holding_type == HoldingType::Cash)
+            .map(|holding| holding.market_value.base)
+            .sum();
+
+        if input.available_cash > cash_in_scope {
+            return Err(CoreError::Validation(
+                crate::errors::ValidationError::InvalidInput(
+                    "cash to deploy exceeds tracked cash in scope".to_string(),
                 ),
             ));
         }
@@ -431,11 +458,18 @@ impl RebalanceServiceTrait for RebalanceService {
                 .iter()
                 .filter(|row| row.is_required)
                 .map(|row| {
-                    let deployed = deployed_per_sleeve
-                        .get(&row.category_id)
-                        .copied()
-                        .unwrap_or(Decimal::ZERO);
-                    let new_value = row.current_value + deployed;
+                    // Deploying cash moves value out of the cash sleeve into buy
+                    // sleeves. Total value is unchanged, so the cash row must shed
+                    // total_cash_used for after-drift to stay consistent.
+                    let new_value = if row.is_cash {
+                        (row.current_value - total_cash_used).max(Decimal::ZERO)
+                    } else {
+                        let deployed = deployed_per_sleeve
+                            .get(&row.category_id)
+                            .copied()
+                            .unwrap_or(Decimal::ZERO);
+                        row.current_value + deployed
+                    };
                     let new_bps = (new_value / total_value * bps_scale)
                         .round()
                         .to_string()
@@ -448,14 +482,6 @@ impl RebalanceServiceTrait for RebalanceService {
         };
 
         let cash_remaining = input.available_cash - total_cash_used;
-
-        debug!(
-            "Rebalance plan: {} trades, {} remaining cash, max drift {} → {} bps",
-            trades.len(),
-            cash_remaining,
-            max_drift_bps_before,
-            max_drift_bps_after,
-        );
 
         Ok(RebalancePlan {
             target_id: input.target_id.clone(),
@@ -480,7 +506,7 @@ mod tests {
         AllocationTarget, AllocationTargetWeight, DriftReport, DriftRow, DriftStatus,
         NewAllocationTarget, NewAllocationTargetWeight, RebalanceGoal, ScopeType, TriggerType,
     };
-    use crate::portfolio::holdings::{HoldingSummary, HoldingType};
+    use crate::portfolio::holdings::{Holding, HoldingSummary, HoldingType, MonetaryValue};
     use rust_decimal_macros::dec;
 
     fn make_profile(rebalance_goal: RebalanceGoal, whole_shares_only: bool) -> AllocationTarget {
@@ -531,6 +557,7 @@ mod tests {
             status,
             is_required: true,
             is_zero_current: current_bps == 0,
+            is_cash: false,
         }
     }
 
@@ -700,10 +727,84 @@ mod tests {
         }
     }
 
+    struct MockHoldingsService {
+        cash_in_scope: Decimal,
+    }
+
+    #[async_trait]
+    impl crate::portfolio::holdings::HoldingsServiceTrait for MockHoldingsService {
+        async fn get_holdings(&self, _: &str, _: &str) -> CoreResult<Vec<Holding>> {
+            unimplemented!()
+        }
+        async fn get_holdings_for_accounts(
+            &self,
+            _: &[String],
+            base_currency: &str,
+            _: &str,
+        ) -> CoreResult<Vec<Holding>> {
+            // Single cash holding carrying the configured in-scope cash.
+            Ok(vec![Holding {
+                id: "cash".to_string(),
+                account_id: "acc-1".to_string(),
+                holding_type: HoldingType::Cash,
+                instrument: None,
+                asset_kind: None,
+                quantity: self.cash_in_scope,
+                open_date: None,
+                lots: None,
+                contract_multiplier: Decimal::ONE,
+                local_currency: base_currency.to_string(),
+                base_currency: base_currency.to_string(),
+                fx_rate: None,
+                market_value: MonetaryValue {
+                    local: self.cash_in_scope,
+                    base: self.cash_in_scope,
+                },
+                cost_basis: None,
+                price: None,
+                purchase_price: None,
+                unrealized_gain: None,
+                unrealized_gain_pct: None,
+                realized_gain: None,
+                realized_gain_pct: None,
+                total_gain: None,
+                total_gain_pct: None,
+                day_change: None,
+                day_change_pct: None,
+                prev_close_value: None,
+                weight: Decimal::ZERO,
+                as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+                metadata: None,
+                source_account_ids: vec![],
+            }])
+        }
+        async fn get_holding(&self, _: &str, _: &str, _: &str) -> CoreResult<Option<Holding>> {
+            unimplemented!()
+        }
+        async fn holdings_from_snapshot(
+            &self,
+            _: &crate::portfolio::snapshot::AccountStateSnapshot,
+            _: &str,
+        ) -> CoreResult<Vec<Holding>> {
+            unimplemented!()
+        }
+    }
+
     fn make_service(
         profile: AllocationTarget,
         report: DriftReport,
         holdings: std::collections::HashMap<String, Vec<HoldingSummary>>,
+    ) -> RebalanceService {
+        // Large default so existing tests can deploy freely; the rejection test
+        // uses make_service_with_cash to constrain it.
+        make_service_with_cash(profile, report, holdings, dec!(1_000_000))
+    }
+
+    fn make_service_with_cash(
+        profile: AllocationTarget,
+        report: DriftReport,
+        holdings: std::collections::HashMap<String, Vec<HoldingSummary>>,
+        cash_in_scope: Decimal,
     ) -> RebalanceService {
         RebalanceService::new(
             Arc::new(MockTargetService { profile }),
@@ -711,6 +812,7 @@ mod tests {
             Arc::new(MockAllocationService {
                 holdings_by_category: holdings,
             }),
+            Arc::new(MockHoldingsService { cash_in_scope }),
         )
     }
 
@@ -828,6 +930,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deploy_exceeding_tracked_cash_is_rejected() {
+        // Only $500 of cash is tracked in scope, but the caller asks to deploy $1000.
+        // Backend must reject regardless of what the UI allowed.
+        let total = dec!(10000);
+        let rows = vec![make_drift_row("equity", 6000, 7000, total)];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(6000))],
+        );
+        let svc = make_service_with_cash(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+            dec!(500),
+        );
+        let err = svc
+            .calculate_plan(make_input(dec!(1000)))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds tracked cash in scope"),
+            "deploy over tracked cash must be rejected: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn total_value_stays_constant_when_cash_deployed() {
         // Portfolio: equity $6000 (60%), cash $4000 (40%). Total = $10000.
         // Target: equity 70%, cash 30%.
@@ -836,7 +966,10 @@ mod tests {
         let total = dec!(10000);
         let rows = vec![
             make_drift_row("equity", 6000, 7000, total),
-            make_drift_row("cash", 4000, 3000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 4000, 3000, total)
+            },
         ];
         let report = make_report(rows, total);
         let mut holdings = std::collections::HashMap::new();
@@ -853,8 +986,14 @@ mod tests {
 
         // cash_used + cash_remaining must equal available_cash (no value created)
         assert_eq!(plan.cash_used + plan.cash_remaining, dec!(2000));
-        // max_drift_after computed on base total $10000
-        assert!(plan.max_drift_bps_after <= plan.max_drift_bps_before);
+        // Equity shortfall is $1000 (60% → 70%); deploying it pulls cash 40% → 30%.
+        // The cash sleeve must shed cash_used so both sleeves hit target → after-drift 0.
+        // Without subtracting cash_used the cash row would stay at 40% (drift +1000bps).
+        assert_eq!(plan.cash_used, dec!(1000));
+        assert_eq!(
+            plan.max_drift_bps_after, 0,
+            "cash sleeve must drop by cash_used so both sleeves reach target"
+        );
     }
 
     #[tokio::test]

@@ -1819,12 +1819,12 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "calculate_rebalance_plan": {
-      const { profileId, availableCash, filter } = payload as {
-        profileId: string;
+      const { targetId, availableCash, filter } = payload as {
+        targetId: string;
         availableCash: number;
         filter: unknown;
       };
-      body = JSON.stringify({ profileId, availableCash, filter });
+      body = JSON.stringify({ targetId, availableCash, filter });
       break;
     }
     // AI Providers

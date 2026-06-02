@@ -469,6 +469,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             allocation_target_service.clone(),
             drift_service.clone(),
             allocation_service.clone(),
+            holdings_service.clone(),
         ),
     );
 

@@ -440,6 +440,7 @@ pub async fn initialize_context(
         allocation_target_service.clone(),
         drift_service.clone(),
         allocation_service.clone(),
+        holdings_service.clone(),
     ));
 
     let net_worth_service = Arc::new(NetWorthService::new(

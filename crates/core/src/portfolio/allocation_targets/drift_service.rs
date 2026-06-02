@@ -20,6 +20,15 @@ struct CategoryCurrent {
     value: Decimal,
     name: String,
     color: String,
+    has_cash: bool,
+    has_non_cash: bool,
+}
+
+impl CategoryCurrent {
+    /// A category that holds cash and nothing else is the cash sleeve.
+    fn is_cash(&self) -> bool {
+        self.has_cash && !self.has_non_cash
+    }
 }
 
 #[async_trait]
@@ -105,8 +114,15 @@ impl DriftService {
                     value: Decimal::ZERO,
                     name: contribution.category_name.clone(),
                     color: contribution.category_color.clone(),
+                    has_cash: false,
+                    has_non_cash: false,
                 });
             entry.value += contribution.value;
+            if contribution.holding_type == HoldingType::Cash {
+                entry.has_cash = true;
+            } else {
+                entry.has_non_cash = true;
+            }
         }
 
         current_by_category
@@ -162,6 +178,7 @@ impl DriftService {
                     status,
                     is_required: weight.is_required,
                     is_zero_current: current_value == Decimal::ZERO,
+                    is_cash: current.map(|current| current.is_cash()).unwrap_or(false),
                 }
             })
             .filter(|row| row.is_required || row.current_value > Decimal::ZERO)
@@ -178,6 +195,7 @@ impl DriftService {
             }
 
             let current_bps = Self::current_bps(current.value, total_value);
+            let is_cash = current.is_cash();
             rows.push(DriftRow {
                 category_id,
                 category_name: current.name,
@@ -191,6 +209,7 @@ impl DriftService {
                 status: DriftStatus::NotTargeted,
                 is_required: false,
                 is_zero_current: current.value == Decimal::ZERO,
+                is_cash,
             });
         }
 

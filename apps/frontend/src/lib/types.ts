@@ -2327,6 +2327,7 @@ export interface DriftRow {
   status: DriftStatus;
   isRequired: boolean;
   isZeroCurrent: boolean;
+  isCash: boolean;
 }
 
 export interface DriftReport {
