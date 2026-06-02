@@ -1,69 +1,83 @@
 import type {
   AccountScope,
   DriftReport,
-  NewTargetAllocationNode,
-  NewTargetProfile,
-  TargetAllocationNode,
-  TargetProfile,
+  NewAllocationTargetWeight,
+  NewAllocationTarget,
+  AllocationTargetWeight,
+  AllocationTarget,
+  SaveAllocationTargetResult,
 } from "@/lib/types";
 
 import { invoke } from "./platform";
 
-// ── Profile CRUD ──────────────────────────────────────────────────────────────
+// ── Target CRUD ──────────────────────────────────────────────────────────────
 
-export const listTargetProfiles = async (): Promise<TargetProfile[]> => {
-  return invoke<TargetProfile[]>("list_target_profiles");
+export const listAllocationTargets = async (): Promise<AllocationTarget[]> => {
+  return invoke<AllocationTarget[]>("list_allocation_targets");
 };
 
-export const getTargetProfile = async (id: string): Promise<TargetProfile | null> => {
-  return invoke<TargetProfile | null>("get_target_profile", { id });
+export const getAllocationTarget = async (id: string): Promise<AllocationTarget | null> => {
+  return invoke<AllocationTarget | null>("get_allocation_target", { id });
 };
 
-export const createTargetProfile = async (input: NewTargetProfile): Promise<TargetProfile> => {
-  return invoke<TargetProfile>("create_target_profile", { input });
+export const createAllocationTarget = async (
+  input: NewAllocationTarget,
+): Promise<AllocationTarget> => {
+  return invoke<AllocationTarget>("create_allocation_target", { input });
 };
 
-export const updateTargetProfile = async (
+export const updateAllocationTarget = async (
   id: string,
-  input: NewTargetProfile,
-): Promise<TargetProfile> => {
-  return invoke<TargetProfile>("update_target_profile", { id, input });
+  input: NewAllocationTarget,
+): Promise<AllocationTarget> => {
+  return invoke<AllocationTarget>("update_allocation_target", { id, input });
 };
 
-export const activateTargetProfile = async (id: string): Promise<TargetProfile> => {
-  return invoke<TargetProfile>("activate_target_profile", { id });
+export const archiveAllocationTarget = async (id: string): Promise<AllocationTarget> => {
+  return invoke<AllocationTarget>("archive_allocation_target", { id });
 };
 
-export const archiveTargetProfile = async (id: string): Promise<TargetProfile> => {
-  return invoke<TargetProfile>("archive_target_profile", { id });
+export const deleteAllocationTarget = async (id: string): Promise<void> => {
+  return invoke<void>("delete_allocation_target", { id });
 };
 
-export const deleteTargetProfile = async (id: string): Promise<void> => {
-  return invoke<void>("delete_target_profile", { id });
+// ── Weights ─────────────────────────────────────────────────────────────────────
+
+export const listAllocationTargetWeights = async (
+  targetId: string,
+): Promise<AllocationTargetWeight[]> => {
+  return invoke<AllocationTargetWeight[]>("list_allocation_target_weights", { targetId });
 };
 
-// ── Nodes ─────────────────────────────────────────────────────────────────────
-
-export const listTargetNodes = async (profileId: string): Promise<TargetAllocationNode[]> => {
-  return invoke<TargetAllocationNode[]>("list_target_nodes", { profileId });
+export const saveAllocationTargetWeights = async (
+  targetId: string,
+  weights: NewAllocationTargetWeight[],
+): Promise<AllocationTargetWeight[]> => {
+  return invoke<AllocationTargetWeight[]>("save_allocation_target_weights", { targetId, weights });
 };
 
-export const saveTargetNodes = async (
-  profileId: string,
-  nodes: NewTargetAllocationNode[],
-): Promise<TargetAllocationNode[]> => {
-  return invoke<TargetAllocationNode[]>("save_target_nodes", { profileId, nodes });
+export const saveAllocationTargetWithWeights = async (
+  id: string | null,
+  input: NewAllocationTarget,
+  weights: NewAllocationTargetWeight[],
+): Promise<SaveAllocationTargetResult> => {
+  return invoke<SaveAllocationTargetResult>("save_allocation_target_with_weights", {
+    id,
+    input,
+    weights,
+  });
 };
 
 // ── Drift ─────────────────────────────────────────────────────────────────────
 
-export const getTargetDrift = async (filter: AccountScope): Promise<DriftReport | null> => {
-  return invoke<DriftReport | null>("get_target_drift", { input: { filter } });
-};
-
-export const getTargetDriftForProfile = async (
-  profileId: string,
+export const getAllocationTargetDrift = async (
+  targetId: string,
   filter: AccountScope,
+  options?: { includeHoldings?: boolean },
 ): Promise<DriftReport> => {
-  return invoke<DriftReport>("get_target_drift_for_profile", { profileId, filter });
+  return invoke<DriftReport>("get_allocation_target_drift", {
+    targetId,
+    filter,
+    includeHoldings: options?.includeHoldings ?? false,
+  });
 };

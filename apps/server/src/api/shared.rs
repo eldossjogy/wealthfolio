@@ -12,7 +12,7 @@ use anyhow::anyhow;
 use chrono::NaiveDate;
 use serde_json::json;
 use wealthfolio_core::{
-    accounts::AccountServiceTrait,
+    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait},
     portfolio::{
         snapshot::{reconcile_quote_sync_from_latest_account_snapshots, SnapshotRecalcMode},
         valuation::ValuationRecalcMode,
@@ -36,6 +36,16 @@ pub fn parse_date_optional(
     field_name: &str,
 ) -> Result<Option<NaiveDate>, ApiError> {
     date_str.map(|s| parse_date(&s, field_name)).transpose()
+}
+
+pub fn holdings_account_ids(state: &AppState, account_ids: &[String]) -> ApiResult<Vec<String>> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .filter(|account| account_supports_purpose(&account.account_type, AccountPurpose::Holdings))
+        .map(|account| account.id)
+        .collect())
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

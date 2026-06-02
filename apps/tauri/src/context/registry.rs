@@ -54,7 +54,8 @@ pub struct ServiceContext {
     pub app_sync_repository: Arc<AppSyncRepository>,
     pub holdings_service: Arc<dyn portfolio::holdings::HoldingsServiceTrait>,
     pub allocation_service: Arc<dyn portfolio::allocation::AllocationServiceTrait>,
-    pub target_profile_service: Arc<dyn portfolio::allocation_targets::TargetProfileServiceTrait>,
+    pub allocation_target_service:
+        Arc<dyn portfolio::allocation_targets::AllocationTargetServiceTrait>,
     pub drift_service: Arc<dyn portfolio::allocation_targets::DriftServiceTrait>,
     pub valuation_service: Arc<dyn portfolio::valuation::ValuationServiceTrait>,
     pub net_worth_service: Arc<dyn portfolio::net_worth::NetWorthServiceTrait>,
@@ -183,10 +184,10 @@ impl ServiceContext {
         Arc::clone(&self.allocation_service)
     }
 
-    pub fn target_profile_service(
+    pub fn allocation_target_service(
         &self,
-    ) -> Arc<dyn portfolio::allocation_targets::TargetProfileServiceTrait> {
-        Arc::clone(&self.target_profile_service)
+    ) -> Arc<dyn portfolio::allocation_targets::AllocationTargetServiceTrait> {
+        Arc::clone(&self.allocation_target_service)
     }
 
     pub fn drift_service(&self) -> Arc<dyn portfolio::allocation_targets::DriftServiceTrait> {

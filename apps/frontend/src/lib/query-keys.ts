@@ -142,11 +142,16 @@ export const QueryKeys = {
   ASSET_CLASSIFICATIONS: "asset-classifications",
 
   // Allocation Targets
-  TARGET_PROFILES: "targetProfiles",
-  TARGET_NODES: "targetNodes",
-  TARGET_DRIFT: "targetDrift",
-  targetNodes: (profileId: string) => [QueryKeys.TARGET_NODES, profileId],
-  targetDrift: (profileId: string, scope: unknown) => [QueryKeys.TARGET_DRIFT, profileId, scope],
+  ALLOCATION_TARGETS: "allocationTargets",
+  ALLOCATION_TARGET_WEIGHTS: "allocationTargetWeights",
+  ALLOCATION_TARGET_DRIFT: "allocationTargetDrift",
+  allocationTargetWeights: (targetId: string) => [QueryKeys.ALLOCATION_TARGET_WEIGHTS, targetId],
+  allocationTargetDrift: (targetId: string, scope: unknown, includeHoldings = false) => [
+    QueryKeys.ALLOCATION_TARGET_DRIFT,
+    targetId,
+    scope,
+    includeHoldings,
+  ],
 
   // Health Center
   HEALTH_STATUS: "healthStatus",

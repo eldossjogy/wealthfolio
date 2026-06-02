@@ -21,7 +21,7 @@ use wealthfolio_core::{
     limits::ContributionLimitService,
     portfolio::{
         allocation::AllocationService,
-        allocation_targets::{DriftService, TargetProfileService},
+        allocation_targets::{AllocationTargetService, DriftService},
         holdings::{HoldingsService, HoldingsValuationService},
         income::IncomeService,
         net_worth::NetWorthService,
@@ -47,7 +47,7 @@ use wealthfolio_storage_sqlite::{
     limits::ContributionLimitRepository,
     market_data::{MarketDataRepository, QuoteSyncStateRepository},
     portfolio::{
-        allocation_targets::TargetProfileRepository, snapshot::SnapshotRepository,
+        allocation_targets::AllocationTargetRepository, snapshot::SnapshotRepository,
         valuation::ValuationRepository,
     },
     portfolios::PortfolioRepository,
@@ -424,14 +424,16 @@ pub async fn initialize_context(
         taxonomy_service.clone(),
     ));
 
-    let target_profile_repository =
-        Arc::new(TargetProfileRepository::new(pool.clone(), writer.clone()));
-    let target_profile_service = Arc::new(TargetProfileService::new(
-        target_profile_repository,
+    let allocation_target_repository = Arc::new(AllocationTargetRepository::new(
+        pool.clone(),
+        writer.clone(),
+    ));
+    let allocation_target_service = Arc::new(AllocationTargetService::new(
+        allocation_target_repository,
         taxonomy_service.clone(),
     ));
     let drift_service = Arc::new(DriftService::new(
-        target_profile_service.clone(),
+        allocation_target_service.clone(),
         allocation_service.clone(),
     ));
 
@@ -560,7 +562,7 @@ pub async fn initialize_context(
             app_sync_repository,
             holdings_service,
             allocation_service,
-            target_profile_service,
+            allocation_target_service,
             drift_service,
             valuation_service,
             net_worth_service,

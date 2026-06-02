@@ -21,7 +21,7 @@ use wealthfolio_core::{
     },
 };
 
-use crate::{error::ApiResult, main_lib::AppState};
+use crate::{api::shared::holdings_account_ids, error::ApiResult, main_lib::AppState};
 
 use super::dto::{
     AccountIdQuery, AllocationFilterBody, AllocationHoldingsQuery, AssetHoldingsQuery,
@@ -41,19 +41,6 @@ fn resolve_scope(
         .portfolio_service
         .resolve_account_scope(filter, &base)
         .map_err(crate::error::ApiError::from)
-}
-
-fn holdings_account_ids(
-    state: &AppState,
-    account_ids: &[String],
-) -> Result<Vec<String>, crate::error::ApiError> {
-    Ok(state
-        .account_service
-        .get_accounts_by_ids(account_ids)?
-        .into_iter()
-        .filter(|account| account_supports_purpose(&account.account_type, AccountPurpose::Holdings))
-        .map(|account| account.id)
-        .collect())
 }
 
 pub async fn get_holdings(

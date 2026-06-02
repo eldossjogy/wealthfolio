@@ -1,170 +1,136 @@
 use std::sync::Arc;
 
-use serde::Deserialize;
 use tauri::State;
 
 use wealthfolio_core::portfolio::allocation_targets::{
-    DriftReport, NewTargetAllocationNode, NewTargetProfile, TargetAllocationNode, TargetProfile,
+    AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
+    NewAllocationTargetWeight, SaveAllocationTargetResult,
 };
 
 use crate::context::ServiceContext;
 
-use super::portfolio::AccountScopeInput;
+use super::portfolio::{holdings_account_ids, AccountScopeInput};
 
-// ── Profile CRUD ──────────────────────────────────────────────────────────────
+// ── Target CRUD ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_target_profiles(
+pub async fn list_allocation_targets(
     state: State<'_, Arc<ServiceContext>>,
-) -> Result<Vec<TargetProfile>, String> {
+) -> Result<Vec<AllocationTarget>, String> {
     state
-        .target_profile_service()
-        .list_profiles()
+        .allocation_target_service()
+        .list_targets()
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn get_target_profile(
+pub async fn get_allocation_target(
     state: State<'_, Arc<ServiceContext>>,
     id: String,
-) -> Result<Option<TargetProfile>, String> {
+) -> Result<Option<AllocationTarget>, String> {
     state
-        .target_profile_service()
-        .get_profile(&id)
+        .allocation_target_service()
+        .get_target(&id)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn create_target_profile(
+pub async fn create_allocation_target(
     state: State<'_, Arc<ServiceContext>>,
-    input: NewTargetProfile,
-) -> Result<TargetProfile, String> {
+    input: NewAllocationTarget,
+) -> Result<AllocationTarget, String> {
     state
-        .target_profile_service()
-        .create_profile(input)
+        .allocation_target_service()
+        .create_target(input)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn update_target_profile(
+pub async fn update_allocation_target(
     state: State<'_, Arc<ServiceContext>>,
     id: String,
-    input: NewTargetProfile,
-) -> Result<TargetProfile, String> {
+    input: NewAllocationTarget,
+) -> Result<AllocationTarget, String> {
     state
-        .target_profile_service()
-        .update_profile(&id, input)
+        .allocation_target_service()
+        .update_target(&id, input)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn activate_target_profile(
+pub async fn archive_allocation_target(
     state: State<'_, Arc<ServiceContext>>,
     id: String,
-) -> Result<TargetProfile, String> {
+) -> Result<AllocationTarget, String> {
     state
-        .target_profile_service()
-        .activate_profile(&id)
+        .allocation_target_service()
+        .archive_target(&id)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn archive_target_profile(
-    state: State<'_, Arc<ServiceContext>>,
-    id: String,
-) -> Result<TargetProfile, String> {
-    state
-        .target_profile_service()
-        .archive_profile(&id)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn delete_target_profile(
+pub async fn delete_allocation_target(
     state: State<'_, Arc<ServiceContext>>,
     id: String,
 ) -> Result<(), String> {
     state
-        .target_profile_service()
-        .delete_profile(&id)
+        .allocation_target_service()
+        .delete_target(&id)
         .await
         .map_err(|e| e.to_string())
 }
 
-// ── Nodes ─────────────────────────────────────────────────────────────────────
+// ── Weights ─────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_target_nodes(
+pub async fn list_allocation_target_weights(
     state: State<'_, Arc<ServiceContext>>,
-    profile_id: String,
-) -> Result<Vec<TargetAllocationNode>, String> {
+    target_id: String,
+) -> Result<Vec<AllocationTargetWeight>, String> {
     state
-        .target_profile_service()
-        .list_nodes_for_profile(&profile_id)
+        .allocation_target_service()
+        .list_weights_for_target(&target_id)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn save_target_nodes(
+pub async fn save_allocation_target_weights(
     state: State<'_, Arc<ServiceContext>>,
-    profile_id: String,
-    nodes: Vec<NewTargetAllocationNode>,
-) -> Result<Vec<TargetAllocationNode>, String> {
+    target_id: String,
+    weights: Vec<NewAllocationTargetWeight>,
+) -> Result<Vec<AllocationTargetWeight>, String> {
     state
-        .target_profile_service()
-        .save_nodes(&profile_id, nodes)
+        .allocation_target_service()
+        .save_weights(&target_id, weights)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_allocation_target_with_weights(
+    state: State<'_, Arc<ServiceContext>>,
+    id: Option<String>,
+    input: NewAllocationTarget,
+    weights: Vec<NewAllocationTargetWeight>,
+) -> Result<SaveAllocationTargetResult, String> {
+    state
+        .allocation_target_service()
+        .save_target_with_weights(id, input, weights)
         .await
         .map_err(|e| e.to_string())
 }
 
 // ── Drift ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DriftInput {
-    pub filter: AccountScopeInput,
-}
-
 #[tauri::command]
-pub async fn get_target_drift(
+pub async fn get_allocation_target_drift(
     state: State<'_, Arc<ServiceContext>>,
-    input: DriftInput,
-) -> Result<Option<DriftReport>, String> {
-    let filter = input.filter.into_account_filter()?;
-    let base_currency = state.get_base_currency();
-
-    let resolved = wealthfolio_core::portfolios::PortfolioServiceTrait::resolve_account_scope(
-        state.portfolio_service.as_ref(),
-        &filter,
-        &base_currency,
-    )
-    .map_err(|e| e.to_string())?;
-
-    let scope_type = resolved.scope_id.split(':').next().unwrap_or("all");
-    let scope_id = resolved.scope_id.split(':').nth(1).map(|s| s.to_string());
-
-    state
-        .drift_service()
-        .get_drift_report(
-            scope_type,
-            scope_id.as_deref(),
-            &resolved.account_ids,
-            &base_currency,
-            &resolved.scope_id,
-        )
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn get_target_drift_for_profile(
-    state: State<'_, Arc<ServiceContext>>,
-    profile_id: String,
+    target_id: String,
     filter: AccountScopeInput,
+    include_holdings: Option<bool>,
 ) -> Result<DriftReport, String> {
     let filter = filter.into_account_filter()?;
     let base_currency = state.get_base_currency();
@@ -176,14 +142,29 @@ pub async fn get_target_drift_for_profile(
     )
     .map_err(|e| e.to_string())?;
 
-    state
-        .drift_service()
-        .get_drift_report_for_profile(
-            &profile_id,
-            &resolved.account_ids,
-            &base_currency,
-            &resolved.scope_id,
-        )
-        .await
-        .map_err(|e| e.to_string())
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+
+    if include_holdings.unwrap_or(false) {
+        state
+            .drift_service()
+            .get_drift_report_with_holdings_for_target(
+                &target_id,
+                &account_ids,
+                &base_currency,
+                &resolved.scope_id,
+            )
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        state
+            .drift_service()
+            .get_drift_report_for_target(
+                &target_id,
+                &account_ids,
+                &base_currency,
+                &resolved.scope_id,
+            )
+            .await
+            .map_err(|e| e.to_string())
+    }
 }

@@ -321,17 +321,16 @@ export {
 
 // Allocation Target Commands
 export {
-  activateTargetProfile,
-  archiveTargetProfile,
-  createTargetProfile,
-  deleteTargetProfile,
-  getTargetDrift,
-  getTargetDriftForProfile,
-  getTargetProfile,
-  listTargetNodes,
-  listTargetProfiles,
-  saveTargetNodes,
-  updateTargetProfile,
+  archiveAllocationTarget,
+  createAllocationTarget,
+  deleteAllocationTarget,
+  getAllocationTargetDrift,
+  getAllocationTarget,
+  listAllocationTargetWeights,
+  listAllocationTargets,
+  saveAllocationTargetWeights,
+  saveAllocationTargetWithWeights,
+  updateAllocationTarget,
 } from "../shared/allocation-targets";
 
 // Data Export Commands

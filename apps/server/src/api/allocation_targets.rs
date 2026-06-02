@@ -9,92 +9,109 @@ use axum::{
 use serde::Deserialize;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
-        DriftReport, NewTargetAllocationNode, NewTargetProfile, TargetAllocationNode, TargetProfile,
+        AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
+        NewAllocationTargetWeight, SaveAllocationTargetResult,
     },
     portfolios::AccountScope,
 };
 
-use crate::{error::ApiResult, main_lib::AppState};
+use crate::{api::shared::holdings_account_ids, error::ApiResult, main_lib::AppState};
 
-// ── Profile CRUD ──────────────────────────────────────────────────────────────
+// ── Target CRUD ──────────────────────────────────────────────────────────────
 
-async fn list_profiles(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<TargetProfile>>> {
-    let profiles = state.target_profile_service.list_profiles()?;
-    Ok(Json(profiles))
+async fn list_targets(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<Vec<AllocationTarget>>> {
+    let targets = state.allocation_target_service.list_targets()?;
+    Ok(Json(targets))
 }
 
-async fn get_profile(
+async fn get_target(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<Option<TargetProfile>>> {
-    let profile = state.target_profile_service.get_profile(&id)?;
-    Ok(Json(profile))
+) -> ApiResult<Json<Option<AllocationTarget>>> {
+    let target = state.allocation_target_service.get_target(&id)?;
+    Ok(Json(target))
 }
 
-async fn create_profile(
+async fn create_target(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<NewTargetProfile>,
-) -> ApiResult<Json<TargetProfile>> {
-    let created = state.target_profile_service.create_profile(payload).await?;
+    Json(payload): Json<NewAllocationTarget>,
+) -> ApiResult<Json<AllocationTarget>> {
+    let created = state
+        .allocation_target_service
+        .create_target(payload)
+        .await?;
     Ok(Json(created))
 }
 
-async fn update_profile(
+async fn update_target(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<NewTargetProfile>,
-) -> ApiResult<Json<TargetProfile>> {
+    Json(payload): Json<NewAllocationTarget>,
+) -> ApiResult<Json<AllocationTarget>> {
     let updated = state
-        .target_profile_service
-        .update_profile(&id, payload)
+        .allocation_target_service
+        .update_target(&id, payload)
         .await?;
     Ok(Json(updated))
 }
 
-async fn activate_profile(
+async fn archive_target(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<TargetProfile>> {
-    let profile = state.target_profile_service.activate_profile(&id).await?;
-    Ok(Json(profile))
+) -> ApiResult<Json<AllocationTarget>> {
+    let target = state.allocation_target_service.archive_target(&id).await?;
+    Ok(Json(target))
 }
 
-async fn archive_profile(
-    Path(id): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<TargetProfile>> {
-    let profile = state.target_profile_service.archive_profile(&id).await?;
-    Ok(Json(profile))
-}
-
-async fn delete_profile(
+async fn delete_target(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<StatusCode> {
-    state.target_profile_service.delete_profile(&id).await?;
+    state.allocation_target_service.delete_target(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ── Nodes ─────────────────────────────────────────────────────────────────────
+// ── Weights ─────────────────────────────────────────────────────────────────────
 
-async fn list_nodes(
-    Path(profile_id): Path<String>,
+async fn list_weights(
+    Path(target_id): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<Vec<TargetAllocationNode>>> {
-    let nodes = state
-        .target_profile_service
-        .list_nodes_for_profile(&profile_id)?;
-    Ok(Json(nodes))
+) -> ApiResult<Json<Vec<AllocationTargetWeight>>> {
+    let weights = state
+        .allocation_target_service
+        .list_weights_for_target(&target_id)?;
+    Ok(Json(weights))
 }
 
-async fn save_nodes(
-    Path(profile_id): Path<String>,
+async fn save_weights(
+    Path(target_id): Path<String>,
     State(state): State<Arc<AppState>>,
-    Json(nodes): Json<Vec<NewTargetAllocationNode>>,
-) -> ApiResult<Json<Vec<TargetAllocationNode>>> {
+    Json(weights): Json<Vec<NewAllocationTargetWeight>>,
+) -> ApiResult<Json<Vec<AllocationTargetWeight>>> {
     let saved = state
-        .target_profile_service
-        .save_nodes(&profile_id, nodes)
+        .allocation_target_service
+        .save_weights(&target_id, weights)
+        .await?;
+    Ok(Json(saved))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveTargetWithWeightsBody {
+    id: Option<String>,
+    input: NewAllocationTarget,
+    weights: Vec<NewAllocationTargetWeight>,
+}
+
+async fn save_target_with_weights(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SaveTargetWithWeightsBody>,
+) -> ApiResult<Json<SaveAllocationTargetResult>> {
+    let saved = state
+        .allocation_target_service
+        .save_target_with_weights(body.id, body.input, body.weights)
         .await?;
     Ok(Json(saved))
 }
@@ -105,36 +122,12 @@ async fn save_nodes(
 #[serde(rename_all = "camelCase")]
 struct DriftBody {
     filter: AccountScope,
+    #[serde(default)]
+    include_holdings: bool,
 }
 
-async fn get_drift(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<DriftBody>,
-) -> ApiResult<Json<Option<DriftReport>>> {
-    let base_currency = state.base_currency.read().unwrap().clone();
-    let resolved = state
-        .portfolio_service
-        .resolve_account_scope(&body.filter, &base_currency)
-        .map_err(crate::error::ApiError::from)?;
-
-    let scope_type = resolved.scope_id.split(':').next().unwrap_or("all");
-    let scope_id = resolved.scope_id.split(':').nth(1).map(|s| s.to_string());
-
-    let report = state
-        .drift_service
-        .get_drift_report(
-            scope_type,
-            scope_id.as_deref(),
-            &resolved.account_ids,
-            &base_currency,
-            &resolved.scope_id,
-        )
-        .await?;
-    Ok(Json(report))
-}
-
-async fn get_drift_for_profile(
-    Path(profile_id): Path<String>,
+async fn get_drift_for_target(
+    Path(target_id): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<DriftBody>,
 ) -> ApiResult<Json<DriftReport>> {
@@ -144,15 +137,29 @@ async fn get_drift_for_profile(
         .resolve_account_scope(&body.filter, &base_currency)
         .map_err(crate::error::ApiError::from)?;
 
-    let report = state
-        .drift_service
-        .get_drift_report_for_profile(
-            &profile_id,
-            &resolved.account_ids,
-            &base_currency,
-            &resolved.scope_id,
-        )
-        .await?;
+    let account_ids = holdings_account_ids(&state, &resolved.account_ids)?;
+
+    let report = if body.include_holdings {
+        state
+            .drift_service
+            .get_drift_report_with_holdings_for_target(
+                &target_id,
+                &account_ids,
+                &base_currency,
+                &resolved.scope_id,
+            )
+            .await?
+    } else {
+        state
+            .drift_service
+            .get_drift_report_for_target(
+                &target_id,
+                &account_ids,
+                &base_currency,
+                &resolved.scope_id,
+            )
+            .await?
+    };
     Ok(Json(report))
 }
 
@@ -160,29 +167,19 @@ async fn get_drift_for_profile(
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/allocation-targets", get(list_targets).post(create_target))
         .route(
-            "/allocation-targets/profiles",
-            get(list_profiles).post(create_profile),
+            "/allocation-targets/save-with-weights",
+            post(save_target_with_weights),
         )
         .route(
-            "/allocation-targets/profiles/{id}",
-            get(get_profile).put(update_profile).delete(delete_profile),
+            "/allocation-targets/{id}",
+            get(get_target).put(update_target).delete(delete_target),
         )
+        .route("/allocation-targets/{id}/archive", post(archive_target))
         .route(
-            "/allocation-targets/profiles/{id}/activate",
-            post(activate_profile),
+            "/allocation-targets/{id}/weights",
+            get(list_weights).post(save_weights),
         )
-        .route(
-            "/allocation-targets/profiles/{id}/archive",
-            post(archive_profile),
-        )
-        .route(
-            "/allocation-targets/profiles/{id}/nodes",
-            get(list_nodes).post(save_nodes),
-        )
-        .route("/allocation-targets/drift", post(get_drift))
-        .route(
-            "/allocation-targets/profiles/{id}/drift",
-            post(get_drift_for_profile),
-        )
+        .route("/allocation-targets/{id}/drift", post(get_drift_for_target))
 }
