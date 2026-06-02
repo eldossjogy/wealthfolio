@@ -21,7 +21,9 @@ use super::model::{
 use super::sync;
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::{asset_taxonomy_assignments, taxonomies, taxonomy_categories};
+use crate::schema::{
+    allocation_target_weights, asset_taxonomy_assignments, taxonomies, taxonomy_categories,
+};
 
 pub struct TaxonomyRepository {
     pool: Arc<Pool<r2d2::ConnectionManager<SqliteConnection>>>,
@@ -204,6 +206,21 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
         Ok(row.count.max(0) as usize)
     }
 
+    fn get_category_allocation_target_weight_count(
+        &self,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> Result<usize> {
+        let mut conn = get_connection(&self.pool)?;
+        let count = allocation_target_weights::table
+            .filter(allocation_target_weights::taxonomy_id.eq(taxonomy_id))
+            .filter(allocation_target_weights::category_id.eq(category_id))
+            .count()
+            .get_result::<i64>(&mut conn)
+            .map_err(StorageError::from)?;
+        Ok(count.max(0) as usize)
+    }
+
     async fn create_category(&self, category: NewCategory) -> Result<Category> {
         self.writer
             .exec_projected(move |conn, projection| -> Result<Category> {
@@ -353,6 +370,37 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
         let mut conn = get_connection(&self.pool)?;
         let results = asset_taxonomy_assignments::table
             .filter(asset_taxonomy_assignments::asset_id.eq(asset_id))
+            .order((
+                asset_taxonomy_assignments::asset_id.asc(),
+                asset_taxonomy_assignments::taxonomy_id.asc(),
+                asset_taxonomy_assignments::category_id.asc(),
+                asset_taxonomy_assignments::id.asc(),
+            ))
+            .load::<AssetTaxonomyAssignmentDB>(&mut conn)
+            .map_err(StorageError::from)?;
+        Ok(results
+            .into_iter()
+            .map(AssetTaxonomyAssignment::from)
+            .collect())
+    }
+
+    fn get_asset_assignments_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<Vec<AssetTaxonomyAssignment>> {
+        if asset_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let results = asset_taxonomy_assignments::table
+            .filter(asset_taxonomy_assignments::asset_id.eq_any(asset_ids))
+            .order((
+                asset_taxonomy_assignments::asset_id.asc(),
+                asset_taxonomy_assignments::taxonomy_id.asc(),
+                asset_taxonomy_assignments::category_id.asc(),
+                asset_taxonomy_assignments::id.asc(),
+            ))
             .load::<AssetTaxonomyAssignmentDB>(&mut conn)
             .map_err(StorageError::from)?;
         Ok(results

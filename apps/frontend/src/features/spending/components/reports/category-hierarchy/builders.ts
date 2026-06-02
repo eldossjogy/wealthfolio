@@ -145,7 +145,7 @@ export function buildTree({
     .sort(compare);
 }
 
-export function buildGroupNodes({
+export function buildGroupWeights({
   tree,
   groupRows,
   budgetRows,

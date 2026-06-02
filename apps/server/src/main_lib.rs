@@ -119,8 +119,8 @@ pub struct AppState {
     pub budget_service: Arc<wealthfolio_spending::budget::BudgetService>,
     pub spending_analytics_service: Arc<wealthfolio_spending::analytics::AnalyticsService>,
     pub spending_insight_service: Arc<wealthfolio_spending::insight::InsightService>,
-    pub target_profile_service: Arc<
-        dyn wealthfolio_core::portfolio::allocation_targets::TargetProfileServiceTrait
+    pub allocation_target_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::AllocationTargetServiceTrait
             + Send
             + Sync,
     >,
@@ -435,19 +435,19 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         AllocationService::new(holdings_service.clone(), taxonomy_service.clone()),
     );
 
-    let target_profile_repository = Arc::new(
-        wealthfolio_storage_sqlite::portfolio::allocation_targets::TargetProfileRepository::new(
+    let allocation_target_repository = Arc::new(
+        wealthfolio_storage_sqlite::portfolio::allocation_targets::AllocationTargetRepository::new(
             pool.clone(),
             writer.clone(),
         ),
     );
-    let target_profile_service: Arc<
-        dyn wealthfolio_core::portfolio::allocation_targets::TargetProfileServiceTrait
+    let allocation_target_service: Arc<
+        dyn wealthfolio_core::portfolio::allocation_targets::AllocationTargetServiceTrait
             + Send
             + Sync,
     > = Arc::new(
-        wealthfolio_core::portfolio::allocation_targets::TargetProfileService::new(
-            target_profile_repository,
+        wealthfolio_core::portfolio::allocation_targets::AllocationTargetService::new(
+            allocation_target_repository,
             taxonomy_service.clone(),
         ),
     );
@@ -455,7 +455,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         dyn wealthfolio_core::portfolio::allocation_targets::DriftServiceTrait + Send + Sync,
     > = Arc::new(
         wealthfolio_core::portfolio::allocation_targets::DriftService::new(
-            target_profile_service.clone(),
+            allocation_target_service.clone(),
             allocation_service.clone(),
         ),
     );
@@ -801,7 +801,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         budget_service,
         spending_analytics_service,
         spending_insight_service,
-        target_profile_service,
+        allocation_target_service,
         drift_service,
     });
 

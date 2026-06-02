@@ -1,8 +1,7 @@
 # Allocation Advisor SOTA Target Model Specification
 
-Status: Draft  
-Date: 2026-05-07  
-Audience: Product, frontend, backend, desktop, web, and addon engineers
+Status: Draft Date: 2026-05-07 Audience: Product, frontend, backend, desktop,
+web, and addon engineers
 
 ## 1. Purpose
 
@@ -92,7 +91,7 @@ brokerages, robo-advisors, and advisor tools.
 An investor defines an intended asset mix. Market movement, contributions,
 withdrawals, income, and price changes cause the current mix to drift from that
 target. Rebalancing restores or moves the portfolio closer to the intended risk
-profile.
+target.
 
 Common target types:
 
@@ -172,8 +171,8 @@ allocation/rebalancing engine then decides where that contribution should go.
 The SOTA model has eight independent but connected entities.
 
 ```text
-TargetProfile
-  -> TargetAllocationNode[]
+AllocationTarget
+  -> AllocationTargetWeight[]
   -> TargetGuardrail[]
   -> HoldingTarget[]
   -> RebalancePolicy
@@ -183,36 +182,39 @@ TargetProfile
        -> TradeDraft[]
 ```
 
-### 5.1 TargetProfile
+### 5.1 AllocationTarget
 
 Defines the desired portfolio model for a scope.
 
 Fields:
 
-| Field          | Type            | Notes                                          |
-| -------------- | --------------- | ---------------------------------------------- |
-| id             | string          | UUID                                           |
-| name           | string          | User-visible name                              |
-| status         | enum            | draft, active, archived                        |
-| scope_type     | enum            | portfolio, account, account_group              |
-| scope_id       | string nullable | Null for whole portfolio                       |
-| base_currency  | string          | ISO currency code                              |
-| objective      | enum nullable   | growth, balanced, income, preservation, custom |
-| model_type     | enum            | template, custom, imported                     |
-| version        | integer         | Increment on material changes                  |
-| effective_from | date nullable   | For scheduled/glide changes                    |
-| created_at     | datetime        | UTC                                            |
-| updated_at     | datetime        | UTC                                            |
+| Field             | Type              | Notes                                          |
+| ----------------- | ----------------- | ---------------------------------------------- |
+| id                | string            | UUID                                           |
+| name              | string            | User-visible name                              |
+| scope_type        | enum              | portfolio, account, account_group              |
+| scope_id          | string nullable   | Null for whole portfolio                       |
+| base_currency     | string            | ISO currency code                              |
+| objective         | enum nullable     | growth, balanced, income, preservation, custom |
+| model_type        | enum              | template, custom, imported                     |
+| version           | integer           | Increment on material changes                  |
+| effective_from    | date nullable     | For scheduled/glide changes                    |
+| rebalance_goal    | enum              | nearest_band, exact_target                     |
+| min_trade_amount  | decimal text      | Future planner minimum trade amount            |
+| whole_shares_only | boolean           | Future planner execution constraint            |
+| created_at        | datetime          | UTC                                            |
+| updated_at        | datetime          | UTC                                            |
+| archived_at       | datetime nullable | Null for normal targets; set when archived     |
 
 Rules:
 
-- Only one active profile per scope at a time.
-- Draft profiles can be edited without changing monitoring.
-- Activating a profile snapshots the prior active profile as inactive history.
+- Multiple targets can exist per scope.
+- The monitored target is selected outside the target row.
+- Selecting a target does not mutate the previous target.
 - Scope is explicit. Do not use sentinel account IDs like "TOTAL" or "PORTFOLIO"
   in persisted target records.
 
-### 5.2 TargetAllocationNode
+### 5.2 AllocationTargetWeight
 
 Defines a target sleeve in a primary taxonomy.
 
@@ -221,7 +223,7 @@ Fields:
 | Field               | Type             | Notes                                  |
 | ------------------- | ---------------- | -------------------------------------- |
 | id                  | string           | UUID                                   |
-| profile_id          | string           | Parent TargetProfile                   |
+| target_id           | string           | Parent AllocationTarget                |
 | taxonomy_id         | string           | Usually asset_classes for v1           |
 | category_id         | string           | References taxonomy category           |
 | parent_node_id      | string nullable  | Enables nested sleeve targets          |
@@ -237,10 +239,10 @@ Fields:
 
 Rules:
 
-- Top-level allocation nodes for a profile must sum to 10000 bps.
-- Child nodes under the same parent must sum to 10000 bps of their parent if
+- Top-level allocation target weights for a target must sum to 10000 bps.
+- Child weights under the same parent must sum to 10000 bps of their parent if
   child targeting is enabled.
-- A node can reference a category with no current holdings.
+- A target weight can reference a category with no current holdings.
 - If min/max are omitted, the RebalancePolicy default band applies.
 
 ### 5.3 TargetGuardrail
@@ -260,7 +262,7 @@ Fields:
 | Field          | Type             | Notes                                           |
 | -------------- | ---------------- | ----------------------------------------------- |
 | id             | string           | UUID                                            |
-| profile_id     | string           | Parent TargetProfile                            |
+| target_id      | string           | Parent AllocationTarget                         |
 | guardrail_type | enum             | taxonomy, holding, account, cash, concentration |
 | taxonomy_id    | string nullable  | Required for taxonomy guardrails                |
 | category_id    | string nullable  | Category for taxonomy guardrails                |
@@ -287,20 +289,20 @@ Defines optional instrument targets inside an allocation sleeve.
 
 Fields:
 
-| Field               | Type             | Notes                       |
-| ------------------- | ---------------- | --------------------------- |
-| id                  | string           | UUID                        |
-| allocation_node_id  | string           | Parent TargetAllocationNode |
-| asset_id            | string           | Asset/instrument            |
-| target_bps          | integer nullable | Target inside the sleeve    |
-| min_bps             | integer nullable | Lower band inside sleeve    |
-| max_bps             | integer nullable | Upper band inside sleeve    |
-| buy_priority        | integer nullable | Lower number buys first     |
-| sell_priority       | integer nullable | Lower number sells first    |
-| substitute_group_id | string nullable  | For equivalent ETFs/funds   |
-| is_locked           | boolean          | Prevent auto-adjust         |
-| is_buyable          | boolean          | Can receive buys            |
-| is_sellable         | boolean          | Can be sold by plans        |
+| Field               | Type             | Notes                         |
+| ------------------- | ---------------- | ----------------------------- |
+| id                  | string           | UUID                          |
+| allocation_node_id  | string           | Parent AllocationTargetWeight |
+| asset_id            | string           | Asset/instrument              |
+| target_bps          | integer nullable | Target inside the sleeve      |
+| min_bps             | integer nullable | Lower band inside sleeve      |
+| max_bps             | integer nullable | Upper band inside sleeve      |
+| buy_priority        | integer nullable | Lower number buys first       |
+| sell_priority       | integer nullable | Lower number sells first      |
+| substitute_group_id | string nullable  | For equivalent ETFs/funds     |
+| is_locked           | boolean          | Prevent auto-adjust           |
+| is_buyable          | boolean          | Can receive buys              |
+| is_sellable         | boolean          | Can be sold by plans          |
 
 Rules:
 
@@ -320,7 +322,7 @@ Fields:
 | Field                | Type          | Notes                                          |
 | -------------------- | ------------- | ---------------------------------------------- |
 | id                   | string        | UUID                                           |
-| profile_id           | string        | Parent TargetProfile                           |
+| target_id            | string        | Parent AllocationTarget                        |
 | trigger_type         | enum          | manual, calendar, threshold, hybrid            |
 | review_frequency     | enum nullable | weekly, monthly, quarterly, semiannual, annual |
 | next_review_date     | date nullable | Used for calendar/hybrid                       |
@@ -346,7 +348,7 @@ Fields:
 | Field                  | Type             | Notes                                                           |
 | ---------------------- | ---------------- | --------------------------------------------------------------- |
 | id                     | string           | UUID                                                            |
-| profile_id             | string           | Parent TargetProfile                                            |
+| target_id              | string           | Parent AllocationTarget                                         |
 | funding_mode           | enum             | none, manual_cash, recurring_contribution, dca, value_averaging |
 | cash_source            | enum             | user_input, account_cash, dividends_interest, external          |
 | default_cash_amount    | decimal nullable | Optional prefill                                                |
@@ -375,7 +377,7 @@ Fields:
 | Field               | Type             | Notes                                         |
 | ------------------- | ---------------- | --------------------------------------------- |
 | id                  | string           | UUID                                          |
-| profile_id          | string           | Parent TargetProfile                          |
+| target_id           | string           | Parent AllocationTarget                       |
 | scenario_mode       | enum             | cash_flow_only, sell_to_rebalance, hybrid     |
 | allow_sells         | boolean          | False for cash-flow-only                      |
 | tax_mode            | enum             | ignore, aware, strict                         |
@@ -406,10 +408,10 @@ Fields:
 | Field                | Type             | Notes                                      |
 | -------------------- | ---------------- | ------------------------------------------ |
 | id                   | string           | UUID                                       |
-| profile_id           | string           | Target profile used                        |
-| profile_version      | integer          | Version at calculation time                |
-| scope_type           | enum             | Copied from profile                        |
-| scope_id             | string nullable  | Copied from profile                        |
+| target_id            | string           | Allocation target used                     |
+| target_version       | integer          | Version at calculation time                |
+| scope_type           | enum             | Copied from target                         |
+| scope_id             | string nullable  | Copied from target                         |
 | run_status           | enum             | draft, accepted, exported, canceled, stale |
 | scenario_mode        | enum             | Scenario calculated                        |
 | base_currency        | string           | Currency                                   |
@@ -466,7 +468,7 @@ For each target scope:
 
 ```text
 current_bps = current_value / total_scope_value * 10000
-target_bps = target allocation node target
+target_bps = target allocation weight
 drift_bps = current_bps - target_bps
 value_delta = current_value - target_value
 target_value = total_scope_value * target_bps / 10000
@@ -666,7 +668,7 @@ Targets & Policy
   -> Configure rebalance trigger
   -> Configure funding policy
   -> Configure execution policy
-  -> Save draft or activate
+  -> Save draft or select
 
 Rebalance Plan
   -> Compare scenarios
@@ -687,21 +689,21 @@ Avoid:
 
 - Calling execution modes "strategies".
 - Hiding target setup inside the allocation monitor.
-- Mixing dividend-income analytics into allocation unless income is the active
+- Mixing dividend-income analytics into allocation unless income is the selected
   objective.
 
 ### 7.2 Allocation Advisor Screen
 
 Purpose:
 
-- Show current allocation against the active target profile.
+- Show current allocation against the selected allocation target.
 - Make drift and breach state obvious.
 - Let users inspect what holdings make up a sleeve.
 
 Primary controls:
 
 - Scope selector.
-- Active profile selector.
+- Selected target selector.
 - Primary dimension tabs:
   - Asset class.
   - Account.
@@ -736,7 +738,8 @@ Row display:
 
 Empty states:
 
-- No active profile: show current allocation and CTA to create target profile.
+- No selected target: show current allocation and CTA to create allocation
+  target.
 - No holdings in target sleeve: show target row with 0 current and suggested buy
   candidates if configured.
 - Missing classification: show Unknown category and prompt classification.
@@ -745,7 +748,7 @@ Empty states:
 
 Purpose:
 
-- Create and maintain target profiles.
+- Create and maintain allocation targets.
 - Keep model, target, trigger, funding, and execution policy separate.
 
 Recommended layout:
@@ -800,23 +803,23 @@ Recommended layout:
    - Turnover cap.
    - Do-not-trade list.
 
-8. Save & activate
+8. Save & select
    - Save draft.
-   - Activate profile.
-   - Duplicate profile.
-   - Archive profile.
+   - Select target.
+   - Duplicate target.
+   - Archive target.
 
 ### 7.4 Rebalance Plan Screen
 
 Purpose:
 
-- Generate an explainable plan from current state, active target, funding input,
-  and execution policy.
+- Generate an explainable plan from current state, selected target, funding
+  input, and execution policy.
 
 Top summary:
 
 - Scope.
-- Target profile and version.
+- Allocation target and version.
 - Trigger reason.
 - Available cash.
 - Portfolio value.
@@ -925,22 +928,22 @@ apps/frontend/src/adapters/shared/allocation-advisor.ts
 
 TargetService:
 
-- CRUD target profiles.
-- CRUD allocation nodes.
+- CRUD allocation targets.
+- CRUD allocation target weights.
 - CRUD guardrails.
-- Activate/archive/duplicate profiles.
+- Select/archive/duplicate targets.
 - Validate target sums and category references.
 
 PolicyService:
 
 - CRUD rebalance, funding, and execution policies.
-- Provide defaults for new profiles.
+- Provide defaults for new targets.
 - Validate policy compatibility.
 
 DriftService:
 
 - Load holdings and current allocation.
-- Compare current against target nodes.
+- Compare current against target weights.
 - Evaluate guardrails.
 - Return current/target/band/drift rows.
 
@@ -985,22 +988,24 @@ disables them in web mode.
 Suggested frontend adapter functions:
 
 ```typescript
-export async function listTargetProfiles(
+export async function listAllocationTargets(
   scope?: TargetScope,
-): Promise<TargetProfile[]>;
-export async function getTargetProfile(
+): Promise<AllocationTarget[]>;
+export async function getAllocationTarget(
   id: string,
-): Promise<TargetProfileDetail>;
-export async function saveTargetProfile(
-  input: SaveTargetProfileInput,
-): Promise<TargetProfileDetail>;
-export async function activateTargetProfile(id: string): Promise<TargetProfile>;
-export async function archiveTargetProfile(id: string): Promise<void>;
+): Promise<AllocationTargetDetail>;
+export async function saveAllocationTarget(
+  input: SaveAllocationTargetInput,
+): Promise<AllocationTargetDetail>;
+export async function selectAllocationTarget(
+  id: string,
+): Promise<AllocationTarget>;
+export async function archiveAllocationTarget(id: string): Promise<void>;
 export async function getAllocationAdvisorState(
   input: AdvisorStateInput,
 ): Promise<AdvisorState>;
 export async function evaluateRebalanceTrigger(
-  profileId: string,
+  targetId: string,
 ): Promise<TriggerEvaluation>;
 export async function calculateRebalanceScenarios(
   input: RebalanceScenarioInput,
@@ -1017,13 +1022,12 @@ export async function exportRebalanceDraft(
 Use a new migration set. Names below are logical names; final Diesel table names
 can follow repository conventions.
 
-### 9.1 target_profiles
+### 9.1 allocation_targets
 
 ```sql
-CREATE TABLE target_profiles (
+CREATE TABLE allocation_targets (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
-    status TEXT NOT NULL,
     scope_type TEXT NOT NULL,
     scope_id TEXT,
     base_currency TEXT NOT NULL,
@@ -1031,22 +1035,26 @@ CREATE TABLE target_profiles (
     model_type TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     effective_from TEXT,
+    rebalance_goal TEXT NOT NULL DEFAULT 'nearest_band'
+        CHECK (rebalance_goal IN ('nearest_band', 'exact_target')),
+    min_trade_amount TEXT NOT NULL DEFAULT '0',
+    whole_shares_only INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    archived_at TEXT
 );
 ```
 
 Indexes:
 
-- `(scope_type, scope_id, status)`
-- `(status)`
+- `(scope_type, scope_id, archived_at)`
 
-### 9.2 target_allocation_nodes
+### 9.2 allocation_target_weights
 
 ```sql
-CREATE TABLE target_allocation_nodes (
+CREATE TABLE allocation_target_weights (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
     taxonomy_id TEXT NOT NULL,
     category_id TEXT NOT NULL,
     parent_node_id TEXT,
@@ -1059,14 +1067,14 @@ CREATE TABLE target_allocation_nodes (
     is_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE,
-    FOREIGN KEY (parent_node_id) REFERENCES target_allocation_nodes(id) ON DELETE CASCADE
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_node_id) REFERENCES allocation_target_weights(id) ON DELETE CASCADE
 );
 ```
 
 Indexes:
 
-- `(profile_id)`
+- `(target_id)`
 - `(taxonomy_id, category_id)`
 
 ### 9.3 target_guardrails
@@ -1074,7 +1082,7 @@ Indexes:
 ```sql
 CREATE TABLE target_guardrails (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
     guardrail_type TEXT NOT NULL,
     taxonomy_id TEXT,
     category_id TEXT,
@@ -1088,7 +1096,7 @@ CREATE TABLE target_guardrails (
     enforcement TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE
 );
 ```
 
@@ -1110,7 +1118,7 @@ CREATE TABLE holding_targets (
     is_sellable INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (allocation_node_id) REFERENCES target_allocation_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (allocation_node_id) REFERENCES allocation_target_weights(id) ON DELETE CASCADE,
     UNIQUE(allocation_node_id, asset_id)
 );
 ```
@@ -1120,7 +1128,7 @@ CREATE TABLE holding_targets (
 ```sql
 CREATE TABLE rebalance_policies (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL UNIQUE,
+    target_id TEXT NOT NULL UNIQUE,
     trigger_type TEXT NOT NULL,
     review_frequency TEXT,
     next_review_date TEXT,
@@ -1131,7 +1139,7 @@ CREATE TABLE rebalance_policies (
     require_confirmation INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE
 );
 ```
 
@@ -1140,7 +1148,7 @@ CREATE TABLE rebalance_policies (
 ```sql
 CREATE TABLE funding_policies (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL UNIQUE,
+    target_id TEXT NOT NULL UNIQUE,
     funding_mode TEXT NOT NULL,
     cash_source TEXT NOT NULL,
     default_cash_amount TEXT,
@@ -1154,7 +1162,7 @@ CREATE TABLE funding_policies (
     fractional_units INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE
 );
 ```
 
@@ -1163,7 +1171,7 @@ CREATE TABLE funding_policies (
 ```sql
 CREATE TABLE execution_policies (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL UNIQUE,
+    target_id TEXT NOT NULL UNIQUE,
     scenario_mode TEXT NOT NULL,
     allow_sells INTEGER NOT NULL,
     tax_mode TEXT NOT NULL,
@@ -1179,7 +1187,7 @@ CREATE TABLE execution_policies (
     preferred_asset_ids_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id) ON DELETE CASCADE
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id) ON DELETE CASCADE
 );
 ```
 
@@ -1188,8 +1196,8 @@ CREATE TABLE execution_policies (
 ```sql
 CREATE TABLE rebalance_runs (
     id TEXT PRIMARY KEY NOT NULL,
-    profile_id TEXT NOT NULL,
-    profile_version INTEGER NOT NULL,
+    target_id TEXT NOT NULL,
+    target_version INTEGER NOT NULL,
     scope_type TEXT NOT NULL,
     scope_id TEXT,
     run_status TEXT NOT NULL,
@@ -1203,7 +1211,7 @@ CREATE TABLE rebalance_runs (
     estimated_tax_impact TEXT,
     explanation_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (profile_id) REFERENCES target_profiles(id)
+    FOREIGN KEY (target_id) REFERENCES allocation_targets(id)
 );
 ```
 
@@ -1244,7 +1252,7 @@ apps/frontend/src/pages/allocation-advisor/
   rebalance-plan-page.tsx
   components/
     scope-selector.tsx
-    target-profile-selector.tsx
+    target-selector.tsx
     target-model-picker.tsx
     target-allocation-editor.tsx
     target-band-row.tsx
@@ -1258,7 +1266,7 @@ apps/frontend/src/pages/allocation-advisor/
     before-after-allocation.tsx
     trade-draft-table.tsx
   hooks/
-    use-target-profiles.ts
+    use-allocation-targets.ts
     use-advisor-state.ts
     use-rebalance-scenarios.ts
     use-policy-mutations.ts
@@ -1287,7 +1295,7 @@ Use camelCase DTOs at the frontend boundary and Rust snake_case internally.
 ```typescript
 interface AdvisorState {
   scope: TargetScope;
-  activeProfile: TargetProfileSummary | null;
+  selectedTarget: AllocationTargetSummary | null;
   portfolioValue: Money;
   trigger: TriggerEvaluation | null;
   rows: AllocationAdvisorRow[];
@@ -1322,7 +1330,7 @@ interface AllocationAdvisorRow {
 
 ```typescript
 interface RebalanceScenarioInput {
-  profileId: string;
+  targetId: string;
   scenarioModes: Array<"cash_flow_only" | "sell_to_rebalance" | "hybrid">;
   availableCash?: string;
   baseCurrency: string;
@@ -1334,8 +1342,8 @@ interface RebalanceScenarioInput {
 
 ```typescript
 interface RebalanceScenarioSet {
-  profileId: string;
-  profileVersion: number;
+  targetId: string;
+  targetVersion: number;
   generatedAt: string;
   scenarios: RebalanceScenario[];
 }
@@ -1358,14 +1366,14 @@ interface RebalanceScenario {
 
 ## 12. Validation Rules
 
-Profile:
+Target:
 
 - Name is required.
 - Scope type is required.
-- Active profile scope must be unique.
+- Selected target scope must be unique.
 - Base currency is required.
 
-Allocation nodes:
+Allocation target weights:
 
 - Top-level targets must sum to 10000 bps.
 - No negative bps.
@@ -1407,8 +1415,8 @@ Plan:
 
 Ship:
 
-- Target profiles by scope.
-- Primary asset-class target nodes.
+- Allocation targets by scope.
+- Primary asset-class target weights.
 - Tolerance bands.
 - Advisor monitor screen.
 - Trigger evaluation.
@@ -1465,7 +1473,7 @@ Ship when required data exists:
 Ship:
 
 - Import/export target models.
-- Addon SDK APIs for target profiles and advisor state.
+- Addon SDK APIs for allocation targets and advisor state.
 - Optional curated templates.
 - Addon-provided funding policies such as advanced value averaging.
 
@@ -1473,9 +1481,9 @@ Ship:
 
 Functional:
 
-- User can create a target profile from scratch.
+- User can create a allocation target from scratch.
 - User can target a category with no current holdings.
-- User can activate one profile for a scope.
+- User can select one target for a scope.
 - Advisor screen shows current, target, band, drift, and value delta.
 - Trigger status explains whether rebalancing is recommended.
 - Cash-flow scenario generates buy drafts for underweight sleeves.
@@ -1520,11 +1528,11 @@ Rust unit tests:
 
 Repository tests:
 
-- Create/update/archive/activate profile.
-- Enforce one active profile per scope.
-- Persist nodes, guardrails, policies, runs, and drafts.
-- Cascade deletes for draft profiles.
-- Preserve immutable runs after profile change.
+- Create/update/archive/select target.
+- Enforce one selected target per scope.
+- Persist weights, guardrails, policies, runs, and drafts.
+- Cascade deletes for draft targets.
+- Preserve immutable runs after target change.
 
 Frontend tests:
 
@@ -1541,14 +1549,14 @@ Integration tests:
 - Tauri command parity.
 - Web route parity.
 - Advisor state from sample holdings.
-- Rebalance scenario from sample target profile.
+- Rebalance scenario from sample allocation target.
 - Export CSV contains included trades only.
 
 Manual QA:
 
 - Desktop build.
 - Web build.
-- New user with no target profile.
+- New user with no allocation target.
 - Portfolio with only stocks targeting bonds.
 - Portfolio with missing classifications.
 - Taxable plus IRA accounts.
@@ -1579,15 +1587,15 @@ model:
 
 ## 18. References
 
-- Vanguard, "Rebalancing your portfolio":  
+- Vanguard, "Rebalancing your portfolio":
   https://investor.vanguard.com/investor-resources-education/portfolio-management/rebalancing-your-portfolio
-- Vanguard, "Tuning in to the right frequency for rebalancing":  
+- Vanguard, "Tuning in to the right frequency for rebalancing":
   https://corporate.vanguard.com/content/corporatesite/us/en/corp/articles/tuning-frequency-for-rebalancing.html
-- Fidelity, "Rebalancing your portfolio":  
+- Fidelity, "Rebalancing your portfolio":
   https://www.fidelity.com/learning-center/trading-investing/rebalance
-- Schwab Intelligent Portfolios FAQ and overview:  
+- Schwab Intelligent Portfolios FAQ and overview:
   https://www.schwab.com/automated-investing/faqs
-- Schwab iRebal advisor rebalancing overview:  
+- Schwab iRebal advisor rebalancing overview:
   https://advisorservices.schwab.com/intelligent-advisor
-- Michael E. Edleson, "Value Averaging":  
+- Michael E. Edleson, "Value Averaging":
   https://www.oreilly.com/library/view/value-averaging-the/9780470049778/

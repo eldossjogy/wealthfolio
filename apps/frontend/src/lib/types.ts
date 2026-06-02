@@ -2256,36 +2256,43 @@ export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
 // Allocation Target Types
 // ============================================================================
 
-export type ProfileStatus = "draft" | "active" | "archived";
 export type TargetScopeType = "all" | "portfolio" | "account";
 export type TriggerType = "manual" | "threshold";
+export type RebalanceGoal = "nearest_band" | "exact_target";
 export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
 
-export interface TargetProfile {
+export interface AllocationTarget {
   id: string;
   name: string;
-  status: ProfileStatus;
   scopeType: TargetScopeType;
   scopeId?: string | null;
   taxonomyId: string;
   triggerType: TriggerType;
   driftBandBps: number;
+  rebalanceGoal: RebalanceGoal;
+  minTradeAmount: string;
+  wholeSharesOnly: boolean;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
 }
 
-export interface NewTargetProfile {
+export interface NewAllocationTarget {
   name: string;
   scopeType: TargetScopeType;
   scopeId?: string | null;
   taxonomyId: string;
   triggerType: TriggerType;
   driftBandBps: number;
+  rebalanceGoal?: RebalanceGoal;
+  minTradeAmount?: string;
+  wholeSharesOnly?: boolean;
 }
 
-export interface TargetAllocationNode {
+export interface AllocationTargetWeight {
   id: string;
-  profileId: string;
+  targetId: string;
+  taxonomyId: string;
   categoryId: string;
   targetBps: number;
   isLocked: boolean;
@@ -2294,12 +2301,16 @@ export interface TargetAllocationNode {
   updatedAt: string;
 }
 
-export interface NewTargetAllocationNode {
-  profileId: string;
+export interface NewAllocationTargetWeight {
   categoryId: string;
   targetBps: number;
   isLocked: boolean;
   isRequired: boolean;
+}
+
+export interface SaveAllocationTargetResult {
+  target: AllocationTarget;
+  weights: AllocationTargetWeight[];
 }
 
 export interface DriftRow {
@@ -2318,7 +2329,7 @@ export interface DriftRow {
 }
 
 export interface DriftReport {
-  profileId: string;
+  targetId: string;
   scopeType: TargetScopeType;
   scopeId?: string | null;
   totalValue: number;
@@ -2326,4 +2337,31 @@ export interface DriftReport {
   maxDriftBps: number;
   outOfBandCount: number;
   rows: DriftRow[];
+  holdings?: DriftHoldingsReport | null;
+}
+
+export interface DriftHoldingRow {
+  id: string;
+  holdingId: string;
+  assetId: string;
+  accountId: string;
+  sourceAccountIds?: string[];
+  symbol: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  categoryColor?: string | null;
+  value: number;
+  currentPct: number;
+  targetPct?: number | null;
+  driftBps?: number | null;
+  isUnknownCategory: boolean;
+  isCash: boolean;
+}
+
+export interface DriftHoldingsReport {
+  targetId: string;
+  totalValue: number;
+  baseCurrency: string;
+  rows: DriftHoldingRow[];
 }

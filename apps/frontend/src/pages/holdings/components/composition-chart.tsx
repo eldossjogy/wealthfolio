@@ -1,3 +1,4 @@
+import { RenderableChartContainer } from "@/components/renderable-chart-container";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import { useSettingsContext } from "@/lib/settings-provider";
 import { Holding } from "@/lib/types";
@@ -9,12 +10,34 @@ import { EmptyPlaceholder } from "@wealthfolio/ui/components/ui/empty-placeholde
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
-import { useEffect, useMemo, useRef, type FC } from "react";
+import { useMemo, useSyncExternalStore, type FC } from "react";
 import { Link } from "react-router-dom";
-import { Tooltip as ChartTooltip, ResponsiveContainer, type TreemapNode, Treemap } from "recharts";
+import { Tooltip as ChartTooltip, type TreemapNode, Treemap } from "recharts";
 
 type ReturnType = "daily" | "total";
 type DisplayMode = "symbol" | "name";
+
+function noop() {
+  return undefined;
+}
+
+function getDarkModeSnapshot(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.documentElement.classList.contains("dark");
+}
+
+function subscribeToDarkModeChange(onStoreChange: () => void): () => void {
+  if (typeof document === "undefined" || typeof MutationObserver === "undefined") {
+    return noop;
+  }
+
+  const observer = new MutationObserver(onStoreChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  return () => observer.disconnect();
+}
 
 const DisplayModeToggle: React.FC<{
   displayMode: DisplayMode;
@@ -36,37 +59,48 @@ const DisplayModeToggle: React.FC<{
   </Tooltip>
 );
 
-interface ColorScale {
-  opacity: number;
-  className: string;
+// Treemap heatmap palette — symbols colored by return.
+// Matches the "Allocation Concept E - Unified" design: gains lerp from a light
+// sage to a deep green, losses from a light clay to a deep red.
+const POS_LO = [205, 217, 191]; // #cdd9bf
+const POS_HI = [53, 92, 76]; // #355c4c
+const NEG_LO = [236, 201, 192]; // #ecc9c0
+const NEG_HI = [176, 74, 60]; // #b04a3c
+
+const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+
+// Label colors picked from tile luminance (not the theme) so text stays legible
+// on every shade in both light and dark mode.
+const TILE_TEXT_DARK = "#1c2a24";
+const TILE_TEXT_LIGHT = "#f5f3ec";
+
+interface TreemapTile {
+  fill: string;
+  isLightTile: boolean; // bright fill → use dark text
 }
 
-function getColorScale(gain: number, maxGain: number, minGain: number): ColorScale {
-  const isGain = gain >= 0;
+// Shade by return using a saturating curve `t = m / (m + k)` that maps
+// [0, ∞) → [0, 1). Unlike a hard cap, extreme winners/losers keep darkening
+// instead of collapsing into a single shade. `k` is the return magnitude that
+// maps to the mid-tone (losses ramp ~2× faster, matching the design). Values
+// are fractions: 0.5 = +50%, 0.025 = +2.5% for the smaller daily returns.
+function getTreemapColor(gain: number, returnType: ReturnType): TreemapTile {
+  const isGain = isNaN(gain) || gain >= 0;
+  const [lo, hi] = isGain ? [POS_LO, POS_HI] : [NEG_LO, NEG_HI];
+  const k = isGain
+    ? returnType === "daily"
+      ? 0.025
+      : 0.5
+    : returnType === "daily"
+      ? 0.0125
+      : 0.25;
 
-  // Handle edge cases
-  if (isNaN(gain) || isNaN(maxGain) || isNaN(minGain)) {
-    return {
-      opacity: 0.5,
-      className: isGain ? "fill-success" : "fill-destructive",
-    };
-  }
-
-  // Calculate relative position in the range
-  let relativePosition: number;
-  if (isGain) {
-    relativePosition = maxGain === 0 ? 0 : Math.min(1, gain / maxGain);
-  } else {
-    relativePosition = minGain === 0 ? 0 : Math.min(1, gain / minGain);
-  }
-
-  // Semi-transparent range: 0.4 to 0.85 (more muted, matches v2)
-  const opacity = Math.max(0.4, Math.min(0.85, 0.4 + Math.abs(relativePosition) * 0.45));
-
-  return {
-    opacity,
-    className: isGain ? "fill-success" : "fill-destructive",
-  };
+  const m = isNaN(gain) ? 0 : Math.abs(gain);
+  const t = m / (m + k);
+  const c = lo.map((v, i) => lerp(v, hi[i], t));
+  // Perceived luminance (ITU-R BT.601); >150 reads as a light tile.
+  const luminance = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  return { fill: `rgb(${c.join(",")})`, isLightTile: luminance > 150 };
 }
 
 // Function to truncate text based on available width
@@ -94,9 +128,9 @@ interface CustomizedContentProps {
   symbol?: string;
   name?: TreemapNode["name"];
   gain?: number;
-  maxGain?: number;
-  minGain?: number;
   displayMode?: DisplayMode;
+  returnType?: ReturnType;
+  isDark?: boolean;
 }
 
 const CustomizedContent: FC<CustomizedContentProps> = ({
@@ -109,13 +143,14 @@ const CustomizedContent: FC<CustomizedContentProps> = ({
   symbol,
   name,
   gain = 0,
-  maxGain = 0,
-  minGain = 0,
   displayMode = "symbol",
+  returnType = "daily",
+  isDark = false,
 }) => {
   const fontSize = Math.min(width, height) < 80 ? Math.min(width, height) * 0.16 : 13;
   const fontSize2 = Math.min(width, height) < 80 ? Math.min(width, height) * 0.14 : 12;
-  const colorScale = getColorScale(gain, maxGain, minGain);
+  const { fill: fillColor, isLightTile } = getTreemapColor(gain, returnType);
+  const textColor = isLightTile ? TILE_TEXT_DARK : TILE_TEXT_LIGHT;
 
   // Determine what text to display based on mode
   const displayText = displayMode === "name" && name ? name : symbol;
@@ -134,10 +169,12 @@ const CustomizedContent: FC<CustomizedContentProps> = ({
         className={cn("stroke-card", {
           "stroke-[4px]": depth === 1,
           "fill-none stroke-0": depth === 0,
-          [colorScale.className]: depth === 1,
         })}
         style={{
-          fillOpacity: colorScale.opacity,
+          fill: depth === 1 ? fillColor : undefined,
+          // Soften tiles in dark mode so they blend into the background instead
+          // of reading as bright rectangles on near-black.
+          fillOpacity: depth === 1 && isDark ? 0.88 : undefined,
           cursor: "pointer",
         }}
       />
@@ -148,7 +185,7 @@ const CustomizedContent: FC<CustomizedContentProps> = ({
               x={x + width / 2}
               y={y + height / 2}
               textAnchor="middle"
-              fill="currentColor"
+              fill={textColor}
               className="font-default cursor-pointer text-sm hover:underline"
               style={{
                 fontSize: fontSize + 1,
@@ -162,7 +199,7 @@ const CustomizedContent: FC<CustomizedContentProps> = ({
             x={x + width / 2}
             y={y + height / 2 + fontSize}
             textAnchor="middle"
-            fill="currentColor"
+            fill={textColor}
             className="text- font-thin"
             style={{
               fontSize: fontSize2,
@@ -263,33 +300,13 @@ export function PortfolioComposition({ holdings, isLoading }: PortfolioCompositi
     "symbol",
   );
   const { settings } = useSettingsContext();
-  const lastLoggedMode = useRef<DisplayMode | null>(null);
+  const isDark = useSyncExternalStore(subscribeToDarkModeChange, getDarkModeSnapshot, () => false);
 
   const toggleDisplayMode = () => {
-    const prev = displayMode;
-    const next = prev === "symbol" ? "name" : "symbol";
-    if (import.meta.env.DEV) {
-      console.warn("[Composition][debug] toggle displayMode", { prev, next });
-    }
-    setDisplayMode(next);
+    setDisplayMode(displayMode === "symbol" ? "name" : "symbol");
   };
 
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.warn("[Composition][debug] displayMode changed", { displayMode });
-    }
-  }, [displayMode]);
-
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.warn("[Composition][debug] returnType changed", { returnType });
-    }
-  }, [returnType]);
-
   const data = useMemo(() => {
-    let maxGain = -Infinity;
-    let minGain = Infinity;
-
     // Map holdings directly, assuming backend provides aggregated data
     const processedData = holdings
       .map((holding) => {
@@ -306,10 +323,6 @@ export function PortfolioComposition({ holdings, isLoading }: PortfolioCompositi
         // Basic validation
         if (isNaN(gain) || isNaN(marketValue) || marketValue <= 0) return null;
 
-        // Update min/max gain across all valid holdings
-        maxGain = Math.max(maxGain, gain);
-        minGain = Math.min(minGain, gain);
-
         return {
           id: holding.instrument?.id, // Asset ID for navigation
           symbol: symbol,
@@ -317,16 +330,9 @@ export function PortfolioComposition({ holdings, isLoading }: PortfolioCompositi
           marketValueConverted: marketValue,
           gain,
           asOfDate: holding.asOfDate,
-          // We'll add min/max gain later after iterating through all
         };
       })
-      .filter((item): item is NonNullable<typeof item> => item !== null) // Explicit non-null filter
-      // Add minGain and maxGain to each item after calculating them
-      .map((item) => ({
-        ...item,
-        maxGain,
-        minGain,
-      }));
+      .filter((item): item is NonNullable<typeof item> => item !== null); // Explicit non-null filter
 
     // Sort by market value after processing all holdings
     processedData.sort((a, b) => b.marketValueConverted - a.marketValueConverted);
@@ -398,39 +404,25 @@ export function PortfolioComposition({ holdings, isLoading }: PortfolioCompositi
         </div>
       </CardHeader>
       <CardContent className="pl-2">
-        <ResponsiveContainer width="100%" height={500}>
+        <RenderableChartContainer className="h-[500px] w-full">
           <Treemap
             width={400}
             height={200}
             data={data}
             dataKey="marketValueConverted"
             animationDuration={100}
-            content={(props: TreemapNode) => {
-              if (import.meta.env.DEV && lastLoggedMode.current !== displayMode) {
-                const anyProps = props as unknown as {
-                  index?: number;
-                  symbol?: string;
-                  name?: string;
-                  depth?: number;
-                };
-                if (anyProps.depth === 1 && anyProps.index === 0) {
-                  lastLoggedMode.current = displayMode;
-                  console.warn("[Composition][debug] treemap content render (sample)", {
-                    displayMode,
-                    sample: {
-                      symbol: anyProps.symbol,
-                      name: anyProps.name,
-                    },
-                  });
-                }
-              }
-
-              return <CustomizedContent {...props} displayMode={displayMode} />;
-            }}
+            content={(props: TreemapNode) => (
+              <CustomizedContent
+                {...props}
+                displayMode={displayMode}
+                returnType={returnType}
+                isDark={isDark}
+              />
+            )}
           >
             <ChartTooltip content={<CompositionTooltip settings={settings ?? undefined} />} />
           </Treemap>
-        </ResponsiveContainer>
+        </RenderableChartContainer>
       </CardContent>
     </Card>
   );

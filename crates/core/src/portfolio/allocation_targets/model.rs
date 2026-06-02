@@ -5,36 +5,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProfileStatus {
-    Draft,
-    Active,
-    Archived,
-}
-
-impl ProfileStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Active => "active",
-            Self::Archived => "archived",
-        }
-    }
-}
-
-impl TryFrom<&str> for ProfileStatus {
-    type Error = String;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "draft" => Ok(Self::Draft),
-            "active" => Ok(Self::Active),
-            "archived" => Ok(Self::Archived),
-            _ => Err(format!("unknown profile status: {s}")),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ScopeType {
     All,
     Portfolio,
@@ -90,39 +60,73 @@ impl TryFrom<&str> for TriggerType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RebalanceGoal {
+    NearestBand,
+    ExactTarget,
+}
+
+impl RebalanceGoal {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NearestBand => "nearest_band",
+            Self::ExactTarget => "exact_target",
+        }
+    }
+}
+
+impl TryFrom<&str> for RebalanceGoal {
+    type Error = String;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "nearest_band" => Ok(Self::NearestBand),
+            "exact_target" => Ok(Self::ExactTarget),
+            _ => Err(format!("unknown rebalance goal: {s}")),
+        }
+    }
+}
+
 // ── Core domain types ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TargetProfile {
+pub struct AllocationTarget {
     pub id: String,
     pub name: String,
-    pub status: ProfileStatus,
     pub scope_type: ScopeType,
     pub scope_id: Option<String>,
     pub taxonomy_id: String,
     pub trigger_type: TriggerType,
     pub drift_band_bps: i32,
+    pub rebalance_goal: RebalanceGoal,
+    pub min_trade_amount: String,
+    pub whole_shares_only: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub archived_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewTargetProfile {
+pub struct NewAllocationTarget {
     pub name: String,
     pub scope_type: ScopeType,
     pub scope_id: Option<String>,
     pub taxonomy_id: String,
     pub trigger_type: TriggerType,
     pub drift_band_bps: i32,
+    pub rebalance_goal: Option<RebalanceGoal>,
+    pub min_trade_amount: Option<String>,
+    pub whole_shares_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TargetAllocationNode {
+pub struct AllocationTargetWeight {
     pub id: String,
-    pub profile_id: String,
+    pub target_id: String,
+    pub taxonomy_id: String,
     pub category_id: String,
     pub target_bps: i32,
     pub is_locked: bool,
@@ -133,12 +137,18 @@ pub struct TargetAllocationNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewTargetAllocationNode {
-    pub profile_id: String,
+pub struct NewAllocationTargetWeight {
     pub category_id: String,
     pub target_bps: i32,
     pub is_locked: bool,
     pub is_required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAllocationTargetResult {
+    pub target: AllocationTarget,
+    pub weights: Vec<AllocationTargetWeight>,
 }
 
 // ── Drift types ──────────────────────────────────────────────────────────────
@@ -172,7 +182,7 @@ pub struct DriftRow {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DriftReport {
-    pub profile_id: String,
+    pub target_id: String,
     pub scope_type: ScopeType,
     pub scope_id: Option<String>,
     pub total_value: Decimal,
@@ -180,4 +190,37 @@ pub struct DriftReport {
     pub max_drift_bps: i32,
     pub out_of_band_count: usize,
     pub rows: Vec<DriftRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holdings: Option<DriftHoldingsReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftHoldingRow {
+    pub id: String,
+    pub holding_id: String,
+    pub asset_id: String,
+    pub account_id: String,
+    #[serde(default)]
+    pub source_account_ids: Vec<String>,
+    pub symbol: String,
+    pub name: String,
+    pub category_id: String,
+    pub category_name: String,
+    pub category_color: Option<String>,
+    pub value: Decimal,
+    pub current_pct: Decimal,
+    pub target_pct: Option<Decimal>,
+    pub drift_bps: Option<i32>,
+    pub is_unknown_category: bool,
+    pub is_cash: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriftHoldingsReport {
+    pub target_id: String,
+    pub total_value: Decimal,
+    pub base_currency: String,
+    pub rows: Vec<DriftHoldingRow>,
 }

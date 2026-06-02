@@ -90,7 +90,7 @@ fn account_tracking_modes(
         .collect())
 }
 
-fn holdings_account_ids(
+pub(super) fn holdings_account_ids(
     state: &ServiceContext,
     account_ids: &[String],
 ) -> Result<Vec<String>, String> {

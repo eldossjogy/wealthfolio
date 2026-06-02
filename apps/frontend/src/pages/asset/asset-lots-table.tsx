@@ -53,6 +53,7 @@ export const AssetLotsTable = ({
     [lots, marketPrice, contractMultiplier],
   );
   const totals = useMemo(() => computeTotals(groups), [groups]);
+  const totalLots = useMemo(() => groups.reduce((acc, g) => acc + g.lots.length, 0), [groups]);
   const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
 
   if (!lots || lots.length === 0) {
@@ -93,7 +94,14 @@ export const AssetLotsTable = ({
       </Card>
       <Card>
         <CardContent className="p-0">
-          <div className="flex items-center justify-end border-b px-4 py-2">
+          <div className="flex items-center justify-between border-b px-4 py-2.5">
+            <div className="flex items-baseline gap-2">
+              <span className="text-foreground text-sm font-medium">Lots by account</span>
+              <span className="text-muted-foreground text-xs">
+                {groups.length} {groups.length === 1 ? "account" : "accounts"} · {totalLots}{" "}
+                {totalLots === 1 ? "lot" : "lots"}
+              </span>
+            </div>
             <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={toggleAll}>
               {allExpanded ? (
                 <>
@@ -418,14 +426,24 @@ function AccountLotGroup({
   const Chevron = expanded ? Icons.ChevronDown : Icons.ChevronRight;
 
   return (
-    <div className={cn(!isFirst && "border-t")}>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5">
+    <div className={cn(!isFirst && "border-t", expanded && "bg-muted/20")}>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 transition-colors",
+          !expanded && "hover:bg-muted/30",
+        )}
+      >
         <button
           type="button"
           onClick={onToggle}
-          className="hover:text-foreground flex min-w-0 flex-1 items-center gap-2"
+          className="group flex min-w-0 flex-1 items-center gap-2"
         >
-          <Chevron className="text-muted-foreground h-4 w-4 shrink-0" />
+          <Chevron
+            className={cn(
+              "h-4 w-4 shrink-0 transition-colors",
+              expanded ? "text-foreground" : "text-muted-foreground group-hover:text-foreground",
+            )}
+          />
           <span className="text-foreground truncate text-sm font-medium">{group.accountName}</span>
           {group.allSnapshot && (
             <Badge variant="secondary" className="ml-1 text-[10px] uppercase tracking-wider">
@@ -438,23 +456,25 @@ function AccountLotGroup({
           </span>
         </button>
 
-        <div className="text-muted-foreground flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs">
-          <span>
-            Basis{" "}
+        <div className="text-muted-foreground flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wider">Basis</span>
             <PrivacyAmount
               value={group.costBasis}
               currency={currency}
               className="text-foreground font-medium"
             />
           </span>
-          <span>
-            Value{" "}
+          <span className="bg-border hidden h-3 w-px sm:block" aria-hidden />
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wider">Value</span>
             <PrivacyAmount
               value={group.marketValue}
               currency={currency}
               className="text-foreground font-medium"
             />
           </span>
+          <span className="bg-border hidden h-3 w-px sm:block" aria-hidden />
           <div className="flex items-center gap-2">
             <GainAmount
               value={group.gainLossAmount}
@@ -468,51 +488,53 @@ function AccountLotGroup({
       </div>
 
       {expanded && (
-        <>
-          <div className="hidden overflow-x-auto md:block">
-            <Table className="table-fixed">
-              <colgroup>
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "12%" }} />
-                <col style={{ width: "14%" }} />
-                <col style={{ width: "16%" }} />
-                <col style={{ width: "18%" }} />
-                <col style={{ width: "20%" }} />
-              </colgroup>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-[10px] uppercase tracking-[0.1em]">Date</TableHead>
-                  <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
-                    Qty
-                  </TableHead>
-                  <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
-                    Unit Cost
-                  </TableHead>
-                  <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
-                    Cost Basis
-                  </TableHead>
-                  <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
-                    Market Value
-                  </TableHead>
-                  <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
-                    Unrealized
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {group.lots.map((item) => (
-                  <AssetLotTableRow key={item.lot.id} item={item} currency={currency} />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+        <div className="px-2 pb-2 md:px-3 md:pb-3">
+          <div className="bg-card overflow-hidden rounded-lg border">
+            <div className="hidden overflow-x-auto md:block">
+              <Table className="table-fixed">
+                <colgroup>
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "20%" }} />
+                </colgroup>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-[10px] uppercase tracking-[0.1em]">Date</TableHead>
+                    <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
+                      Qty
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
+                      Unit Cost
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
+                      Cost Basis
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
+                      Market Value
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] uppercase tracking-[0.1em]">
+                      Unrealized
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.lots.map((item) => (
+                    <AssetLotTableRow key={item.lot.id} item={item} currency={currency} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
 
-          <div className="divide-y md:hidden">
-            {group.lots.map((item) => (
-              <AssetLotMobileRow key={item.lot.id} item={item} currency={currency} />
-            ))}
+            <div className="divide-y md:hidden">
+              {group.lots.map((item) => (
+                <AssetLotMobileRow key={item.lot.id} item={item} currency={currency} />
+              ))}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -523,7 +545,12 @@ function AssetLotTableRow({ item, currency }: { item: ComputedLot; currency: str
   const isSnapshot = lot.source === "SNAPSHOT_POSITION";
 
   return (
-    <TableRow className={cn("text-[13px]", lot.isClosed && "opacity-60")}>
+    <TableRow
+      className={cn(
+        "hover:bg-muted/40 text-[13px] transition-colors",
+        lot.isClosed && "opacity-60",
+      )}
+    >
       <TableCell className="font-medium">
         <div>{formatLotDate(lot)}</div>
         <div className="text-muted-foreground text-[11px]">

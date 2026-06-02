@@ -16,7 +16,7 @@ export default function SpendingSettingsPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="font-mono text-sm leading-relaxed antialiased [&>*+*]:mt-9 [&>section+section]:mt-11">
+    <div className="text-sm leading-relaxed antialiased [&>*+*]:mt-9 [&>section+section]:mt-11">
       <header className="flex items-center gap-1.5 lg:block">
         <Button
           type="button"

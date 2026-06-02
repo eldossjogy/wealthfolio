@@ -424,16 +424,17 @@
   --input-bg: hsl(var(--flexoki-bg));
   --ring: hsl(var(--flexoki-ui-3));
 
-  /* Charts (full hsl colors) */
-  --chart-1: hsl(40 3% 20%);
-  --chart-2: hsl(45 2% 33%);
-  --chart-3: hsl(50 3% 42%);
-  --chart-4: hsl(43 3% 52%);
-  --chart-5: hsl(47 4% 61%);
+  /* Charts (allocation palette: forest / sage / sand / clay / plum + stone) */
+  --chart-1: #355c4c;
+  --chart-2: #7e9f8c;
+  --chart-3: #cbba8c;
+  --chart-4: #c08a5f;
+  --chart-5: #9a7e92;
   --chart-6: hsl(49 7% 70%);
   --chart-7: hsl(55 10% 79%);
   --chart-8: hsl(50 14% 83%);
   --chart-9: hsl(51 21% 88%);
+  --chart-stone: #b1aa9a;
 
   /* Sidebar (full hsl colors) */
   --sidebar: hsl(var(--flexoki-bg));
@@ -488,16 +489,19 @@
   --flexoki-gr: 72 46% 41%;
   --flexoki-ye: 45 82% 45%;
 
-  /* Dark chart palette (full hsl colors) */
-  --chart-1: hsl(25 92% 72%);
-  --chart-2: hsl(24 81% 61%);
-  --chart-3: hsl(23 70% 51%);
-  --chart-4: hsl(23 73% 46%);
-  --chart-5: hsl(22 80% 41%);
-  --chart-6: hsl(22 82% 34%);
-  --chart-7: hsl(22 79% 25%);
-  --chart-8: hsl(22 75% 20%);
-  --chart-9: hsl(22 70% 15%);
+  /* Dark chart palette — same semantic hues as light (forest / sage / sand /
+     clay / plum + stone), tuned for the dark surface: forest is lifted for
+     contrast, the stones are pulled down so they stay calm instead of glaring. */
+  --chart-1: hsl(156 28% 44%);
+  --chart-2: #7e9f8c;
+  --chart-3: #cbba8c;
+  --chart-4: #c08a5f;
+  --chart-5: #9a7e92;
+  --chart-6: hsl(49 8% 60%);
+  --chart-7: hsl(55 10% 67%);
+  --chart-8: hsl(50 13% 72%);
+  --chart-9: hsl(51 18% 77%);
+  --chart-stone: hsl(49 8% 60%);
 
   /* Sonner toast overrides for dark mode - solid backgrounds for better readability */
   --toast-bg: hsl(var(--flexoki-bg-2));
@@ -527,6 +531,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   button:not(:disabled),
@@ -632,7 +638,7 @@ body.qr-scan-active .app-shell {
   background: transparent !important;
   background-color: transparent !important;
 }
-body.qr-scan-active .app-shell > ** {
+body.qr-scan-active .app-shell * {
   background: transparent !important;
 }
 body.qr-scan-active .qr-overlay {

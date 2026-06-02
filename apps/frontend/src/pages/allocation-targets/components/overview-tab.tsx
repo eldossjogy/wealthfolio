@@ -1,76 +1,51 @@
-import { cn } from "@/lib/utils";
-import type { AccountScope, DriftReport } from "@/lib/types";
+import type { DriftReport } from "@/lib/types";
+import { useTaxonomy } from "@/hooks/use-taxonomies";
 import { CurrentVsTargetCard } from "./current-vs-target-card";
 import { DriftDriversCard } from "./drift-drivers-card";
 import { HoldingsTable } from "./holdings-table";
+import { resolveDriftReportCategories } from "./drift-report-resolver";
+import { categoryNoun, taxonomyLabel, targetLabel } from "./drift-copy";
 
 interface OverviewTabProps {
   report: DriftReport;
-  driftBandBps: number;
-  accountScope: AccountScope;
+  taxonomyId: string;
+  targetName?: string;
   onRebalanceClick?: () => void;
 }
 
 export function OverviewTab({
   report,
-  driftBandBps,
-  accountScope,
+  taxonomyId,
+  targetName,
   onRebalanceClick,
 }: OverviewTabProps) {
-  const isFine = report.outOfBandCount === 0;
-  const bandPct = (driftBandBps / 100).toFixed(1);
-  const oobNames = report.rows
-    .filter((r) => r.status === "overweight" || r.status === "underweight")
-    .map((r) => r.categoryName)
-    .join(", ");
+  const { data: taxonomy } = useTaxonomy(taxonomyId);
+  const resolvedReport = resolveDriftReportCategories(report, taxonomy?.categories);
+  const taxonomyName = taxonomy?.taxonomy.name;
+  const categoryLabel = categoryNoun(taxonomyId, taxonomyName, report.outOfBandCount);
+  const pluralCategoryLabel = categoryNoun(taxonomyId, taxonomyName, 2);
+  const displayTaxonomy = taxonomyLabel(taxonomyId, taxonomyName);
+  const gapStatus =
+    report.outOfBandCount === 0
+      ? `All ${pluralCategoryLabel} inside target`
+      : `${report.outOfBandCount} ${categoryLabel} outside target`;
 
   return (
     <div className="space-y-5">
-      {/* Status banner */}
-      <div
-        className={cn(
-          "flex items-center justify-between gap-4 rounded-lg border px-5 py-4",
-          isFine
-            ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/20"
-            : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20",
-        )}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className={cn(
-              "h-2.5 w-2.5 shrink-0 rounded-full",
-              isFine ? "bg-green-600" : "bg-amber-600",
-            )}
-          />
-          <div>
-            <div className="text-foreground text-[13px] font-semibold">
-              {isFine
-                ? "All sleeves within tolerance"
-                : `${report.outOfBandCount} ${report.outOfBandCount === 1 ? "sleeve" : "sleeves"} out of band`}
-            </div>
-            <div className="text-muted-foreground text-[12px]">
-              {isFine
-                ? `Drift band ±${bandPct}%`
-                : `Drift band ±${bandPct}% · largest breach ${(Math.abs(report.maxDriftBps) / 100).toFixed(2)}%${oobNames ? ` — ${oobNames}` : ""}`}
-            </div>
-          </div>
-        </div>
-        {onRebalanceClick && (
-          <button
-            onClick={onRebalanceClick}
-            className="bg-foreground text-background h-8 whitespace-nowrap rounded-md px-3 text-[12px] font-medium hover:opacity-90"
-          >
-            Plan rebalance →
-          </button>
-        )}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.75fr)]">
+        <CurrentVsTargetCard
+          report={resolvedReport}
+          taxonomyLabel={displayTaxonomy}
+          targetLabel={targetLabel(targetName)}
+        />
+        <DriftDriversCard
+          report={resolvedReport}
+          statusDescription={gapStatus}
+          onRebalanceClick={onRebalanceClick}
+        />
       </div>
 
-      <div className="grid grid-cols-1 gap-5 md:min-h-[480px] md:grid-cols-[3fr_2fr]">
-        <CurrentVsTargetCard report={report} />
-        <DriftDriversCard report={report} />
-      </div>
-
-      <HoldingsTable report={report} accountScope={accountScope} />
+      <HoldingsTable report={resolvedReport} />
     </div>
   );
 }

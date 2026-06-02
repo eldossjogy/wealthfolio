@@ -364,17 +364,19 @@ export const COMMANDS: CommandMap = {
   get_ai_thread_tags: { method: "GET", path: "/ai/threads" },
   update_tool_result: { method: "PATCH", path: "/ai/tool-result" },
   // Allocation Targets
-  list_target_profiles: { method: "GET", path: "/allocation-targets/profiles" },
-  get_target_profile: { method: "GET", path: "/allocation-targets/profiles" },
-  create_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
-  update_target_profile: { method: "PUT", path: "/allocation-targets/profiles" },
-  activate_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
-  archive_target_profile: { method: "POST", path: "/allocation-targets/profiles" },
-  delete_target_profile: { method: "DELETE", path: "/allocation-targets/profiles" },
-  list_target_nodes: { method: "GET", path: "/allocation-targets/profiles" },
-  save_target_nodes: { method: "POST", path: "/allocation-targets/profiles" },
-  get_target_drift: { method: "POST", path: "/allocation-targets/drift" },
-  get_target_drift_for_profile: { method: "POST", path: "/allocation-targets/profiles" },
+  list_allocation_targets: { method: "GET", path: "/allocation-targets" },
+  get_allocation_target: { method: "GET", path: "/allocation-targets" },
+  create_allocation_target: { method: "POST", path: "/allocation-targets" },
+  update_allocation_target: { method: "PUT", path: "/allocation-targets" },
+  archive_allocation_target: { method: "POST", path: "/allocation-targets" },
+  delete_allocation_target: { method: "DELETE", path: "/allocation-targets" },
+  list_allocation_target_weights: { method: "GET", path: "/allocation-targets" },
+  save_allocation_target_weights: { method: "POST", path: "/allocation-targets" },
+  save_allocation_target_with_weights: {
+    method: "POST",
+    path: "/allocation-targets/save-with-weights",
+  },
+  get_allocation_target_drift: { method: "POST", path: "/allocation-targets" },
   // Alternative Assets
   create_alternative_asset: { method: "POST", path: "/alternative-assets" },
   update_alternative_asset_valuation: { method: "PUT", path: "/alternative-assets" },
@@ -1757,59 +1759,62 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "get_alternative_holdings":
       break;
     // Allocation Targets
-    case "list_target_profiles":
+    case "list_allocation_targets":
       break;
-    case "get_target_profile": {
+    case "get_allocation_target": {
       const { id } = payload as { id: string };
       url += `/${encodeURIComponent(id)}`;
       break;
     }
-    case "create_target_profile": {
+    case "create_allocation_target": {
       const { input } = payload as { input: Record<string, unknown> };
       body = JSON.stringify(input);
       break;
     }
-    case "update_target_profile": {
+    case "update_allocation_target": {
       const { id, input } = payload as { id: string; input: Record<string, unknown> };
       url += `/${encodeURIComponent(id)}`;
       body = JSON.stringify(input);
       break;
     }
-    case "activate_target_profile": {
-      const { id } = payload as { id: string };
-      url += `/${encodeURIComponent(id)}/activate`;
-      break;
-    }
-    case "archive_target_profile": {
+    case "archive_allocation_target": {
       const { id } = payload as { id: string };
       url += `/${encodeURIComponent(id)}/archive`;
       break;
     }
-    case "delete_target_profile": {
+    case "delete_allocation_target": {
       const { id } = payload as { id: string };
       url += `/${encodeURIComponent(id)}`;
       break;
     }
-    case "list_target_nodes": {
-      const { profileId } = payload as { profileId: string };
-      url += `/${encodeURIComponent(profileId)}/nodes`;
+    case "list_allocation_target_weights": {
+      const { targetId } = payload as { targetId: string };
+      url += `/${encodeURIComponent(targetId)}/weights`;
       break;
     }
-    case "save_target_nodes": {
-      const { profileId, nodes } = payload as { profileId: string; nodes: unknown[] };
-      url += `/${encodeURIComponent(profileId)}/nodes`;
-      body = JSON.stringify(nodes);
+    case "save_allocation_target_weights": {
+      const { targetId, weights } = payload as { targetId: string; weights: unknown[] };
+      url += `/${encodeURIComponent(targetId)}/weights`;
+      body = JSON.stringify(weights);
       break;
     }
-    case "get_target_drift": {
-      const { input } = payload as { input: { filter: unknown } };
-      body = JSON.stringify({ filter: input.filter });
+    case "save_allocation_target_with_weights": {
+      const { id, input, weights } = payload as {
+        id: string | null;
+        input: Record<string, unknown>;
+        weights: unknown[];
+      };
+      body = JSON.stringify({ id, input, weights });
       break;
     }
-    case "get_target_drift_for_profile": {
-      const { profileId, filter } = payload as { profileId: string; filter: unknown };
-      url += `/${encodeURIComponent(profileId)}/drift`;
-      body = JSON.stringify({ filter });
+    case "get_allocation_target_drift": {
+      const { targetId, filter, includeHoldings } = payload as {
+        targetId: string;
+        filter: unknown;
+        includeHoldings?: boolean;
+      };
+      url += `/${encodeURIComponent(targetId)}/drift`;
+      body = JSON.stringify({ filter, includeHoldings: includeHoldings ?? false });
       break;
     }
     // AI Providers

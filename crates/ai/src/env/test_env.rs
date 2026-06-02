@@ -31,7 +31,10 @@ use wealthfolio_core::{
     },
     holdings::{Holding, HoldingsServiceTrait},
     planning::SaveUpOverview,
-    portfolio::allocation::{AllocationHoldings, AllocationServiceTrait, PortfolioAllocations},
+    portfolio::allocation::{
+        AllocationHoldings, AllocationServiceTrait, PortfolioAllocations,
+        TaxonomyHoldingContributions,
+    },
     portfolio::fire::RetirementOverview,
     portfolio::income::{IncomeServiceTrait, IncomeSummary},
     portfolio::performance::{PerformanceMetrics, PerformanceServiceTrait, ReturnMethod},
@@ -1089,9 +1092,9 @@ impl AllocationServiceTrait for MockAllocationService {
         &self,
         _account_ids: &[String],
         base_currency: &str,
-        _aggregated_account_id: &str,
         taxonomy_id: &str,
         category_id: &str,
+        _aggregated_account_id: &str,
     ) -> CoreResult<AllocationHoldings> {
         Ok(AllocationHoldings {
             taxonomy_id: taxonomy_id.to_string(),
@@ -1102,6 +1105,22 @@ impl AllocationServiceTrait for MockAllocationService {
             holdings: Vec::new(),
             total_value: rust_decimal::Decimal::ZERO,
             currency: base_currency.to_string(),
+        })
+    }
+
+    async fn get_holding_contributions_for_taxonomy_for_accounts(
+        &self,
+        _account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        _aggregated_account_id: &str,
+    ) -> CoreResult<TaxonomyHoldingContributions> {
+        Ok(TaxonomyHoldingContributions {
+            taxonomy_id: taxonomy_id.to_string(),
+            taxonomy_name: "Mock Taxonomy".to_string(),
+            total_value: rust_decimal::Decimal::ZERO,
+            currency: base_currency.to_string(),
+            contributions: Vec::new(),
         })
     }
 }

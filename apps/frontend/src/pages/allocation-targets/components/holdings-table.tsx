@@ -1,29 +1,17 @@
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@wealthfolio/ui";
+import { TickerAvatar } from "@/components/ticker-avatar";
 import { cn, formatAmount } from "@/lib/utils";
-import { useHoldings } from "@/hooks/use-holdings";
 import { useAccounts } from "@/hooks/use-accounts";
-import type { AccountScope, DriftReport, DriftRow, Holding } from "@/lib/types";
+import type { DriftHoldingRow, DriftReport } from "@/lib/types";
+import { formatPp } from "./drift-copy";
 
 interface HoldingsTableProps {
   report: DriftReport;
-  accountScope: AccountScope;
 }
 
-function findDriftRow(holding: Holding, rows: DriftRow[]): DriftRow | undefined {
-  if (holding.holdingType === "cash") {
-    return rows.find(
-      (r) =>
-        r.categoryId.toLowerCase().includes("cash") ||
-        r.categoryName.toLowerCase().includes("cash"),
-    );
-  }
-  const topCatId = holding.instrument?.classifications?.assetClasses?.[0]?.topLevelCategory?.id;
-  if (topCatId) {
-    return rows.find((r) => r.categoryId === topCatId);
-  }
-  return undefined;
-}
+const EMPTY_DRIFT_ROWS: DriftHoldingRow[] = [];
 
 function driftColor(driftBps: number): string {
   if (driftBps > 0) return "text-destructive";
@@ -31,78 +19,167 @@ function driftColor(driftBps: number): string {
   return "text-muted-foreground";
 }
 
-export function HoldingsTable({ report, accountScope }: HoldingsTableProps) {
-  const { holdings, isLoading } = useHoldings(accountScope);
+function cashSymbol(currency: string): string {
+  if (currency === "USD") return "$";
+  if (currency === "CAD") return "C$";
+  if (currency === "BTC") return "₿";
+  if (currency.length <= 2) return currency;
+  return currency.slice(0, 2);
+}
+
+function HoldingAvatar({
+  isCash,
+  symbol,
+  className = "size-6",
+}: {
+  isCash: boolean;
+  symbol: string;
+  className?: string;
+}) {
+  if (isCash) {
+    return (
+      <span
+        className={cn(
+          "bg-primary/80 dark:bg-primary/20 flex shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white",
+          className,
+        )}
+      >
+        {cashSymbol(symbol)}
+      </span>
+    );
+  }
+
+  return (
+    <TickerAvatar
+      symbol={symbol === "-" ? "?" : symbol}
+      className={cn("shrink-0", className)}
+      imageClassName="object-contain p-1"
+    />
+  );
+}
+
+function formatUpdatedAt(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  })
+    .format(date)
+    .replace(/\bE[DS]T\b/, "ET");
+}
+
+function accountLabelForRow(row: DriftHoldingRow, accountMap: Map<string, string>): string {
+  if (row.sourceAccountIds && row.sourceAccountIds.length > 0) {
+    const names = row.sourceAccountIds.map((id) => accountMap.get(id) ?? id).filter(Boolean);
+    if (names.length === 1) return names[0];
+    if (names.length > 1) return `${names.length} accounts`;
+  }
+  return accountMap.get(row.accountId) ?? row.accountId;
+}
+
+function canNavigateToHolding(row: DriftHoldingRow): boolean {
+  return !row.isCash && row.assetId.trim().length > 0;
+}
+
+export function HoldingsTable({ report }: HoldingsTableProps) {
+  const navigate = useNavigate();
   const { accounts } = useAccounts();
 
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+  const updatedAt = useMemo(() => formatUpdatedAt(new Date()), []);
 
-  const showAccountCol = accountScope.type !== "account";
+  const showAccountCol = report.scopeType !== "account";
+  const holdingsReport = report.holdings ?? null;
+  const isLoading = !holdingsReport;
+  const rows = holdingsReport?.rows ?? EMPTY_DRIFT_ROWS;
+  const baseCurrency = holdingsReport?.baseCurrency ?? report.baseCurrency;
+  const holdingCount = useMemo(() => new Set(rows.map((row) => row.holdingId)).size, [rows]);
 
-  const rows = useMemo(
-    () =>
-      holdings.map((h) => {
-        const driftRow = findDriftRow(h, report.rows);
-        const currentPct = h.weight;
-        let targetPct: number | null = null;
-        let driftPct: number | null = null;
-        if (driftRow) {
-          const categoryCurrentPct = driftRow.currentBps / 100;
-          const categoryTargetPct = driftRow.targetBps / 100;
-          if (categoryCurrentPct > 0) {
-            targetPct = (currentPct / categoryCurrentPct) * categoryTargetPct;
-            driftPct = currentPct - targetPct;
-          }
-        }
-
-        const symbol = h.holdingType === "cash" ? h.localCurrency : (h.instrument?.symbol ?? "—");
-        const name =
-          h.holdingType === "cash" ? `Cash (${h.localCurrency})` : (h.instrument?.name ?? symbol);
-        const categoryName = driftRow?.categoryName ?? "—";
-        const categoryColor = driftRow?.color ?? null;
-
-        let accountLabel = "—";
-        if (h.sourceAccountIds && h.sourceAccountIds.length > 0) {
-          const names = h.sourceAccountIds.map((id) => accountMap.get(id) ?? id).filter(Boolean);
-          accountLabel =
-            names.length === 1 ? names[0] : names.length > 1 ? `${names.length} accounts` : "—";
-        } else {
-          accountLabel = accountMap.get(h.accountId) ?? h.accountId;
-        }
-
-        return {
-          id: h.id,
-          symbol,
-          name,
-          categoryName,
-          categoryColor,
-          value: h.marketValue.base,
-          currentPct,
-          targetPct,
-          driftPct,
-          driftBps: driftPct !== null ? Math.round(driftPct * 100) : null,
-          accountLabel,
-        };
-      }),
-    [holdings, report.rows, accountMap],
-  );
+  function navigateToHolding(row: DriftHoldingRow) {
+    if (!canNavigateToHolding(row)) return;
+    navigate(`/holdings/${encodeURIComponent(row.assetId)}`);
+  }
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">All holdings</CardTitle>
+      <CardHeader className="px-4 pb-2 pt-4 md:px-6 md:pb-3 md:pt-6">
+        <CardTitle className="text-base">Holdings</CardTitle>
         <CardDescription>
-          {isLoading ? "Loading…" : `${holdings.length} positions · ${report.baseCurrency}`}
+          {isLoading ? (
+            "Loading…"
+          ) : (
+            <>
+              <span className="md:hidden">
+                {holdingCount} holdings · {baseCurrency}
+              </span>
+              <span className="hidden md:inline">
+                {holdingCount} holdings · {baseCurrency} · Updated {updatedAt}
+              </span>
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
+        <div className="divide-y md:hidden">
+          {rows.map((row) => {
+            const canNavigate = canNavigateToHolding(row);
+            return (
+              <button
+                key={row.id}
+                type="button"
+                disabled={!canNavigate}
+                className={cn(
+                  "focus-visible:ring-ring block w-full px-4 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset",
+                  canNavigate ? "hover:bg-muted/30" : "cursor-default",
+                )}
+                onClick={() => navigateToHolding(row)}
+              >
+                <div className="grid grid-cols-[1.75rem_minmax(0,1fr)_auto] gap-x-3 gap-y-1">
+                  <div className="row-span-2 flex items-center">
+                    <HoldingAvatar isCash={row.isCash} symbol={row.symbol} className="size-7" />
+                  </div>
+
+                  <div className="flex min-w-0 items-baseline gap-1.5">
+                    <span className="text-foreground shrink-0 text-[12px] font-semibold">
+                      {row.symbol}
+                    </span>
+                    <span className="text-muted-foreground truncate text-[12px]">{row.name}</span>
+                  </div>
+                  <span className="text-foreground text-right text-[12px] font-medium tabular-nums">
+                    {formatAmount(row.value, baseCurrency)}
+                  </span>
+
+                  <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11.5px]">
+                    {row.categoryColor && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: row.categoryColor }}
+                      />
+                    )}
+                    <span className="truncate">{row.categoryName}</span>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-right text-[11.5px] font-medium tabular-nums",
+                      row.driftBps != null ? driftColor(row.driftBps) : "text-muted-foreground",
+                    )}
+                  >
+                    {row.driftBps != null ? formatPp(row.driftBps) : "—"}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-[13px]">
             <thead>
               <tr className="text-muted-foreground border-b text-[10px] uppercase tracking-wider">
-                <th className="py-2.5 pl-6 pr-2 text-left font-medium">Ticker</th>
-                <th className="py-2.5 pl-2 pr-3 text-left font-medium">Name</th>
-                <th className="py-2.5 pr-3 text-left font-medium">Class</th>
+                <th className="py-2.5 pl-6 pr-3 text-left font-medium">Holding</th>
+                <th className="py-2.5 pr-3 text-left font-medium">Category</th>
                 <th className="py-2.5 pr-3 text-right font-medium">Value</th>
                 <th className="py-2.5 pr-3 text-right font-medium">Current</th>
                 <th className="py-2.5 pr-3 text-right font-medium">Target</th>
@@ -113,47 +190,85 @@ export function HoldingsTable({ report, accountScope }: HoldingsTableProps) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="hover:bg-muted/30 h-11 border-b last:border-b-0">
-                  <td className="text-foreground pl-6 pr-2 font-mono text-[12px]">{row.symbol}</td>
-                  <td className="text-foreground max-w-[220px] truncate pl-2 pr-3">{row.name}</td>
-                  <td className="pr-3">
-                    <div className="flex items-center gap-1.5">
-                      {row.categoryColor && (
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ background: row.categoryColor }}
-                        />
-                      )}
-                      <span className="text-muted-foreground text-[12px]">{row.categoryName}</span>
-                    </div>
-                  </td>
-                  <td className="text-foreground pr-3 text-right tabular-nums">
-                    {formatAmount(row.value, report.baseCurrency)}
-                  </td>
-                  <td className="text-foreground pr-3 text-right font-medium tabular-nums">
-                    {row.currentPct.toFixed(2)}%
-                  </td>
-                  <td className="text-muted-foreground pr-3 text-right tabular-nums">
-                    {row.targetPct !== null ? `${row.targetPct.toFixed(2)}%` : "—"}
-                  </td>
-                  <td
+              {rows.map((row) => {
+                const canNavigate = canNavigateToHolding(row);
+                return (
+                  <tr
+                    key={row.id}
+                    tabIndex={canNavigate ? 0 : -1}
                     className={cn(
-                      "pr-3 text-right font-medium tabular-nums",
-                      row.driftBps !== null ? driftColor(row.driftBps) : "text-muted-foreground",
+                      "h-11 border-b outline-none last:border-b-0",
+                      canNavigate
+                        ? "hover:bg-muted/30 focus-visible:bg-muted/30 cursor-pointer"
+                        : "cursor-default",
                     )}
+                    onClick={() => navigateToHolding(row)}
+                    onKeyDown={(event) => {
+                      if (!canNavigate) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        navigateToHolding(row);
+                      }
+                    }}
                   >
-                    {row.driftPct !== null
-                      ? `${row.driftPct > 0 ? "+" : ""}${row.driftPct.toFixed(2)}%`
-                      : "—"}
-                  </td>
-                  {showAccountCol && (
-                    <td className="text-muted-foreground pl-2 pr-6 text-right">
-                      {row.accountLabel}
+                    <td className="pl-6 pr-3">
+                      <div className="flex min-w-[280px] items-center gap-2">
+                        <HoldingAvatar isCash={row.isCash} symbol={row.symbol} />
+                        <div className="flex min-w-0 items-baseline gap-2">
+                          <span className="text-foreground shrink-0 text-[12px] font-semibold">
+                            {row.symbol}
+                          </span>
+                          <span className="text-muted-foreground max-w-[330px] truncate text-[12px]">
+                            {row.name}
+                          </span>
+                        </div>
+                      </div>
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className="pr-3">
+                      <div className="flex items-center gap-1.5">
+                        {row.categoryColor && (
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ background: row.categoryColor }}
+                          />
+                        )}
+                        <span className="min-w-0">
+                          <span className="text-muted-foreground block truncate text-[12px]">
+                            {row.categoryName}
+                          </span>
+                          {row.isUnknownCategory && (
+                            <span className="text-muted-foreground/80 block max-w-[220px] truncate text-[10.5px]">
+                              This holding is not mapped to the selected taxonomy.
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="text-foreground pr-3 text-right tabular-nums">
+                      {formatAmount(row.value, baseCurrency)}
+                    </td>
+                    <td className="text-foreground pr-3 text-right font-medium tabular-nums">
+                      {row.currentPct.toFixed(2)}%
+                    </td>
+                    <td className="text-muted-foreground pr-3 text-right tabular-nums">
+                      {row.targetPct != null ? `${row.targetPct.toFixed(2)}%` : "—"}
+                    </td>
+                    <td
+                      className={cn(
+                        "pr-3 text-right font-medium tabular-nums",
+                        row.driftBps != null ? driftColor(row.driftBps) : "text-muted-foreground",
+                      )}
+                    >
+                      {row.driftBps != null ? formatPp(row.driftBps) : "—"}
+                    </td>
+                    {showAccountCol && (
+                      <td className="text-muted-foreground pl-2 pr-6 text-right">
+                        {accountLabelForRow(row, accountMap)}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

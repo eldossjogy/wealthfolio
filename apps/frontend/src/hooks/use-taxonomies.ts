@@ -40,6 +40,21 @@ function invalidateActivityTaxonomyCaches(queryClient: QueryClient, taxonomyId: 
   }
 }
 
+function shouldInvalidateAllocationTargetDrift(taxonomyId?: string, scope?: TaxonomyScope) {
+  if (scope) return scope === "asset";
+  if (taxonomyId) return !ACTIVITY_TAXONOMY_IDS.has(taxonomyId);
+  return true;
+}
+
+function invalidateAllocationTargetDriftCaches(
+  queryClient: QueryClient,
+  taxonomyId?: string,
+  scope?: TaxonomyScope,
+) {
+  if (!shouldInvalidateAllocationTargetDrift(taxonomyId, scope)) return;
+  queryClient.invalidateQueries({ queryKey: [QueryKeys.ALLOCATION_TARGET_DRIFT] });
+}
+
 // ============================================================================
 // Taxonomy Queries
 // ============================================================================
@@ -89,8 +104,9 @@ export function useCreateTaxonomy() {
 
   return useMutation({
     mutationFn: (taxonomy: NewTaxonomy) => createTaxonomy(taxonomy),
-    onSuccess: () => {
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TAXONOMIES] });
+      invalidateAllocationTargetDriftCaches(queryClient, created.id, created.scope ?? "asset");
     },
   });
 }
@@ -103,6 +119,7 @@ export function useUpdateTaxonomy() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TAXONOMIES] });
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.id) });
+      invalidateAllocationTargetDriftCaches(queryClient, variables.id, variables.scope ?? "asset");
     },
   });
 }
@@ -112,8 +129,9 @@ export function useDeleteTaxonomy() {
 
   return useMutation({
     mutationFn: (id: string) => deleteTaxonomy(id),
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TAXONOMIES] });
+      invalidateAllocationTargetDriftCaches(queryClient, id);
     },
   });
 }
@@ -130,6 +148,7 @@ export function useCreateCategory() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
       invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -142,6 +161,7 @@ export function useUpdateCategory() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
       invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -155,6 +175,7 @@ export function useDeleteCategory() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
       invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -177,6 +198,7 @@ export function useMoveCategory() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QueryKeys.taxonomy(variables.taxonomyId) });
       invalidateActivityTaxonomyCaches(queryClient, variables.taxonomyId);
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -192,6 +214,7 @@ export function useImportTaxonomy() {
     mutationFn: (jsonStr: string) => importTaxonomyJson(jsonStr),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TAXONOMIES] });
+      invalidateAllocationTargetDriftCaches(queryClient);
     },
   });
 }
@@ -218,6 +241,7 @@ export function useAssignAssetToCategory() {
       // Invalidate portfolio allocations and holdings to reflect classification changes
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }
@@ -234,6 +258,7 @@ export function useRemoveAssetTaxonomyAssignment() {
       // Invalidate portfolio allocations and holdings to reflect classification changes
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
+      invalidateAllocationTargetDriftCaches(queryClient);
     },
   });
 }
@@ -259,6 +284,7 @@ export function useMigrateLegacyClassifications() {
       // Invalidate portfolio allocations and holdings to reflect classification changes
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
+      invalidateAllocationTargetDriftCaches(queryClient);
       // Invalidate health status so health center updates
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HEALTH_STATUS] });
     },
