@@ -1,14 +1,37 @@
-import { EmptyPlaceholder } from "@wealthfolio/ui";
-import { Button } from "@wealthfolio/ui/components/ui/button";
-import { Icons } from "@wealthfolio/ui/components/ui/icons";
+import {
+  Button,
+  Card,
+  CardContent,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  EmptyPlaceholder,
+  Icons,
+  Skeleton,
+} from "@wealthfolio/ui";
 import { useCallback, useMemo, useState } from "react";
 
 import { useHoldings } from "@/hooks/use-holdings";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { usePortfolios } from "@/hooks/use-portfolios";
-import { isAlternativeAssetKind, type AssetKind } from "@/lib/constants";
+import { isAlternativeAssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
-import type { AccountScope, TaxonomyAllocation } from "@/lib/types";
+import type { AccountScope, AllocationTarget, DriftReport, TaxonomyAllocation } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { formatPp, formatTolerance } from "@/pages/allocation-targets/components/drift-copy";
+import { isOutOfBand } from "@/pages/allocation-targets/components/drift-row-utils";
+import { OverviewTab } from "@/pages/allocation-targets/components/overview-tab";
+import {
+  accountScopeKey,
+  filterTargetsByScope,
+} from "@/pages/allocation-targets/components/target-scope";
+import { TargetDetailHeader } from "@/pages/allocation-targets/components/target-detail-header";
+import { TargetsTab } from "@/pages/allocation-targets/components/targets-tab";
+import { UnsavedTargetChangesDialog } from "@/pages/allocation-targets/components/unsaved-target-changes-dialog";
+import { useAllocationTargetDrift } from "@/pages/allocation-targets/hooks/use-allocation-target-drift";
+import { useAllocationTargets } from "@/pages/allocation-targets/hooks/use-allocation-targets";
 import { useNavigate } from "react-router-dom";
 import { AllocationDetailSheet } from "./components/allocation-detail-sheet";
 import { CashHoldingsWidget } from "./components/cash-holdings-widget";
@@ -19,10 +42,178 @@ import { DrillableAccountChart } from "./components/drillable-account-chart";
 import { DrillableDonutChart } from "./components/drillable-donut-chart";
 import { SectorsChart } from "./components/sectors-chart";
 import { SegmentedAllocationBar } from "./components/segmented-allocation-bar";
+import {
+  customAllocationDrilldownType,
+  resolveAllocationForDrilldown,
+} from "./allocation-drilldown";
 
 interface HoldingsInsightsPageProps {
   accountId?: string;
   filter?: AccountScope;
+}
+
+type AllocationWorkspaceView = "current" | "drift" | "targets" | "rebalance";
+type TargetEditorMode = "create" | "edit";
+
+interface TargetAllocationCardProps {
+  targets: AllocationTarget[];
+  selectedTargetId: string | null;
+  target: AllocationTarget | null;
+  driftReport: DriftReport | null;
+  isLoading: boolean;
+  onTargetChange: (id: string) => void;
+  onCreateTarget: () => void;
+  onEditTarget: () => void;
+  onViewDrift: () => void;
+  onPlanRebalance: () => void;
+}
+
+function TargetAllocationCard({
+  targets,
+  selectedTargetId,
+  target,
+  driftReport,
+  isLoading,
+  onTargetChange,
+  onCreateTarget,
+  onEditTarget,
+  onViewDrift,
+  onPlanRebalance,
+}: TargetAllocationCardProps) {
+  const hasTargets = targets.length > 0;
+  const isFine = driftReport ? driftReport.outOfBandCount === 0 : false;
+  const largestGapRow = driftReport?.rows
+    .filter(isOutOfBand)
+    .sort((a, b) => Math.abs(b.driftBps) - Math.abs(a.driftBps))[0];
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-muted-foreground text-[11px] font-medium uppercase tracking-wider">
+              Target allocation
+            </div>
+            {target ? (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-foreground text-[13px] font-semibold">{target.name}</span>
+              </div>
+            ) : (
+              <div className="text-foreground mt-1 text-[13px] font-semibold">
+                No target selected
+              </div>
+            )}
+          </div>
+
+          {hasTargets && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label="Select target">
+                  <Icons.ChevronsUpDown className="h-3.5 w-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {targets.map((p) => (
+                  <DropdownMenuItem
+                    key={p.id}
+                    onSelect={() => onTargetChange(p.id)}
+                    className={cn(selectedTargetId === p.id && "font-medium")}
+                  >
+                    <span className="flex-1">{p.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onCreateTarget}>
+                  <Icons.PlusCircle className="mr-2 h-4 w-4" />
+                  New target
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        ) : driftReport ? (
+          <div className="space-y-3">
+            <div
+              className={cn(
+                "rounded-md border px-3 py-2",
+                isFine
+                  ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/20"
+                  : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn("h-2 w-2 rounded-full", isFine ? "bg-green-600" : "bg-amber-600")}
+                />
+                <span className="text-[12px] font-semibold">
+                  {isFine
+                    ? "All categories inside target range"
+                    : `${driftReport.outOfBandCount} categories outside target range`}
+                </span>
+              </div>
+              <div className="text-muted-foreground mt-1 text-[11px]">
+                Largest gap {formatPp(largestGapRow?.driftBps ?? driftReport.maxDriftBps)} · drift
+                tolerance {formatTolerance(target?.driftBandBps ?? 0)}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={onViewDrift}>
+                Allocation vs target
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onEditTarget}>
+                Edit target
+              </Button>
+              <Button size="sm" onClick={onPlanRebalance}>
+                Review rebalance
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-[12px] leading-relaxed">
+              Add a target mix to compare this allocation against your intended portfolio.
+            </p>
+            <Button size="sm" onClick={onCreateTarget}>
+              Set target allocation
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkspaceBackButton({
+  title,
+  description,
+  onBack,
+}: {
+  title: string;
+  description?: string;
+  onBack: () => void;
+}) {
+  return (
+    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="ghost" size="sm" className="-ml-2" onClick={onBack}>
+          <Icons.ArrowLeft className="mr-1.5 h-4 w-4" />
+          Back to allocation
+        </Button>
+        <span className="bg-border hidden h-5 w-px sm:block" />
+        <h2 className="text-foreground text-[16px] font-semibold">{title}</h2>
+      </div>
+      {description && (
+        <p className="text-muted-foreground text-[12px] sm:text-right">{description}</p>
+      )}
+    </div>
+  );
 }
 
 export const HoldingsInsightsPage = ({
@@ -33,10 +224,36 @@ export const HoldingsInsightsPage = ({
   const { settings } = useSettingsContext();
   const baseCurrency = settings?.baseCurrency ?? "USD";
 
-  const accountFilter: AccountScope =
-    filterProp ?? (accountIdProp ? { type: "account", accountId: accountIdProp } : { type: "all" });
+  const accountFilter: AccountScope = useMemo(
+    () =>
+      filterProp ??
+      (accountIdProp ? { type: "account", accountId: accountIdProp } : { type: "all" }),
+    [accountIdProp, filterProp],
+  );
   const { holdings, isLoading: holdingsLoading } = useHoldings(accountFilter);
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountFilter);
+  const { targets, isLoading: targetsLoading } = useAllocationTargets();
+  const selectedAccountScopeKey = accountScopeKey(accountFilter);
+  const [workspaceView, setWorkspaceView] = useState<AllocationWorkspaceView>("current");
+  const [selectedTargetSelection, setSelectedTargetSelection] = useState<{
+    scopeKey: string;
+    id: string;
+  } | null>(null);
+  const [targetEditorMode, setTargetEditorMode] = useState<TargetEditorMode>("edit");
+  const [targetEditorDirty, setTargetEditorDirty] = useState(false);
+  const [confirmDiscardTargetChanges, setConfirmDiscardTargetChanges] = useState(false);
+  const selectedTargetId =
+    selectedTargetSelection?.scopeKey === selectedAccountScopeKey
+      ? selectedTargetSelection.id
+      : null;
+  const setScopedSelectedTargetId = useCallback(
+    (targetId: string | null) => {
+      setSelectedTargetSelection(
+        targetId ? { scopeKey: selectedAccountScopeKey, id: targetId } : null,
+      );
+    },
+    [selectedAccountScopeKey],
+  );
 
   const { data: portfolios = [] } = usePortfolios();
   const filteredAccountIds = useMemo(() => {
@@ -48,7 +265,65 @@ export const HoldingsInsightsPage = ({
     return undefined; // "all" → DrillableAccountChart shows every account
   }, [accountFilter, portfolios]);
 
+  const scopedTargets = useMemo(
+    () => filterTargetsByScope(targets, accountFilter),
+    [targets, accountFilter],
+  );
+
+  const scopedLiveTargets = useMemo(
+    () => scopedTargets.filter((p) => !p.archivedAt),
+    [scopedTargets],
+  );
+
+  const effectiveTargetId = selectedTargetId ?? scopedLiveTargets[0]?.id ?? null;
+  const effectiveTarget = targets.find((p) => p.id === effectiveTargetId) ?? null;
+
+  const { driftReport, isLoading: driftLoading } = useAllocationTargetDrift(
+    effectiveTargetId,
+    accountFilter,
+    { includeHoldings: workspaceView === "drift" },
+  );
+
   const isLoading = holdingsLoading || allocationsLoading;
+  const targetLoading = targetsLoading || driftLoading;
+
+  function handleCreateTarget() {
+    setTargetEditorMode("create");
+    setWorkspaceView("targets");
+  }
+
+  function handleEditTarget() {
+    setTargetEditorMode("edit");
+    setWorkspaceView("targets");
+  }
+
+  function handleBackToCurrentAllocation() {
+    if (targetEditorDirty) {
+      setConfirmDiscardTargetChanges(true);
+      return;
+    }
+    setTargetEditorDirty(false);
+    setWorkspaceView("current");
+  }
+
+  function discardTargetChangesAndReturn() {
+    setConfirmDiscardTargetChanges(false);
+    setTargetEditorDirty(false);
+    setWorkspaceView("current");
+  }
+
+  function handleTargetEditorCancel() {
+    setTargetEditorDirty(false);
+    setTargetEditorMode("edit");
+    setWorkspaceView(effectiveTargetId ? "drift" : "current");
+  }
+
+  function handleTargetEditorSaved(targetId: string) {
+    setTargetEditorDirty(false);
+    setTargetEditorMode("edit");
+    setScopedSelectedTargetId(targetId);
+    setWorkspaceView("drift");
+  }
 
   // State for allocation detail sheet
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -57,42 +332,17 @@ export const HoldingsInsightsPage = ({
   );
   const [initialCategoryId, setInitialCategoryId] = useState<string | null>(null);
 
-  // Map filter types to allocations
-  const getAllocationForType = useCallback(
-    (type: string): TaxonomyAllocation | undefined => {
-      switch (type) {
-        case "class":
-          return allocations?.assetClasses;
-        case "sector":
-          return allocations?.sectors;
-        case "country":
-          return allocations?.regions;
-        case "risk":
-          return allocations?.riskCategory;
-        case "securityType":
-          return allocations?.securityTypes;
-        default:
-          // Check custom groups
-          if (type === "custom" && allocations?.customGroups?.length) {
-            return allocations.customGroups[0];
-          }
-          return undefined;
-      }
-    },
-    [allocations],
-  );
-
   // Handle chart section click - opens sheet with clicked category pre-selected
   const handleChartSectionClick = useCallback(
     (type: string, _name: string, _title?: string, categoryId?: string) => {
-      const allocation = getAllocationForType(type);
+      const allocation = resolveAllocationForDrilldown(allocations, type);
       if (allocation) {
         setSelectedAllocation(allocation);
         setInitialCategoryId(categoryId ?? null);
         setIsSheetOpen(true);
       }
     },
-    [getAllocationForType],
+    [allocations],
   );
 
   // Handle card click - opens sheet with first category selected
@@ -109,8 +359,7 @@ export const HoldingsInsightsPage = ({
     const nonCash =
       holdings?.filter((holding) => {
         if (holding.holdingType?.toLowerCase() === "cash") return false;
-        if (holding.assetKind && isAlternativeAssetKind(holding.assetKind as AssetKind))
-          return false;
+        if (holding.assetKind && isAlternativeAssetKind(holding.assetKind)) return false;
         return true;
       }) ?? [];
 
@@ -215,6 +464,19 @@ export const HoldingsInsightsPage = ({
           </div>
 
           <div className="col-span-1 space-y-4">
+            <TargetAllocationCard
+              targets={scopedLiveTargets}
+              selectedTargetId={effectiveTargetId}
+              target={effectiveTarget}
+              driftReport={driftReport}
+              isLoading={targetLoading}
+              onTargetChange={setScopedSelectedTargetId}
+              onCreateTarget={handleCreateTarget}
+              onEditTarget={handleEditTarget}
+              onViewDrift={() => setWorkspaceView(effectiveTargetId ? "drift" : "targets")}
+              onPlanRebalance={() => setWorkspaceView("rebalance")}
+            />
+
             {hasRiskAllocations && (
               <CompactAllocationStrip
                 title="Risk Composition"
@@ -284,7 +546,7 @@ export const HoldingsInsightsPage = ({
                       compact={true}
                       onSegmentClick={(categoryId, categoryName) =>
                         handleChartSectionClick(
-                          "custom",
+                          customAllocationDrilldownType(taxonomy.taxonomyId),
                           categoryName,
                           `${taxonomy.taxonomyName}: ${categoryName}`,
                           categoryId,
@@ -299,6 +561,99 @@ export const HoldingsInsightsPage = ({
       </div>
     );
   };
+
+  if (workspaceView === "targets") {
+    return (
+      <>
+        <div>
+          <WorkspaceBackButton title="Target allocation" onBack={handleBackToCurrentAllocation} />
+          {targetsLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-40 w-full" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          ) : (
+            <TargetsTab
+              key={selectedAccountScopeKey}
+              targets={scopedLiveTargets}
+              selectedTargetId={effectiveTargetId}
+              onTargetChange={setScopedSelectedTargetId}
+              editorMode={targetEditorMode}
+              accountScope={accountFilter}
+              onUnsavedChange={setTargetEditorDirty}
+              onCancel={handleTargetEditorCancel}
+              onSaved={handleTargetEditorSaved}
+              actionsPlacement="page-header"
+            />
+          )}
+        </div>
+        <UnsavedTargetChangesDialog
+          open={confirmDiscardTargetChanges}
+          onOpenChange={setConfirmDiscardTargetChanges}
+          onDiscard={discardTargetChangesAndReturn}
+        />
+      </>
+    );
+  }
+
+  if (workspaceView === "drift") {
+    return (
+      <div>
+        <TargetDetailHeader
+          targets={scopedLiveTargets}
+          selectedTargetId={effectiveTargetId}
+          target={effectiveTarget}
+          onBack={handleBackToCurrentAllocation}
+          onTargetChange={setScopedSelectedTargetId}
+          onCreateTarget={handleCreateTarget}
+          onEditTarget={handleEditTarget}
+        />
+        {driftReport ? (
+          <OverviewTab
+            report={driftReport}
+            taxonomyId={effectiveTarget?.taxonomyId ?? "asset_classes"}
+            targetName={effectiveTarget?.name}
+            onRebalanceClick={() => setWorkspaceView("rebalance")}
+          />
+        ) : targetLoading ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <Skeleton className="h-64 w-full" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+            <Skeleton className="h-48 w-full" />
+          </div>
+        ) : (
+          <EmptyPlaceholder
+            icon={<Icons.Target className="text-muted-foreground h-10 w-10" />}
+            title="No target in use"
+            description="Create a target allocation to compare current weights against intended weights."
+          >
+            <Button size="sm" onClick={handleCreateTarget}>
+              Set target allocation
+            </Button>
+          </EmptyPlaceholder>
+        )}
+      </div>
+    );
+  }
+
+  if (workspaceView === "rebalance") {
+    return (
+      <div>
+        <WorkspaceBackButton
+          title="Rebalance plan"
+          description="Generate suggested manual trades from allocation drift."
+          onBack={handleBackToCurrentAllocation}
+        />
+        <EmptyPlaceholder
+          icon={<Icons.BarChart className="text-muted-foreground h-10 w-10" />}
+          title="Coming soon"
+          description="Rebalance plan generator will be available in the next milestone."
+        />
+      </div>
+    );
+  }
 
   return (
     <>

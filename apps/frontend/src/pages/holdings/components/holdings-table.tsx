@@ -17,6 +17,7 @@ import { TickerAvatar } from "@/components/ticker-avatar";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
+import { HoldingType } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
 import { Holding } from "@/lib/types";
 import { AmountDisplay, QuantityDisplay } from "@wealthfolio/ui";
@@ -186,10 +187,16 @@ const getColumns = (
       const navigate = useNavigate();
       const holding = row.original;
       const symbol = holding.instrument?.symbol ?? holding.id;
+      const isCash = holding.holdingType === HoldingType.CASH;
 
       // Parse OCC symbol for options
-      const parsedOption = parseOccSymbol(symbol);
+      const parsedOption = isCash ? null : parseOccSymbol(symbol);
       const displaySymbol = parsedOption ? parsedOption.underlying : symbol;
+      const avatarSymbol = isCash
+        ? `CASH:${holding.localCurrency}`
+        : parsedOption
+          ? parsedOption.underlying
+          : symbol;
 
       // Option subtitle: "Mar 29 $150 CALL"
       const optionSubtitle = parsedOption
@@ -206,7 +213,7 @@ const getColumns = (
       const content = (
         <div className="flex items-center">
           <TickerAvatar
-            symbol={parsedOption ? parsedOption.underlying : symbol}
+            symbol={avatarSymbol}
             className="mr-2 h-8 w-8"
           />
           <div className="flex flex-col">
