@@ -803,6 +803,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn negative_cash_returns_validation_error() {
+        let total = dec!(10000);
+        let rows = vec![make_drift_row("equity", 6000, 7000, total)];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(6000))],
+        );
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+        );
+        let err = svc
+            .calculate_plan(make_input(dec!(-100)))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("non-negative"),
+            "negative cash must be rejected: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn total_value_stays_constant_when_cash_deployed() {
+        // Portfolio: equity $6000 (60%), cash $4000 (40%). Total = $10000.
+        // Target: equity 70%, cash 30%.
+        // Deploy $2000 of cash → buys equity.
+        // Total value must stay $10000 (cash moves within portfolio, not added).
+        let total = dec!(10000);
+        let rows = vec![
+            make_drift_row("equity", 6000, 7000, total),
+            make_drift_row("cash", 4000, 3000, total),
+        ];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(6000))],
+        );
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+        );
+        let plan = svc.calculate_plan(make_input(dec!(2000))).await.unwrap();
+
+        // cash_used + cash_remaining must equal available_cash (no value created)
+        assert_eq!(plan.cash_used + plan.cash_remaining, dec!(2000));
+        // max_drift_after computed on base total $10000
+        assert!(plan.max_drift_bps_after <= plan.max_drift_bps_before);
+    }
+
+    #[tokio::test]
     async fn insufficient_cash_scales_down() {
         // Need $1000 for equity, but only $500 available.
         let total = dec!(10000);
