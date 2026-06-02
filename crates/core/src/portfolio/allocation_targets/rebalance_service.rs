@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use log::debug;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -11,17 +12,17 @@ use crate::portfolio::holdings::HoldingSummary;
 
 use super::drift_service::DriftServiceTrait;
 use super::model::{
-    CalculateRebalancePlanInput, RebalanceDraft, RebalancePlan, RebalanceTo, RebalanceWarning,
-    RebalanceWarningKind, SuggestedManualTrade, TargetProfile,
+    AllocationTarget, CalculateRebalancePlanInput, RebalanceDraft, RebalanceGoal, RebalancePlan,
+    RebalanceWarning, RebalanceWarningKind, SuggestedManualTrade,
 };
-use super::target_service::TargetProfileServiceTrait;
+use super::target_service::AllocationTargetServiceTrait;
 
 // ── Repository trait ──────────────────────────────────────────────────────────
 
 #[async_trait]
 pub trait RebalanceDraftRepositoryTrait: Send + Sync {
     async fn save_draft(&self, draft: RebalanceDraft) -> CoreResult<RebalanceDraft>;
-    fn list_drafts(&self, profile_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
+    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
     async fn delete_draft(&self, id: &str) -> CoreResult<usize>;
 }
 
@@ -34,12 +35,12 @@ pub trait RebalanceServiceTrait: Send + Sync {
 
     async fn save_draft(
         &self,
-        profile: &TargetProfile,
+        profile: &AllocationTarget,
         input: &CalculateRebalancePlanInput,
         plan: &RebalancePlan,
     ) -> CoreResult<RebalanceDraft>;
 
-    fn list_drafts(&self, profile_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
+    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
 
     async fn delete_draft(&self, id: &str) -> CoreResult<()>;
 }
@@ -47,7 +48,7 @@ pub trait RebalanceServiceTrait: Send + Sync {
 // ── Implementation ────────────────────────────────────────────────────────────
 
 pub struct RebalanceService {
-    target_service: Arc<dyn TargetProfileServiceTrait>,
+    allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
     drift_service: Arc<dyn DriftServiceTrait>,
     allocation_service: Arc<dyn AllocationServiceTrait>,
     draft_repo: Arc<dyn RebalanceDraftRepositoryTrait>,
@@ -55,13 +56,13 @@ pub struct RebalanceService {
 
 impl RebalanceService {
     pub fn new(
-        target_service: Arc<dyn TargetProfileServiceTrait>,
+        allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
         drift_service: Arc<dyn DriftServiceTrait>,
         allocation_service: Arc<dyn AllocationServiceTrait>,
         draft_repo: Arc<dyn RebalanceDraftRepositoryTrait>,
     ) -> Self {
         Self {
-            target_service,
+            allocation_target_service,
             drift_service,
             allocation_service,
             draft_repo,
@@ -81,25 +82,25 @@ impl RebalanceServiceTrait for RebalanceService {
     ) -> CoreResult<RebalancePlan> {
         debug!(
             "Calculating rebalance plan for profile {} with {} available cash",
-            input.profile_id, input.available_cash
+            input.target_id, input.available_cash
         );
 
         // --- 1. Load profile -------------------------------------------------
         let profile = self
-            .target_service
-            .get_profile(&input.profile_id)?
+            .allocation_target_service
+            .get_target(&input.target_id)?
             .ok_or_else(|| {
                 CoreError::Database(crate::errors::DatabaseError::NotFound(format!(
-                    "TargetProfile {} not found",
-                    input.profile_id
+                    "AllocationTarget {} not found",
+                    input.target_id
                 )))
             })?;
 
         // --- 2. Drift report (reuse M1 DriftService) -------------------------
         let drift = self
             .drift_service
-            .get_drift_report_for_profile(
-                &input.profile_id,
+            .get_drift_report_for_target(
+                &input.target_id,
                 &input.account_ids,
                 &input.base_currency,
                 &input.aggregated_account_id,
@@ -108,11 +109,13 @@ impl RebalanceServiceTrait for RebalanceService {
 
         let total_value = drift.total_value;
         let max_drift_bps_before = drift.max_drift_bps;
+        let min_trade_amount =
+            Decimal::from_str(&profile.min_trade_amount).unwrap_or(Decimal::ZERO);
 
         // Nothing to plan against.
         if total_value == Decimal::ZERO && input.available_cash == Decimal::ZERO {
             return Ok(RebalancePlan {
-                profile_id: input.profile_id.clone(),
+                target_id: input.target_id.clone(),
                 available_cash: Decimal::ZERO,
                 cash_used: Decimal::ZERO,
                 cash_remaining: Decimal::ZERO,
@@ -142,9 +145,9 @@ impl RebalanceServiceTrait for RebalanceService {
         let mut sleeves: Vec<SleeveShortfall> = Vec::new();
         for row in &drift.rows {
             let target_bps_dec = Decimal::from(row.target_bps);
-            let desired_bps = match profile.rebalance_to {
-                RebalanceTo::ExactTarget => target_bps_dec,
-                RebalanceTo::NearestBand => (target_bps_dec - drift_band).max(Decimal::ZERO),
+            let desired_bps = match profile.rebalance_goal {
+                RebalanceGoal::ExactTarget => target_bps_dec,
+                RebalanceGoal::NearestBand => (target_bps_dec - drift_band).max(Decimal::ZERO),
             };
             let desired_value = desired_bps / bps_scale * new_total_value;
             let shortfall = (desired_value - row.current_value).max(Decimal::ZERO);
@@ -272,7 +275,7 @@ impl RebalanceServiceTrait for RebalanceService {
                         continue;
                     }
                     // Fractional: emit as dollar amount without shares.
-                    if holding_budget < profile.min_trade_amount {
+                    if holding_budget < min_trade_amount {
                         continue;
                     }
                     trades.push(SuggestedManualTrade {
@@ -309,7 +312,7 @@ impl RebalanceServiceTrait for RebalanceService {
                     (Some(holding_budget / price), holding_budget)
                 };
 
-                if amount < profile.min_trade_amount {
+                if amount < min_trade_amount {
                     continue;
                 }
 
@@ -382,7 +385,7 @@ impl RebalanceServiceTrait for RebalanceService {
                         if let Some(t) = existing {
                             t.quantity = t.quantity.map(|q| q + Decimal::ONE);
                             t.estimated_amount += *price;
-                        } else if *price >= profile.min_trade_amount {
+                        } else if *price >= min_trade_amount {
                             // New trade (Phase 1 had skipped this holding).
                             trades.push(SuggestedManualTrade {
                                 action: "buy".to_string(),
@@ -477,7 +480,7 @@ impl RebalanceServiceTrait for RebalanceService {
         );
 
         Ok(RebalancePlan {
-            profile_id: input.profile_id.clone(),
+            target_id: input.target_id.clone(),
             available_cash: input.available_cash,
             cash_used: total_cash_used,
             cash_remaining,
@@ -490,7 +493,7 @@ impl RebalanceServiceTrait for RebalanceService {
 
     async fn save_draft(
         &self,
-        profile: &TargetProfile,
+        profile: &AllocationTarget,
         input: &CalculateRebalancePlanInput,
         plan: &RebalancePlan,
     ) -> CoreResult<RebalanceDraft> {
@@ -498,8 +501,8 @@ impl RebalanceServiceTrait for RebalanceService {
         let now = Self::now();
         let draft = RebalanceDraft {
             id: Uuid::new_v4().to_string(),
-            profile_id: profile.id.clone(),
-            profile_snapshot_json: serde_json::to_string(profile)
+            target_id: profile.id.clone(),
+            target_snapshot_json: serde_json::to_string(profile)
                 .map_err(|e| db_err(format!("failed to serialize profile snapshot: {e}")))?,
             input_json: serde_json::to_string(input)
                 .map_err(|e| db_err(format!("failed to serialize plan input: {e}")))?,
@@ -511,8 +514,8 @@ impl RebalanceServiceTrait for RebalanceService {
         self.draft_repo.save_draft(draft).await
     }
 
-    fn list_drafts(&self, profile_id: &str) -> CoreResult<Vec<RebalanceDraft>> {
-        self.draft_repo.list_drafts(profile_id)
+    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>> {
+        self.draft_repo.list_drafts(target_id)
     }
 
     async fn delete_draft(&self, id: &str) -> CoreResult<()> {
@@ -528,27 +531,27 @@ mod tests {
     use super::*;
     use crate::portfolio::allocation::{AllocationHoldings, PortfolioAllocations};
     use crate::portfolio::allocation_targets::{
-        DriftReport, DriftRow, DriftStatus, NewTargetAllocationNode, NewTargetProfile,
-        ProfileStatus, RebalanceTo, ScopeType, TargetAllocationNode, TargetProfile, TriggerType,
+        AllocationTarget, AllocationTargetWeight, DriftReport, DriftRow, DriftStatus,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalanceGoal, ScopeType, TriggerType,
     };
     use crate::portfolio::holdings::{HoldingSummary, HoldingType};
     use rust_decimal_macros::dec;
 
-    fn make_profile(rebalance_to: RebalanceTo, whole_shares_only: bool) -> TargetProfile {
-        TargetProfile {
+    fn make_profile(rebalance_goal: RebalanceGoal, whole_shares_only: bool) -> AllocationTarget {
+        AllocationTarget {
             id: "profile-1".to_string(),
             name: "Test".to_string(),
-            status: ProfileStatus::Active,
             scope_type: ScopeType::All,
             scope_id: None,
             taxonomy_id: "asset_classes".to_string(),
             trigger_type: TriggerType::Threshold,
             drift_band_bps: 500,
-            rebalance_to,
-            min_trade_amount: Decimal::ZERO,
+            rebalance_goal,
+            min_trade_amount: "0".to_string(),
             whole_shares_only,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            archived_at: None,
         }
     }
 
@@ -612,47 +615,49 @@ mod tests {
     // ── Mocks ─────────────────────────────────────────────────────────────────
 
     struct MockTargetService {
-        profile: TargetProfile,
+        profile: AllocationTarget,
     }
 
     #[async_trait]
-    impl TargetProfileServiceTrait for MockTargetService {
-        fn get_profile(&self, _: &str) -> CoreResult<Option<TargetProfile>> {
+    impl AllocationTargetServiceTrait for MockTargetService {
+        fn get_target(&self, _: &str) -> CoreResult<Option<AllocationTarget>> {
             Ok(Some(self.profile.clone()))
         }
-        fn list_profiles(&self) -> CoreResult<Vec<TargetProfile>> {
+        fn list_targets(&self) -> CoreResult<Vec<AllocationTarget>> {
             Ok(vec![])
         }
-        fn get_active_profile_for_scope(
-            &self,
-            _: &str,
-            _: Option<&str>,
-        ) -> CoreResult<Option<TargetProfile>> {
-            Ok(None)
-        }
-        fn list_nodes_for_profile(&self, _: &str) -> CoreResult<Vec<TargetAllocationNode>> {
+        fn list_weights_for_target(&self, _: &str) -> CoreResult<Vec<AllocationTargetWeight>> {
             Ok(vec![])
         }
-        async fn create_profile(&self, _: NewTargetProfile) -> CoreResult<TargetProfile> {
+        async fn create_target(&self, _: NewAllocationTarget) -> CoreResult<AllocationTarget> {
             unimplemented!()
         }
-        async fn update_profile(&self, _: &str, _: NewTargetProfile) -> CoreResult<TargetProfile> {
-            unimplemented!()
-        }
-        async fn activate_profile(&self, _: &str) -> CoreResult<TargetProfile> {
-            unimplemented!()
-        }
-        async fn archive_profile(&self, _: &str) -> CoreResult<TargetProfile> {
-            unimplemented!()
-        }
-        async fn delete_profile(&self, _: &str) -> CoreResult<()> {
-            unimplemented!()
-        }
-        async fn save_nodes(
+        async fn update_target(
             &self,
             _: &str,
-            _: Vec<NewTargetAllocationNode>,
-        ) -> CoreResult<Vec<TargetAllocationNode>> {
+            _: NewAllocationTarget,
+        ) -> CoreResult<AllocationTarget> {
+            unimplemented!()
+        }
+        async fn archive_target(&self, _: &str) -> CoreResult<AllocationTarget> {
+            unimplemented!()
+        }
+        async fn delete_target(&self, _: &str) -> CoreResult<()> {
+            unimplemented!()
+        }
+        async fn save_weights(
+            &self,
+            _: &str,
+            _: Vec<NewAllocationTargetWeight>,
+        ) -> CoreResult<Vec<AllocationTargetWeight>> {
+            unimplemented!()
+        }
+        async fn save_target_with_weights(
+            &self,
+            _: Option<String>,
+            _: NewAllocationTarget,
+            _: Vec<NewAllocationTargetWeight>,
+        ) -> CoreResult<crate::portfolio::allocation_targets::SaveAllocationTargetResult> {
             unimplemented!()
         }
     }
@@ -663,17 +668,16 @@ mod tests {
 
     #[async_trait]
     impl DriftServiceTrait for MockDriftService {
-        async fn get_drift_report(
+        async fn get_drift_report_for_target(
             &self,
             _: &str,
-            _: Option<&str>,
             _: &[String],
             _: &str,
             _: &str,
-        ) -> CoreResult<Option<DriftReport>> {
-            Ok(Some(self.report.clone()))
+        ) -> CoreResult<DriftReport> {
+            Ok(self.report.clone())
         }
-        async fn get_drift_report_for_profile(
+        async fn get_drift_report_with_holdings_for_target(
             &self,
             _: &str,
             _: &[String],
@@ -739,6 +743,15 @@ mod tests {
                 currency: "USD".to_string(),
             })
         }
+        async fn get_holding_contributions_for_taxonomy_for_accounts(
+            &self,
+            _: &[String],
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> CoreResult<crate::portfolio::allocation::TaxonomyHoldingContributions> {
+            unimplemented!()
+        }
     }
 
     struct MockDraftRepo;
@@ -757,7 +770,7 @@ mod tests {
     }
 
     fn make_service(
-        profile: TargetProfile,
+        profile: AllocationTarget,
         report: DriftReport,
         holdings: std::collections::HashMap<String, Vec<HoldingSummary>>,
     ) -> RebalanceService {
@@ -773,7 +786,7 @@ mod tests {
 
     fn make_input(available_cash: Decimal) -> CalculateRebalancePlanInput {
         CalculateRebalancePlanInput {
-            profile_id: "profile-1".to_string(),
+            target_id: "profile-1".to_string(),
             available_cash,
             account_ids: vec!["acc-1".to_string()],
             base_currency: "USD".to_string(),
@@ -792,7 +805,7 @@ mod tests {
             .filter(|r| r.drift_bps.unsigned_abs() > 500)
             .count();
         DriftReport {
-            profile_id: "profile-1".to_string(),
+            target_id: "profile-1".to_string(),
             scope_type: ScopeType::All,
             scope_id: None,
             total_value,
@@ -800,6 +813,7 @@ mod tests {
             max_drift_bps: max as i32,
             out_of_band_count: out,
             rows,
+            holdings: None,
         }
     }
 
@@ -821,7 +835,7 @@ mod tests {
         );
 
         let svc = make_service(
-            make_profile(RebalanceTo::ExactTarget, false),
+            make_profile(RebalanceGoal::ExactTarget, false),
             report,
             holdings,
         );
@@ -848,7 +862,7 @@ mod tests {
         );
 
         let svc = make_service(
-            make_profile(RebalanceTo::ExactTarget, false),
+            make_profile(RebalanceGoal::ExactTarget, false),
             report,
             holdings,
         );
@@ -874,7 +888,7 @@ mod tests {
         );
 
         let svc = make_service(
-            make_profile(RebalanceTo::ExactTarget, false),
+            make_profile(RebalanceGoal::ExactTarget, false),
             report,
             holdings,
         );
@@ -891,7 +905,7 @@ mod tests {
         let holdings = std::collections::HashMap::new(); // no holdings in bonds
 
         let svc = make_service(
-            make_profile(RebalanceTo::ExactTarget, false),
+            make_profile(RebalanceGoal::ExactTarget, false),
             report,
             holdings,
         );
@@ -922,7 +936,7 @@ mod tests {
         );
 
         let svc = make_service(
-            make_profile(RebalanceTo::ExactTarget, true),
+            make_profile(RebalanceGoal::ExactTarget, true),
             report,
             holdings,
         );
@@ -958,12 +972,12 @@ mod tests {
         );
 
         let svc_exact = make_service(
-            make_profile(RebalanceTo::ExactTarget, false),
+            make_profile(RebalanceGoal::ExactTarget, false),
             report_exact,
             h.clone(),
         );
         let svc_band = make_service(
-            make_profile(RebalanceTo::NearestBand, false),
+            make_profile(RebalanceGoal::NearestBand, false),
             report_band,
             h,
         );
@@ -1000,9 +1014,9 @@ mod tests {
                 make_holding("h2", "IVV", dec!(1), dec!(100)),
             ],
         );
-        let profile = TargetProfile {
-            min_trade_amount: dec!(100),
-            ..make_profile(RebalanceTo::ExactTarget, false)
+        let profile = AllocationTarget {
+            min_trade_amount: "100".to_string(),
+            ..make_profile(RebalanceGoal::ExactTarget, false)
         };
 
         let svc = make_service(profile, report, holdings);
@@ -1041,7 +1055,7 @@ mod tests {
             ],
         );
 
-        let svc = make_service(make_profile(RebalanceTo::ExactTarget, false), report, h);
+        let svc = make_service(make_profile(RebalanceGoal::ExactTarget, false), report, h);
         let plan = svc.calculate_plan(make_input(dec!(2000))).await.unwrap();
 
         let vti = plan
@@ -1097,7 +1111,7 @@ mod tests {
             ],
         );
 
-        let svc = make_service(make_profile(RebalanceTo::ExactTarget, true), report, h);
+        let svc = make_service(make_profile(RebalanceGoal::ExactTarget, true), report, h);
         let plan = svc.calculate_plan(make_input(dec!(100))).await.unwrap();
 
         let a = plan
@@ -1152,7 +1166,7 @@ mod tests {
             vec![make_holding("x", "EXPENSIVE", dec!(5), dec!(1200))],
         );
 
-        let svc = make_service(make_profile(RebalanceTo::ExactTarget, true), report, h);
+        let svc = make_service(make_profile(RebalanceGoal::ExactTarget, true), report, h);
         let plan = svc.calculate_plan(make_input(dec!(200))).await.unwrap();
 
         // No trade for EXPENSIVE.
