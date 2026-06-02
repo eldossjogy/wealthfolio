@@ -1,7 +1,7 @@
 import type React from "react";
 import type { ComponentProps } from "react";
 import { useMemo, useState } from "react";
-import { Cell, Pie, PieChart } from "recharts";
+import { Cell, Pie, PieChart, Sector, type PieSectorShapeProps } from "recharts";
 import type { NameType, Payload, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { useBalancePrivacy } from "../../hooks/use-balance-privacy";
 import { formatPercent } from "../../lib/utils";
@@ -54,6 +54,10 @@ const COLORS = [
   "var(--chart-9)",
 ];
 
+const PADDING_ANGLE = 4;
+const CORNER_RADIUS = 6;
+const ACTIVE_RING_TRIM_ANGLE = 1;
+
 interface ChartCenterLabelProps {
   activeData: { name: string; value: number; currency: string } | undefined;
   totalValue: number;
@@ -95,6 +99,44 @@ interface DonutChartProps {
   displayTooltip?: boolean;
 }
 
+function renderActiveSector(props: PieSectorShapeProps) {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+  if (
+    typeof cx !== "number" ||
+    typeof cy !== "number" ||
+    typeof innerRadius !== "number" ||
+    typeof outerRadius !== "number" ||
+    typeof startAngle !== "number" ||
+    typeof endAngle !== "number"
+  ) {
+    return <Sector {...props} />;
+  }
+
+  const direction = Math.sign(endAngle - startAngle) || 1;
+  const angleSpan = Math.abs(endAngle - startAngle);
+  const trimAngle = Math.min(ACTIVE_RING_TRIM_ANGLE, Math.max(0, angleSpan / 2 - 0.5));
+  const ringGap = Math.max(2, (outerRadius - innerRadius) * 0.1);
+  const ringThickness = Math.max(1.5, (outerRadius - innerRadius) * 0.07);
+
+  return (
+    <g>
+      <Sector {...props} />
+      {trimAngle > 0 && (
+        <Sector
+          cx={cx}
+          cy={cy}
+          innerRadius={outerRadius + ringGap}
+          outerRadius={outerRadius + ringGap + ringThickness}
+          startAngle={startAngle + direction * trimAngle}
+          endAngle={endAngle - direction * trimAngle}
+          fill={fill}
+          cornerRadius={0}
+        />
+      )}
+    </g>
+  );
+}
+
 export const DonutChart: React.FC<DonutChartProps> = ({
   data,
   activeIndex,
@@ -117,7 +159,6 @@ export const DonutChart: React.FC<DonutChartProps> = ({
   const totalValue = useMemo(() => data.reduce((acc, item) => acc + item.value, 0), [data]);
   const displayIndex = hoverIndex ?? activeIndex;
   const activeData = data[displayIndex];
-  const activeColor = COLORS[displayIndex % COLORS.length];
 
   const tooltipFormatter = (
     value: ValueType | undefined,
@@ -142,8 +183,8 @@ export const DonutChart: React.FC<DonutChartProps> = ({
     cy: "80%",
     innerRadius: "110%",
     outerRadius: "140%",
-    paddingAngle: 4,
-    cornerRadius: 6,
+    paddingAngle: PADDING_ANGLE,
+    cornerRadius: CORNER_RADIUS,
     dataKey: "value",
     nameKey: "name",
     onMouseEnter: handlePieEnter,
@@ -155,6 +196,8 @@ export const DonutChart: React.FC<DonutChartProps> = ({
     },
     startAngle,
     endAngle,
+    activeIndex: displayIndex,
+    activeShape: renderActiveSector,
     isAnimationActive: false,
   } as PieComponentProps;
 
@@ -178,24 +221,6 @@ export const DonutChart: React.FC<DonutChartProps> = ({
               />
             ))}
           </Pie>
-          {activeData && (
-            <Pie
-              data={data}
-              dataKey="value"
-              cy="80%"
-              innerRadius="143%"
-              outerRadius="145%"
-              paddingAngle={6}
-              cornerRadius={6}
-              startAngle={startAngle}
-              endAngle={endAngle}
-              isAnimationActive={false}
-            >
-              {data.map((_, index) => (
-                <Cell key={`active-ring-${index}`} fill={index === displayIndex ? activeColor : "transparent"} />
-              ))}
-            </Pie>
-          )}
         </PieChart>
       </ChartContainer>
       <ChartCenterLabel activeData={activeData} totalValue={totalValue} isBalanceHidden={isBalanceHidden} />

@@ -46,12 +46,57 @@ const ChartContainer = React.forwardRef<
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = React.useState<{ width: number; height: number } | null>(null);
+
+  const setContainerRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node;
+
+      if (typeof ref === "function") {
+        ref(node);
+      } else if (ref) {
+        (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      }
+    },
+    [ref],
+  );
+
+  React.useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const updateRenderableState = () => {
+      const rect = node.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      const nextSize = width > 0 && height > 0 ? { width, height } : null;
+
+      setContainerSize((current) => {
+        if (current?.width === nextSize?.width && current?.height === nextSize?.height) {
+          return current;
+        }
+        return nextSize;
+      });
+    };
+
+    updateRenderableState();
+
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(updateRenderableState);
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
         data-chart={chartId}
-        ref={ref}
+        ref={setContainerRef}
         className={cn(
           "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
           className,
@@ -59,7 +104,11 @@ const ChartContainer = React.forwardRef<
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
+        {containerSize ? (
+          <RechartsPrimitive.ResponsiveContainer minWidth={0} minHeight={0} initialDimension={containerSize}>
+            {children}
+          </RechartsPrimitive.ResponsiveContainer>
+        ) : null}
       </div>
     </ChartContext.Provider>
   );

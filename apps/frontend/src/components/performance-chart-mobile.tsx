@@ -96,54 +96,52 @@ export function PerformanceChartMobile({ data }: PerformanceChartMobileProps) {
     typeof label === "string" ? format(parseISO(label), "MMM d, yyyy") : "";
 
   return (
-    <div className="h-full w-full">
-      <ChartContainer config={chartConfig} className="h-full w-full" data-no-swipe-drag>
-        <ResponsiveContainer width="100%" height="100%" aspect={undefined}>
-          <LineChart data={formattedData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-            <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.3} />
-            <XAxis
-              dataKey="date"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={6}
-              tickFormatter={formatXAxis}
-              interval={getTickInterval()}
-              tick={{ fontSize: 10 }}
-            />
-            <YAxis
-              tickFormatter={(value: number) => formatPercent(value)}
-              tickLine={false}
-              axisLine={false}
-              tickMargin={4}
-              domain={[-0.12, "auto"]}
-              tick={{ fontSize: 10 }}
-              width={50}
-            />
-            <ChartTooltip
-              cursor={false}
-              content={
-                <ChartTooltipContent
-                  formatter={tooltipFormatter}
-                  labelFormatter={tooltipLabelFormatter}
-                />
-              }
-            />
-            <ChartLegend content={<ChartLegendContent payload={[]} />} />
-            {data.map((series, seriesIndex) => (
-              <Line
-                key={series.id}
-                type="linear"
-                dataKey={series.id}
-                stroke={PERFORMANCE_CHART_COLORS[seriesIndex % PERFORMANCE_CHART_COLORS.length]}
-                strokeWidth={2}
-                dot={false}
-                name={series.name}
-                isAnimationActive={false}
+    <ChartContainer config={chartConfig} className="h-full w-full" data-no-swipe-drag>
+      <ResponsiveContainer width="100%" height="100%" aspect={undefined}>
+        <LineChart data={formattedData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.3} />
+          <XAxis
+            dataKey="date"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={6}
+            tickFormatter={formatXAxis}
+            interval={getTickInterval()}
+            tick={{ fontSize: 10 }}
+          />
+          <YAxis
+            tickFormatter={(value: number) => formatPercent(value)}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={4}
+            domain={[-0.12, "auto"]}
+            tick={{ fontSize: 10 }}
+            width={50}
+          />
+          <ChartTooltip
+            cursor={false}
+            content={
+              <ChartTooltipContent
+                formatter={tooltipFormatter}
+                labelFormatter={tooltipLabelFormatter}
               />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </ChartContainer>
-    </div>
+            }
+          />
+          <ChartLegend content={<ChartLegendContent payload={[]} />} />
+          {data.map((series, seriesIndex) => (
+            <Line
+              key={series.id}
+              type="linear"
+              dataKey={series.id}
+              stroke={PERFORMANCE_CHART_COLORS[seriesIndex % PERFORMANCE_CHART_COLORS.length]}
+              strokeWidth={2}
+              dot={false}
+              name={series.name}
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </ChartContainer>
   );
 }
