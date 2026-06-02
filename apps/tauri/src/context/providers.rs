@@ -47,8 +47,7 @@ use wealthfolio_storage_sqlite::{
     limits::ContributionLimitRepository,
     market_data::{MarketDataRepository, QuoteSyncStateRepository},
     portfolio::{
-        allocation_targets::{AllocationTargetRepository, RebalanceDraftRepository},
-        snapshot::SnapshotRepository,
+        allocation_targets::AllocationTargetRepository, snapshot::SnapshotRepository,
         valuation::ValuationRepository,
     },
     portfolios::PortfolioRepository,
@@ -437,13 +436,10 @@ pub async fn initialize_context(
         allocation_target_service.clone(),
         allocation_service.clone(),
     ));
-    let rebalance_draft_repository =
-        Arc::new(RebalanceDraftRepository::new(pool.clone(), writer.clone()));
     let rebalance_service = Arc::new(RebalanceService::new(
         allocation_target_service.clone(),
         drift_service.clone(),
         allocation_service.clone(),
-        rebalance_draft_repository,
     ));
 
     let net_worth_service = Arc::new(NetWorthService::new(

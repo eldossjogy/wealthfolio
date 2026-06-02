@@ -4,7 +4,6 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::str::FromStr;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::errors::{Error as CoreError, Result as CoreResult};
 use crate::portfolio::allocation::AllocationServiceTrait;
@@ -12,19 +11,10 @@ use crate::portfolio::holdings::HoldingSummary;
 
 use super::drift_service::DriftServiceTrait;
 use super::model::{
-    AllocationTarget, CalculateRebalancePlanInput, RebalanceDraft, RebalanceGoal, RebalancePlan,
-    RebalanceWarning, RebalanceWarningKind, SuggestedManualTrade,
+    AllocationTarget, CalculateRebalancePlanInput, RebalanceGoal, RebalancePlan, RebalanceWarning,
+    RebalanceWarningKind, SuggestedManualTrade,
 };
 use super::target_service::AllocationTargetServiceTrait;
-
-// ── Repository trait ──────────────────────────────────────────────────────────
-
-#[async_trait]
-pub trait RebalanceDraftRepositoryTrait: Send + Sync {
-    async fn save_draft(&self, draft: RebalanceDraft) -> CoreResult<RebalanceDraft>;
-    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
-    async fn delete_draft(&self, id: &str) -> CoreResult<usize>;
-}
 
 // ── Service trait ─────────────────────────────────────────────────────────────
 
@@ -32,17 +22,6 @@ pub trait RebalanceDraftRepositoryTrait: Send + Sync {
 pub trait RebalanceServiceTrait: Send + Sync {
     async fn calculate_plan(&self, input: CalculateRebalancePlanInput)
         -> CoreResult<RebalancePlan>;
-
-    async fn save_draft(
-        &self,
-        profile: &AllocationTarget,
-        input: &CalculateRebalancePlanInput,
-        plan: &RebalancePlan,
-    ) -> CoreResult<RebalanceDraft>;
-
-    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>>;
-
-    async fn delete_draft(&self, id: &str) -> CoreResult<()>;
 }
 
 // ── Implementation ────────────────────────────────────────────────────────────
@@ -51,7 +30,6 @@ pub struct RebalanceService {
     allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
     drift_service: Arc<dyn DriftServiceTrait>,
     allocation_service: Arc<dyn AllocationServiceTrait>,
-    draft_repo: Arc<dyn RebalanceDraftRepositoryTrait>,
 }
 
 impl RebalanceService {
@@ -59,18 +37,12 @@ impl RebalanceService {
         allocation_target_service: Arc<dyn AllocationTargetServiceTrait>,
         drift_service: Arc<dyn DriftServiceTrait>,
         allocation_service: Arc<dyn AllocationServiceTrait>,
-        draft_repo: Arc<dyn RebalanceDraftRepositoryTrait>,
     ) -> Self {
         Self {
             allocation_target_service,
             drift_service,
             allocation_service,
-            draft_repo,
         }
-    }
-
-    fn now() -> String {
-        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
     }
 }
 
@@ -490,38 +462,6 @@ impl RebalanceServiceTrait for RebalanceService {
             warnings,
         })
     }
-
-    async fn save_draft(
-        &self,
-        profile: &AllocationTarget,
-        input: &CalculateRebalancePlanInput,
-        plan: &RebalancePlan,
-    ) -> CoreResult<RebalanceDraft> {
-        let db_err = |msg: String| CoreError::Database(crate::errors::DatabaseError::Internal(msg));
-        let now = Self::now();
-        let draft = RebalanceDraft {
-            id: Uuid::new_v4().to_string(),
-            target_id: profile.id.clone(),
-            target_snapshot_json: serde_json::to_string(profile)
-                .map_err(|e| db_err(format!("failed to serialize profile snapshot: {e}")))?,
-            input_json: serde_json::to_string(input)
-                .map_err(|e| db_err(format!("failed to serialize plan input: {e}")))?,
-            result_json: serde_json::to_string(plan)
-                .map_err(|e| db_err(format!("failed to serialize plan result: {e}")))?,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        self.draft_repo.save_draft(draft).await
-    }
-
-    fn list_drafts(&self, target_id: &str) -> CoreResult<Vec<RebalanceDraft>> {
-        self.draft_repo.list_drafts(target_id)
-    }
-
-    async fn delete_draft(&self, id: &str) -> CoreResult<()> {
-        self.draft_repo.delete_draft(id).await?;
-        Ok(())
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -754,21 +694,6 @@ mod tests {
         }
     }
 
-    struct MockDraftRepo;
-
-    #[async_trait]
-    impl RebalanceDraftRepositoryTrait for MockDraftRepo {
-        async fn save_draft(&self, d: RebalanceDraft) -> CoreResult<RebalanceDraft> {
-            Ok(d)
-        }
-        fn list_drafts(&self, _: &str) -> CoreResult<Vec<RebalanceDraft>> {
-            Ok(vec![])
-        }
-        async fn delete_draft(&self, _: &str) -> CoreResult<usize> {
-            Ok(1)
-        }
-    }
-
     fn make_service(
         profile: AllocationTarget,
         report: DriftReport,
@@ -780,7 +705,6 @@ mod tests {
             Arc::new(MockAllocationService {
                 holdings_by_category: holdings,
             }),
-            Arc::new(MockDraftRepo),
         )
     }
 

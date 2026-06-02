@@ -2398,13 +2398,3 @@ export interface RebalancePlan {
   trades: SuggestedManualTrade[];
   warnings: RebalanceWarning[];
 }
-
-export interface RebalanceDraft {
-  id: string;
-  profileId: string;
-  profileSnapshotJson: string;
-  inputJson: string;
-  resultJson: string;
-  createdAt: string;
-  updatedAt: string;
-}

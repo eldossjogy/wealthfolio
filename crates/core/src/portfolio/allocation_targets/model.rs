@@ -280,15 +280,3 @@ pub struct RebalancePlan {
     pub trades: Vec<SuggestedManualTrade>,
     pub warnings: Vec<RebalanceWarning>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RebalanceDraft {
-    pub id: String,
-    pub target_id: String,
-    pub target_snapshot_json: String,
-    pub input_json: String,
-    pub result_json: String,
-    pub created_at: String,
-    pub updated_at: String,
-}

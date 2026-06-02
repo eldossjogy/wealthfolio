@@ -8,30 +8,18 @@ import {
   CardDescription,
   Icons,
   Skeleton,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@wealthfolio/ui";
 import { cn, formatAmount } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
   AccountScope,
   DriftReport,
-  RebalanceDraft,
   RebalancePlan,
   RebalanceWarning,
   SuggestedManualTrade,
   AllocationTarget,
 } from "@/lib/types";
-import {
-  useCalculateRebalancePlan,
-  useDeleteRebalanceDraft,
-  useRebalanceDrafts,
-  useSaveRebalanceDraft,
-} from "../hooks/use-rebalance";
+import { useCalculateRebalancePlan } from "../hooks/use-rebalance";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -415,100 +403,22 @@ function BeforeAfterStack({ sleeves }: { sleeves: SleeveSummaryRow[] }) {
   );
 }
 
-// ── Draft dropdown ────────────────────────────────────────────────────────────
-
-function DraftDropdown({
-  targetId,
-  currency,
-  onLoad,
-}: {
-  targetId: string;
-  currency: string;
-  onLoad: (draft: RebalanceDraft) => void;
-}) {
-  const { data: drafts = [] } = useRebalanceDrafts(targetId);
-  const deleteDraft = useDeleteRebalanceDraft(targetId);
-
-  if (!drafts.length) return null;
-
-  function fmtDate(iso: string) {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Icons.FolderOpen className="mr-1.5 h-4 w-4" />
-          Load draft
-          <Icons.ChevronDown className="ml-1 h-3 w-3 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel>Saved drafts</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {drafts.map((d) => {
-          let cashLabel = "";
-          try {
-            const input = JSON.parse(d.inputJson) as { available_cash?: number };
-            if (input.available_cash != null)
-              cashLabel = ` · ${currencySymbol(currency)}${input.available_cash.toLocaleString()}`;
-          } catch {}
-          return (
-            <DropdownMenuItem
-              key={d.id}
-              className="flex items-center justify-between gap-2"
-              onSelect={() => onLoad(d)}
-            >
-              <span className="flex-1 text-[13px]">
-                {fmtDate(d.createdAt)}
-                {cashLabel}
-              </span>
-              <button
-                className="text-muted-foreground hover:text-destructive"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteDraft.mutate(d.id);
-                }}
-              >
-                <Icons.X className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 // ── Input bar ─────────────────────────────────────────────────────────────────
 
 function InputBar({
-  targetId,
   cashValue,
   currency,
   onCashChange,
   onCalculate,
-  onSaveDraft,
-  onLoadDraft,
   hasPlan,
   isCalculating,
-  isSaving,
 }: {
-  targetId: string;
   cashValue: string;
   currency: string;
   onCashChange: (v: string) => void;
   onCalculate: () => void;
-  onSaveDraft: () => void;
-  onLoadDraft: (draft: RebalanceDraft) => void;
   hasPlan: boolean;
   isCalculating: boolean;
-  isSaving: boolean;
 }) {
   return (
     <Card>
@@ -533,13 +443,6 @@ function InputBar({
         </div>
 
         <div className="flex items-center gap-2">
-          <DraftDropdown targetId={targetId} currency={currency} onLoad={onLoadDraft} />
-          {hasPlan && (
-            <Button variant="outline" size="sm" onClick={onSaveDraft} disabled={isSaving}>
-              <Icons.FileText className="mr-1.5 h-4 w-4" />
-              {isSaving ? "Saving…" : "Save as draft"}
-            </Button>
-          )}
           <Button onClick={onCalculate} disabled={isCalculating || !cashValue.trim()}>
             <Icons.BarChart className="mr-1.5 h-4 w-4" />
             {isCalculating ? "Calculating…" : hasPlan ? "Recalculate" : "Calculate plan"}
@@ -553,20 +456,16 @@ function InputBar({
 // ── Empty state (V2 style) ────────────────────────────────────────────────────
 
 function EmptyState({
-  targetId,
   cashValue,
   currency,
   onCashChange,
   onCalculate,
-  onLoadDraft,
   isCalculating,
 }: {
-  targetId: string;
   cashValue: string;
   currency: string;
   onCashChange: (v: string) => void;
   onCalculate: () => void;
-  onLoadDraft: (draft: RebalanceDraft) => void;
   isCalculating: boolean;
 }) {
   return (
@@ -603,17 +502,14 @@ function EmptyState({
               />
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              className="flex-1"
-              onClick={onCalculate}
-              disabled={isCalculating || !cashValue.trim()}
-            >
-              <Icons.BarChart className="mr-1.5 h-4 w-4" />
-              {isCalculating ? "Calculating…" : "Calculate plan"}
-            </Button>
-            <DraftDropdown targetId={targetId} currency={currency} onLoad={onLoadDraft} />
-          </div>
+          <Button
+            className="w-full"
+            onClick={onCalculate}
+            disabled={isCalculating || !cashValue.trim()}
+          >
+            <Icons.BarChart className="mr-1.5 h-4 w-4" />
+            {isCalculating ? "Calculating…" : "Calculate plan"}
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -631,11 +527,8 @@ interface RebalanceTabProps {
 export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTabProps) {
   const [cashValue, setCashValue] = useState("");
   const [plan, setPlan] = useState<RebalancePlan | null>(null);
-  const [draftLabel, setDraftLabel] = useState<string | null>(null);
 
   const calculatePlan = useCalculateRebalancePlan();
-  const saveDraft = useSaveRebalanceDraft(profile?.id ?? "");
-
   const currency = driftReport?.baseCurrency ?? "USD";
 
   function parseCash(): number {
@@ -649,7 +542,6 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       toast.error("Enter a valid cash amount");
       return;
     }
-    setDraftLabel(null);
     calculatePlan.mutate(
       { targetId: profile.id, availableCash: cash, filter: accountScope },
       {
@@ -657,37 +549,6 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
         onError: (err) => toast.error(`Failed to calculate plan: ${err.message}`),
       },
     );
-  }
-
-  function handleSaveDraft() {
-    if (!plan || !profile) return;
-    saveDraft.mutate(
-      { availableCash: parseCash(), filter: accountScope, plan },
-      {
-        onSuccess: () => toast.success("Draft saved"),
-        onError: (err) => toast.error(`Failed to save draft: ${err.message}`),
-      },
-    );
-  }
-
-  function handleLoadDraft(draft: RebalanceDraft) {
-    try {
-      const loadedPlan = JSON.parse(draft.resultJson) as RebalancePlan;
-      const loadedInput = JSON.parse(draft.inputJson) as { available_cash?: number };
-      if (loadedInput.available_cash != null) {
-        setCashValue(String(loadedInput.available_cash));
-      }
-      setPlan(loadedPlan);
-      setDraftLabel(
-        new Date(draft.createdAt).toLocaleDateString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        }),
-      );
-    } catch {
-      toast.error("Failed to load draft");
-    }
   }
 
   if (!profile) {
@@ -721,26 +582,14 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       {/* Input bar — only shown once a plan exists; empty state has its own input */}
       {plan ? (
         <InputBar
-          targetId={profile.id}
           cashValue={cashValue}
           currency={currency}
           onCashChange={setCashValue}
           onCalculate={handleCalculate}
-          onSaveDraft={handleSaveDraft}
-          onLoadDraft={handleLoadDraft}
           hasPlan
           isCalculating={isCalculating}
-          isSaving={saveDraft.isPending}
         />
       ) : null}
-
-      {/* Draft loaded label */}
-      {draftLabel && (
-        <div className="text-muted-foreground flex items-center gap-2 text-[12px]">
-          <Icons.FolderOpen className="h-3.5 w-3.5" />
-          Loaded from draft · {draftLabel}
-        </div>
-      )}
 
       {/* Loading skeletons */}
       {isCalculating && (
@@ -762,12 +611,10 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
       {/* Empty state */}
       {!plan && !isCalculating && (
         <EmptyState
-          targetId={profile.id}
           cashValue={cashValue}
           currency={currency}
           onCashChange={setCashValue}
           onCalculate={handleCalculate}
-          onLoadDraft={handleLoadDraft}
           isCalculating={isCalculating}
         />
       )}

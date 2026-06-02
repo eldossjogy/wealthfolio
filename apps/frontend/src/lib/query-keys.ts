@@ -145,7 +145,6 @@ export const QueryKeys = {
   ALLOCATION_TARGETS: "allocationTargets",
   ALLOCATION_TARGET_WEIGHTS: "allocationTargetWeights",
   ALLOCATION_TARGET_DRIFT: "allocationTargetDrift",
-  REBALANCE_DRAFTS: "rebalanceDrafts",
   allocationTargetWeights: (targetId: string) => [QueryKeys.ALLOCATION_TARGET_WEIGHTS, targetId],
   allocationTargetDrift: (targetId: string, scope: unknown, includeHoldings = false) => [
     QueryKeys.ALLOCATION_TARGET_DRIFT,
@@ -153,7 +152,6 @@ export const QueryKeys = {
     scope,
     includeHoldings,
   ],
-  rebalanceDrafts: (targetId: string) => [QueryKeys.REBALANCE_DRAFTS, targetId],
 
   // Health Center
   HEALTH_STATUS: "healthStatus",

@@ -6,7 +6,6 @@ import type {
   AllocationTargetWeight,
   AllocationTarget,
   SaveAllocationTargetResult,
-  RebalanceDraft,
   RebalancePlan,
 } from "@/lib/types";
 
@@ -92,26 +91,4 @@ export const calculateRebalancePlan = async (
   filter: AccountScope,
 ): Promise<RebalancePlan> => {
   return invoke<RebalancePlan>("calculate_rebalance_plan", { targetId, availableCash, filter });
-};
-
-export const saveRebalanceDraft = async (
-  targetId: string,
-  availableCash: number,
-  filter: AccountScope,
-  plan: RebalancePlan,
-): Promise<RebalanceDraft> => {
-  return invoke<RebalanceDraft>("save_rebalance_draft", {
-    targetId,
-    availableCash,
-    filter,
-    plan,
-  });
-};
-
-export const listRebalanceDrafts = async (targetId: string): Promise<RebalanceDraft[]> => {
-  return invoke<RebalanceDraft[]>("list_rebalance_drafts", { targetId });
-};
-
-export const deleteRebalanceDraft = async (id: string): Promise<void> => {
-  return invoke<void>("delete_rebalance_draft", { id });
 };

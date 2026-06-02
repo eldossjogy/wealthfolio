@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS rebalance_drafts;
+-- Nothing to revert.

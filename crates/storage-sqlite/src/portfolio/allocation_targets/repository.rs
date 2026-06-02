@@ -4,14 +4,14 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::sqlite::SqliteConnection;
 use std::sync::Arc;
 
-use super::model::{AllocationTargetDB, AllocationTargetWeightDB, RebalanceDraftDB};
+use super::model::{AllocationTargetDB, AllocationTargetWeightDB};
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
-use crate::schema::{allocation_target_weights, allocation_targets, rebalance_drafts};
+use crate::schema::{allocation_target_weights, allocation_targets};
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::portfolio::allocation_targets::{
-    AllocationTarget, AllocationTargetRepositoryTrait, AllocationTargetWeight, RebalanceDraft,
-    RebalanceDraftRepositoryTrait, SaveAllocationTargetResult,
+    AllocationTarget, AllocationTargetRepositoryTrait, AllocationTargetWeight,
+    SaveAllocationTargetResult,
 };
 
 pub struct AllocationTargetRepository {
@@ -370,65 +370,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(count, 1);
-    }
-}
-
-// ── RebalanceDraftRepository ──────────────────────────────────────────────────
-
-pub struct RebalanceDraftRepository {
-    pool: Arc<Pool<ConnectionManager<SqliteConnection>>>,
-    writer: WriteHandle,
-}
-
-impl RebalanceDraftRepository {
-    pub fn new(pool: Arc<Pool<ConnectionManager<SqliteConnection>>>, writer: WriteHandle) -> Self {
-        Self { pool, writer }
-    }
-}
-
-#[async_trait]
-impl RebalanceDraftRepositoryTrait for RebalanceDraftRepository {
-    async fn save_draft(&self, draft: RebalanceDraft) -> Result<RebalanceDraft> {
-        let db = RebalanceDraftDB::from(draft);
-        let id = db.id.clone();
-        self.writer
-            .exec(move |conn| {
-                diesel::insert_into(rebalance_drafts::table)
-                    .values(&db)
-                    .execute(conn)
-                    .map_err(StorageError::from)?;
-                Ok(())
-            })
-            .await?;
-        let conn = &mut get_connection(&self.pool)?;
-        rebalance_drafts::table
-            .filter(rebalance_drafts::id.eq(&id))
-            .first::<RebalanceDraftDB>(conn)
-            .map(RebalanceDraft::from)
-            .map_err(|e| wealthfolio_core::errors::Error::from(StorageError::from(e)))
-    }
-
-    fn list_drafts(&self, target_id: &str) -> Result<Vec<RebalanceDraft>> {
-        let conn = &mut get_connection(&self.pool)?;
-        let rows = rebalance_drafts::table
-            .filter(rebalance_drafts::target_id.eq(target_id))
-            .order(rebalance_drafts::created_at.desc())
-            .load::<RebalanceDraftDB>(conn)
-            .map_err(StorageError::from)?;
-        Ok(rows.into_iter().map(RebalanceDraft::from).collect())
-    }
-
-    async fn delete_draft(&self, id: &str) -> Result<usize> {
-        let id_owned = id.to_string();
-        self.writer
-            .exec(move |conn| {
-                let n = diesel::delete(
-                    rebalance_drafts::table.filter(rebalance_drafts::id.eq(&id_owned)),
-                )
-                .execute(conn)
-                .map_err(StorageError::from)?;
-                Ok(n)
-            })
-            .await
     }
 }

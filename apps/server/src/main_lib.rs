@@ -462,12 +462,6 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             allocation_service.clone(),
         ),
     );
-    let rebalance_draft_repository = Arc::new(
-        wealthfolio_storage_sqlite::portfolio::allocation_targets::RebalanceDraftRepository::new(
-            pool.clone(),
-            writer.clone(),
-        ),
-    );
     let rebalance_service: Arc<
         dyn wealthfolio_core::portfolio::allocation_targets::RebalanceServiceTrait + Send + Sync,
     > = Arc::new(
@@ -475,7 +469,6 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
             allocation_target_service.clone(),
             drift_service.clone(),
             allocation_service.clone(),
-            rebalance_draft_repository,
         ),
     );
 

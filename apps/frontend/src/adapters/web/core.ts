@@ -378,9 +378,6 @@ export const COMMANDS: CommandMap = {
   },
   get_allocation_target_drift: { method: "POST", path: "/allocation-targets" },
   calculate_rebalance_plan: { method: "POST", path: "/allocation-targets/rebalance/calculate" },
-  save_rebalance_draft: { method: "POST", path: "/allocation-targets/rebalance/drafts" },
-  list_rebalance_drafts: { method: "GET", path: "/allocation-targets" },
-  delete_rebalance_draft: { method: "DELETE", path: "/allocation-targets/rebalance/drafts" },
   // Alternative Assets
   create_alternative_asset: { method: "POST", path: "/alternative-assets" },
   update_alternative_asset_valuation: { method: "PUT", path: "/alternative-assets" },
@@ -1828,26 +1825,6 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
         filter: unknown;
       };
       body = JSON.stringify({ profileId, availableCash, filter });
-      break;
-    }
-    case "save_rebalance_draft": {
-      const { profileId, availableCash, filter, plan } = payload as {
-        profileId: string;
-        availableCash: number;
-        filter: unknown;
-        plan: unknown;
-      };
-      body = JSON.stringify({ profileId, availableCash, filter, plan });
-      break;
-    }
-    case "list_rebalance_drafts": {
-      const { profileId: draftProfileId } = payload as { profileId: string };
-      url += `/${encodeURIComponent(draftProfileId)}/rebalance/drafts`;
-      break;
-    }
-    case "delete_rebalance_draft": {
-      const { id: draftId } = payload as { id: string };
-      url += `/${encodeURIComponent(draftId)}`;
       break;
     }
     // AI Providers

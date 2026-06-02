@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
         AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
-        NewAllocationTarget, NewAllocationTargetWeight, RebalanceDraft, RebalancePlan,
-        SaveAllocationTargetResult, ScopeType,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalancePlan, SaveAllocationTargetResult,
+        ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -241,50 +241,6 @@ pub async fn calculate_rebalance_plan(
     state
         .rebalance_service()
         .calculate_plan(input)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn save_rebalance_draft(
-    state: State<'_, Arc<ServiceContext>>,
-    target_id: String,
-    available_cash: Decimal,
-    filter: AccountScopeInput,
-    plan: RebalancePlan,
-) -> Result<RebalanceDraft, String> {
-    let input = resolve_rebalance_input(&state, target_id.clone(), available_cash, filter)?;
-    let target = state
-        .allocation_target_service()
-        .get_target(&target_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Target {target_id} not found"))?;
-    state
-        .rebalance_service()
-        .save_draft(&target, &input, &plan)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn list_rebalance_drafts(
-    state: State<'_, Arc<ServiceContext>>,
-    target_id: String,
-) -> Result<Vec<RebalanceDraft>, String> {
-    state
-        .rebalance_service()
-        .list_drafts(&target_id)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn delete_rebalance_draft(
-    state: State<'_, Arc<ServiceContext>>,
-    id: String,
-) -> Result<(), String> {
-    state
-        .rebalance_service()
-        .delete_draft(&id)
         .await
         .map_err(|e| e.to_string())
 }

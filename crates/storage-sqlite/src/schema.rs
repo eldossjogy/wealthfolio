@@ -719,20 +719,6 @@ diesel::table! {
 
 diesel::joinable!(allocation_target_weights -> allocation_targets (target_id));
 
-diesel::table! {
-    rebalance_drafts (id) {
-        id -> Text,
-        target_id -> Text,
-        target_snapshot_json -> Text,
-        input_json -> Text,
-        result_json -> Text,
-        created_at -> Text,
-        updated_at -> Text,
-    }
-}
-
-diesel::joinable!(rebalance_drafts -> allocation_targets (target_id));
-
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
 diesel::joinable!(activities -> assets (asset_id));
@@ -818,5 +804,4 @@ diesel::allow_tables_to_appear_in_same_query!(
     budget_rollover_settings,
     allocation_targets,
     allocation_target_weights,
-    rebalance_drafts,
 );

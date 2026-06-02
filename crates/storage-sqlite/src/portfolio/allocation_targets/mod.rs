@@ -1,4 +1,4 @@
 mod model;
 pub mod repository;
 
-pub use repository::{AllocationTargetRepository, RebalanceDraftRepository};
+pub use repository::AllocationTargetRepository;

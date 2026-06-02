@@ -11,8 +11,8 @@ use serde::Deserialize;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
         AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
-        NewAllocationTarget, NewAllocationTargetWeight, RebalanceDraft, RebalancePlan,
-        SaveAllocationTargetResult, ScopeType,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalancePlan, SaveAllocationTargetResult,
+        ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -239,52 +239,6 @@ async fn calculate_plan(
     Ok(Json(plan))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveDraftBody {
-    target_id: String,
-    available_cash: Decimal,
-    filter: AccountScope,
-    plan: RebalancePlan,
-}
-
-async fn save_draft(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<SaveDraftBody>,
-) -> ApiResult<Json<RebalanceDraft>> {
-    let input = resolve_rebalance_input(
-        &state,
-        body.target_id.clone(),
-        body.available_cash,
-        &body.filter,
-    )?;
-    let profile = state
-        .allocation_target_service
-        .get_target(&body.target_id)?
-        .ok_or(crate::error::ApiError::NotFound)?;
-    let draft = state
-        .rebalance_service
-        .save_draft(&profile, &input, &body.plan)
-        .await?;
-    Ok(Json(draft))
-}
-
-async fn list_drafts(
-    Path(target_id): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> ApiResult<Json<Vec<RebalanceDraft>>> {
-    let drafts = state.rebalance_service.list_drafts(&target_id)?;
-    Ok(Json(drafts))
-}
-
-async fn delete_draft(
-    Path(id): Path<String>,
-    State(state): State<Arc<AppState>>,
-) -> ApiResult<StatusCode> {
-    state.rebalance_service.delete_draft(&id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -307,14 +261,5 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/allocation-targets/rebalance/calculate",
             post(calculate_plan),
-        )
-        .route("/allocation-targets/rebalance/drafts", post(save_draft))
-        .route(
-            "/allocation-targets/{id}/rebalance/drafts",
-            get(list_drafts),
-        )
-        .route(
-            "/allocation-targets/rebalance/drafts/{id}",
-            axum::routing::delete(delete_draft),
         )
 }
