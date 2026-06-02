@@ -1,3 +1,5 @@
-DROP TABLE IF EXISTS rebalance_drafts;
-DROP TABLE IF EXISTS target_allocation_nodes;
-DROP TABLE IF EXISTS target_profiles;
+DROP TRIGGER IF EXISTS allocation_target_weights_taxonomy_update;
+DROP TRIGGER IF EXISTS allocation_target_weights_taxonomy_insert;
+DROP TRIGGER IF EXISTS allocation_targets_taxonomy_update;
+DROP TABLE IF EXISTS allocation_target_weights;
+DROP TABLE IF EXISTS allocation_targets;

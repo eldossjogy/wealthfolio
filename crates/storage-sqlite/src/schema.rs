@@ -686,24 +686,28 @@ diesel::joinable!(portfolio_accounts -> portfolios (portfolio_id));
 diesel::joinable!(portfolio_accounts -> accounts (account_id));
 
 diesel::table! {
-    target_profiles (id) {
+    allocation_targets (id) {
         id -> Text,
         name -> Text,
-        status -> Text,
         scope_type -> Text,
         scope_id -> Nullable<Text>,
         taxonomy_id -> Text,
         trigger_type -> Text,
         drift_band_bps -> Integer,
+        rebalance_goal -> Text,
+        min_trade_amount -> Text,
+        whole_shares_only -> Integer,
         created_at -> Text,
         updated_at -> Text,
+        archived_at -> Nullable<Text>,
     }
 }
 
 diesel::table! {
-    target_allocation_nodes (id) {
+    allocation_target_weights (id) {
         id -> Text,
-        profile_id -> Text,
+        target_id -> Text,
+        taxonomy_id -> Text,
         category_id -> Text,
         target_bps -> Integer,
         is_locked -> Integer,
@@ -713,7 +717,7 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(target_allocation_nodes -> target_profiles (profile_id));
+diesel::joinable!(allocation_target_weights -> allocation_targets (target_id));
 
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
@@ -798,6 +802,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     budget_group_assignments,
     budget_targets,
     budget_rollover_settings,
-    target_profiles,
-    target_allocation_nodes,
+    allocation_targets,
+    allocation_target_weights,
 );

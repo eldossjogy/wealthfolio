@@ -108,3 +108,40 @@ pub struct AllocationHoldings {
     /// Base currency
     pub currency: String,
 }
+
+/// A single holding's weighted contribution to one taxonomy category.
+/// Split funds can produce multiple rows for the same holding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoldingAllocationContribution {
+    /// Unique row ID for this holding/category contribution.
+    pub id: String,
+    /// Original holding ID.
+    pub holding_id: String,
+    /// Asset ID used for navigation. Cash falls back to the holding ID.
+    pub asset_id: String,
+    pub account_id: String,
+    /// Source account IDs for aggregated holdings.
+    #[serde(default)]
+    pub source_account_ids: Vec<String>,
+    pub symbol: String,
+    pub name: String,
+    pub holding_type: crate::portfolio::holdings::HoldingType,
+    pub quantity: Decimal,
+    pub category_id: String,
+    pub category_name: String,
+    pub category_color: String,
+    /// Weighted market value in base currency.
+    pub value: Decimal,
+}
+
+/// Holding-level category contributions for one taxonomy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxonomyHoldingContributions {
+    pub taxonomy_id: String,
+    pub taxonomy_name: String,
+    pub total_value: Decimal,
+    pub currency: String,
+    pub contributions: Vec<HoldingAllocationContribution>,
+}

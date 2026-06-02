@@ -1,6 +1,6 @@
 //! Service for computing portfolio allocations by taxonomy.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,9 +9,21 @@ use rust_decimal_macros::dec;
 
 use crate::errors::Result;
 use crate::portfolio::holdings::{Holding, HoldingSummary, HoldingType, HoldingsServiceTrait};
-use crate::taxonomies::{Category, TaxonomyServiceTrait};
+use crate::taxonomies::{AssetTaxonomyAssignment, Category, TaxonomyServiceTrait};
 
-use super::{AllocationHoldings, CategoryAllocation, PortfolioAllocations, TaxonomyAllocation};
+use super::{
+    AllocationHoldings, CategoryAllocation, HoldingAllocationContribution, PortfolioAllocations,
+    TaxonomyAllocation, TaxonomyHoldingContributions,
+};
+
+const CUSTOM_GROUPS_TAXONOMY_ID: &str = "custom_groups";
+
+#[derive(Debug, Clone)]
+struct HoldingTaxonomyShare {
+    category_id: String,
+    assigned_category_id: String,
+    share: Decimal,
+}
 
 /// Trait for allocation service.
 #[async_trait]
@@ -50,6 +62,15 @@ pub trait AllocationServiceTrait: Send + Sync {
         category_id: &str,
         aggregated_account_id: &str,
     ) -> Result<AllocationHoldings>;
+
+    /// Returns weighted holding contributions for every category in a taxonomy.
+    async fn get_holding_contributions_for_taxonomy_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        aggregated_account_id: &str,
+    ) -> Result<TaxonomyHoldingContributions>;
 }
 
 /// Service for computing taxonomy-based portfolio allocations.
@@ -69,6 +90,234 @@ impl AllocationService {
         }
     }
 
+    fn rollup_to_top_level(taxonomy_id: &str) -> bool {
+        matches!(
+            taxonomy_id,
+            "asset_classes" | "industries_gics" | "regions" | "instrument_type"
+        )
+    }
+
+    fn cash_category_id(taxonomy_id: &str) -> Option<&'static str> {
+        match taxonomy_id {
+            "asset_classes" => Some("CASH_BANK_DEPOSITS"),
+            "instrument_type" => Some("CASH"),
+            _ => None,
+        }
+    }
+
+    fn category_display(
+        category_by_id: &HashMap<&str, &Category>,
+        category_id: &str,
+        fallback_color: &str,
+    ) -> (String, String) {
+        if category_id == "__UNKNOWN__" {
+            return ("Unknown".to_string(), "#878580".to_string());
+        }
+
+        category_by_id
+            .get(category_id)
+            .map(|category| (category.name.clone(), category.color.clone()))
+            .unwrap_or_else(|| (category_id.to_string(), fallback_color.to_string()))
+    }
+
+    fn holding_display(holding: &Holding) -> (String, String, String) {
+        let asset_id = holding
+            .instrument
+            .as_ref()
+            .map(|instrument| instrument.id.clone())
+            .unwrap_or_else(|| holding.id.clone());
+
+        if holding.holding_type == HoldingType::Cash {
+            let symbol = holding.local_currency.clone();
+            return (
+                asset_id,
+                symbol.clone(),
+                format!("Cash ({})", holding.local_currency),
+            );
+        }
+
+        let symbol = holding
+            .instrument
+            .as_ref()
+            .map(|instrument| instrument.symbol.clone())
+            .unwrap_or_else(|| "-".to_string());
+        let name = holding
+            .instrument
+            .as_ref()
+            .and_then(|instrument| instrument.name.clone())
+            .unwrap_or_else(|| symbol.clone());
+
+        (asset_id, symbol, name)
+    }
+
+    fn contribution_shares_for_holding(
+        &self,
+        holding: &Holding,
+        taxonomy_id: &str,
+        rollup_to_top_level: bool,
+        top_level_map: &HashMap<&str, &str>,
+        assignments_by_asset: &HashMap<String, Vec<AssetTaxonomyAssignment>>,
+    ) -> Vec<HoldingTaxonomyShare> {
+        if holding.holding_type == HoldingType::Cash {
+            let Some(cash_category_id) = Self::cash_category_id(taxonomy_id) else {
+                return Vec::new();
+            };
+            let category_id = if rollup_to_top_level {
+                top_level_map
+                    .get(cash_category_id)
+                    .copied()
+                    .unwrap_or(cash_category_id)
+            } else {
+                cash_category_id
+            };
+            return vec![HoldingTaxonomyShare {
+                category_id: category_id.to_string(),
+                assigned_category_id: cash_category_id.to_string(),
+                share: Decimal::ONE,
+            }];
+        }
+
+        let asset_id = match &holding.instrument {
+            Some(instrument) => &instrument.id,
+            None => return Vec::new(),
+        };
+
+        let taxonomy_assignments: Vec<_> = assignments_by_asset
+            .get(asset_id)
+            .map(|assignments| {
+                assignments
+                    .iter()
+                    .filter(|assignment| assignment.taxonomy_id == taxonomy_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if taxonomy_assignments.is_empty() {
+            return vec![HoldingTaxonomyShare {
+                category_id: "__UNKNOWN__".to_string(),
+                assigned_category_id: "__UNKNOWN__".to_string(),
+                share: Decimal::ONE,
+            }];
+        }
+
+        let top_levels_covered_by_children: HashSet<&str> = if rollup_to_top_level {
+            taxonomy_assignments
+                .iter()
+                .filter_map(|assignment| {
+                    let assigned_category_id = assignment.category_id.as_str();
+                    let top = *top_level_map.get(assigned_category_id)?;
+                    if top != assigned_category_id {
+                        Some(top)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
+        let active_assignments: Vec<_> = taxonomy_assignments
+            .into_iter()
+            .filter(|assignment| {
+                if !rollup_to_top_level {
+                    return true;
+                }
+                let assigned_category_id = assignment.category_id.as_str();
+                let top = top_level_map
+                    .get(assigned_category_id)
+                    .copied()
+                    .unwrap_or(assigned_category_id);
+                !(top == assigned_category_id && top_levels_covered_by_children.contains(top))
+            })
+            .collect();
+
+        let total_active_weight: i32 = active_assignments
+            .iter()
+            .map(|assignment| assignment.weight)
+            .sum();
+        if total_active_weight <= 0 {
+            return vec![HoldingTaxonomyShare {
+                category_id: "__UNKNOWN__".to_string(),
+                assigned_category_id: "__UNKNOWN__".to_string(),
+                share: Decimal::ONE,
+            }];
+        }
+
+        let weight_divisor = Decimal::from(total_active_weight.max(10000));
+        let mut shares: Vec<HoldingTaxonomyShare> = Vec::new();
+
+        for assignment in active_assignments {
+            let assigned_category_id = assignment.category_id.as_str();
+            let category_id = if rollup_to_top_level {
+                top_level_map
+                    .get(assigned_category_id)
+                    .copied()
+                    .unwrap_or(assigned_category_id)
+            } else {
+                assigned_category_id
+            };
+
+            shares.push(HoldingTaxonomyShare {
+                category_id: category_id.to_string(),
+                assigned_category_id: assigned_category_id.to_string(),
+                share: Decimal::from(assignment.weight) / weight_divisor,
+            });
+        }
+
+        if total_active_weight < 10000 {
+            shares.push(HoldingTaxonomyShare {
+                category_id: "__UNKNOWN__".to_string(),
+                assigned_category_id: "__UNKNOWN__".to_string(),
+                share: Decimal::from(10000 - total_active_weight) / dec!(10000),
+            });
+        }
+
+        shares
+            .into_iter()
+            .filter(|share| share.share > Decimal::ZERO)
+            .collect()
+    }
+
+    fn collect_assignments_by_asset(
+        &self,
+        holdings: &[Holding],
+    ) -> Result<HashMap<String, Vec<AssetTaxonomyAssignment>>> {
+        let mut asset_ids: Vec<String> = holdings
+            .iter()
+            .filter_map(|holding| {
+                holding
+                    .instrument
+                    .as_ref()
+                    .map(|instrument| instrument.id.clone())
+            })
+            .collect();
+        asset_ids.sort();
+        asset_ids.dedup();
+
+        let mut assignments_by_asset = HashMap::new();
+        for assignment in self
+            .taxonomy_service
+            .get_asset_assignments_for_assets(&asset_ids)?
+        {
+            assignments_by_asset
+                .entry(assignment.asset_id.clone())
+                .or_insert_with(Vec::new)
+                .push(assignment);
+        }
+
+        for assignments in assignments_by_asset.values_mut() {
+            assignments.sort_by(|a, b| {
+                a.taxonomy_id
+                    .cmp(&b.taxonomy_id)
+                    .then_with(|| a.category_id.cmp(&b.category_id))
+                    .then_with(|| a.id.cmp(&b.id))
+            });
+        }
+
+        Ok(assignments_by_asset)
+    }
+
     /// Aggregates holdings into a taxonomy allocation.
     /// For hierarchical taxonomies (GICS, Regions), rolls up to top-level categories
     /// and populates children for drill-down.
@@ -80,7 +329,7 @@ impl AllocationService {
         taxonomy_name: &str,
         taxonomy_color: &str,
         categories: &[Category],
-        assignments_by_asset: &HashMap<String, Vec<(String, String, i32)>>, // asset_id -> [(taxonomy_id, category_id, weight)]
+        assignments_by_asset: &HashMap<String, Vec<AssetTaxonomyAssignment>>,
         total_value: Decimal,
         rollup_to_top_level: bool,
     ) -> TaxonomyAllocation {
@@ -106,129 +355,26 @@ impl AllocationService {
         let mut rolled_up_values: HashMap<String, Decimal> = HashMap::new();
 
         for holding in holdings {
-            // Skip cash holdings for sector/region allocation (not for asset_classes)
-            // Cash has asset_class classifications but not sector/region classifications
-            if holding.holding_type == HoldingType::Cash && taxonomy_id != "asset_classes" {
-                continue;
-            }
-
-            let asset_id = match &holding.instrument {
-                Some(instrument) => &instrument.id,
-                None => continue,
-            };
-
             let market_value = holding.market_value.base;
+            let shares = self.contribution_shares_for_holding(
+                holding,
+                taxonomy_id,
+                rollup_to_top_level,
+                &top_level_map,
+                assignments_by_asset,
+            );
 
-            // Cash holdings have synthetic IDs (no DB record / no taxonomy assignments).
-            // Assign them directly to CASH_BANK_DEPOSITS for the asset_classes taxonomy.
-            if holding.holding_type == HoldingType::Cash && taxonomy_id == "asset_classes" {
-                let cash_category = "CASH_BANK_DEPOSITS";
-                let top_level_id = if rollup_to_top_level {
-                    top_level_map
-                        .get(cash_category)
-                        .copied()
-                        .unwrap_or(cash_category)
-                } else {
-                    cash_category
-                };
+            for share in shares {
+                let weighted_value = market_value * share.share;
 
                 let entry = original_values
-                    .entry(cash_category.to_string())
-                    .or_insert((Decimal::ZERO, top_level_id.to_string()));
-                entry.0 += market_value;
+                    .entry(share.assigned_category_id)
+                    .or_insert((Decimal::ZERO, share.category_id.clone()));
+                entry.0 += weighted_value;
 
                 *rolled_up_values
-                    .entry(top_level_id.to_string())
-                    .or_insert(Decimal::ZERO) += market_value;
-                continue;
-            }
-
-            // Get assignments for this asset and taxonomy
-            if let Some(asset_assignments) = assignments_by_asset.get(asset_id) {
-                let taxonomy_assignments: Vec<_> = asset_assignments
-                    .iter()
-                    .filter(|(tid, _, _)| tid == taxonomy_id)
-                    .collect();
-
-                if taxonomy_assignments.is_empty() {
-                    // No assignment for this taxonomy - count as "Unknown"
-                    *rolled_up_values
-                        .entry("__UNKNOWN__".to_string())
-                        .or_insert(Decimal::ZERO) += market_value;
-                } else {
-                    // In rollup mode: skip top-level category assignments when a child of
-                    // that category is also assigned for this asset (leaf-wins principle).
-                    // Without this guard, Americas + United States both roll up to Americas
-                    // and double-count the US portion.
-                    let top_levels_covered_by_children: std::collections::HashSet<&str> =
-                        if rollup_to_top_level {
-                            taxonomy_assignments
-                                .iter()
-                                .filter_map(|(_, cat_id, _)| {
-                                    let top = *top_level_map.get(cat_id.as_str())?;
-                                    if top != cat_id.as_str() {
-                                        Some(top)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect()
-                        } else {
-                            std::collections::HashSet::new()
-                        };
-
-                    // Build active assignment set after applying leaf-wins filter, then
-                    // normalize over only those active assignments. Computing total_weight
-                    // before filtering would dilute kept leaf weights by skipped parents.
-                    let active_assignments: Vec<_> = taxonomy_assignments
-                        .iter()
-                        .filter(|(_, category_id, _)| {
-                            if !rollup_to_top_level {
-                                return true;
-                            }
-                            let top = top_level_map
-                                .get(category_id.as_str())
-                                .copied()
-                                .unwrap_or(category_id.as_str());
-                            !(top == category_id.as_str()
-                                && top_levels_covered_by_children.contains(top))
-                        })
-                        .collect();
-
-                    let total_active_weight: i32 =
-                        active_assignments.iter().map(|(_, _, w)| *w).sum();
-                    let weight_divisor = Decimal::from(total_active_weight.max(10000));
-
-                    for (_, category_id, weight) in active_assignments.iter() {
-                        let top_level_id = if rollup_to_top_level {
-                            top_level_map
-                                .get(category_id.as_str())
-                                .copied()
-                                .unwrap_or(category_id.as_str())
-                        } else {
-                            category_id.as_str()
-                        };
-
-                        let weight_decimal = Decimal::from(*weight) / weight_divisor;
-                        let weighted_value = market_value * weight_decimal;
-
-                        // Track original category values (for children)
-                        let entry = original_values
-                            .entry(category_id.clone())
-                            .or_insert((Decimal::ZERO, top_level_id.to_string()));
-                        entry.0 += weighted_value;
-
-                        // Track rolled-up values
-                        *rolled_up_values
-                            .entry(top_level_id.to_string())
-                            .or_insert(Decimal::ZERO) += weighted_value;
-                    }
-                }
-            } else {
-                // No assignments at all - count as "Unknown"
-                *rolled_up_values
-                    .entry("__UNKNOWN__".to_string())
-                    .or_insert(Decimal::ZERO) += market_value;
+                    .entry(share.category_id)
+                    .or_insert(Decimal::ZERO) += weighted_value;
             }
         }
 
@@ -261,9 +407,12 @@ impl AllocationService {
                     );
                 }
             }
-            // Sort children by value descending
             for children in children_map.values_mut() {
-                children.sort_by_key(|b| std::cmp::Reverse(b.value));
+                children.sort_by(|a, b| {
+                    b.value
+                        .cmp(&a.value)
+                        .then_with(|| a.category_id.cmp(&b.category_id))
+                });
             }
         }
 
@@ -300,8 +449,11 @@ impl AllocationService {
             })
             .collect();
 
-        // Sort by value descending
-        allocations.sort_by_key(|b| std::cmp::Reverse(b.value));
+        allocations.sort_by(|a, b| {
+            b.value
+                .cmp(&a.value)
+                .then_with(|| a.category_id.cmp(&b.category_id))
+        });
 
         TaxonomyAllocation {
             taxonomy_id: taxonomy_id.to_string(),
@@ -364,25 +516,8 @@ impl AllocationService {
         // 3. Get all taxonomies with categories
         let taxonomies = self.taxonomy_service.get_taxonomies_with_categories()?;
 
-        // 4. Collect all asset IDs from holdings
-        let asset_ids: Vec<String> = holdings
-            .iter()
-            .filter_map(|h| h.instrument.as_ref().map(|i| i.id.clone()))
-            .collect();
-
-        // 5. Get all assignments for these assets
-        let mut assignments_by_asset: HashMap<String, Vec<(String, String, i32)>> = HashMap::new();
-
-        for asset_id in &asset_ids {
-            let assignments = self.taxonomy_service.get_asset_assignments(asset_id)?;
-            let entries: Vec<(String, String, i32)> = assignments
-                .into_iter()
-                .map(|a| (a.taxonomy_id, a.category_id, a.weight))
-                .collect();
-            if !entries.is_empty() {
-                assignments_by_asset.insert(asset_id.clone(), entries);
-            }
-        }
+        // 4. Get all assignments for held assets once, then reuse for each taxonomy.
+        let assignments_by_asset = self.collect_assignments_by_asset(holdings)?;
 
         // 6. Find each taxonomy and its categories
         let mut asset_classes_alloc =
@@ -457,12 +592,14 @@ impl AllocationService {
                         &taxonomy.color,
                         categories,
                         &assignments_by_asset,
-                        total_value,
+                        total_with_cash,
                         true, // Roll up to top-level instrument types
                     );
                 }
-                _ if !taxonomy.is_system => {
-                    // User-created custom taxonomies only (skip system placeholder "custom_groups")
+                _ if !taxonomy.is_system || taxonomy.id == CUSTOM_GROUPS_TAXONOMY_ID => {
+                    // User-created custom taxonomies plus the seeded Custom Groups taxonomy.
+                    // Custom Groups is marked system so the taxonomy row is protected, but its
+                    // categories and assignments are user data and must be included in allocations.
                     let custom_alloc = self.aggregate_by_taxonomy(
                         holdings,
                         &taxonomy.id,
@@ -474,7 +611,11 @@ impl AllocationService {
                         false,
                     );
                     // Only include if there are real categories (not just Unknown)
-                    if !custom_alloc.categories.is_empty() {
+                    if custom_alloc
+                        .categories
+                        .iter()
+                        .any(|category| category.category_id.as_str() != "__UNKNOWN__")
+                    {
                         custom_allocs.push(custom_alloc);
                     }
                 }
@@ -490,6 +631,113 @@ impl AllocationService {
             security_types: security_types_alloc,
             custom_groups: custom_allocs,
             total_value: total_with_cash,
+        })
+    }
+
+    async fn compute_holding_contributions_for_taxonomy_from_holdings(
+        &self,
+        holdings: &[Holding],
+        base_currency: &str,
+        taxonomy_id: &str,
+    ) -> Result<TaxonomyHoldingContributions> {
+        let taxonomy_with_cats = self.taxonomy_service.get_taxonomy(taxonomy_id)?;
+        let empty_categories: Vec<Category> = Vec::new();
+
+        let (taxonomy_name, taxonomy_color, categories) = match &taxonomy_with_cats {
+            Some(twc) => (
+                twc.taxonomy.name.clone(),
+                twc.taxonomy.color.clone(),
+                &twc.categories,
+            ),
+            None => (
+                "Unknown".to_string(),
+                "#808080".to_string(),
+                &empty_categories,
+            ),
+        };
+
+        if holdings.is_empty() {
+            return Ok(TaxonomyHoldingContributions {
+                taxonomy_id: taxonomy_id.to_string(),
+                taxonomy_name,
+                total_value: Decimal::ZERO,
+                currency: base_currency.to_string(),
+                contributions: Vec::new(),
+            });
+        }
+
+        let rollup_to_top_level = Self::rollup_to_top_level(taxonomy_id);
+        let top_level_map: HashMap<&str, &str> = if rollup_to_top_level {
+            self.build_top_level_map(categories)
+        } else {
+            categories
+                .iter()
+                .map(|c| (c.id.as_str(), c.id.as_str()))
+                .collect()
+        };
+        let category_by_id: HashMap<&str, &Category> =
+            categories.iter().map(|c| (c.id.as_str(), c)).collect();
+
+        let assignments_by_asset = self.collect_assignments_by_asset(holdings)?;
+
+        let mut contributions: Vec<HoldingAllocationContribution> = Vec::new();
+        for holding in holdings {
+            let shares = self.contribution_shares_for_holding(
+                holding,
+                taxonomy_id,
+                rollup_to_top_level,
+                &top_level_map,
+                &assignments_by_asset,
+            );
+            let (asset_id, symbol, name) = Self::holding_display(holding);
+            let mut value_by_category: BTreeMap<String, Decimal> = BTreeMap::new();
+            for share in shares {
+                *value_by_category.entry(share.category_id).or_default() +=
+                    holding.market_value.base * share.share;
+            }
+
+            for (category_id, value) in value_by_category {
+                if value == Decimal::ZERO {
+                    continue;
+                }
+                let (category_name, category_color) =
+                    Self::category_display(&category_by_id, &category_id, &taxonomy_color);
+
+                contributions.push(HoldingAllocationContribution {
+                    id: format!("{}:{}", holding.id, category_id),
+                    holding_id: holding.id.clone(),
+                    asset_id: asset_id.clone(),
+                    account_id: holding.account_id.clone(),
+                    source_account_ids: holding.source_account_ids.clone(),
+                    symbol: symbol.clone(),
+                    name: name.clone(),
+                    holding_type: holding.holding_type.clone(),
+                    quantity: holding.quantity,
+                    category_id,
+                    category_name,
+                    category_color,
+                    value,
+                });
+            }
+        }
+
+        contributions.sort_by(|a, b| {
+            b.value
+                .cmp(&a.value)
+                .then_with(|| a.holding_id.cmp(&b.holding_id))
+                .then_with(|| a.category_id.cmp(&b.category_id))
+        });
+        let total_value: Decimal = contributions
+            .iter()
+            .map(|contribution| contribution.value)
+            .sum();
+
+        Ok(TaxonomyHoldingContributions {
+            taxonomy_id: taxonomy_id.to_string(),
+            taxonomy_name,
+            total_value,
+            currency: base_currency.to_string(),
+            contributions,
         })
     }
 
@@ -540,144 +788,76 @@ impl AllocationService {
             });
         }
 
-        // Build map from category to top-level ancestor
-        let top_level_map: HashMap<&str, &str> = self.build_top_level_map(categories);
-
-        // Get all assignments for this category (including child categories)
-        // First, find all category IDs that roll up to the target category
-        let matching_category_ids: Vec<&str> = if category_id == "__UNKNOWN__" {
-            vec!["__UNKNOWN__"]
+        let rollup_to_top_level = Self::rollup_to_top_level(taxonomy_id);
+        let top_level_map: HashMap<&str, &str> = if rollup_to_top_level {
+            self.build_top_level_map(categories)
         } else {
             categories
                 .iter()
-                .filter(|c| {
-                    // Include this category if it equals or rolls up to the target
-                    c.id == category_id
-                        || top_level_map.get(c.id.as_str()).copied() == Some(category_id)
-                })
-                .map(|c| c.id.as_str())
+                .map(|category| (category.id.as_str(), category.id.as_str()))
                 .collect()
         };
+        let assignments_by_asset = self.collect_assignments_by_asset(holdings)?;
 
-        // Get assignments for all matching categories, applying leaf-wins to avoid
-        // double-counting when both a parent and its child are assigned to the same asset.
-        // Separate direct (target category itself) from child category assignments.
-        // If an asset has child-level assignments, use those; otherwise fall back to direct.
-        let mut direct_weight: HashMap<String, i32> = HashMap::new();
-        let mut child_weight: HashMap<String, i32> = HashMap::new();
-        for cat_id in &matching_category_ids {
-            if *cat_id == "__UNKNOWN__" {
-                continue;
-            }
-            let is_direct = *cat_id == category_id;
-            if let Ok(assignments) = self
-                .taxonomy_service
-                .get_category_assignments(taxonomy_id, cat_id)
-            {
-                for assignment in assignments {
-                    if is_direct {
-                        *direct_weight
-                            .entry(assignment.asset_id.clone())
-                            .or_insert(0) += assignment.weight;
-                    } else {
-                        *child_weight.entry(assignment.asset_id.clone()).or_insert(0) +=
-                            assignment.weight;
-                    }
-                }
-            }
-        }
-        // Leaf-wins: prefer child weights; fall back to direct only when no child exists.
-        // Also normalize each asset's weight to at most 10000 bps (100%).
-        let mut asset_to_weight: HashMap<String, i32> = child_weight;
-        for (asset_id, weight) in direct_weight {
-            asset_to_weight.entry(asset_id).or_insert(weight);
-        }
-        for weight in asset_to_weight.values_mut() {
-            *weight = (*weight).min(10000);
-        }
-
-        // Calculate total value of matched holdings for weight calculation
-        let mut matched_holdings: Vec<(&Holding, i32)> = Vec::new();
-
+        let mut matched_values: Vec<(HoldingSummary, Decimal)> = Vec::new();
         for holding in holdings {
-            let asset_id = match &holding.instrument {
-                Some(instrument) => &instrument.id,
-                None => continue,
-            };
+            let shares = self.contribution_shares_for_holding(
+                holding,
+                taxonomy_id,
+                rollup_to_top_level,
+                &top_level_map,
+                &assignments_by_asset,
+            );
 
-            // Cash holdings: match if drilling into CASH or CASH_BANK_DEPOSITS
-            if holding.holding_type == HoldingType::Cash
-                && taxonomy_id == "asset_classes"
-                && matching_category_ids
-                    .iter()
-                    .any(|id| *id == "CASH" || *id == "CASH_BANK_DEPOSITS")
-            {
-                matched_holdings.push((holding, 10000)); // 100% weight
+            let matched_share: Decimal = shares
+                .into_iter()
+                .filter(|share| {
+                    share.category_id == category_id || share.assigned_category_id == category_id
+                })
+                .map(|share| share.share)
+                .sum();
+
+            if matched_share <= Decimal::ZERO {
                 continue;
             }
 
-            // Check if this holding matches the category
-            if category_id == "__UNKNOWN__" {
-                // For "Unknown", include holdings with no assignment for this taxonomy
-                let has_assignment = self
-                    .taxonomy_service
-                    .get_asset_assignments(asset_id)
-                    .map(|assignments| assignments.iter().any(|a| a.taxonomy_id == taxonomy_id))
-                    .unwrap_or(false);
-
-                if !has_assignment {
-                    matched_holdings.push((holding, 10000)); // 100% weight
-                }
-            } else if let Some(&weight) = asset_to_weight.get(asset_id) {
-                matched_holdings.push((holding, weight));
-            }
+            let matched_value = holding.market_value.base * matched_share;
+            let (asset_id, symbol, name) = Self::holding_display(holding);
+            matched_values.push((
+                HoldingSummary {
+                    id: asset_id,
+                    symbol,
+                    name: Some(name),
+                    holding_type: holding.holding_type.clone(),
+                    quantity: holding.quantity,
+                    market_value: matched_value,
+                    currency: base_currency.to_string(),
+                    weight_in_category: Decimal::ZERO,
+                },
+                matched_value,
+            ));
         }
 
-        // Calculate total matched value for weight calculation
-        let total_matched_value: Decimal = matched_holdings
-            .iter()
-            .map(|(h, weight)| {
-                let weight_decimal = Decimal::from(*weight) / dec!(10000);
-                h.market_value.base * weight_decimal
-            })
-            .sum();
+        let total_matched_value: Decimal = matched_values.iter().map(|(_, value)| *value).sum();
 
-        // Build summaries
-        let mut summaries: Vec<HoldingSummary> = matched_holdings
+        let mut summaries: Vec<HoldingSummary> = matched_values
             .into_iter()
-            .map(|(holding, weight)| {
-                let weight_decimal = Decimal::from(weight) / dec!(10000);
-                let weighted_value = holding.market_value.base * weight_decimal;
-                let weight_in_category = if total_matched_value > Decimal::ZERO {
-                    (weighted_value / total_matched_value * dec!(100)).round_dp(2)
+            .map(|(mut summary, value)| {
+                summary.weight_in_category = if total_matched_value > Decimal::ZERO {
+                    (value / total_matched_value * dec!(100)).round_dp(2)
                 } else {
                     Decimal::ZERO
                 };
-
-                HoldingSummary {
-                    // Use instrument.id (the asset ID) for navigation, not holding.id (composite ID)
-                    id: holding
-                        .instrument
-                        .as_ref()
-                        .map(|i| i.id.clone())
-                        .unwrap_or_else(|| holding.id.clone()),
-                    symbol: holding
-                        .instrument
-                        .as_ref()
-                        .map(|i| i.symbol.clone())
-                        .unwrap_or_default(),
-                    name: holding.instrument.as_ref().and_then(|i| i.name.clone()),
-                    holding_type: holding.holding_type.clone(),
-                    quantity: holding.quantity,
-                    market_value: weighted_value,
-                    currency: holding.base_currency.clone(),
-                    weight_in_category,
-                }
+                summary
             })
             .collect();
 
-        // Sort by market value descending
-        summaries.sort_by_key(|b| std::cmp::Reverse(b.market_value));
+        summaries.sort_by(|a, b| {
+            b.market_value
+                .cmp(&a.market_value)
+                .then_with(|| a.symbol.cmp(&b.symbol))
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
         Ok(AllocationHoldings {
             taxonomy_id: taxonomy_id.to_string(),
@@ -761,6 +941,25 @@ impl AllocationServiceTrait for AllocationService {
         )
         .await
     }
+
+    async fn get_holding_contributions_for_taxonomy_for_accounts(
+        &self,
+        account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        aggregated_account_id: &str,
+    ) -> Result<TaxonomyHoldingContributions> {
+        let holdings = self
+            .holdings_service
+            .get_holdings_for_accounts(account_ids, base_currency, aggregated_account_id)
+            .await?;
+        self.compute_holding_contributions_for_taxonomy_from_holdings(
+            &holdings,
+            base_currency,
+            taxonomy_id,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -778,6 +977,10 @@ mod tests {
     // Minimal mocks — aggregate_by_taxonomy is pure data, does not call these
     struct NoopHoldings;
     struct NoopTaxonomies;
+    struct StaticTaxonomies {
+        taxonomies: Vec<TaxonomyWithCategories>,
+        assignments_by_asset: HashMap<String, Vec<AssetTaxonomyAssignment>>,
+    }
 
     #[async_trait]
     impl HoldingsServiceTrait for NoopHoldings {
@@ -869,6 +1072,83 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl TaxonomyServiceTrait for StaticTaxonomies {
+        fn get_taxonomies(&self) -> Result<Vec<Taxonomy>> {
+            Ok(self
+                .taxonomies
+                .iter()
+                .map(|entry| entry.taxonomy.clone())
+                .collect())
+        }
+        fn get_taxonomy(&self, id: &str) -> Result<Option<TaxonomyWithCategories>> {
+            Ok(self
+                .taxonomies
+                .iter()
+                .find(|entry| entry.taxonomy.id == id)
+                .cloned())
+        }
+        fn get_taxonomies_with_categories(&self) -> Result<Vec<TaxonomyWithCategories>> {
+            Ok(self.taxonomies.clone())
+        }
+        async fn create_taxonomy(&self, _: NewTaxonomy) -> Result<Taxonomy> {
+            unimplemented!()
+        }
+        async fn update_taxonomy(&self, _: Taxonomy) -> Result<Taxonomy> {
+            unimplemented!()
+        }
+        async fn delete_taxonomy(&self, _: &str) -> Result<usize> {
+            unimplemented!()
+        }
+        async fn create_category(&self, _: NewCategory) -> Result<Category> {
+            unimplemented!()
+        }
+        async fn update_category(&self, _: Category) -> Result<Category> {
+            unimplemented!()
+        }
+        async fn delete_category(&self, _: &str, _: &str) -> Result<usize> {
+            unimplemented!()
+        }
+        async fn move_category(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<String>,
+            _: i32,
+        ) -> Result<Category> {
+            unimplemented!()
+        }
+        async fn import_taxonomy_json(&self, _: &str) -> Result<Taxonomy> {
+            unimplemented!()
+        }
+        fn export_taxonomy_json(&self, _: &str) -> Result<String> {
+            unimplemented!()
+        }
+        fn get_asset_assignments(&self, asset_id: &str) -> Result<Vec<AssetTaxonomyAssignment>> {
+            Ok(self
+                .assignments_by_asset
+                .get(asset_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+        fn get_category_assignments(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<Vec<AssetTaxonomyAssignment>> {
+            unimplemented!()
+        }
+        async fn assign_asset_to_category(
+            &self,
+            _: NewAssetTaxonomyAssignment,
+        ) -> Result<AssetTaxonomyAssignment> {
+            unimplemented!()
+        }
+        async fn remove_asset_assignment(&self, _: &str) -> Result<usize> {
+            unimplemented!()
+        }
+    }
+
     fn svc() -> AllocationService {
         AllocationService::new(Arc::new(NoopHoldings), Arc::new(NoopTaxonomies))
     }
@@ -877,10 +1157,29 @@ mod tests {
         Utc::now().naive_utc()
     }
 
-    fn make_category(id: &str, parent_id: Option<&str>) -> Category {
+    fn make_taxonomy(id: &str, name: &str, is_system: bool) -> Taxonomy {
+        Taxonomy {
+            id: id.to_string(),
+            name: name.to_string(),
+            color: "#808080".to_string(),
+            description: None,
+            is_system,
+            is_single_select: false,
+            sort_order: 0,
+            created_at: now(),
+            updated_at: now(),
+            scope: "asset".to_string(),
+        }
+    }
+
+    fn make_category_for_taxonomy(
+        taxonomy_id: &str,
+        id: &str,
+        parent_id: Option<&str>,
+    ) -> Category {
         Category {
             id: id.to_string(),
-            taxonomy_id: "regions".to_string(),
+            taxonomy_id: taxonomy_id.to_string(),
             parent_id: parent_id.map(|s| s.to_string()),
             name: id.to_string(),
             key: id.to_string(),
@@ -890,6 +1189,28 @@ mod tests {
             created_at: now(),
             updated_at: now(),
             icon: None,
+        }
+    }
+
+    fn make_category(id: &str, parent_id: Option<&str>) -> Category {
+        make_category_for_taxonomy("regions", id, parent_id)
+    }
+
+    fn make_assignment(
+        asset_id: &str,
+        taxonomy_id: &str,
+        category_id: &str,
+        weight: i32,
+    ) -> AssetTaxonomyAssignment {
+        AssetTaxonomyAssignment {
+            id: format!("{asset_id}:{taxonomy_id}:{category_id}"),
+            asset_id: asset_id.to_string(),
+            taxonomy_id: taxonomy_id.to_string(),
+            category_id: category_id.to_string(),
+            weight,
+            source: "manual".to_string(),
+            created_at: now(),
+            updated_at: now(),
         }
     }
 
@@ -940,6 +1261,43 @@ mod tests {
         }
     }
 
+    fn make_cash_holding(currency: &str, base_value: Decimal) -> Holding {
+        Holding {
+            id: format!("cash_{currency}"),
+            account_id: "acc".to_string(),
+            holding_type: HoldingType::Cash,
+            instrument: None,
+            asset_kind: None,
+            quantity: base_value,
+            open_date: None,
+            lots: None,
+            contract_multiplier: Decimal::ONE,
+            local_currency: currency.to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate: None,
+            market_value: MonetaryValue {
+                local: base_value,
+                base: base_value,
+            },
+            cost_basis: None,
+            price: None,
+            purchase_price: None,
+            unrealized_gain: None,
+            unrealized_gain_pct: None,
+            realized_gain: None,
+            realized_gain_pct: None,
+            total_gain: None,
+            total_gain_pct: None,
+            day_change: None,
+            day_change_pct: None,
+            prev_close_value: None,
+            weight: Decimal::ZERO,
+            as_of_date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            metadata: None,
+            source_account_ids: vec![],
+        }
+    }
+
     /// Weights summing above 100% must not cause any category percentage to exceed
     /// the portfolio total. With AAPL assigned 60% North_America + 60% Europe (120% total),
     /// the normalized sum across all regions must equal 100%.
@@ -955,12 +1313,12 @@ mod tests {
         ];
 
         // 60% + 60% = 120% (invalid, should be normalized to 50% + 50%)
-        let mut assignments: HashMap<String, Vec<(String, String, i32)>> = HashMap::new();
+        let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
         assignments.insert(
             "AAPL".to_string(),
             vec![
-                ("regions".to_string(), "North_America".to_string(), 6000),
-                ("regions".to_string(), "Europe".to_string(), 6000),
+                make_assignment("AAPL", "regions", "North_America", 6000),
+                make_assignment("AAPL", "regions", "Europe", 6000),
             ],
         );
 
@@ -982,6 +1340,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn weights_below_100_pct_are_counted_as_unknown_remainder() {
+        let svc = svc();
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let categories = vec![
+            make_category("North_America", None),
+            make_category("Europe", None),
+        ];
+
+        let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
+        assignments.insert(
+            "AAPL".to_string(),
+            vec![make_assignment("AAPL", "regions", "North_America", 6000)],
+        );
+
+        let result = svc.aggregate_by_taxonomy(
+            &holdings,
+            "regions",
+            "Regions",
+            "#ccc",
+            &categories,
+            &assignments,
+            dec!(1000),
+            false,
+        );
+
+        let north_america = result
+            .categories
+            .iter()
+            .find(|c| c.category_id == "North_America")
+            .expect("North_America category missing");
+        let unknown = result
+            .categories
+            .iter()
+            .find(|c| c.category_id == "__UNKNOWN__")
+            .expect("Unknown category missing");
+
+        assert_eq!(north_america.value, dec!(600));
+        assert_eq!(north_america.percentage, dec!(60));
+        assert_eq!(unknown.value, dec!(400));
+        assert_eq!(unknown.percentage, dec!(40));
+    }
+
     /// When an asset is assigned to both a parent region (Americas) and a child (United_States),
     /// rolling up to the top level must not double-count: United_States rolls up to Americas,
     /// so the direct Americas assignment should be skipped (leaf-wins).
@@ -998,12 +1399,12 @@ mod tests {
 
         // 60% Americas (parent) + 40% United_States (child of Americas)
         // Leaf-wins: Americas direct assignment should be skipped, only US rolls up
-        let mut assignments: HashMap<String, Vec<(String, String, i32)>> = HashMap::new();
+        let mut assignments: HashMap<String, Vec<AssetTaxonomyAssignment>> = HashMap::new();
         assignments.insert(
             "AAPL".to_string(),
             vec![
-                ("regions".to_string(), "Americas".to_string(), 6000),
-                ("regions".to_string(), "United_States".to_string(), 4000),
+                make_assignment("AAPL", "regions", "Americas", 6000),
+                make_assignment("AAPL", "regions", "United_States", 4000),
             ],
         );
 
@@ -1036,5 +1437,400 @@ mod tests {
             "Expected Americas = 400 (leaf US only), got {}",
             americas.value
         );
+    }
+
+    #[tokio::test]
+    async fn holdings_by_allocation_normalizes_weights_above_100_pct() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![
+                    make_category_for_taxonomy("regions", "North_America", None),
+                    make_category_for_taxonomy("regions", "Europe", None),
+                ],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![
+                    make_assignment("AAPL", "regions", "North_America", 6000),
+                    make_assignment("AAPL", "regions", "Europe", 6000),
+                ],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let north_america = svc
+            .compute_holdings_by_allocation_from_holdings(
+                &holdings,
+                "USD",
+                "regions",
+                "North_America",
+            )
+            .await
+            .unwrap();
+        let europe = svc
+            .compute_holdings_by_allocation_from_holdings(&holdings, "USD", "regions", "Europe")
+            .await
+            .unwrap();
+
+        assert_eq!(north_america.total_value, dec!(500));
+        assert_eq!(north_america.holdings[0].market_value, dec!(500));
+        assert_eq!(europe.total_value, dec!(500));
+        assert_eq!(europe.holdings[0].market_value, dec!(500));
+    }
+
+    #[tokio::test]
+    async fn holdings_by_allocation_includes_unknown_remainder_below_100_pct() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![make_category_for_taxonomy("regions", "North_America", None)],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![make_assignment("AAPL", "regions", "North_America", 6000)],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let north_america = svc
+            .compute_holdings_by_allocation_from_holdings(
+                &holdings,
+                "USD",
+                "regions",
+                "North_America",
+            )
+            .await
+            .unwrap();
+        let unknown = svc
+            .compute_holdings_by_allocation_from_holdings(
+                &holdings,
+                "USD",
+                "regions",
+                "__UNKNOWN__",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(north_america.total_value, dec!(600));
+        assert_eq!(north_america.holdings[0].market_value, dec!(600));
+        assert_eq!(unknown.total_value, dec!(400));
+        assert_eq!(unknown.holdings[0].market_value, dec!(400));
+    }
+
+    #[tokio::test]
+    async fn holdings_by_allocation_returns_child_contributions_for_rolled_taxonomy() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![
+                    make_category_for_taxonomy("regions", "Americas", None),
+                    make_category_for_taxonomy("regions", "United_States", Some("Americas")),
+                    make_category_for_taxonomy("regions", "Europe", None),
+                ],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![
+                    make_assignment("AAPL", "regions", "United_States", 4000),
+                    make_assignment("AAPL", "regions", "Europe", 6000),
+                ],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let child = svc
+            .compute_holdings_by_allocation_from_holdings(
+                &holdings,
+                "USD",
+                "regions",
+                "United_States",
+            )
+            .await
+            .unwrap();
+        let parent = svc
+            .compute_holdings_by_allocation_from_holdings(&holdings, "USD", "regions", "Americas")
+            .await
+            .unwrap();
+
+        assert_eq!(child.total_value, dec!(400));
+        assert_eq!(child.holdings[0].market_value, dec!(400));
+        assert_eq!(parent.total_value, dec!(400));
+        assert_eq!(parent.holdings[0].market_value, dec!(400));
+    }
+
+    #[tokio::test]
+    async fn holdings_by_allocation_returns_cash_bank_deposit_child() {
+        let holdings = vec![make_cash_holding("USD", dec!(2000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("asset_classes", "Asset Classes", true),
+                categories: vec![
+                    make_category_for_taxonomy("asset_classes", "CASH", None),
+                    make_category_for_taxonomy("asset_classes", "CASH_BANK_DEPOSITS", Some("CASH")),
+                ],
+            }],
+            assignments_by_asset: HashMap::new(),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let child = svc
+            .compute_holdings_by_allocation_from_holdings(
+                &holdings,
+                "USD",
+                "asset_classes",
+                "CASH_BANK_DEPOSITS",
+            )
+            .await
+            .unwrap();
+        let parent = svc
+            .compute_holdings_by_allocation_from_holdings(&holdings, "USD", "asset_classes", "CASH")
+            .await
+            .unwrap();
+
+        assert_eq!(child.total_value, dec!(2000));
+        assert_eq!(child.holdings[0].holding_type, HoldingType::Cash);
+        assert_eq!(parent.total_value, dec!(2000));
+        assert_eq!(parent.holdings[0].holding_type, HoldingType::Cash);
+    }
+
+    #[tokio::test]
+    async fn holding_contributions_exclude_cash_from_region_taxonomy() {
+        let holdings = vec![
+            make_holding("AAPL", dec!(1000)),
+            make_cash_holding("USD", dec!(500)),
+        ];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![make_category_for_taxonomy("regions", "North_America", None)],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![make_assignment("AAPL", "regions", "North_America", 10000)],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let result = svc
+            .compute_holding_contributions_for_taxonomy_from_holdings(&holdings, "USD", "regions")
+            .await
+            .unwrap();
+
+        assert_eq!(result.total_value, dec!(1000));
+        assert_eq!(result.contributions.len(), 1);
+        assert_eq!(result.contributions[0].holding_id, "AAPL");
+        assert_eq!(result.contributions[0].category_id, "North_America");
+    }
+
+    #[tokio::test]
+    async fn holding_contributions_have_stable_category_order_and_ids() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![
+                    make_category_for_taxonomy("regions", "Europe", None),
+                    make_category_for_taxonomy("regions", "North_America", None),
+                ],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![
+                    make_assignment("AAPL", "regions", "North_America", 5000),
+                    make_assignment("AAPL", "regions", "Europe", 5000),
+                ],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let result = svc
+            .compute_holding_contributions_for_taxonomy_from_holdings(&holdings, "USD", "regions")
+            .await
+            .unwrap();
+        let ids: Vec<_> = result
+            .contributions
+            .iter()
+            .map(|contribution| contribution.id.as_str())
+            .collect();
+
+        assert_eq!(ids, vec!["AAPL:Europe", "AAPL:North_America"]);
+    }
+
+    #[tokio::test]
+    async fn holding_contributions_leaf_wins_and_keeps_unknown_remainder() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("regions", "Regions", true),
+                categories: vec![
+                    make_category_for_taxonomy("regions", "Americas", None),
+                    make_category_for_taxonomy("regions", "United_States", Some("Americas")),
+                ],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![
+                    make_assignment("AAPL", "regions", "Americas", 6000),
+                    make_assignment("AAPL", "regions", "United_States", 4000),
+                ],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let result = svc
+            .compute_holding_contributions_for_taxonomy_from_holdings(&holdings, "USD", "regions")
+            .await
+            .unwrap();
+        let americas = result
+            .contributions
+            .iter()
+            .find(|contribution| contribution.category_id == "Americas")
+            .expect("Americas contribution missing");
+        let unknown = result
+            .contributions
+            .iter()
+            .find(|contribution| contribution.category_id == "__UNKNOWN__")
+            .expect("Unknown contribution missing");
+
+        assert_eq!(americas.value, dec!(400));
+        assert_eq!(unknown.value, dec!(600));
+        assert_eq!(result.total_value, dec!(1000));
+    }
+
+    #[tokio::test]
+    async fn holding_contributions_roll_cash_to_asset_class_cash() {
+        let holdings = vec![make_cash_holding("USD", dec!(2000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy("asset_classes", "Asset Classes", true),
+                categories: vec![
+                    make_category_for_taxonomy("asset_classes", "CASH", None),
+                    make_category_for_taxonomy("asset_classes", "CASH_BANK_DEPOSITS", Some("CASH")),
+                ],
+            }],
+            assignments_by_asset: HashMap::new(),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let result = svc
+            .compute_holding_contributions_for_taxonomy_from_holdings(
+                &holdings,
+                "USD",
+                "asset_classes",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.total_value, dec!(2000));
+        assert_eq!(result.contributions.len(), 1);
+        assert_eq!(result.contributions[0].category_id, "CASH");
+        assert_eq!(result.contributions[0].symbol, "USD");
+        assert_eq!(result.contributions[0].holding_type, HoldingType::Cash);
+    }
+
+    #[test]
+    fn cash_rolls_up_to_asset_class_cash_without_instrument() {
+        let svc = svc();
+        let holdings = vec![make_cash_holding("USD", dec!(2000))];
+        let categories = vec![
+            make_category("CASH", None),
+            make_category("CASH_BANK_DEPOSITS", Some("CASH")),
+        ];
+
+        let result = svc.aggregate_by_taxonomy(
+            &holdings,
+            "asset_classes",
+            "Asset Classes",
+            "#ccc",
+            &categories,
+            &HashMap::new(),
+            dec!(12000),
+            true,
+        );
+
+        let cash = result
+            .categories
+            .iter()
+            .find(|c| c.category_id == "CASH")
+            .expect("cash allocation missing");
+        assert_eq!(cash.value, dec!(2000));
+        assert_eq!(cash.percentage, dec!(16.67));
+    }
+
+    #[test]
+    fn cash_rolls_up_to_instrument_type_cash_fx_without_instrument() {
+        let svc = svc();
+        let holdings = vec![make_cash_holding("USD", dec!(2000))];
+        let categories = vec![
+            make_category("CASH_FX", None),
+            make_category("CASH", Some("CASH_FX")),
+        ];
+
+        let result = svc.aggregate_by_taxonomy(
+            &holdings,
+            "instrument_type",
+            "Instrument Type",
+            "#ccc",
+            &categories,
+            &HashMap::new(),
+            dec!(12000),
+            true,
+        );
+
+        let cash_fx = result
+            .categories
+            .iter()
+            .find(|c| c.category_id == "CASH_FX")
+            .expect("cash/fx allocation missing");
+        assert_eq!(cash_fx.value, dec!(2000));
+        assert_eq!(cash_fx.percentage, dec!(16.67));
+    }
+
+    #[tokio::test]
+    async fn system_custom_groups_taxonomy_is_included_in_custom_allocations() {
+        let holdings = vec![make_holding("AAPL", dec!(1000))];
+        let taxonomies = StaticTaxonomies {
+            taxonomies: vec![TaxonomyWithCategories {
+                taxonomy: make_taxonomy(CUSTOM_GROUPS_TAXONOMY_ID, "Custom Groups", true),
+                categories: vec![make_category_for_taxonomy(
+                    CUSTOM_GROUPS_TAXONOMY_ID,
+                    "small_cap",
+                    None,
+                )],
+            }],
+            assignments_by_asset: HashMap::from([(
+                "AAPL".to_string(),
+                vec![make_assignment(
+                    "AAPL",
+                    CUSTOM_GROUPS_TAXONOMY_ID,
+                    "small_cap",
+                    10000,
+                )],
+            )]),
+        };
+        let svc = AllocationService::new(Arc::new(NoopHoldings), Arc::new(taxonomies));
+
+        let result = svc
+            .compute_allocations_from_holdings(&holdings, "USD")
+            .await
+            .unwrap();
+
+        let custom_groups = result
+            .custom_groups
+            .iter()
+            .find(|allocation| allocation.taxonomy_id == CUSTOM_GROUPS_TAXONOMY_ID)
+            .expect("custom_groups allocation missing");
+        let small_cap = custom_groups
+            .categories
+            .iter()
+            .find(|category| category.category_id == "small_cap")
+            .expect("small_cap custom group missing");
+
+        assert_eq!(small_cap.value, dec!(1000));
+        assert_eq!(small_cap.percentage, dec!(100));
     }
 }
