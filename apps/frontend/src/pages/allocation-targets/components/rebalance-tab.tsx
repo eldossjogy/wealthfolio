@@ -425,6 +425,7 @@ function BeforeAfterStack({ sleeves }: { sleeves: SleeveSummaryRow[] }) {
 
 function InputBar({
   cashValue,
+  availableCash,
   currency,
   onCashChange,
   onCalculate,
@@ -432,81 +433,45 @@ function InputBar({
   isCalculating,
 }: {
   cashValue: string;
+  availableCash: number;
   currency: string;
   onCashChange: (v: string) => void;
   onCalculate: () => void;
   hasPlan: boolean;
   isCalculating: boolean;
 }) {
+  const deploy = parseFloat(cashValue.replace(/,/g, "")) || 0;
+  const overBudget = availableCash > 0 && deploy > availableCash;
+
   return (
     <Card>
       <CardContent className="flex flex-wrap items-end justify-between gap-4 px-5 py-4">
-        <div className="min-w-sidebar">
-          <label className="text-muted-foreground mb-1.5 block text-[11px] font-medium uppercase tracking-wider">
-            Available cash to deploy
-          </label>
-          <div className="border-input bg-background focus-within:ring-ring flex h-11 items-center rounded-md border px-3 focus-within:ring-2">
-            <span className="text-muted-foreground mr-1 text-[15px]">
-              {currencySymbol(currency)}
-            </span>
-            <input
-              value={cashValue}
-              onChange={(e) => onCashChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onCalculate()}
-              inputMode="decimal"
-              placeholder="25,000"
-              className="text-foreground placeholder:text-muted-foreground/60 w-full bg-transparent text-[15px] font-medium tabular-nums outline-none"
-            />
+        <div className="flex flex-wrap gap-6">
+          {/* Available cash — read-only */}
+          <div>
+            <div className="text-muted-foreground mb-1.5 text-[11px] font-medium uppercase tracking-wider">
+              Cash in scope
+            </div>
+            <div className="text-foreground text-[15px] font-semibold tabular-nums">
+              {availableCash > 0 ? (
+                formatAmount(availableCash, currency)
+              ) : (
+                <span className="text-muted-foreground font-normal">No cash detected</span>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <Button onClick={onCalculate} disabled={isCalculating || !cashValue.trim()}>
-            <Icons.BarChart className="mr-1.5 h-4 w-4" />
-            {isCalculating ? "Calculating…" : hasPlan ? "Recalculate" : "Calculate plan"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Empty state (V2 style) ────────────────────────────────────────────────────
-
-function EmptyState({
-  cashValue,
-  currency,
-  onCashChange,
-  onCalculate,
-  isCalculating,
-}: {
-  cashValue: string;
-  currency: string;
-  onCashChange: (v: string) => void;
-  onCalculate: () => void;
-  isCalculating: boolean;
-}) {
-  return (
-    <Card>
-      <CardContent className="flex flex-col items-center gap-5 px-8 py-14 text-center">
-        <div className="bg-muted text-muted-foreground flex h-12 w-12 items-center justify-center rounded-full">
-          <Icons.Coins className="h-6 w-6" />
-        </div>
-        <div>
-          <div className="text-foreground text-[17px] font-semibold">
-            How much cash do you want to deploy?
-          </div>
-          <div className="text-muted-foreground mt-1 max-w-sm text-[13px]">
-            We&apos;ll spread it across your underweight sleeves to cut drift as much as possible —
-            without selling a thing.
-          </div>
-        </div>
-        <div className="w-full max-w-xs space-y-3 pt-1">
+          {/* Cash to deploy — editable */}
           <div>
             <label className="text-muted-foreground mb-1.5 block text-[11px] font-medium uppercase tracking-wider">
-              Available cash to deploy
+              Cash to deploy
             </label>
-            <div className="border-input bg-background focus-within:ring-ring flex h-11 items-center rounded-md border px-3 focus-within:ring-2">
+            <div
+              className={cn(
+                "border-input bg-background focus-within:ring-ring flex h-11 items-center rounded-md border px-3 focus-within:ring-2",
+                overBudget && "border-destructive focus-within:ring-destructive",
+              )}
+            >
               <span className="text-muted-foreground mr-1 text-[15px]">
                 {currencySymbol(currency)}
               </span>
@@ -515,20 +480,20 @@ function EmptyState({
                 onChange={(e) => onCashChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && onCalculate()}
                 inputMode="decimal"
-                placeholder="25,000"
-                className="text-foreground placeholder:text-muted-foreground/60 w-full bg-transparent text-[15px] font-medium tabular-nums outline-none"
+                placeholder="0"
+                className="text-foreground placeholder:text-muted-foreground/60 w-32 bg-transparent text-[15px] font-medium tabular-nums outline-none"
               />
             </div>
+            {overBudget && (
+              <p className="text-destructive mt-1 text-[11px]">Exceeds available cash</p>
+            )}
           </div>
-          <Button
-            className="w-full"
-            onClick={onCalculate}
-            disabled={isCalculating || !cashValue.trim()}
-          >
-            <Icons.BarChart className="mr-1.5 h-4 w-4" />
-            {isCalculating ? "Calculating…" : "Calculate plan"}
-          </Button>
         </div>
+
+        <Button onClick={onCalculate} disabled={isCalculating || !cashValue.trim() || deploy <= 0}>
+          <Icons.BarChart className="mr-1.5 h-4 w-4" />
+          {isCalculating ? "Calculating…" : hasPlan ? "Recalculate" : "Calculate plan"}
+        </Button>
       </CardContent>
     </Card>
   );
@@ -540,10 +505,18 @@ interface RebalanceTabProps {
   profile: AllocationTarget | null;
   driftReport: DriftReport | null;
   accountScope: AccountScope;
+  availableCash: number;
 }
 
-export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTabProps) {
-  const [cashValue, setCashValue] = useState("");
+export function RebalanceTab({
+  profile,
+  driftReport,
+  accountScope,
+  availableCash,
+}: RebalanceTabProps) {
+  const [cashValue, setCashValue] = useState(() =>
+    availableCash > 0 ? String(availableCash) : "",
+  );
   const [plan, setPlan] = useState<RebalancePlan | null>(null);
 
   const calculatePlan = useCalculateRebalancePlan();
@@ -597,17 +570,15 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
 
       <ModeSwitch currency={currency} />
 
-      {/* Input bar — only shown once a plan exists; empty state has its own input */}
-      {plan ? (
-        <InputBar
-          cashValue={cashValue}
-          currency={currency}
-          onCashChange={setCashValue}
-          onCalculate={handleCalculate}
-          hasPlan
-          isCalculating={isCalculating}
-        />
-      ) : null}
+      <InputBar
+        cashValue={cashValue}
+        availableCash={availableCash}
+        currency={currency}
+        onCashChange={setCashValue}
+        onCalculate={handleCalculate}
+        hasPlan={!!plan}
+        isCalculating={isCalculating}
+      />
 
       {/* Loading skeletons */}
       {isCalculating && (
@@ -624,17 +595,6 @@ export function RebalanceTab({ profile, driftReport, accountScope }: RebalanceTa
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
-      )}
-
-      {/* Empty state */}
-      {!plan && !isCalculating && (
-        <EmptyState
-          cashValue={cashValue}
-          currency={currency}
-          onCashChange={setCashValue}
-          onCalculate={handleCalculate}
-          isCalculating={isCalculating}
-        />
       )}
 
       {/* Plan result */}

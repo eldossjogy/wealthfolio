@@ -2,7 +2,7 @@ import { useAccounts } from "@/hooks/use-accounts";
 import { useHoldings } from "@/hooks/use-holdings";
 import { usePortfolioAllocations } from "@/hooks/use-portfolio-allocations";
 import { usePortfolios } from "@/hooks/use-portfolios";
-import { isAlternativeAssetKind } from "@/lib/constants";
+import { HoldingType, isAlternativeAssetKind } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
 import type { AccountScope, AllocationTarget, TaxonomyAllocation } from "@/lib/types";
 import { OverviewTab } from "@/pages/allocation-targets/components/overview-tab";
@@ -317,6 +317,11 @@ export function OverviewPage({
           profile={effectiveTarget ?? null}
           driftReport={driftReport ?? null}
           accountScope={accountFilter}
+          availableCash={
+            holdings
+              ?.filter((h) => h.holdingType === HoldingType.CASH)
+              .reduce((sum, h) => sum + (h.marketValue.base ?? 0), 0) ?? 0
+          }
         />
       </div>
     );
