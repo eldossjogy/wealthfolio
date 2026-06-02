@@ -19,6 +19,10 @@ import type {
   SuggestedManualTrade,
   AllocationTarget,
 } from "@/lib/types";
+import {
+  allocationTargetColorForRow,
+  buildAllocationTargetColorMap,
+} from "./allocation-target-colors";
 import { useCalculateRebalancePlan } from "../hooks/use-rebalance";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -40,19 +44,21 @@ function currencySymbol(code: string): string {
 }
 
 function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
-  const newTotal = driftReport.totalValue + plan.cashUsed;
+  // Total value is constant — cash moves within the portfolio, not added from outside.
+  const total = driftReport.totalValue;
+  const colorMap = buildAllocationTargetColorMap(driftReport.rows);
   return driftReport.rows
     .filter((r) => r.status !== "not_targeted")
-    .map((row) => {
+    .map((row, i) => {
       const deployed = plan.trades
         .filter((t) => t.categoryId === row.categoryId)
         .reduce((sum, t) => sum + t.estimatedAmount, 0);
       const afterValue = row.currentValue + deployed;
-      const afterBps = newTotal > 0 ? Math.round((afterValue / newTotal) * 10000) : 0;
+      const afterBps = total > 0 ? Math.round((afterValue / total) * 10000) : 0;
       return {
         categoryId: row.categoryId,
         categoryName: row.categoryName,
-        color: row.color,
+        color: allocationTargetColorForRow(row, colorMap, i),
         currentBps: row.currentBps,
         targetBps: row.targetBps,
         afterBps,
