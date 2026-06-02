@@ -165,20 +165,19 @@ test.describe("Bulk Holdings (Add Existing Holdings)", () => {
 
     await gotoActivities(page);
 
-    // Filter by account. The trigger is a combobox labelled with the current scope
-    // ("All Accounts"); matching on its visible text is reliable since the combobox
-    // role derives no accessible name from its contents.
-    const accountFilter = page.getByRole("combobox").filter({ hasText: "All Accounts" });
-    await accountFilter.click();
+    // Filter by account. The control is a faceted-filter button titled "Account"; its
+    // options render as role="option" inside the popover. It's multi-select, so it stays
+    // open after a pick — Escape to close.
+    await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("option", { name: ACCOUNT_NAME }).first().click();
     await page.keyboard.press("Escape");
 
-    // The trigger now reflects the selected account — proves the filter applied
-    // (and replaces a fixed wait for the table to refetch).
-    await expect(page.getByRole("combobox").filter({ hasText: ACCOUNT_NAME })).toBeVisible();
+    // The faceted trigger keeps the "Account" label, so assert on the observable outcome:
+    // only the selected account's rows remain (this also web-first-waits for the refetch).
+    const rows = page.getByRole("table").getByRole("row");
+    await expect(rows.filter({ hasText: ACCOUNT_NAME })).not.toHaveCount(0);
 
     // All 3 holdings appear in the table, each as a single Transfer In row.
-    const rows = page.getByRole("table").getByRole("row");
     await expect(rows.filter({ hasText: "AAPL" })).toHaveCount(1);
     await expect(rows.filter({ hasText: "MSFT" })).toHaveCount(1);
     await expect(rows.filter({ hasText: "MYASSET" })).toHaveCount(1);
