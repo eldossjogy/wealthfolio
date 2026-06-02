@@ -11,7 +11,7 @@ use crate::portfolio::holdings::HoldingSummary;
 
 use super::drift_service::DriftServiceTrait;
 use super::model::{
-    AllocationTarget, CalculateRebalancePlanInput, RebalanceGoal, RebalancePlan, RebalanceWarning,
+    CalculateRebalancePlanInput, RebalanceGoal, RebalancePlan, RebalanceWarning,
     RebalanceWarningKind, SuggestedManualTrade,
 };
 use super::target_service::AllocationTargetServiceTrait;
