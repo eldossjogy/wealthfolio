@@ -52,8 +52,8 @@ pub struct ResolvedAccountScope {
 - Add explicit return fields:
   - `returns.twr`
   - `returns.annualized_twr`
-  - `returns.irr`
-  - `returns.annualized_irr`
+  - `returns.irr` as selected-period money-weighted return
+  - `returns.annualized_irr` as annualized XIRR
   - `returns.value_return`
 
 ## Phase 1: Scope Engine And Aggregate Retirement
@@ -256,7 +256,7 @@ Checks:
 - Cache invalidates when underlying valuation rows change.
 - Cache invalidates when portfolio membership changes.
 
-## Phase 7: Period XIRR
+## Phase 7: IRR And XIRR
 
 Goal:
 
@@ -265,13 +265,14 @@ Goal:
 Implementation:
 
 - Implement Brent solver only.
-- Name the metric “Period XIRR”.
+- Calculate annualized XIRR and derive selected-period IRR/MWR from it.
 - Cash-flow convention:
   - starting market value is negative anchor flow
   - external inflows are negative flows
   - external outflows are positive flows
   - ending market value is positive terminal flow
-- Expose XIRR alongside TWR and value return.
+- Expose selected-period IRR plus annualized XIRR alongside TWR and value
+  return.
 
 Checks:
 

@@ -343,10 +343,11 @@ export const AccountsSummary = React.memo(
         startDate,
         endDate,
       ],
-      queryFn: () => calculatePerformanceSummaries(performanceScopes, startDate, endDate),
+      queryFn: () =>
+        calculatePerformanceSummaries(performanceScopes, startDate, endDate, "headline"),
       enabled: datesReady && performanceScopes.length > 0,
       staleTime: 30 * 1000,
-      retry: false,
+      retry: 1,
     });
 
     const combinedAccountViews = useMemo((): AccountSummaryDisplayData[] => {

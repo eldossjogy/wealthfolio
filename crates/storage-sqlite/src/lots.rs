@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::assets::AssetDB;
 use crate::db::{get_connection, WriteHandle};
 use crate::errors::StorageError;
+use crate::utils::chunk_for_sqlite;
 use chrono::NaiveDate;
 use log::warn;
 use rust_decimal::Decimal;
@@ -692,6 +693,48 @@ impl LotRepositoryTrait for LotsRepository {
         Ok(rows.into_iter().map(LotDisposal::from).collect())
     }
 
+    async fn get_lot_disposals_for_accounts_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_date_exclusive: NaiveDate,
+        end_date_inclusive: NaiveDate,
+    ) -> Result<Vec<LotDisposal>> {
+        use crate::schema::lot_disposals::dsl;
+
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let start = start_date_exclusive.to_string();
+        let end = end_date_inclusive.to_string();
+        let mut rows = Vec::new();
+
+        for chunk in chunk_for_sqlite(account_ids) {
+            let chunk_rows: Vec<LotDisposalDB> = dsl::lot_disposals
+                .filter(dsl::account_id.eq_any(chunk))
+                .filter(dsl::disposal_date.gt(&start))
+                .filter(dsl::disposal_date.le(&end))
+                .order((
+                    dsl::disposal_date.asc(),
+                    dsl::disposal_activity_id.asc(),
+                    dsl::id.asc(),
+                ))
+                .load(&mut conn)
+                .map_err(StorageError::from)?;
+            rows.extend(chunk_rows);
+        }
+
+        rows.sort_by(|a, b| {
+            a.disposal_date
+                .cmp(&b.disposal_date)
+                .then_with(|| a.disposal_activity_id.cmp(&b.disposal_activity_id))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        Ok(rows.into_iter().map(LotDisposal::from).collect())
+    }
+
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>> {
         // Quantities are stored as TEXT for Decimal precision, so SUM() in
         // SQLite would force a lossy REAL cast. Fetch only the columns we
@@ -1237,6 +1280,100 @@ mod tests {
             created_at: "2024-01-15T00:00:00.000Z".to_string(),
             updated_at: "2024-01-15T00:00:00.000Z".to_string(),
         }
+    }
+
+    fn make_lot_disposal(
+        id: &str,
+        account_id: &str,
+        lot_id: &str,
+        activity_id: &str,
+        disposal_date: &str,
+    ) -> LotDisposal {
+        LotDisposal {
+            id: id.to_string(),
+            lot_id: lot_id.to_string(),
+            account_id: account_id.to_string(),
+            asset_id: "AAPL".to_string(),
+            disposal_activity_id: activity_id.to_string(),
+            disposal_date: disposal_date.to_string(),
+            quantity: "1".to_string(),
+            proceeds: "160".to_string(),
+            cost_basis: "150".to_string(),
+            realized_pnl: "10".to_string(),
+            proceeds_base: "160".to_string(),
+            cost_basis_base: "150".to_string(),
+            realized_pnl_base: "10".to_string(),
+            currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: "1".to_string(),
+            cost_basis_method: "FIFO".to_string(),
+            created_at: "2026-02-01T00:00:00.000Z".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_lot_disposals_for_accounts_in_date_range_filters_period() {
+        let (repo, pool, _dir) = setup().await;
+        insert_account(&pool, "acc1");
+        insert_account(&pool, "acc2");
+        insert_asset(&pool, "AAPL");
+        insert_activity(&pool, "sell-old");
+        insert_activity(&pool, "sell-1");
+        insert_activity(&pool, "sell-2");
+
+        repo.replace_lots_for_account(
+            "acc1",
+            &[
+                make_lot_record("lot-old", "acc1", "AAPL", "1"),
+                make_lot_record("lot-1", "acc1", "AAPL", "1"),
+            ],
+        )
+        .await
+        .unwrap();
+        repo.replace_lots_for_account("acc2", &[make_lot_record("lot-2", "acc2", "AAPL", "1")])
+            .await
+            .unwrap();
+
+        repo.sync_lot_disposals_for_account(
+            "acc1",
+            &[],
+            &[
+                make_lot_disposal("disp-old", "acc1", "lot-old", "sell-old", "2026-01-01"),
+                make_lot_disposal("disp-1", "acc1", "lot-1", "sell-1", "2026-02-01"),
+            ],
+            true,
+        )
+        .await
+        .unwrap();
+        repo.sync_lot_disposals_for_account(
+            "acc2",
+            &[],
+            &[make_lot_disposal(
+                "disp-2",
+                "acc2",
+                "lot-2",
+                "sell-2",
+                "2026-02-15",
+            )],
+            true,
+        )
+        .await
+        .unwrap();
+
+        let disposals = repo
+            .get_lot_disposals_for_accounts_in_date_range(
+                &["acc1".to_string(), "acc2".to_string()],
+                NaiveDate::from_ymd_opt(2026, 1, 31).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 2, 28).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let ids: Vec<&str> = disposals
+            .iter()
+            .map(|disposal| disposal.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["disp-1", "disp-2"]);
     }
 
     #[tokio::test]

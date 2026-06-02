@@ -542,6 +542,10 @@ export function usePortfolioData(accountId?: string) {
 }
 ```
 
+`performanceData.returns.irr` is the selected-period money-weighted return.
+`performanceData.returns.annualizedIrr` is the annualized XIRR on the same dated
+cash flows.
+
 ## 🔐 Security & Permissions
 
 ### Permission Categories

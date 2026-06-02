@@ -175,6 +175,40 @@ impl ValuationRepositoryTrait for ValuationRepository {
             .collect())
     }
 
+    fn get_max_calculated_at_for_accounts(
+        &self,
+        input_account_ids: &[String],
+        start_date_opt: Option<NaiveDate>,
+        end_date_opt: Option<NaiveDate>,
+    ) -> Result<Option<String>> {
+        use diesel::OptionalExtension;
+
+        if input_account_ids.is_empty() {
+            return Ok(None);
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut query = daily_account_valuation::table
+            .filter(account_id.eq_any(input_account_ids))
+            .into_boxed();
+
+        if let Some(start_date_val) = start_date_opt {
+            query = query.filter(valuation_date.ge(start_date_val));
+        }
+
+        if let Some(end_date_val) = end_date_opt {
+            query = query.filter(valuation_date.le(end_date_val));
+        }
+
+        let result: Option<Option<String>> = query
+            .select(diesel::dsl::max(calculated_at))
+            .first::<Option<String>>(&mut conn)
+            .optional()
+            .map_err(StorageError::from)?;
+
+        Ok(result.flatten())
+    }
+
     fn load_latest_valuation_date(&self, input_account_id: &str) -> Result<Option<NaiveDate>> {
         use diesel::OptionalExtension; // Ensure OptionalExtension is in scope
         let mut conn = get_connection(&self.pool)?;

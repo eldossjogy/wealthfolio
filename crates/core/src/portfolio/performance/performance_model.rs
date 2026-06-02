@@ -51,10 +51,20 @@ pub struct PerformancePeriod {
 pub struct PerformanceReturns {
     pub twr: Option<Decimal>,
     pub annualized_twr: Option<Decimal>,
+    /// Selected-period money-weighted return derived from annualized XIRR.
     pub irr: Option<Decimal>,
+    /// Annualized XIRR using dated cash flows.
     pub annualized_irr: Option<Decimal>,
     pub value_return: Option<Decimal>,
     pub annualized_value_return: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PerformanceSummaryProfile {
+    #[default]
+    Full,
+    Headline,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

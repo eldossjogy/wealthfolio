@@ -88,10 +88,11 @@ export function DashboardContent() {
         startDate,
         endDate,
         filter: { type: "all" },
+        profile: "headline",
       }),
     enabled: datesReady,
     staleTime: 30 * 1000,
-    retry: false,
+    retry: 1,
   });
 
   const gainLossAmount = performancePeriodPnl(portfolioPerformance);

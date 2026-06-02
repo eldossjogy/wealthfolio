@@ -480,6 +480,8 @@ to see these APIs in action.
 ## Performance API
 
 Calculate portfolio and account performance metrics with historical analysis.
+`returns.irr` is the selected-period money-weighted return. `returns.annualizedIrr`
+is the annualized XIRR on the same dated cash flows.
 
 ### Methods
 

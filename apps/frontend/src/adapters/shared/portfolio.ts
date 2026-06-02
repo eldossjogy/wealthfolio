@@ -6,6 +6,7 @@ import type {
   IncomeSummary,
   AccountValuation,
   PerformanceSummaryMap,
+  PerformanceSummaryProfile,
   PerformanceSummaryScope,
   PerformanceResult,
   PortfolioAllocations,
@@ -89,6 +90,7 @@ interface CalculatePerformanceSummaryArgs {
   endDate?: string | null;
   trackingMode?: "HOLDINGS" | "TRANSACTIONS";
   filter?: AccountScope;
+  profile?: PerformanceSummaryProfile;
 }
 
 export const calculatePerformanceSummary = async ({
@@ -98,6 +100,7 @@ export const calculatePerformanceSummary = async ({
   endDate,
   trackingMode,
   filter,
+  profile,
 }: CalculatePerformanceSummaryArgs): Promise<PerformanceResult> => {
   const args: Record<string, unknown> = {
     itemType,
@@ -114,6 +117,9 @@ export const calculatePerformanceSummary = async ({
   }
   if (filter) {
     args.filter = filter;
+  }
+  if (profile) {
+    args.profile = profile;
   }
 
   const response = await invoke<PerformanceResult>("calculate_performance_summary", args);
@@ -137,12 +143,17 @@ export const calculatePerformanceSummaries = async (
   scopes: PerformanceSummaryScope[],
   startDate?: string | null,
   endDate?: string | null,
+  profile?: PerformanceSummaryProfile,
 ): Promise<PerformanceSummaryMap> => {
-  return invoke<PerformanceSummaryMap>("get_performance_summaries", {
+  const args: Record<string, unknown> = {
     scopes,
     startDate,
     endDate,
-  });
+  };
+  if (profile) {
+    args.profile = profile;
+  }
+  return invoke<PerformanceSummaryMap>("get_performance_summaries", args);
 };
 
 export const calculateAccountsSimplePerformance = async (

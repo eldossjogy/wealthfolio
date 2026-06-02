@@ -1178,16 +1178,11 @@ impl ValuationServiceTrait for ValuationService {
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
     ) -> CoreResult<Vec<DailyAccountValuation>> {
-        let records = self
+        let max_calculated_at = self
             .valuation_repository
-            .get_historical_valuations_for_accounts(account_ids, start_date_opt, end_date_opt)?;
-
-        let max_calculated_at = records
-            .iter()
-            .map(|valuation| valuation.calculated_at.to_rfc3339())
-            .max()
+            .get_max_calculated_at_for_accounts(account_ids, start_date_opt, end_date_opt)?
             .unwrap_or_default();
-        let cache_key = ScopedValuationCacheKey {
+        let mut cache_key = ScopedValuationCacheKey {
             service_instance_id: self.service_instance_id,
             scope_id: scope_id.to_string(),
             membership_hash: Self::membership_hash(account_ids),
@@ -1205,6 +1200,28 @@ impl ValuationServiceTrait for ValuationService {
             .cloned()
         {
             return Ok(cached);
+        }
+
+        let records = self
+            .valuation_repository
+            .get_historical_valuations_for_accounts(account_ids, start_date_opt, end_date_opt)?;
+
+        let loaded_max_calculated_at = records
+            .iter()
+            .map(|valuation| valuation.calculated_at.to_rfc3339())
+            .max()
+            .unwrap_or_default();
+        if loaded_max_calculated_at != cache_key.max_calculated_at {
+            cache_key.max_calculated_at = loaded_max_calculated_at;
+            if let Some(cached) = self
+                .scoped_history_cache
+                .read()
+                .unwrap()
+                .get(&cache_key)
+                .cloned()
+            {
+                return Ok(cached);
+            }
         }
 
         let mut histories_by_account: HashMap<String, Vec<DailyAccountValuation>> =

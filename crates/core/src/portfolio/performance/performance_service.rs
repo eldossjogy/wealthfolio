@@ -25,7 +25,7 @@ use rust_decimal_macros::dec;
 use super::{
     is_external_transfer, DataQualityStatus, PerformanceAttribution, PerformanceDataQuality,
     PerformancePeriod, PerformanceResult, PerformanceReturns, PerformanceRisk,
-    PerformanceScopeDescriptor, ReturnMethod, SimplePerformanceMetrics,
+    PerformanceScopeDescriptor, PerformanceSummaryProfile, ReturnMethod, SimplePerformanceMetrics,
 };
 use crate::portfolio::valuation::{
     DailyAccountValuation, ExternalFlowSource as ValuationExternalFlowSource,
@@ -59,8 +59,10 @@ pub trait PerformanceServiceTrait: Send + Sync {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
         tracking_mode: Option<TrackingMode>,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult>;
 
+    #[allow(clippy::too_many_arguments)]
     async fn calculate_performance_summary_for_accounts(
         &self,
         scope_id: &str,
@@ -69,6 +71,7 @@ pub trait PerformanceServiceTrait: Send + Sync {
         account_tracking_modes: &HashMap<String, TrackingMode>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult>;
 
     /// Calculates lightweight account performance metrics (cumulative returns and portfolio weights) for multiple accounts.
@@ -89,9 +92,8 @@ pub struct PerformanceService {
     fx_service: Option<Arc<dyn FxServiceTrait>>,
 }
 
-const TRADING_DAYS_PER_YEAR: u32 = 252;
 const DAYS_PER_YEAR_DECIMAL: Decimal = dec!(365.25);
-const SQRT_TRADING_DAYS_APPROX: Decimal = dec!(15.874507866); // sqrt(252)
+const SQRT_DAYS_PER_YEAR_APPROX: Decimal = dec!(19.111514854); // sqrt(365.25)
 
 fn parse_decimal_lossy(value: &str) -> Decimal {
     value.parse::<Decimal>().unwrap_or(Decimal::ZERO)
@@ -120,7 +122,7 @@ struct TwrComputation {
 
 #[derive(Clone, Debug)]
 struct IrrComputation {
-    irr: Option<Decimal>,
+    annualized_irr: Option<Decimal>,
     warnings: Vec<String>,
     not_applicable_reasons: Vec<String>,
 }
@@ -150,6 +152,7 @@ struct ScopedPerformanceRequest<'a> {
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
     include_returns_series: bool,
+    profile: PerformanceSummaryProfile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -220,6 +223,17 @@ impl PerformanceService {
         self.activity_repository = Some(activity_repository);
         self.fx_service = Some(fx_service);
         self
+    }
+
+    fn empty_risk() -> PerformanceRisk {
+        PerformanceRisk {
+            volatility: None,
+            max_drawdown: None,
+            peak_date: None,
+            trough_date: None,
+            recovery_date: None,
+            drawdown_duration_days: None,
+        }
     }
 
     fn today_in_user_timezone(&self) -> NaiveDate {
@@ -493,7 +507,7 @@ impl PerformanceService {
     ) -> IrrComputation {
         if history.len() < 2 {
             return IrrComputation {
-                irr: None,
+                annualized_irr: None,
                 warnings: Vec::new(),
                 not_applicable_reasons: vec![
                     "IRR unavailable: at least two valuation points are required.".to_string(),
@@ -532,7 +546,7 @@ impl PerformanceService {
 
         if cash_flows.len() < 2 {
             return IrrComputation {
-                irr: None,
+                annualized_irr: None,
                 warnings: Vec::new(),
                 not_applicable_reasons: vec![
                     "IRR unavailable: insufficient dated cash flows.".to_string()
@@ -544,7 +558,7 @@ impl PerformanceService {
         let has_negative = cash_flows.iter().any(|(_, amount)| *amount < 0.0);
         if !has_positive || !has_negative {
             return IrrComputation {
-                irr: None,
+                annualized_irr: None,
                 warnings: vec!["IRR unavailable: cash flows do not change sign.".to_string()],
                 not_applicable_reasons: Vec::new(),
             };
@@ -558,7 +572,7 @@ impl PerformanceService {
             let base = 1.0 + rate;
             let mut total = 0.0;
             for (date, amount) in &cash_flows {
-                let years = (*date - origin).num_days() as f64 / 365.0;
+                let years = (*date - origin).num_days() as f64 / 365.25;
                 total += amount / base.powf(years);
             }
             if total.is_finite() {
@@ -574,7 +588,7 @@ impl PerformanceService {
             Some(value) => value,
             None => {
                 return IrrComputation {
-                    irr: None,
+                    annualized_irr: None,
                     warnings: vec![
                         "IRR unavailable: solver could not evaluate cash flows.".to_string()
                     ],
@@ -596,7 +610,7 @@ impl PerformanceService {
 
         if !npv_high.is_finite() || npv_low.signum() == npv_high.signum() {
             return IrrComputation {
-                irr: None,
+                annualized_irr: None,
                 warnings: vec!["IRR unavailable: solver did not converge.".to_string()],
                 not_applicable_reasons: Vec::new(),
             };
@@ -606,14 +620,15 @@ impl PerformanceService {
             let mid = (low + high) / 2.0;
             let Some(npv_mid) = npv(mid) else {
                 return IrrComputation {
-                    irr: None,
+                    annualized_irr: None,
                     warnings: vec!["IRR unavailable: solver did not converge.".to_string()],
                     not_applicable_reasons: Vec::new(),
                 };
             };
             if npv_mid.abs() < 1e-7 || (high - low).abs() < 1e-10 {
                 return IrrComputation {
-                    irr: Decimal::from_f64(mid).map(|value| value.round_dp(DECIMAL_PRECISION)),
+                    annualized_irr: Decimal::from_f64(mid)
+                        .map(|value| value.round_dp(DECIMAL_PRECISION)),
                     warnings: Vec::new(),
                     not_applicable_reasons: Vec::new(),
                 };
@@ -628,7 +643,7 @@ impl PerformanceService {
         }
 
         IrrComputation {
-            irr: None,
+            annualized_irr: None,
             warnings: vec!["IRR unavailable: solver did not converge.".to_string()],
             not_applicable_reasons: Vec::new(),
         }
@@ -736,10 +751,45 @@ impl PerformanceService {
     ) {
         self.apply_activity_attribution_best_effort(result, account_ids, history)
             .await;
-        self.apply_realized_attribution_best_effort(result, account_ids, history)
+        let period_disposals = self
+            .load_period_lot_disposals_best_effort(result, account_ids)
             .await;
-        self.apply_trade_fee_pnl_gross_up_best_effort(result, account_ids, history)
+        self.apply_realized_attribution_best_effort(result, period_disposals.as_deref(), history)
             .await;
+        self.apply_trade_fee_pnl_gross_up_best_effort(
+            result,
+            account_ids,
+            period_disposals.as_deref(),
+            history,
+        )
+        .await;
+    }
+
+    async fn load_period_lot_disposals_best_effort(
+        &self,
+        result: &PerformanceResult,
+        account_ids: &[String],
+    ) -> Option<Vec<LotDisposal>> {
+        let lot_repository = self.lot_repository.as_ref()?;
+        let start_date = result.period.start_date?;
+        let end_date = result.period.end_date?;
+        if account_ids.is_empty() {
+            return Some(Vec::new());
+        }
+
+        match lot_repository
+            .get_lot_disposals_for_accounts_in_date_range(account_ids, start_date, end_date)
+            .await
+        {
+            Ok(disposals) => Some(disposals),
+            Err(e) => {
+                warn!(
+                    "Failed to load lot disposals for performance attribution scope {}: {}",
+                    result.scope.id, e
+                );
+                None
+            }
+        }
     }
 
     async fn apply_scoped_unrealized_attribution_best_effort(
@@ -1171,49 +1221,19 @@ impl PerformanceService {
     async fn apply_realized_attribution_best_effort(
         &self,
         result: &mut PerformanceResult,
-        account_ids: &[String],
+        period_disposals: Option<&[LotDisposal]>,
         history: &[DailyAccountValuation],
     ) {
-        let Some(lot_repository) = &self.lot_repository else {
-            return;
-        };
-        let Some(start_date) = result.period.start_date else {
-            return;
-        };
-        let Some(end_date) = result.period.end_date else {
+        let Some(disposals) = period_disposals else {
             return;
         };
 
         let mut realized_pnl_base = Decimal::ZERO;
         let initial_warning_count = result.data_quality.warnings.len();
-        for account_id in account_ids {
-            let disposals = match lot_repository
-                .get_lot_disposals_for_account(account_id)
-                .await
-            {
-                Ok(disposals) => disposals,
-                Err(e) => {
-                    warn!(
-                        "Failed to load lot disposals for performance attribution account {}: {}",
-                        account_id, e
-                    );
-                    continue;
-                }
-            };
-
-            for disposal in disposals {
-                let Ok(disposal_date) =
-                    NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d")
-                else {
-                    continue;
-                };
-                if disposal_date <= start_date || disposal_date > end_date {
-                    continue;
-                }
-                match Self::realized_pnl_base_from_disposal(&disposal) {
-                    Ok(amount) => realized_pnl_base += amount,
-                    Err(warning) => result.data_quality.warnings.push(warning),
-                }
+        for disposal in disposals {
+            match Self::realized_pnl_base_from_disposal(disposal) {
+                Ok(amount) => realized_pnl_base += amount,
+                Err(warning) => result.data_quality.warnings.push(warning),
             }
         }
 
@@ -1232,12 +1252,16 @@ impl PerformanceService {
         &self,
         result: &mut PerformanceResult,
         account_ids: &[String],
+        period_disposals: Option<&[LotDisposal]>,
         history: &[DailyAccountValuation],
     ) {
         let Some(activity_repository) = &self.activity_repository else {
             return;
         };
         let Some(lot_repository) = &self.lot_repository else {
+            return;
+        };
+        let Some(disposals) = period_disposals else {
             return;
         };
         let Some(start_date) = result.period.start_date else {
@@ -1334,55 +1358,30 @@ impl PerformanceService {
 
         let mut acquisition_fees_disposed = Decimal::ZERO;
         let mut disposal_activity_ids = HashSet::<String>::new();
-        for account_id in account_ids {
-            let disposals = match lot_repository
-                .get_lot_disposals_for_account(account_id)
-                .await
-            {
-                Ok(disposals) => disposals,
-                Err(e) => {
-                    warn!(
-                        "Failed to load lot disposals for trade-fee attribution account {}: {}",
-                        account_id, e
-                    );
-                    continue;
-                }
+        for disposal in disposals {
+            disposal_activity_ids.insert(disposal.disposal_activity_id.clone());
+
+            let Some(lot) =
+                lot_by_account_and_id.get(&(disposal.account_id.clone(), disposal.lot_id.clone()))
+            else {
+                continue;
             };
-
-            for disposal in disposals {
-                let Ok(disposal_date) =
-                    NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d")
-                else {
-                    continue;
-                };
-                if disposal_date <= start_date || disposal_date > end_date {
-                    continue;
-                }
-
-                disposal_activity_ids.insert(disposal.disposal_activity_id.clone());
-
-                let Some(lot) =
-                    lot_by_account_and_id.get(&(account_id.clone(), disposal.lot_id.clone()))
-                else {
-                    continue;
-                };
-                let Ok(open_date) = NaiveDate::parse_from_str(&lot.open_date, "%Y-%m-%d") else {
-                    continue;
-                };
-                if open_date <= start_date || open_date > end_date {
-                    continue;
-                }
-
-                let original_cost_basis_base = parse_decimal_lossy(&lot.original_cost_basis_base);
-                let fee_allocated_base = parse_decimal_lossy(&lot.fee_allocated_base);
-                let disposal_cost_basis_base = parse_decimal_lossy(&disposal.cost_basis_base);
-                if original_cost_basis_base <= Decimal::ZERO || fee_allocated_base.is_zero() {
-                    continue;
-                }
-
-                acquisition_fees_disposed +=
-                    disposal_cost_basis_base * fee_allocated_base / original_cost_basis_base;
+            let Ok(open_date) = NaiveDate::parse_from_str(&lot.open_date, "%Y-%m-%d") else {
+                continue;
+            };
+            if open_date <= start_date || open_date > end_date {
+                continue;
             }
+
+            let original_cost_basis_base = parse_decimal_lossy(&lot.original_cost_basis_base);
+            let fee_allocated_base = parse_decimal_lossy(&lot.fee_allocated_base);
+            let disposal_cost_basis_base = parse_decimal_lossy(&disposal.cost_basis_base);
+            if original_cost_basis_base <= Decimal::ZERO || fee_allocated_base.is_zero() {
+                continue;
+            }
+
+            acquisition_fees_disposed +=
+                disposal_cost_basis_base * fee_allocated_base / original_cost_basis_base;
         }
 
         let period_buy_fees = buy_fee_by_activity
@@ -1660,15 +1659,15 @@ impl PerformanceService {
         Ok(metrics)
     }
 
-    /// Summary account performance calculation (no `returns[]`, no risk
-    /// metrics). Used by the dashboard card. Shares the same TWR/IRR chain as
-    /// the full path so percentages match the account-detail page.
+    /// Summary account performance calculation. `Full` keeps the rich scalar
+    /// metrics; `Headline` keeps dashboard-visible return/P&L fields only.
     async fn calculate_account_performance_summary(
         &self,
         account_id: &str,
         start_date_opt: Option<NaiveDate>,
         end_date_opt: Option<NaiveDate>,
         tracking_mode: Option<TrackingMode>,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         if let (Some(start), Some(end)) = (start_date_opt, end_date_opt) {
             if start > end {
@@ -1711,8 +1710,14 @@ impl PerformanceService {
             ));
         }
 
-        let mut metrics =
-            Self::compute_account_performance(&full_history, tracking_mode, start_date_opt, false)?;
+        let mut metrics = Self::compute_account_performance_with_flow_basis(
+            &full_history,
+            tracking_mode,
+            start_date_opt,
+            false,
+            ExternalFlowBasis::BaseCurrency,
+            profile,
+        )?;
         metrics.scope.id = account_id.to_string();
         self.apply_external_attribution_best_effort(
             &mut metrics,
@@ -1735,6 +1740,7 @@ impl PerformanceService {
             start_date: start_date_opt,
             end_date: end_date_opt,
             include_returns_series,
+            profile,
         } = request;
 
         if let (Some(start), Some(end)) = (start_date_opt, end_date_opt) {
@@ -1809,6 +1815,7 @@ impl PerformanceService {
                     Some(TrackingMode::Transactions),
                     start_date_opt,
                     include_returns_series,
+                    profile,
                 )?
             }
             ScopedTrackingComposition::HoldingsOnly => Self::compute_scoped_account_performance(
@@ -1816,10 +1823,13 @@ impl PerformanceService {
                 Some(TrackingMode::Holdings),
                 start_date_opt,
                 include_returns_series,
+                profile,
             )?,
-            ScopedTrackingComposition::Mixed => {
-                Self::compute_mixed_scope_performance(&full_history, include_returns_series)?
-            }
+            ScopedTrackingComposition::Mixed => Self::compute_mixed_scope_performance_with_profile(
+                &full_history,
+                include_returns_series,
+                profile,
+            )?,
         };
 
         metrics.scope.id = scope_id.to_string();
@@ -1870,9 +1880,7 @@ impl PerformanceService {
     /// both call sites need.
     ///
     /// * `include_returns_series` — when `true`, populates `returns[]` with a
-    ///   per-day cumulative TWR and computes volatility/max-drawdown. The full
-    ///   path sets this; the summary doesn't to save allocation on dashboards
-    ///   with many accounts.
+    ///   per-day cumulative TWR.
     ///
     /// `id` is left empty — callers set it after.
     ///
@@ -1891,6 +1899,7 @@ impl PerformanceService {
             start_date_opt,
             include_returns_series,
             ExternalFlowBasis::BaseCurrency,
+            PerformanceSummaryProfile::Full,
         )
     }
 
@@ -1899,6 +1908,7 @@ impl PerformanceService {
         tracking_mode: Option<TrackingMode>,
         start_date_opt: Option<NaiveDate>,
         include_returns_series: bool,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         Self::compute_account_performance_with_flow_basis(
             full_history,
@@ -1906,6 +1916,7 @@ impl PerformanceService {
             start_date_opt,
             include_returns_series,
             ExternalFlowBasis::BaseCurrency,
+            profile,
         )
     }
 
@@ -1915,6 +1926,7 @@ impl PerformanceService {
         start_date_opt: Option<NaiveDate>,
         include_returns_series: bool,
         flow_basis: ExternalFlowBasis,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         debug_assert!(full_history.len() >= 2);
 
@@ -1927,6 +1939,9 @@ impl PerformanceService {
             ExternalFlowBasis::BaseCurrency => start_point.base_currency.clone(),
         };
         let is_holdings_mode = matches!(tracking_mode, Some(TrackingMode::Holdings));
+        let include_irr = profile == PerformanceSummaryProfile::Full;
+        let include_risk = profile == PerformanceSummaryProfile::Full;
+        let include_annualized_returns = profile == PerformanceSummaryProfile::Full;
 
         let start_value = Self::return_total_value(start_point, flow_basis);
         let end_value = Self::return_total_value(end_point, flow_basis);
@@ -1944,16 +1959,22 @@ impl PerformanceService {
         } else {
             Self::compute_time_weighted_returns(full_history, &daily_flows, flow_basis)?
         };
-        let irr = if is_holdings_mode {
+        let irr = if is_holdings_mode && include_irr {
             IrrComputation {
-                irr: None,
+                annualized_irr: None,
                 warnings: Vec::new(),
                 not_applicable_reasons: vec![
                     "IRR unavailable for holdings-only scopes because transaction cash flows are not tracked.".to_string(),
                 ],
             }
-        } else {
+        } else if include_irr {
             Self::calculate_xirr(full_history, &daily_flows, flow_basis)
+        } else {
+            IrrComputation {
+                annualized_irr: None,
+                warnings: Vec::new(),
+                not_applicable_reasons: Vec::new(),
+            }
         };
 
         let mut risk_samples = Vec::new();
@@ -1965,7 +1986,7 @@ impl PerformanceService {
             });
         }
 
-        if is_holdings_mode {
+        if is_holdings_mode && (include_risk || include_returns_series) {
             let mut cumulative_value_factor = Decimal::ONE;
             for (index, window) in full_history.windows(2).enumerate() {
                 let prev = &window[0];
@@ -1977,10 +1998,12 @@ impl PerformanceService {
                 if prev_value > Decimal::ZERO {
                     let daily_return = day_gain / prev_value;
                     cumulative_value_factor *= Decimal::ONE + daily_return;
-                    risk_samples.push(RiskSample {
-                        date: curr.valuation_date,
-                        simple_return: daily_return,
-                    });
+                    if include_risk {
+                        risk_samples.push(RiskSample {
+                            date: curr.valuation_date,
+                            simple_return: daily_return,
+                        });
+                    }
                     if include_returns_series {
                         series.push(ReturnData {
                             date: curr.valuation_date,
@@ -1995,9 +2018,9 @@ impl PerformanceService {
                     });
                 }
             }
-        } else {
+        } else if !is_holdings_mode {
             for (date, sample) in &twr.samples {
-                if !sample.excluded_from_compounding {
+                if include_risk && !sample.excluded_from_compounding {
                     risk_samples.push(RiskSample {
                         date: *date,
                         simple_return: sample.twr,
@@ -2012,7 +2035,11 @@ impl PerformanceService {
             }
         }
 
-        let risk = Self::risk_from_samples(&risk_samples, Some(actual_start_date));
+        let risk = if include_risk {
+            Self::risk_from_samples(&risk_samples, Some(actual_start_date))
+        } else {
+            Self::empty_risk()
+        };
 
         let (mode, value_return, value_return_not_applicable_reason) = if is_holdings_mode {
             let (_pnl_change, ret) = Self::compute_holdings_value_return(
@@ -2084,11 +2111,6 @@ impl PerformanceService {
                 residual_threshold.round_dp(DECIMAL_PRECISION)
             ));
         }
-        if risk.volatility.is_some() {
-            warnings
-                .push("Volatility is annualized with equity-style sqrt(252) scaling.".to_string());
-        }
-
         let mut not_applicable_reasons = twr.not_applicable_reasons;
         not_applicable_reasons.extend(irr.not_applicable_reasons);
         if let Some(reason) = value_return_not_applicable_reason {
@@ -2105,19 +2127,35 @@ impl PerformanceService {
                 twr: twr
                     .cumulative_twr
                     .map(|value| value.round_dp(DECIMAL_PRECISION)),
-                annualized_twr: Self::annualize_optional_return(
+                annualized_twr: if include_annualized_returns {
+                    Self::annualize_optional_return(
+                        actual_start_date,
+                        actual_end_date,
+                        twr.cumulative_twr,
+                    )
+                } else {
+                    None
+                },
+                irr: Self::period_return_from_annualized_optional(
                     actual_start_date,
                     actual_end_date,
-                    twr.cumulative_twr,
+                    irr.annualized_irr,
                 ),
-                irr: irr.irr,
-                annualized_irr: irr.irr,
+                annualized_irr: if include_annualized_returns {
+                    irr.annualized_irr
+                } else {
+                    None
+                },
                 value_return: value_return.map(|value| value.round_dp(DECIMAL_PRECISION)),
-                annualized_value_return: Self::annualize_optional_return(
-                    actual_start_date,
-                    actual_end_date,
-                    value_return,
-                ),
+                annualized_value_return: if include_annualized_returns {
+                    Self::annualize_optional_return(
+                        actual_start_date,
+                        actual_end_date,
+                        value_return,
+                    )
+                } else {
+                    None
+                },
             },
             attribution,
             risk,
@@ -2128,9 +2166,22 @@ impl PerformanceService {
         ))
     }
 
+    #[cfg(test)]
     fn compute_mixed_scope_performance(
         full_history: &[DailyAccountValuation],
         include_returns_series: bool,
+    ) -> Result<PerformanceResult> {
+        Self::compute_mixed_scope_performance_with_profile(
+            full_history,
+            include_returns_series,
+            PerformanceSummaryProfile::Full,
+        )
+    }
+
+    fn compute_mixed_scope_performance_with_profile(
+        full_history: &[DailyAccountValuation],
+        include_returns_series: bool,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         debug_assert!(full_history.len() >= 2);
 
@@ -2145,6 +2196,8 @@ impl PerformanceService {
         let daily_flows = Self::daily_external_flow_series(full_history, flow_basis);
         let net_cash_flow: Decimal = daily_flows.iter().map(|flow| flow.net()).sum();
         let gain_loss_amount = end_value - start_value - net_cash_flow;
+        let include_risk = profile == PerformanceSummaryProfile::Full;
+        let include_annualized_returns = profile == PerformanceSummaryProfile::Full;
         let value_return = if start_value > Decimal::ZERO {
             Some(gain_loss_amount / start_value)
         } else {
@@ -2170,43 +2223,45 @@ impl PerformanceService {
             });
         }
 
-        let mut cumulative_external_flow = Decimal::ZERO;
-        for (window, flow) in full_history.windows(2).zip(daily_flows.iter()) {
-            let prev_point = &window[0];
-            let curr_point = &window[1];
-            let prev_value = Self::return_total_value(prev_point, flow_basis);
-            let curr_value = Self::return_total_value(curr_point, flow_basis);
-            if prev_value.is_sign_negative() || curr_value.is_sign_negative() {
-                return Err(errors::Error::Validation(ValidationError::InvalidInput(
-                    "Account scope has negative portfolio value in its history. Please review the underlying transactions and holdings.".to_string(),
-                )));
-            }
+        if include_risk || include_returns_series {
+            let mut cumulative_external_flow = Decimal::ZERO;
+            for (window, flow) in full_history.windows(2).zip(daily_flows.iter()) {
+                let prev_point = &window[0];
+                let curr_point = &window[1];
+                let prev_value = Self::return_total_value(prev_point, flow_basis);
+                let curr_value = Self::return_total_value(curr_point, flow_basis);
+                if prev_value.is_sign_negative() || curr_value.is_sign_negative() {
+                    return Err(errors::Error::Validation(ValidationError::InvalidInput(
+                        "Account scope has negative portfolio value in its history. Please review the underlying transactions and holdings.".to_string(),
+                    )));
+                }
 
-            cumulative_external_flow += flow.net();
-            let cumulative_return = if start_value > Decimal::ZERO {
-                let cumulative_gain = curr_value - start_value - cumulative_external_flow;
-                Some(cumulative_gain / start_value)
-            } else {
-                None
-            };
-
-            let day_gain = curr_value + flow.outflow - prev_value - flow.inflow;
-            if prev_value > Decimal::ZERO {
-                let daily_return = day_gain / prev_value;
-                risk_samples.push(RiskSample {
-                    date: curr_point.valuation_date,
-                    simple_return: daily_return,
-                });
-            }
-
-            if include_returns_series {
-                let Some(cumulative_return) = cumulative_return else {
-                    continue;
+                cumulative_external_flow += flow.net();
+                let cumulative_return = if start_value > Decimal::ZERO {
+                    let cumulative_gain = curr_value - start_value - cumulative_external_flow;
+                    Some(cumulative_gain / start_value)
+                } else {
+                    None
                 };
-                returns.push(ReturnData {
-                    date: curr_point.valuation_date,
-                    value: cumulative_return.round_dp(DECIMAL_PRECISION),
-                });
+
+                let day_gain = curr_value + flow.outflow - prev_value - flow.inflow;
+                if include_risk && prev_value > Decimal::ZERO {
+                    let daily_return = day_gain / prev_value;
+                    risk_samples.push(RiskSample {
+                        date: curr_point.valuation_date,
+                        simple_return: daily_return,
+                    });
+                }
+
+                if include_returns_series {
+                    let Some(cumulative_return) = cumulative_return else {
+                        continue;
+                    };
+                    returns.push(ReturnData {
+                        date: curr_point.valuation_date,
+                        value: cumulative_return.round_dp(DECIMAL_PRECISION),
+                    });
+                }
             }
         }
 
@@ -2229,19 +2284,23 @@ impl PerformanceService {
                 + attribution.fx_effect
                 - attribution.fees
                 - attribution.taxes);
-        let risk = Self::risk_from_samples(&risk_samples, Some(actual_start_date));
-        let mut warnings = vec![
-            "This scope mixes transaction-mode and holdings-mode accounts, so TWR and IRR are unavailable. The return is a value return over the selected scope.".to_string(),
-        ];
+        let risk = if include_risk {
+            Self::risk_from_samples(&risk_samples, Some(actual_start_date))
+        } else {
+            Self::empty_risk()
+        };
+        let mut warnings = vec![if profile == PerformanceSummaryProfile::Full {
+            "This scope mixes transaction-mode and holdings-mode accounts, so TWR and IRR are unavailable. The return is a value return over the selected scope.".to_string()
+        } else {
+            "This scope mixes transaction-mode and holdings-mode accounts, so TWR is unavailable. The return is a value return over the selected scope.".to_string()
+        }];
         warnings.extend(Self::external_flow_quality_warnings(&daily_flows));
-        if risk.volatility.is_some() {
-            warnings
-                .push("Volatility is annualized with equity-style sqrt(252) scaling.".to_string());
+        let mut not_applicable_reasons =
+            vec!["TWR unavailable for mixed transaction and holdings scopes.".to_string()];
+        if profile == PerformanceSummaryProfile::Full {
+            not_applicable_reasons
+                .push("IRR unavailable for mixed transaction and holdings scopes.".to_string());
         }
-        let mut not_applicable_reasons = vec![
-            "TWR unavailable for mixed transaction and holdings scopes.".to_string(),
-            "IRR unavailable for mixed transaction and holdings scopes.".to_string(),
-        ];
         if value_return.is_none() {
             not_applicable_reasons.push(
                 "Value return unavailable for mixed scope because starting value is zero or negative."
@@ -2261,11 +2320,15 @@ impl PerformanceService {
                 irr: None,
                 annualized_irr: None,
                 value_return: value_return.map(|value| value.round_dp(DECIMAL_PRECISION)),
-                annualized_value_return: Self::annualize_optional_return(
-                    actual_start_date,
-                    actual_end_date,
-                    value_return,
-                ),
+                annualized_value_return: if include_annualized_returns {
+                    Self::annualize_optional_return(
+                        actual_start_date,
+                        actual_end_date,
+                        value_return,
+                    )
+                } else {
+                    None
+                },
             },
             attribution,
             risk,
@@ -2426,10 +2489,7 @@ impl PerformanceService {
             PerformanceAttribution::default(),
             Self::risk_from_samples(&risk_samples, Some(actual_start_date)),
             Self::data_quality(
-                vec![
-                    "Symbol-only performance uses price quotes only; dividends and distributions are excluded unless the quote series is total-return adjusted.".to_string(),
-                    "Volatility is annualized with equity-style sqrt(252) scaling and uses quoted market-movement days only.".to_string(),
-                ],
+                vec!["Symbol-only performance uses price quotes only; dividends and distributions are excluded unless the quote series is total-return adjusted.".to_string()],
                 vec![
                     "TWR unavailable for symbol-only price performance because there is no portfolio cash-flow scope.".to_string(),
                     "IRR unavailable for symbol-only price performance because there are no user cash flows.".to_string(),
@@ -2563,6 +2623,46 @@ impl PerformanceService {
         base.powd(exponent) - Decimal::ONE
     }
 
+    fn period_return_from_annualized_optional(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        annualized_return: Option<Decimal>,
+    ) -> Option<Decimal> {
+        annualized_return.map(|value| {
+            Self::calculate_period_return_from_annualized(start_date, end_date, value)
+                .round_dp(DECIMAL_PRECISION)
+        })
+    }
+
+    fn calculate_period_return_from_annualized(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        annualized_return: Decimal,
+    ) -> Decimal {
+        if start_date > end_date {
+            return Decimal::ZERO;
+        }
+
+        if annualized_return <= dec!(-1.0) {
+            return dec!(-1.0);
+        }
+
+        let days = (end_date - start_date).num_days();
+
+        if days <= 0 {
+            return annualized_return;
+        }
+
+        let years = Decimal::from(days) / DAYS_PER_YEAR_DECIMAL;
+        let base = Decimal::ONE + annualized_return;
+
+        if base <= Decimal::ZERO {
+            return dec!(-1.0);
+        }
+
+        base.powd(years) - Decimal::ONE
+    }
+
     fn calculate_volatility(daily_returns: &[Decimal]) -> Option<Decimal> {
         if daily_returns.len() < 2 {
             return None;
@@ -2604,9 +2704,9 @@ impl PerformanceService {
 
         let daily_volatility = variance.sqrt().unwrap_or(Decimal::ZERO);
 
-        let annualization_factor = Decimal::from(TRADING_DAYS_PER_YEAR)
+        let annualization_factor = DAYS_PER_YEAR_DECIMAL
             .sqrt()
-            .unwrap_or(SQRT_TRADING_DAYS_APPROX);
+            .unwrap_or(SQRT_DAYS_PER_YEAR_APPROX);
 
         Some((daily_volatility * annualization_factor).round_dp(DECIMAL_PRECISION))
     }
@@ -2756,12 +2856,13 @@ impl PerformanceServiceTrait for PerformanceService {
             start_date,
             end_date,
             include_returns_series: true,
+            profile: PerformanceSummaryProfile::Full,
         })
         .await
     }
 
-    /// Calculates summary performance metrics only (no returns array, vol, maxDD)
-    /// Currently only implemented for item_type = "account"
+    /// Calculates summary performance metrics. The `Headline` profile is used by
+    /// dashboard cards to avoid unused IRR/risk work.
     async fn calculate_performance_summary(
         &self,
         item_type: &str,
@@ -2769,6 +2870,7 @@ impl PerformanceServiceTrait for PerformanceService {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
         tracking_mode: Option<TrackingMode>,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         match item_type {
             "account" => {
@@ -2777,6 +2879,7 @@ impl PerformanceServiceTrait for PerformanceService {
                     start_date,
                     end_date,
                     tracking_mode,
+                    profile,
                 )
                 .await
             }
@@ -2790,6 +2893,7 @@ impl PerformanceServiceTrait for PerformanceService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn calculate_performance_summary_for_accounts(
         &self,
         scope_id: &str,
@@ -2798,6 +2902,7 @@ impl PerformanceServiceTrait for PerformanceService {
         account_tracking_modes: &HashMap<String, TrackingMode>,
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
+        profile: PerformanceSummaryProfile,
     ) -> Result<PerformanceResult> {
         self.calculate_scoped_performance(ScopedPerformanceRequest {
             scope_id,
@@ -2807,6 +2912,7 @@ impl PerformanceServiceTrait for PerformanceService {
             start_date,
             end_date,
             include_returns_series: false,
+            profile,
         })
         .await
     }
@@ -4580,6 +4686,15 @@ mod tests {
             false,
         )
         .expect("summary should compute");
+        let headline = PerformanceService::compute_account_performance_with_flow_basis(
+            &history,
+            Some(TrackingMode::Transactions),
+            start,
+            false,
+            ExternalFlowBasis::BaseCurrency,
+            PerformanceSummaryProfile::Headline,
+        )
+        .expect("headline should compute");
 
         // Headline percentage must match exactly — that's the user-visible
         // invariant. Everything else (returns series, risk metrics) is summary
@@ -4588,8 +4703,11 @@ mod tests {
         assert_eq!(full.mode, ReturnMethod::TimeWeighted);
         assert_eq!(summary.mode, ReturnMethod::TimeWeighted);
         assert_eq!(full.returns.twr, summary.returns.twr);
+        assert_eq!(full.returns.twr, headline.returns.twr);
         assert_eq!(attribution_pnl(&full), attribution_pnl(&summary));
+        assert_eq!(attribution_pnl(&full), attribution_pnl(&headline));
         assert_eq!(full.returns.value_return, summary.returns.value_return);
+        assert_eq!(full.returns.value_return, headline.returns.value_return);
 
         // Differentiation: full path populates returns[] and risk metrics;
         // summary stays empty/zero to save allocation on the dashboard.
@@ -4597,6 +4715,9 @@ mod tests {
         assert!(summary.series.is_empty());
         assert!(full.risk.volatility.unwrap() > Decimal::ZERO);
         assert!(summary.risk.volatility.is_some());
+        assert!(headline.returns.irr.is_none());
+        assert!(headline.returns.annualized_twr.is_none());
+        assert!(headline.risk.volatility.is_none());
     }
 
     /// Well-formed account (`start_value == net_contribution`) stays sane —
@@ -4881,6 +5002,37 @@ mod tests {
     }
 
     #[test]
+    fn account_performance_reports_period_irr_and_annualized_xirr() {
+        let history = vec![
+            valuation("2026-01-01", dec!(100), dec!(100), dec!(100), dec!(100)),
+            valuation("2026-07-02", dec!(110), dec!(100), dec!(110), dec!(100)),
+        ];
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            true,
+        )
+        .expect("performance should compute");
+
+        let irr = result.returns.irr.expect("period IRR should be present");
+        let annualized_irr = result
+            .returns
+            .annualized_irr
+            .expect("annualized XIRR should be present");
+        let expected_annualized = PerformanceService::calculate_annualized_return(
+            date("2026-01-01"),
+            date("2026-07-02"),
+            dec!(0.1),
+        );
+
+        assert_eq!(irr.round_dp(4), dec!(0.1));
+        assert_eq!(annualized_irr.round_dp(4), expected_annualized.round_dp(4));
+        assert!(annualized_irr > irr);
+    }
+
+    #[test]
     fn realized_pnl_attribution_warns_when_acquisition_fx_is_missing() {
         let disposal = lot_disposal("USD", "CAD", "1.1", "100", "0", "0");
 
@@ -4930,7 +5082,7 @@ mod tests {
             ExternalFlowBasis::BaseCurrency,
         );
 
-        assert!(irr.irr.is_none());
+        assert!(irr.annualized_irr.is_none());
         assert!(irr
             .warnings
             .iter()
@@ -4960,7 +5112,7 @@ mod tests {
             ExternalFlowBasis::BaseCurrency,
         );
 
-        assert!(irr.irr.is_none());
+        assert!(irr.annualized_irr.is_none());
         assert!(irr
             .warnings
             .iter()
@@ -5487,6 +5639,13 @@ mod tests {
     }
 
     #[test]
+    fn volatility_annualizes_calendar_daily_returns() {
+        let volatility = PerformanceService::calculate_volatility(&[dec!(0), dec!(0.1)]);
+
+        assert_eq!(volatility, Some(dec!(1.2880105)));
+    }
+
+    #[test]
     fn account_performance_keeps_zero_return_days_for_risk() {
         let history = vec![
             valuation("2026-05-01", dec!(100), dec!(100), dec!(100), dec!(100)),
@@ -5504,5 +5663,29 @@ mod tests {
 
         assert_eq!(result.risk.volatility, Some(Decimal::ZERO));
         assert_eq!(result.risk.max_drawdown, Some(Decimal::ZERO));
+    }
+
+    #[test]
+    fn volatility_methodology_note_is_not_a_data_quality_warning() {
+        let mut history = vec![
+            valuation("2026-05-01", dec!(100), dec!(100), dec!(100), dec!(100)),
+            valuation("2026-05-02", dec!(100), dec!(100), dec!(100), dec!(100)),
+            valuation("2026-05-03", dec!(100), dec!(100), dec!(100), dec!(100)),
+        ];
+        for point in &mut history {
+            point.external_flow_source = ExternalFlowSource::ActivityDerived;
+        }
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            true,
+        )
+        .expect("performance should compute");
+
+        assert!(result.risk.volatility.is_some());
+        assert!(result.data_quality.warnings.is_empty());
+        assert_eq!(result.data_quality.status, DataQualityStatus::Ok);
     }
 }

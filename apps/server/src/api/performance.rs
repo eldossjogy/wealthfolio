@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{error::ApiResult, main_lib::AppState};
 use axum::{
@@ -7,13 +10,15 @@ use axum::{
     Json, Router,
 };
 use wealthfolio_core::{
-    accounts::{account_supports_purpose, AccountPurpose, AccountServiceTrait, TrackingMode},
+    accounts::{
+        account_supports_purpose, Account, AccountPurpose, AccountServiceTrait, TrackingMode,
+    },
     portfolio::{
         income::IncomeSummary,
         performance::{
             DataQualityStatus, PerformanceAttribution, PerformanceDataQuality, PerformancePeriod,
             PerformanceResult, PerformanceReturns, PerformanceRisk, PerformanceScopeDescriptor,
-            ReturnMethod, SimplePerformanceMetrics,
+            PerformanceSummaryProfile, ReturnMethod, SimplePerformanceMetrics,
         },
     },
     portfolios::AccountScope,
@@ -66,6 +71,7 @@ struct PerfBody {
     #[serde(rename = "trackingMode")]
     tracking_mode: Option<String>,
     filter: Option<AccountScope>,
+    profile: Option<PerformanceSummaryProfile>,
 }
 
 #[derive(serde::Deserialize)]
@@ -81,6 +87,7 @@ struct PerformanceSummariesBody {
     start_date: Option<String>,
     #[serde(rename = "endDate")]
     end_date: Option<String>,
+    profile: Option<PerformanceSummaryProfile>,
 }
 
 fn performance_summary_scope_key(account_ids: &[String]) -> String {
@@ -158,18 +165,6 @@ fn empty_performance_metrics(
     }
 }
 
-fn account_tracking_modes(
-    state: &AppState,
-    account_ids: &[String],
-) -> Result<HashMap<String, TrackingMode>, crate::error::ApiError> {
-    Ok(state
-        .account_service
-        .get_accounts_by_ids(account_ids)?
-        .into_iter()
-        .map(|account| (account.id, account.tracking_mode))
-        .collect())
-}
-
 fn performance_account_ids(
     state: &AppState,
     account_ids: &[String],
@@ -187,6 +182,63 @@ fn performance_account_ids(
         .collect())
 }
 
+fn unique_account_ids(account_ids: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    account_ids
+        .into_iter()
+        .filter(|account_id| seen.insert(account_id.clone()))
+        .collect()
+}
+
+fn performance_accounts_by_id(
+    state: &AppState,
+    account_ids: &[String],
+) -> Result<HashMap<String, Account>, crate::error::ApiError> {
+    Ok(state
+        .account_service
+        .get_accounts_by_ids(account_ids)?
+        .into_iter()
+        .map(|account| (account.id.clone(), account))
+        .collect())
+}
+
+fn performance_account_ids_from_map(
+    accounts_by_id: &HashMap<String, Account>,
+    account_ids: &[String],
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    account_ids
+        .iter()
+        .filter_map(|account_id| accounts_by_id.get(account_id))
+        .filter(|account| {
+            account.is_active
+                && !account.is_archived
+                && account_supports_purpose(&account.account_type, AccountPurpose::Performance)
+        })
+        .filter_map(|account| {
+            if seen.insert(account.id.clone()) {
+                Some(account.id.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn account_tracking_modes_from_map(
+    accounts_by_id: &HashMap<String, Account>,
+    account_ids: &[String],
+) -> HashMap<String, TrackingMode> {
+    account_ids
+        .iter()
+        .filter_map(|account_id| {
+            accounts_by_id
+                .get(account_id)
+                .map(|account| (account.id.clone(), account.tracking_mode))
+        })
+        .collect()
+}
+
 async fn calculate_performance_history(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PerfBody>,
@@ -201,7 +253,8 @@ async fn calculate_performance_history(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        let accounts_by_id = performance_accounts_by_id(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids_from_map(&accounts_by_id, &resolved.account_ids);
         if account_ids.is_empty() {
             let mut result = empty_performance_metrics(
                 &resolved.scope_id,
@@ -217,7 +270,7 @@ async fn calculate_performance_history(
             }
             return Ok(Json(result));
         }
-        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
+        let tracking_modes = account_tracking_modes_from_map(&accounts_by_id, &account_ids);
         let mut result = state
             .performance_service
             .calculate_performance_history_for_accounts(
@@ -276,6 +329,7 @@ async fn calculate_performance_summary(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let tracking_mode = parse_tracking_mode(body.tracking_mode);
+    let profile = body.profile.unwrap_or_default();
     let metrics = if let (true, Some(filter)) = (body.item_type == "account", body.filter.as_ref())
     {
         let base = state.base_currency.read().unwrap().clone();
@@ -283,7 +337,8 @@ async fn calculate_performance_summary(
             .portfolio_service
             .resolve_account_scope(filter, &base)
             .map_err(crate::error::ApiError::from)?;
-        let account_ids = performance_account_ids(&state, &resolved.account_ids)?;
+        let accounts_by_id = performance_accounts_by_id(&state, &resolved.account_ids)?;
+        let account_ids = performance_account_ids_from_map(&accounts_by_id, &resolved.account_ids);
         if account_ids.is_empty() {
             let mut result = empty_performance_metrics(
                 &resolved.scope_id,
@@ -299,7 +354,7 @@ async fn calculate_performance_summary(
             }
             return Ok(Json(result));
         }
-        let tracking_modes = account_tracking_modes(&state, &account_ids)?;
+        let tracking_modes = account_tracking_modes_from_map(&accounts_by_id, &account_ids);
         let mut result = state
             .performance_service
             .calculate_performance_summary_for_accounts(
@@ -309,6 +364,7 @@ async fn calculate_performance_summary(
                 &tracking_modes,
                 start,
                 end,
+                profile,
             )
             .await?;
         if account_ids.len() != resolved.account_ids.len() {
@@ -345,6 +401,7 @@ async fn calculate_performance_summary(
                 start,
                 end,
                 authoritative_tracking_mode,
+                profile,
             )
             .await?
     };
@@ -358,11 +415,18 @@ async fn get_performance_summaries(
     let start = parse_date_optional(body.start_date, "startDate")?;
     let end = parse_date_optional(body.end_date, "endDate")?;
     let base = state.base_currency.read().unwrap().clone();
+    let profile = body.profile.unwrap_or_default();
+    let requested_account_ids = unique_account_ids(
+        body.scopes
+            .iter()
+            .flat_map(|scope| scope.account_ids.iter().cloned()),
+    );
+    let accounts_by_id = performance_accounts_by_id(&state, &requested_account_ids)?;
     let mut results = HashMap::new();
 
     for scope in body.scopes {
         let key = performance_summary_scope_key(&scope.account_ids);
-        let account_ids = performance_account_ids(&state, &scope.account_ids)?;
+        let account_ids = performance_account_ids_from_map(&accounts_by_id, &scope.account_ids);
 
         if account_ids.is_empty() {
             let mut result = empty_performance_metrics(&key, base.clone(), start, end);
@@ -382,9 +446,10 @@ async fn get_performance_summaries(
                 &key,
                 &account_ids,
                 &base,
-                &account_tracking_modes(&state, &account_ids)?,
+                &account_tracking_modes_from_map(&accounts_by_id, &account_ids),
                 start,
                 end,
+                profile,
             )
             .await?;
 

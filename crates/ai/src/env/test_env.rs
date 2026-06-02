@@ -40,7 +40,7 @@ use wealthfolio_core::{
     portfolio::performance::{
         DataQualityStatus, PerformanceAttribution, PerformanceDataQuality, PerformancePeriod,
         PerformanceResult, PerformanceReturns, PerformanceRisk, PerformanceScopeDescriptor,
-        PerformanceServiceTrait, ReturnMethod,
+        PerformanceServiceTrait, PerformanceSummaryProfile, ReturnMethod,
     },
     quotes::{
         LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
@@ -1222,6 +1222,7 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
         _tracking_mode: Option<TrackingMode>,
+        _profile: PerformanceSummaryProfile,
     ) -> CoreResult<PerformanceResult> {
         Ok(mock_performance_result(item_id))
     }
@@ -1234,9 +1235,17 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _account_tracking_modes: &std::collections::HashMap<String, TrackingMode>,
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
+        _profile: PerformanceSummaryProfile,
     ) -> CoreResult<PerformanceResult> {
-        self.calculate_performance_summary("account", scope_id, None, None, None)
-            .await
+        self.calculate_performance_summary(
+            "account",
+            scope_id,
+            None,
+            None,
+            None,
+            PerformanceSummaryProfile::Full,
+        )
+        .await
     }
 
     fn calculate_accounts_simple_performance(

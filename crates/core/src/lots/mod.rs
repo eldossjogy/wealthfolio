@@ -182,6 +182,32 @@ pub trait LotRepositoryTrait: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Returns deterministic disposal slices for accounts inside the performance period.
+    ///
+    /// Performance periods use the same convention as valuation flows:
+    /// `(start_date, end_date]`.
+    async fn get_lot_disposals_for_accounts_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_date_exclusive: NaiveDate,
+        end_date_inclusive: NaiveDate,
+    ) -> Result<Vec<LotDisposal>> {
+        let mut disposals = Vec::new();
+        for account_id in account_ids {
+            for disposal in self.get_lot_disposals_for_account(account_id).await? {
+                let Ok(disposal_date) =
+                    NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d")
+                else {
+                    continue;
+                };
+                if disposal_date > start_date_exclusive && disposal_date <= end_date_inclusive {
+                    disposals.push(disposal);
+                }
+            }
+        }
+        Ok(disposals)
+    }
+
     /// Returns total quantity per asset across all open lots (all accounts).
     /// Used for quote sync planning — determines which assets need price data.
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>>;

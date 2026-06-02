@@ -889,7 +889,9 @@ export type ReturnMethod =
 export interface PerformanceReturns {
   twr?: number | null;
   annualizedTwr?: number | null;
+  /** Selected-period money-weighted return derived from annualized XIRR. */
   irr?: number | null;
+  /** Annualized XIRR using dated cash flows. */
   annualizedIrr?: number | null;
   valueReturn?: number | null;
   annualizedValueReturn?: number | null;

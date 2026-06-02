@@ -15,7 +15,7 @@ import React, { useState } from "react";
 export const TIME_WEIGHTED_RETURN_INFO =
   "Time-Weighted Return (TWR) measures the compound growth rate of a portfolio, ignoring the impact of cash flows (deposits/withdrawals). It isolates the performance of the underlying investments.";
 export const IRR_RETURN_INFO =
-  "Internal Rate of Return (IRR) measures personal money-weighted performance using the size and timing of external cash flows.";
+  "Internal Rate of Return (IRR) measures selected-period money-weighted performance using the size and timing of external cash flows. Annualized IRR shows the XIRR equivalent per year.";
 export const SIMPLE_RETURN_INFO =
   "Simple return measures value growth over the selected period after adjusting for external cash flows. It is not time weighted.";
 export const VALUE_RETURN_INFO =
@@ -23,7 +23,7 @@ export const VALUE_RETURN_INFO =
 export const PRICE_RETURN_INFO =
   "Price return measures the selected symbol's price change over the selected period.";
 export const VOLATILITY_INFO =
-  "Volatility measures the dispersion of returns for a given investment. Higher volatility means the investment can change dramatically over a short period. It is annualized with equity-style sqrt(252) scaling.";
+  "Volatility measures the dispersion of returns for a given investment. Higher volatility means the investment can change dramatically over a short period. It is annualized from calendar-daily returns.";
 export const MAX_DRAWDOWN_INFO =
   "Maximum Drawdown represents the largest percentage decline from a peak to a subsequent trough in portfolio value during the specified period. It indicates downside risk.";
 export const ANNUALIZED_RETURN_INFO =

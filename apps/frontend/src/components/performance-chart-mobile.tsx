@@ -116,7 +116,7 @@ export function PerformanceChartMobile({ data }: PerformanceChartMobileProps) {
               tickLine={false}
               axisLine={false}
               tickMargin={4}
-              domain={[-0.12, "auto"]}
+              domain={["auto", "auto"]}
               tick={{ fontSize: 10 }}
               width={50}
             />

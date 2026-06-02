@@ -68,9 +68,11 @@ Acceptance criteria:
   least 1 base currency unit.
 - Tiny/zero denominator periods produce `null` TWR with a clear not-applicable
   reason.
-- IRR uses ACT/365 dated cash flows:
+- IRR uses ACT/365.25 dated cash flows:
   - beginning value and contributions are negative
   - distributions and ending value are positive
+- `returns.annualized_irr` stores annualized XIRR; `returns.irr` stores the
+  selected-period money-weighted return derived from that XIRR.
 - IRR returns `null` with warning for no sign change, insufficient data, or
   non-convergence.
 - Transaction-mode account summary uses TWR as comparison return and IRR as

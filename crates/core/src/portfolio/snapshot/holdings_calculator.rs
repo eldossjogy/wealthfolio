@@ -371,7 +371,6 @@ impl HoldingsCalculator {
                     total_proceeds * effective_quantity / total_quantity_reduced
                 };
                 let cost_basis = lot.cost_basis;
-                let realized_pnl = proceeds - cost_basis;
                 let acquisition_date = self.activity_local_date_from_utc(lot.acquisition_date);
                 let acquisition_fx_rate_to_base =
                     self.fx_rate_to_base(position_currency, &base_currency, acquisition_date);
@@ -382,21 +381,24 @@ impl HoldingsCalculator {
                         activity.id, lot.id
                     );
                 }
-                let proceeds_base = if disposal_base_available {
+                let base_available = disposal_base_available && acquisition_base_available;
+                let proceeds_base = if base_available {
                     proceeds * disposal_fx_rate_to_base
                 } else {
                     Decimal::ZERO
                 };
-                let cost_basis_base = if acquisition_base_available {
+                let cost_basis_base = if base_available {
                     cost_basis * acquisition_fx_rate_to_base
                 } else {
                     Decimal::ZERO
                 };
-                let realized_pnl_base = if disposal_base_available && acquisition_base_available {
-                    proceeds_base - cost_basis_base
-                } else {
-                    Decimal::ZERO
-                };
+                let stored_proceeds = storage_money(proceeds);
+                let stored_cost_basis = storage_money(cost_basis);
+                let stored_realized_pnl = storage_money(stored_proceeds - stored_cost_basis);
+                let stored_proceeds_base = storage_money(proceeds_base);
+                let stored_cost_basis_base = storage_money(cost_basis_base);
+                let stored_realized_pnl_base =
+                    storage_money(stored_proceeds_base - stored_cost_basis_base);
                 entries.push(LotDisposal {
                     id: format!("{}:{}:{}", activity.id, lot.id, index),
                     lot_id: lot.id.clone(),
@@ -405,12 +407,12 @@ impl HoldingsCalculator {
                     disposal_activity_id: activity.id.clone(),
                     disposal_date: disposal_date.to_string(),
                     quantity: effective_quantity.to_string(),
-                    proceeds: storage_money(proceeds).to_string(),
-                    cost_basis: storage_money(cost_basis).to_string(),
-                    realized_pnl: storage_money(realized_pnl).to_string(),
-                    proceeds_base: storage_money(proceeds_base).to_string(),
-                    cost_basis_base: storage_money(cost_basis_base).to_string(),
-                    realized_pnl_base: storage_money(realized_pnl_base).to_string(),
+                    proceeds: stored_proceeds.to_string(),
+                    cost_basis: stored_cost_basis.to_string(),
+                    realized_pnl: stored_realized_pnl.to_string(),
+                    proceeds_base: stored_proceeds_base.to_string(),
+                    cost_basis_base: stored_cost_basis_base.to_string(),
+                    realized_pnl_base: stored_realized_pnl_base.to_string(),
                     currency: position_currency.to_string(),
                     base_currency: base_currency.clone(),
                     fx_rate_to_base: disposal_fx_rate_to_base.to_string(),
@@ -1324,8 +1326,18 @@ impl HoldingsCalculator {
             Some(subtype) if subtype.eq_ignore_ascii_case(ACTIVITY_SUBTYPE_OPTION_EXPIRY) => {
                 let asset_id = activity.asset_id.as_deref().unwrap_or("");
                 if let Some(position) = state.positions.get_mut(asset_id) {
+                    let position_currency = position.currency.clone();
                     let qty = activity.qty();
                     let reduction = position.reduce_lots_fifo(qty)?;
+                    self.record_lot_disposals(
+                        &state.account_id,
+                        asset_id,
+                        activity,
+                        &reduction.removed_lots,
+                        Decimal::ZERO,
+                        reduction.quantity_reduced,
+                        &position_currency,
+                    );
                     let close_date = self.activity_local_date(activity).to_string();
                     for lot in &reduction.fully_consumed_lots {
                         self.record_lot_closure(
@@ -1334,7 +1346,7 @@ impl HoldingsCalculator {
                             lot,
                             &close_date,
                             &activity.id,
-                            &position.currency,
+                            &position_currency,
                         );
                     }
                     debug!(
