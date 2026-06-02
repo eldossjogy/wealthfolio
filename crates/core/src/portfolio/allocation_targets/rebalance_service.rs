@@ -98,8 +98,9 @@ impl RebalanceServiceTrait for RebalanceService {
             });
         }
 
-        // New total value after deploying all available cash (used for target calculations).
-        let new_total_value = total_value + input.available_cash;
+        // Total portfolio value stays constant — tracked cash is already inside the portfolio.
+        // Deploying cash moves value from CASH holdings into buy trades, it does not add new value.
+        let new_total_value = total_value;
         let bps_scale = dec!(10000);
 
         // --- 3. Compute shortfalls per underweight sleeve --------------------
