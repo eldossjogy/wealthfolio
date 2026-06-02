@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["@tauri-apps/api", "vitest/globals"],
+    "types": ["@tauri-apps/api", "vitest/globals", "node"],
     "noEmit": true,
     "composite": false,
     "baseUrl": ".",
