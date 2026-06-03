@@ -51,7 +51,11 @@ export function OverviewPage({
   const accountFilter: AccountScope = useMemo(() => filterProp ?? { type: "all" }, [filterProp]);
   const selectedAccountScopeKey = accountScopeKey(accountFilter);
 
-  const { holdings, isLoading: holdingsLoading } = useHoldings(accountFilter);
+  const {
+    holdings,
+    dataUpdatedAt: holdingsUpdatedAt,
+    isLoading: holdingsLoading,
+  } = useHoldings(accountFilter);
   const { allocations, isLoading: allocationsLoading } = usePortfolioAllocations(accountFilter);
   const { accounts } = useAccounts();
   const { data: portfolios = [] } = usePortfolios();
@@ -90,11 +94,13 @@ export function OverviewPage({
     ? accountFilter
     : (accountScopeFromTarget(effectiveTarget) ?? accountFilter);
 
-  const { driftReport, isLoading: driftLoading } = useAllocationTargetDrift(
-    effectiveTargetId,
-    accountFilter,
-    { includeHoldings: workspaceView === "details" },
-  );
+  const {
+    driftReport,
+    dataUpdatedAt: driftUpdatedAt,
+    isLoading: driftLoading,
+  } = useAllocationTargetDrift(effectiveTargetId, accountFilter, {
+    includeHoldings: workspaceView === "details",
+  });
 
   const isLoading = holdingsLoading || allocationsLoading;
   const targetLoading = targetsLoading || driftLoading;
@@ -121,6 +127,14 @@ export function OverviewPage({
     () => portfolioHoldings.filter((h) => h.holdingType?.toLowerCase() !== "cash"),
     [portfolioHoldings],
   );
+  const availableCash = useMemo(
+    () =>
+      holdings
+        .filter((h) => h.holdingType === HoldingType.CASH)
+        .reduce((sum, h) => sum + (h.marketValue.base ?? 0), 0),
+    [holdings],
+  );
+  const rebalanceSourceVersion = `${holdingsUpdatedAt}:${driftUpdatedAt}:${effectiveTarget?.updatedAt ?? ""}`;
 
   const valueStrip = useMemo(
     () => computeValueStrip(portfolioHoldings, accounts),
@@ -317,11 +331,9 @@ export function OverviewPage({
           profile={effectiveTarget ?? null}
           driftReport={driftReport ?? null}
           accountScope={accountFilter}
-          availableCash={
-            holdings
-              ?.filter((h) => h.holdingType === HoldingType.CASH)
-              .reduce((sum, h) => sum + (h.marketValue.base ?? 0), 0) ?? 0
-          }
+          availableCash={availableCash}
+          sourceVersion={rebalanceSourceVersion}
+          isSourceLoading={holdingsLoading || driftLoading || !driftReport}
         />
       </div>
     );

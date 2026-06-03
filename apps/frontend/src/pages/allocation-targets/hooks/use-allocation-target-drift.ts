@@ -15,6 +15,7 @@ export function useAllocationTargetDrift(
   const includeHoldings = options?.includeHoldings ?? false;
   const {
     data: driftReport,
+    dataUpdatedAt,
     isLoading,
     isError,
   } = useQuery<DriftReport | null, Error>({
@@ -23,5 +24,5 @@ export function useAllocationTargetDrift(
     enabled: !!targetId,
   });
 
-  return { driftReport: driftReport ?? null, isLoading, isError };
+  return { driftReport: driftReport ?? null, dataUpdatedAt, isLoading, isError };
 }
