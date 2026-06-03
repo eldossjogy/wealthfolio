@@ -20,6 +20,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { AccountPurpose, PORTFOLIO_SCOPE_ID } from "@/lib/constants";
 import { performancePeriodPnl } from "@/lib/performance";
+import { getPerformanceDateRangeForRequest } from "@/lib/performance-date-range";
 import { DateRange, PerformanceResult, TrackedItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -834,7 +835,7 @@ export default function PerformancePage() {
     displayDateRange,
   } = useCalculatePerformanceHistory({
     selectedItems,
-    dateRange,
+    dateRange: getPerformanceDateRangeForRequest(dateRange),
   });
 
   const selectedPerformanceData = useMemo(() => {

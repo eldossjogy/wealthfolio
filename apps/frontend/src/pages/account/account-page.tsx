@@ -35,6 +35,7 @@ import {
   isLiabilityAccountType,
 } from "@/lib/constants";
 import { performanceHeadlineReturn, performancePeriodPnl } from "@/lib/performance";
+import { getPerformanceDateRangeForRequest } from "@/lib/performance-date-range";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 import {
@@ -262,6 +263,8 @@ const AccountPage = () => {
     return undefined;
   }, [account, supportsPerformance]);
 
+  const performanceDateRange = getPerformanceDateRangeForRequest(dateRange, selectedIntervalCode);
+
   // Pass tracking mode to the performance hook for SOTA calculations
   const {
     data: performanceResponse,
@@ -270,7 +273,7 @@ const AccountPage = () => {
     errorMessages: performanceErrorMessages,
   } = useCalculatePerformanceHistory({
     selectedItems: accountTrackedItem ? [accountTrackedItem] : [],
-    dateRange: dateRange,
+    dateRange: performanceDateRange,
     trackingMode: isHoldingsMode ? "HOLDINGS" : "TRANSACTIONS",
   });
 

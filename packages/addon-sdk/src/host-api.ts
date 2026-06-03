@@ -332,8 +332,8 @@ export interface PerformanceAPI {
   calculateHistory(
     itemType: 'account' | 'symbol',
     itemId: string,
-    startDate: string,
-    endDate: string,
+    startDate?: string,
+    endDate?: string,
   ): Promise<PerformanceResult>;
 
   /**
