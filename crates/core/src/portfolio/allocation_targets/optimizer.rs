@@ -350,6 +350,11 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                         *after_values.entry(cat_id.clone()).or_default() += expo * shares;
                     }
                 }
+            } else {
+                // Manual sleeve trade (no ticker): the deployed cash lands directly in
+                // the target category. Credit it so after-drift reflects the move.
+                *after_values.entry(trade.category_id.clone()).or_default() +=
+                    trade.estimated_amount;
             }
         }
         for cat in categories.iter().filter(|c| c.is_cash) {

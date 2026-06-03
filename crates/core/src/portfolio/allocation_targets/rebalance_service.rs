@@ -1007,6 +1007,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manual_sleeve_trade_is_reflected_in_after_bps() {
+        // Bonds underweight (0%, target 10%) with no buy candidate. A $1000 manual
+        // sleeve trade fills it; after_bps_by_category must credit the target category
+        // (1000 bps) rather than leaving it at 0.
+        let total = dec!(10000);
+        let rows = vec![
+            make_drift_row("bonds", 0, 1000, total),
+            make_drift_row("equity", 9000, 9000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 1000, 0, total)
+            },
+        ];
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(rows, total),
+            make_contributions(vec![]),
+            vec![make_cash_holding(dec!(1000), "USD")],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(1000))).await.unwrap();
+
+        assert_eq!(
+            plan.cash_used,
+            dec!(1000),
+            "manual trade should deploy $1000"
+        );
+        assert_eq!(
+            plan.after_bps_by_category.get("bonds").copied(),
+            Some(1000),
+            "bonds after-drift must reflect the manual sleeve trade"
+        );
+    }
+
+    #[tokio::test]
     async fn multiple_uncovered_categories_never_overspend_cash() {
         // Two required underweight categories with no buy candidates. Each shortfall
         // ($2000) exceeds available cash ($1000). Manual sleeve trades must share the
