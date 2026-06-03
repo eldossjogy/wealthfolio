@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import { useAccounts } from "@/hooks/use-accounts";
 import type { Account } from "@/lib/types";
@@ -26,20 +26,27 @@ export function AccountsCard() {
   const { accounts } = useAccounts({ filterActive: false });
 
   const accountIds = useMemo(() => settings?.accountIds ?? [], [settings?.accountIds]);
+  const initialAccountIdsRef = useRef<string[] | null>(null);
+  if (settings && initialAccountIdsRef.current === null) {
+    initialAccountIdsRef.current = settings.accountIds;
+  }
+  // Initial load groups tracked accounts first; later toggle changes should not move rows.
+  const sortAccountIds = initialAccountIdsRef.current ?? accountIds;
 
   const spendingAccounts = useMemo<Account[]>(
-    () =>
-      (accounts ?? [])
+    () => {
+      const initiallyTracked = new Set(sortAccountIds);
+      return (accounts ?? [])
         .filter((a) => isSpendingAccountType(a.accountType))
         .sort((a, b) => {
-          // Tracked first, then active, then name
-          const aTracked = accountIds.includes(a.id) ? 0 : 1;
-          const bTracked = accountIds.includes(b.id) ? 0 : 1;
+          const aTracked = initiallyTracked.has(a.id) ? 0 : 1;
+          const bTracked = initiallyTracked.has(b.id) ? 0 : 1;
           if (aTracked !== bTracked) return aTracked - bTracked;
           if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
           return a.name.localeCompare(b.name);
-        }),
-    [accounts, accountIds],
+        });
+    },
+    [accounts, sortAccountIds],
   );
 
   const includedAccounts = useMemo(
