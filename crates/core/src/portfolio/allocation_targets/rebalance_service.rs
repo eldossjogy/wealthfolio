@@ -1236,6 +1236,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn nearest_band_stops_at_band_edge() {
+        // Equity 60% (target 70%, band 5%). NearestBand should stop once equity reaches
+        // the 65% band edge ($500 deployed), not optimize to the exact 70% target ($1000).
+        let total = dec!(10000);
+        let h = make_holding("h1", "VTI", dec!(60), dec!(6000)); // $100/share
+        let rows = vec![make_drift_row("equity", 6000, 7000, total)];
+
+        let svc_band = make_service(
+            make_profile(RebalanceGoal::NearestBand, false),
+            make_report(rows.clone(), total),
+            make_contributions(vec![make_contribution(&h, "equity", dec!(6000))]),
+            vec![make_cash_holding(dec!(1000), "USD"), h.clone()],
+        );
+        let svc_exact = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(rows, total),
+            make_contributions(vec![make_contribution(&h, "equity", dec!(6000))]),
+            vec![make_cash_holding(dec!(1000), "USD"), h],
+        );
+
+        let plan_band = svc_band
+            .calculate_plan(make_input(dec!(1000)))
+            .await
+            .unwrap();
+        let plan_exact = svc_exact
+            .calculate_plan(make_input(dec!(1000)))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            plan_band.cash_used,
+            dec!(500),
+            "nearest_band stops at the band edge ($500), got {}",
+            plan_band.cash_used
+        );
+        assert_eq!(
+            plan_exact.cash_used,
+            dec!(1000),
+            "exact_target deploys to the exact target ($1000), got {}",
+            plan_exact.cash_used
+        );
+    }
+
+    #[tokio::test]
     async fn min_trade_amount_filters_small_trades() {
         // VTI at $80/share. min_trade $100.
         // Cash $80 → greedy buys 1 share ($80). Post-filter: $80 < $100 → dropped.

@@ -62,11 +62,31 @@ pub trait RebalanceOptimizer: Send + Sync {
 pub struct DriftPriorityOptimizer;
 
 impl DriftPriorityOptimizer {
-    /// Σ |current_bps[c] - target_bps[c]| for required non-cash categories.
+    /// Per-category drift the planner tries to minimise.
+    ///
+    /// `ExactTarget` measures distance to the exact target. `NearestBand` only counts
+    /// the distance *outside* the [target ± band] tolerance, so once a category is
+    /// inside its band it contributes zero and the greedy stops deploying into it.
+    fn category_drift(
+        bps: Decimal,
+        target_bps: i32,
+        goal: &RebalanceGoal,
+        band: Decimal,
+    ) -> Decimal {
+        let dist = (bps - Decimal::from(target_bps)).abs();
+        match goal {
+            RebalanceGoal::ExactTarget => dist,
+            RebalanceGoal::NearestBand => (dist - band).max(Decimal::ZERO),
+        }
+    }
+
+    /// Σ drift for required non-cash categories (band-aware via `category_drift`).
     fn total_drift(
         values: &HashMap<String, Decimal>,
         categories: &[CategoryState],
         total_value: Decimal,
+        goal: &RebalanceGoal,
+        band: Decimal,
     ) -> Decimal {
         if total_value == Decimal::ZERO {
             return Decimal::ZERO;
@@ -78,7 +98,7 @@ impl DriftPriorityOptimizer {
             .map(|c| {
                 let v = values.get(&c.category_id).copied().unwrap_or_default();
                 let bps = v / total_value * scale;
-                (bps - Decimal::from(c.target_bps)).abs()
+                Self::category_drift(bps, c.target_bps, goal, band)
             })
             .sum()
     }
@@ -89,6 +109,8 @@ impl DriftPriorityOptimizer {
         categories: &[CategoryState],
         total_value: Decimal,
         exposure: &HashMap<String, Decimal>,
+        goal: &RebalanceGoal,
+        band: Decimal,
     ) -> Decimal {
         if total_value == Decimal::ZERO {
             return Decimal::ZERO;
@@ -101,7 +123,7 @@ impl DriftPriorityOptimizer {
                 let base = values.get(&c.category_id).copied().unwrap_or_default();
                 let delta = exposure.get(&c.category_id).copied().unwrap_or_default();
                 let bps = (base + delta) / total_value * scale;
-                (bps - Decimal::from(c.target_bps)).abs()
+                Self::category_drift(bps, c.target_bps, goal, band)
             })
             .sum()
     }
@@ -217,7 +239,13 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             if cash <= Decimal::ZERO {
                 break;
             }
-            let drift_before = Self::total_drift(&values, &categories, total_value);
+            let drift_before = Self::total_drift(
+                &values,
+                &categories,
+                total_value,
+                &profile.rebalance_goal,
+                drift_band,
+            );
 
             let mut best_score = Decimal::ZERO;
             let mut best_idx: Option<usize> = None;
@@ -231,6 +259,8 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     &categories,
                     total_value,
                     &candidate.exposure_per_share,
+                    &profile.rebalance_goal,
+                    drift_band,
                 );
                 let improvement = drift_before - drift_after;
                 if improvement <= Decimal::ZERO {
