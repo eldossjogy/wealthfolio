@@ -247,6 +247,10 @@ pub enum RebalanceWarningKind {
     MissingQuote,
     NoBuyCandidate,
     WholeShareResidue,
+    /// Asset has no taxonomy assignments for the active taxonomy — skipped as buy candidate.
+    UnclassifiedAsset,
+    /// Asset has partial taxonomy weights (<100%) — known exposure used, remainder ignored.
+    PartialClassification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
