@@ -7,6 +7,12 @@ import { AmountDisplay } from "@wealthfolio/ui";
 import { useId, useMemo, useRef, useState } from "react";
 import { Area, AreaChart, ReferenceDot, Tooltip, XAxis, YAxis } from "recharts";
 import type { MouseHandlerDataParam } from "recharts/types/synchronisation/types";
+import {
+  HistoryChartActiveDot,
+  HistoryChartMarkerShape,
+  type RechartsActiveDotProps,
+  type RechartsMarkerShapeProps,
+} from "./history-chart-marker";
 import { getAutomaticHistoryChartScale } from "./history-chart-scale";
 
 const CHART_SCRUB_HAPTIC_INTERVAL_MS = 80;
@@ -311,7 +317,7 @@ export function HistoryChart({
         </defs>
         <Tooltip
           position={isMobile ? { y: 60 } : { y: -20 }}
-          cursor={{ pointerEvents: "none" }}
+          cursor={{ stroke: "var(--border)", strokeWidth: 1, pointerEvents: "none" }}
           wrapperStyle={{ pointerEvents: "none" }}
           content={(props) => (
             <CustomTooltip
@@ -336,6 +342,11 @@ export function HistoryChart({
           type="monotone"
           dataKey="totalValue"
           stroke={`url(#${strokeGradientId})`}
+          activeDot={(props: RechartsActiveDotProps & { payload?: HistoryChartData }) =>
+            showMarkers && props.payload?.date && markerDateSet.has(props.payload.date) ? null : (
+              <HistoryChartActiveDot {...props} stroke="var(--success)" />
+            )
+          }
           fillOpacity={1}
           fill={`url(#${fillGradientId})`}
           style={{ pointerEvents: "none" }}
@@ -349,33 +360,22 @@ export function HistoryChart({
             type="monotone"
             dataKey="netContribution"
             stroke="var(--muted-foreground)"
+            activeDot={false}
             fill="transparent"
             strokeDasharray="5 5"
             strokeOpacity={isChartHovered ? 0.8 : 0}
             style={{ pointerEvents: "none" }}
           />
         )}
-        {/* Snapshot markers - diamond shape */}
         {showMarkers &&
           markerDataPoints.map((point) => (
             <ReferenceDot
               key={`marker-${point.date}`}
               x={point.date}
               y={point.value}
-              shape={(props: { cx?: number; cy?: number }) => {
-                const cx = props.cx ?? 0;
-                const cy = props.cy ?? 0;
-                const size = 8;
-                return (
-                  <polygon
-                    points={`${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`}
-                    fill={point.value >= 0 ? "var(--success)" : "var(--destructive)"}
-                    stroke="hsl(var(--background))"
-                    strokeWidth={2}
-                    style={{ pointerEvents: "none" }}
-                  />
-                );
-              }}
+              shape={(props: RechartsMarkerShapeProps) => (
+                <HistoryChartMarkerShape {...props} variant="snapshot" value={point.value} />
+              )}
             />
           ))}
       </AreaChart>

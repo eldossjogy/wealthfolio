@@ -1,10 +1,9 @@
 import { searchActivities } from "@/adapters";
-import { ActivityType } from "@/lib/constants";
 import { QueryKeys } from "@/lib/query-keys";
+import { ActivityType } from "@/lib/constants";
 import { ActivityDetails, ActivitySearchResponse } from "@/lib/types";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { SortingState } from "@tanstack/react-table";
-import { format } from "date-fns";
 import { useMemo } from "react";
 
 export type ActivityStatusFilter = "all" | "pending" | "validated";
@@ -14,8 +13,6 @@ export interface ActivitySearchFilters {
   activityTypes: ActivityType[];
   instrumentTypes?: string[];
   status?: ActivityStatusFilter;
-  dateFrom?: Date;
-  dateTo?: Date;
 }
 
 interface BaseOptions {
@@ -80,7 +77,7 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
   const { filters, searchQuery, sorting, pageSize = DEFAULT_PAGE_SIZE } = options;
   const mode = options.mode ?? "infinite";
   const pageIndex = "pageIndex" in options ? options.pageIndex : 0;
-  const hasClosedAccountScope = filters.accountIds !== undefined && filters.accountIds.length === 0;
+  const hasClosedAccountScope = filters.accountIds?.length === 0;
 
   const normalizedFilters = useMemo(() => {
     // Convert status filter to needsReview boolean
@@ -96,26 +93,20 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       accountIds: filters.accountIds,
       activityTypes: filters.activityTypes.length > 0 ? filters.activityTypes : undefined,
       instrumentTypes: filters.instrumentTypes?.length ? filters.instrumentTypes : undefined,
-      dateFrom: filters.dateFrom ? format(filters.dateFrom, "yyyy-MM-dd") : undefined,
-      dateTo: filters.dateTo ? format(filters.dateTo, "yyyy-MM-dd") : undefined,
       needsReview,
     } as Record<string, unknown>;
-  }, [
-    filters.accountIds,
-    filters.activityTypes,
-    filters.instrumentTypes,
-    filters.status,
-    filters.dateFrom,
-    filters.dateTo,
-  ]);
+  }, [filters.accountIds, filters.activityTypes, filters.instrumentTypes, filters.status]);
 
-  const primarySort =
-    sorting.length > 0 && sorting[0]?.id
-      ? ({ id: sorting[0].id, desc: sorting[0].desc ?? false } as {
-          id: string;
-          desc: boolean;
-        })
-      : DEFAULT_SORT;
+  const primarySort = useMemo(
+    () =>
+      sorting.length > 0 && sorting[0]?.id
+        ? ({ id: sorting[0].id, desc: sorting[0].desc ?? false } as {
+            id: string;
+            desc: boolean;
+          })
+        : DEFAULT_SORT,
+    [sorting],
+  );
 
   // Infinite query for "load more" mode
   const infiniteQuery = useInfiniteQuery<ActivitySearchResponse, Error>({
@@ -124,8 +115,8 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       "infinite",
       normalizedFilters,
       searchQuery,
-      primarySort.id,
-      primarySort.desc,
+      hasClosedAccountScope,
+      primarySort,
       pageSize,
     ],
     initialPageParam: 0,
@@ -148,8 +139,8 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       "paginated",
       normalizedFilters,
       searchQuery,
-      primarySort.id,
-      primarySort.desc,
+      hasClosedAccountScope,
+      primarySort,
       pageIndex,
       pageSize,
     ],

@@ -204,8 +204,6 @@ export interface IconProps {
   className?: string;
   style?: CSSProperties;
   weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone";
-  cx?: number | string;
-  cy?: number | string;
 }
 
 export type Icon = ComponentType<IconProps>;
@@ -756,27 +754,6 @@ const IconsInternal = {
   OtherAssetDuotone: ({ size, className, style, color }: IconProps) => (
     <CubeIcon size={size} weight="duotone" className={className} style={style} color={color} />
   ),
-  BuyDot: ({ cx, cy }: IconProps) => (
-    <g transform={`translate(${cx}, ${cy})`}>
-      <circle r={16} fill="var(--color-buy-dot)" opacity={0.15} />
-      <circle r={10} fill="var(--color-buy-dot)" />
-      <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
-        B
-      </text>
-    </g>
-  ),
-
-  SellDot: ({ cx, cy }: IconProps) => {
-    return (
-      <g transform={`translate(${cx}, ${cy})`}>
-        <circle r={16} fill="var(--color-sell-dot)" opacity={0.15} />
-        <circle r={10} fill="var(--color-sell-dot)" />
-        <text x={0} y={0} textAnchor="middle" dominantBaseline="central" fill="white" fontSize={12} fontWeight="bold">
-          S
-        </text>
-      </g>
-    );
-  },
   // Spending taxonomy icons (referenced by category seed data; keys must match
   // the strings stored in `taxonomy_categories.icon`).
   Award: Award,
@@ -999,8 +976,6 @@ export type IconName =
   | "PreciousDuotone"
   | "LiabilityDuotone"
   | "OtherAssetDuotone"
-  | "BuyDot"
-  | "SellDot"
   // Spending taxonomy icons
   | "Award"
   | "Banknote"

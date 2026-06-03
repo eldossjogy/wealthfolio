@@ -1,8 +1,17 @@
-import HistoryChart from "@/components/history-chart-symbol";
+import { searchActivities } from "@/adapters";
+import HistoryChart, {
+  type HistoryChartActivity,
+  type HistoryChartActivityMarker,
+  type HistoryChartData,
+} from "@/components/history-chart-symbol";
+import type { TradeMarkerVariant } from "@/components/history-chart-marker";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useSyncMarketDataMutation } from "@/hooks/use-sync-market-data";
-import { ActivityType, DateRange, Quote, TimePeriod } from "@/lib/types";
+import { QueryKeys } from "@/lib/query-keys";
+import { ActivityDetails, ActivityType, DateRange, Quote, TimePeriod } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ActivityDateSheet } from "@/pages/activity/components/activity-date-sheet";
+import { useQuery } from "@tanstack/react-query";
 import {
   AmountDisplay,
   Badge,
@@ -21,14 +30,9 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  usePersistentState,
 } from "@wealthfolio/ui";
 import { format, subMonths } from "date-fns";
 import React, { useCallback, useMemo, useState } from "react";
-import {
-  useActivitySearch,
-  UseActivitySearchInfiniteOptions,
-} from "../activity/hooks/use-activity-search";
 import { RefreshQuotesConfirmDialog } from "./refresh-quotes-confirm-dialog";
 
 interface AssetHistoryProps {
@@ -54,6 +58,8 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
   const { isBalanceHidden } = useBalancePrivacy();
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
   const [showActivityMarkers, setShowActivityMarkers] = useState(false);
+  const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
+  const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
 
   const handleRefreshQuotes = useCallback(() => {
     syncMarketDataMutation.mutate([assetId]);
@@ -95,6 +101,24 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
         currency: quote.currency || currency,
       }));
   }, [dateRange, quoteHistory, currency, selectedIntervalCode]);
+
+  const activityDateFrom = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
+  const activityDateTo = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
+  const { data: tradeActivities = [], isLoading: isTradeActivitiesLoading } =
+    useAssetTradeActivities({
+      assetId,
+      dateFrom: activityDateFrom,
+      dateTo: activityDateTo,
+      enabled: showActivityMarkers,
+    });
+  const { chartData, activityMarkers } = useMemo(
+    () => buildChartActivityData(filteredData, showActivityMarkers ? tradeActivities : []),
+    [filteredData, showActivityMarkers, tradeActivities],
+  );
+  const selectedDateActivities = useMemo(() => {
+    if (!selectedActivityDate) return [];
+    return tradeActivities.filter((activity) => dateKey(activity) === selectedActivityDate);
+  }, [selectedActivityDate, tradeActivities]);
 
   const { ganAmount, percentage, calculatedAt } = useMemo(() => {
     const lastFilteredDate = filteredData.at(-1)?.timestamp;
@@ -208,13 +232,12 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
                     variant={showActivityMarkers ? "default" : "secondary"}
                     size="icon-xs"
                     className={cn("rounded-full", !showActivityMarkers && "bg-secondary/50")}
-                    onClick={() => setShowActivityMarkers(!showActivityMarkers)}
+                    onClick={() => setShowActivityMarkers((current) => !current)}
+                    aria-label={
+                      showActivityMarkers ? "Hide activity markers" : "Show activity markers"
+                    }
                   >
-                    {showActivityMarkers ? (
-                      <Icons.Goals className="size-5" />
-                    ) : (
-                      <Icons.Goal className="size-5" />
-                    )}
+                    <Icons.History className="size-5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -225,15 +248,14 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
           </div>
         </CardHeader>
         <CardContent className="relative flex-1 p-0">
-          {showActivityMarkers ? (
-            <ChartWithActivity
-              assetId={assetId}
-              dateRange={dateRange}
-              filteredData={filteredData}
-            />
-          ) : (
-            <HistoryChart data={filteredData} activity={[]} />
-          )}
+          <HistoryChart
+            data={chartData}
+            activityMarkers={activityMarkers}
+            onActivityMarkerClick={(marker) => {
+              setSelectedActivityDate(dateKey(marker.point));
+              setIsActivitySheetOpen(true);
+            }}
+          />
           <IntervalSelector
             onIntervalSelect={handleIntervalSelect}
             className="absolute bottom-2 left-1/2 -translate-x-1/2 transform"
@@ -242,6 +264,13 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
           />
         </CardContent>
       </Card>
+      <ActivityDateSheet
+        open={isActivitySheetOpen}
+        onOpenChange={setIsActivitySheetOpen}
+        date={selectedActivityDate}
+        activities={selectedDateActivities}
+        isLoading={isTradeActivitiesLoading}
+      />
     </>
   );
 };
@@ -252,39 +281,132 @@ interface FilteredData {
   currency: string;
 }
 
-function ChartWithActivity({
+interface UseAssetTradeActivitiesOptions {
+  assetId: string;
+  dateFrom?: string;
+  dateTo?: string;
+  enabled: boolean;
+}
+
+function useAssetTradeActivities({
   assetId,
-  dateRange,
-  filteredData,
+  dateFrom,
+  dateTo,
+  enabled,
+}: UseAssetTradeActivitiesOptions) {
+  return useQuery({
+    queryKey: [QueryKeys.ACTIVITY_DATA, "asset-trade-markers", assetId, dateFrom, dateTo],
+    queryFn: () => fetchAssetTradeActivities({ assetId, dateFrom, dateTo }),
+    enabled: enabled && assetId.length > 0,
+  });
+}
+
+async function fetchAssetTradeActivities({
+  assetId,
+  dateFrom,
+  dateTo,
 }: {
   assetId: string;
-  dateRange?: DateRange;
-  filteredData: FilteredData[];
+  dateFrom?: string;
+  dateTo?: string;
 }) {
-  const [selectedAccounts, _] = usePersistentState<string[] | undefined>(
-    "activity-filter-accounts",
-    undefined,
-  );
-  const searchOptions = useMemo<UseActivitySearchInfiniteOptions>(
-    () => ({
-      searchQuery: assetId,
-      mode: "infinite",
-      filters: {
-        status: "validated",
-        dateTo: dateRange?.to,
-        dateFrom: dateRange?.from,
-        accountIds: selectedAccounts,
+  const pageSize = 500;
+  let page = 0;
+  let totalRowCount = 0;
+  const activities: ActivityDetails[] = [];
+
+  do {
+    const response = await searchActivities(
+      page,
+      pageSize,
+      {
+        symbol: assetId,
+        dateFrom,
+        dateTo,
         activityTypes: [ActivityType.BUY, ActivityType.SELL],
+        needsReview: false,
       },
-      pageSize: Number.MAX_SAFE_INTEGER,
-      sorting: [{ desc: false, id: "date" }],
-    }),
-    [selectedAccounts, dateRange, assetId],
-  );
-  const activityData = useActivitySearch(searchOptions);
-  return (
-    <HistoryChart data={filteredData} activity={activityData.isLoading ? [] : activityData.data} />
-  );
+      "",
+      { id: "date", desc: false },
+    );
+    activities.push(
+      ...response.data.filter(
+        (activity) =>
+          activity.assetId === assetId &&
+          (activity.activityType === ActivityType.BUY ||
+            activity.activityType === ActivityType.SELL),
+      ),
+    );
+    totalRowCount = response.meta.totalRowCount;
+    page += 1;
+  } while (page * pageSize < totalRowCount);
+
+  return activities;
+}
+
+function buildChartActivityData(
+  data: FilteredData[],
+  activities: ActivityDetails[],
+): {
+  chartData: HistoryChartData[];
+  activityMarkers: HistoryChartActivityMarker[];
+} {
+  if (activities.length === 0) {
+    return { chartData: data, activityMarkers: [] };
+  }
+
+  const activitiesByDate = new Map<string, HistoryChartActivity[]>();
+  for (const activity of activities) {
+    const key = dateKey(activity);
+    const chartActivity = {
+      id: activity.id,
+      variant: tradeMarkerVariant(activity.activityType),
+      date: activity.date,
+      quantity: activity.quantity,
+      unitPrice: activity.unitPrice,
+    };
+    const existing = activitiesByDate.get(key);
+    if (existing) {
+      existing.push(chartActivity);
+    } else {
+      activitiesByDate.set(key, [chartActivity]);
+    }
+  }
+
+  const chartData: HistoryChartData[] = [];
+  const activityMarkers: HistoryChartActivityMarker[] = [];
+
+  data.forEach((point) => {
+    const activitiesForPoint = activitiesByDate.get(dateKey(point));
+
+    if (!activitiesForPoint) {
+      chartData.push(point);
+      return;
+    }
+
+    const chartPoint = { ...point, activities: activitiesForPoint };
+    chartData.push(chartPoint);
+    for (const activity of activitiesForPoint) {
+      activityMarkers.push({
+        id: activity.id,
+        point: chartPoint,
+        variant: activity.variant,
+      });
+    }
+  });
+
+  return { chartData, activityMarkers };
+}
+
+function dateKey(value: { timestamp: string } | { date?: string | Date }) {
+  const date = "timestamp" in value ? value.timestamp : value.date;
+  if (!date) return "";
+  if (typeof date === "string") return date.slice(0, 10);
+  return format(date, "yyyy-MM-dd");
+}
+
+function tradeMarkerVariant(activityType: ActivityType): TradeMarkerVariant {
+  return activityType === ActivityType.BUY ? "buy" : "sell";
 }
 
 export default AssetHistoryCard;

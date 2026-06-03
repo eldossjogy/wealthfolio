@@ -1,114 +1,110 @@
-import { ActivityType } from "@/lib/constants";
-import { ActivityDetails, TimePeriod } from "@/lib/types";
+import { TimePeriod } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
-import { Icons, formatAmount } from "@wealthfolio/ui";
-import { useMemo } from "react";
-import { Area, AreaChart, ReferenceDot, ResponsiveContainer, Tooltip, YAxis } from "recharts";
+import { formatAmount } from "@wealthfolio/ui";
+import { useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  ReferenceDot,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type { MouseHandlerDataParam } from "recharts/types/synchronisation/types";
+import {
+  HistoryChartMarkerShape,
+  type RechartsMarkerShapeProps,
+  type TradeMarkerVariant,
+} from "./history-chart-marker";
 
-interface ActivityEnrichment {
-  activityType: ActivityType;
+export interface HistoryChartActivity {
+  variant: TradeMarkerVariant;
+  date?: string | Date;
   quantity: string | null;
   unitPrice: string | null;
   id: string;
 }
 
-interface HistoryChartData {
+export interface HistoryChartData {
   timestamp: string;
   totalValue: number;
   currency: string;
-  activities?: ActivityEnrichment[];
+  activities?: HistoryChartActivity[];
 }
 
-interface ActivityMarker {
-  index: number;
-  act: ActivityEnrichment;
+export interface HistoryChartActivityMarker {
+  id: string;
   point: HistoryChartData;
+  variant: TradeMarkerVariant;
 }
 
 interface SymbolTooltipProps<
   TPayload = {
     timestamp: string;
     currency: string;
-    activities?: ActivityEnrichment[];
+    activities?: HistoryChartActivity[];
   },
 > {
-  active: boolean;
-  payload: { value: number; payload: TPayload }[];
-}
-
-function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  active?: boolean;
+  payload?: { value: number; payload: TPayload }[];
 }
 
 export default function HistoryChart({
   data,
   interval,
-  activity,
+  activityMarkers = [],
+  onActivityMarkerClick,
   height = 350,
 }: {
   data: HistoryChartData[];
   interval?: TimePeriod;
   height?: number;
-  activity?: ActivityDetails[];
+  activityMarkers?: HistoryChartActivityMarker[];
+  onActivityMarkerClick?: (marker: HistoryChartActivityMarker) => void;
 }) {
-  const { enrichedData, activityMarkers } = useMemo(() => {
-    if (!activity?.length) {
-      return { enrichedData: data, activityMarkers: [] as ActivityMarker[] };
+  const [hoveredMarker, setHoveredMarker] = useState(false);
+  const markerByTimestamp = useMemo(() => {
+    const markers = new Map<string, HistoryChartActivityMarker>();
+    for (const marker of activityMarkers) {
+      markers.set(marker.point.timestamp, marker);
     }
-    const activitiesByDate = new Map<string, ActivityEnrichment[]>();
-    for (const act of activity) {
-      if (!act.date) continue;
-      const enriched = {
-        id: act.id,
-        activityType: act.activityType,
-        quantity: act.quantity,
-        unitPrice: act.unitPrice,
-      };
+    return markers;
+  }, [activityMarkers]);
 
-      const key = dateKey(new Date(act.date));
-      const list = activitiesByDate.get(key);
-      if (list) {
-        list.push(enriched);
-      } else {
-        activitiesByDate.set(key, [enriched]);
-      }
+  const handleChartMove = (chartState: MouseHandlerDataParam) => {
+    if (!onActivityMarkerClick || chartState.activeLabel == null) {
+      setHoveredMarker(false);
+      return;
     }
 
-    const activityMarkers: ActivityMarker[] = [];
-    const enrichedData: HistoryChartData[] = [];
-
-    data.forEach((point, index) => {
-      const key = dateKey(new Date(point.timestamp));
-      const matchingActivities = activitiesByDate.get(key);
-
-      if (matchingActivities) {
-        enrichedData.push({ ...point, activities: matchingActivities });
-        for (const act of matchingActivities) {
-          activityMarkers.push({ index, act, point });
-        }
-      } else {
-        enrichedData.push(point);
-      }
-    });
-
-    return { enrichedData, activityMarkers };
-  }, [data, activity]);
+    setHoveredMarker(markerByTimestamp.has(String(chartState.activeLabel)));
+  };
 
   return (
     <div className="relative flex h-full flex-col" data-no-swipe-drag>
       <div className="grow">
         <ResponsiveContainer width="100%" height="100%" minHeight={height}>
           <AreaChart
-            data={enrichedData}
+            data={data}
             stackOffset="sign"
+            style={{
+              cursor: onActivityMarkerClick && hoveredMarker ? "pointer" : undefined,
+            }}
             margin={{
               top: 0,
               right: 0,
               left: 0,
               bottom: 0,
+            }}
+            onMouseMove={handleChartMove}
+            onMouseLeave={() => setHoveredMarker(false)}
+            onClick={(chartState) => {
+              if (!onActivityMarkerClick || chartState?.activeLabel == null) return;
+              const marker = markerByTimestamp.get(String(chartState.activeLabel));
+              if (marker) {
+                onActivityMarkerClick(marker);
+              }
             }}
           >
             <defs>
@@ -117,11 +113,14 @@ export default function HistoryChart({
                 <stop offset="95%" stopColor="var(--success)" stopOpacity={0.1} />
               </linearGradient>
             </defs>
-            {/* @ts-expect-error - Recharts Tooltip content typing mismatch */}
-            <Tooltip content={<SymbolToolTip />} />
+            <Tooltip
+              content={(props) => <SymbolToolTip {...(props as unknown as SymbolTooltipProps)} />}
+              wrapperStyle={{ pointerEvents: "none" }}
+            />
             {interval !== "ALL" && interval !== "1Y" ? (
               <YAxis hide={true} type="number" domain={["auto", "auto"]} />
             ) : null}
+            <XAxis hide dataKey="timestamp" type="category" />
             <Area
               isAnimationActive={true}
               animationDuration={300}
@@ -134,14 +133,14 @@ export default function HistoryChart({
               fill="url(#colorUv)"
             />
             {activityMarkers.map((marker) => {
-              const shape =
-                marker.act.activityType === "BUY" ? <Icons.BuyDot /> : <Icons.SellDot />;
               return (
                 <ReferenceDot
                   r={10}
-                  key={marker.act.id}
-                  shape={shape}
-                  x={marker.index}
+                  key={marker.id}
+                  shape={(props: RechartsMarkerShapeProps) => (
+                    <HistoryChartMarkerShape {...props} variant={marker.variant} />
+                  )}
+                  x={marker.point.timestamp}
                   y={marker.point.totalValue}
                 />
               );
@@ -168,19 +167,15 @@ function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
         <>
           <div className="border-border border-t" />
           {data.activities.map((act) => {
-            const isBuy = act.activityType === "BUY";
+            const isBuy = act.variant === "buy";
             return (
               <div key={act.id} className="flex items-center justify-between space-x-2">
                 <div className="flex items-center space-x-1.5">
                   <span
-                    className="block h-2.5 w-2.5 rounded-full"
-                    style={{
-                      backgroundColor: isBuy ? "var(--color-buy-dot)" : "var(--color-sell-dot)",
-                    }}
+                    className={`block h-2.5 w-2.5 rounded-full ${isBuy ? "bg-success" : "bg-blue-600 dark:bg-blue-300"}`}
                   />
                   <span
-                    className="text-sm font-medium"
-                    style={{ color: isBuy ? "var(--color-buy-dot)" : "var(--color-sell-dot)" }}
+                    className={`text-sm font-medium ${isBuy ? "text-success" : "text-blue-600 dark:text-blue-300"}`}
                   >
                     {isBuy ? "Bought" : "Sold"}
                   </span>
