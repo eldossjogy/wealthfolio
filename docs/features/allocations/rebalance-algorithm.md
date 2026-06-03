@@ -18,9 +18,9 @@ Constraints:
   global ETF classified 60 % US equity / 40 % international). One buy must
   update all affected category exposures simultaneously.
 - **Whole-share mode** — when enabled, only round-lot quantities are suggested.
-- **Minimum trade size** — asset trades below `min_trade_amount` are dropped from
-  the final output; no-ticker manual sleeve suggestions can still use remaining
-  cash.
+- **Minimum trade size** — asset trades below `min_trade_amount` are dropped
+  from the final output; no-ticker manual sleeve suggestions can still use
+  remaining cash.
 
 ---
 
@@ -197,8 +197,8 @@ behaviour.
 
 The old `WholeShareResidue` top-up warning is not carried forward. It was tied
 to the old proportional sleeve planner and does not map cleanly to this
-exposure-aware optimiser. Whole-share residue is reported as `cash_remaining`;
-a future UI pass can add a non-blocking "add X for one more share" hint.
+exposure-aware optimiser. Whole-share residue is reported as `cash_remaining`; a
+future UI pass can add a non-blocking "add X for one more share" hint.
 
 ---
 
