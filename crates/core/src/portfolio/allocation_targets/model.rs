@@ -246,7 +246,10 @@ pub struct CalculateRebalancePlanInput {
 pub enum RebalanceWarningKind {
     MissingQuote,
     NoBuyCandidate,
-    WholeShareResidue,
+    /// Asset has no taxonomy assignments for the active taxonomy — skipped as buy candidate.
+    UnclassifiedAsset,
+    /// Asset has partial taxonomy weights (<100%) — known exposure used, remainder ignored.
+    PartialClassification,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,4 +286,9 @@ pub struct RebalancePlan {
     pub max_drift_bps_after: i32,
     pub trades: Vec<SuggestedManualTrade>,
     pub warnings: Vec<RebalanceWarning>,
+    /// After-trade allocation in bps per category_id.
+    /// Accounts for multi-category ETF exposure; use this for BeforeAfterStack
+    /// instead of re-deriving from trades (which only carry the primary category).
+    #[serde(default)]
+    pub after_bps_by_category: std::collections::HashMap<String, i32>,
 }

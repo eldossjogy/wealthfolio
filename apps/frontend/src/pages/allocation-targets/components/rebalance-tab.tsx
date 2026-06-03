@@ -70,36 +70,18 @@ function parseCashValue(value: string): number {
 }
 
 function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
-  // Total value is constant — cash moves within the portfolio, not added from outside.
-  const total = driftReport.totalValue;
   const colorMap = buildAllocationTargetColorMap(driftReport.rows);
-  const deployedByCategory = new Map<string, number>();
-  for (const trade of plan.trades) {
-    deployedByCategory.set(
-      trade.categoryId,
-      (deployedByCategory.get(trade.categoryId) ?? 0) + trade.estimatedAmount,
-    );
-  }
-
   return driftReport.rows
     .filter((r) => r.status !== "not_targeted")
-    .map((row, i) => {
-      // Deploying cash moves value out of the cash sleeve into buy sleeves.
-      // Total value is unchanged, so the cash row sheds cash_used.
-      const deployed = deployedByCategory.get(row.categoryId) ?? 0;
-      const afterValue = row.isCash
-        ? Math.max(row.currentValue - plan.cashUsed, 0)
-        : row.currentValue + deployed;
-      const afterBps = total > 0 ? Math.round((afterValue / total) * 10000) : 0;
-      return {
-        categoryId: row.categoryId,
-        categoryName: row.categoryName,
-        color: allocationTargetColorForRow(row, colorMap, i),
-        currentBps: row.currentBps,
-        targetBps: row.targetBps,
-        afterBps,
-      };
-    });
+    .map((row, i) => ({
+      categoryId: row.categoryId,
+      categoryName: row.categoryName,
+      color: allocationTargetColorForRow(row, colorMap, i),
+      currentBps: row.currentBps,
+      targetBps: row.targetBps,
+      // Use backend-computed after-bps (accounts for multi-category ETF exposure).
+      afterBps: plan.afterBpsByCategory[row.categoryId] ?? row.currentBps,
+    }));
 }
 
 function csvCell(value: string): string {
@@ -107,7 +89,22 @@ function csvCell(value: string): string {
   return `"${escaped}"`;
 }
 
-function exportCsv(plan: RebalancePlan, currency: string) {
+function exportCsv(plan: RebalancePlan, currency: string, profileName: string) {
+  const generated = new Date().toISOString().slice(0, 10);
+  const fractionDigits = currencyFractionDigits(currency);
+
+  const meta = [
+    ["Generated", generated],
+    ["Profile", profileName],
+    ["Currency", currency],
+    ["Cash deployed", plan.cashUsed.toFixed(fractionDigits)],
+    ["Cash available", plan.availableCash.toFixed(fractionDigits)],
+    ["Max drift before", fmtBps(plan.maxDriftBpsBefore)],
+    ["Max drift after", fmtBps(plan.maxDriftBpsAfter)],
+  ]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+
   const header = [
     "Action",
     "Symbol",
@@ -120,26 +117,28 @@ function exportCsv(plan: RebalancePlan, currency: string) {
   ]
     .map(csvCell)
     .join(",");
+
   const rows = plan.trades.map((t) =>
     [
       t.action,
       t.symbol ?? "",
       t.name ?? "",
       t.categoryName,
-      t.estimatedAmount.toFixed(2),
-      t.quantity != null ? t.quantity.toFixed(4) : "",
-      t.estimatedPrice != null ? t.estimatedPrice.toFixed(2) : "",
+      t.estimatedAmount.toFixed(fractionDigits),
+      t.quantity != null ? t.quantity.toFixed(t.quantity % 1 === 0 ? 0 : 4) : "",
+      t.estimatedPrice != null ? t.estimatedPrice.toFixed(fractionDigits) : "",
       t.reason,
     ]
       .map(csvCell)
       .join(","),
   );
-  const csv = [header, ...rows].join("\n");
+
+  const csv = [meta, "", header, ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `rebalance-plan-${currency}.csv`;
+  a.download = `rebalance-plan-${profileName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-${generated}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -272,7 +271,8 @@ function KpiStrip({ plan, currency }: { plan: RebalancePlan; currency: string })
 const WARN_LABEL: Record<string, string> = {
   missing_quote: "Missing quote",
   no_buy_candidate: "No buy candidate",
-  whole_share_residue: "Residual cash",
+  unclassified_asset: "Unclassified",
+  partial_classification: "Partial classification",
 };
 
 function Warnings({ items }: { items: RebalanceWarning[] }) {
@@ -653,12 +653,17 @@ export function RebalanceTab({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-foreground text-xl font-semibold tracking-tight">Rebalance</h2>
-        <p className="text-muted-foreground mt-1 text-[13px]">
-          Deploy new cash to pull underweight sleeves back toward target. Buys only — nothing is
-          sold.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-foreground text-xl font-semibold tracking-tight">Rebalance</h2>
+          <p className="text-muted-foreground mt-1 text-[13px]">
+            Deploy new cash to pull underweight categories back toward target. Buys only — nothing
+            is sold.
+          </p>
+        </div>
+        <span className="border-border text-muted-foreground mt-1 shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium">
+          Drift planner
+        </span>
       </div>
 
       <ModeSwitch currency={currency} />
@@ -770,7 +775,7 @@ export function RebalanceTab({
             <Button
               size="sm"
               onClick={() => {
-                exportCsv(plan, currency);
+                exportCsv(plan, currency, profile.name);
                 toast.success("CSV downloaded");
               }}
             >

@@ -1,7 +1,7 @@
 # Rebalance Algorithm — Design Notes
 
-Status: Current (M2) Date: 2026-05-31 Audience: Contributors, reviewers, curious
-users
+Status: Current (PR-B) Date: 2026-06-03 Audience: Contributors, reviewers,
+curious users
 
 ---
 
@@ -13,11 +13,14 @@ bring the portfolio as close to target as possible using only that cash?
 
 Constraints:
 
-- **Cash-only by default** — no forced sells (M2). Sell-mode is M3.
-- **Sleeve boundaries** — each category gets a proportional share of cash;
-  residue does not cross sleeve boundaries.
+- **Cash-only** — no forced sells (M2). Sell-mode is M3.
+- **Exposure-aware** — an asset may span multiple taxonomy categories (e.g. a
+  global ETF classified 60 % US equity / 40 % international). One buy must
+  update all affected category exposures simultaneously.
 - **Whole-share mode** — when enabled, only round-lot quantities are suggested.
-- **Minimum trade size** — trades below `min_trade_amount` are dropped.
+- **Minimum trade size** — asset trades below `min_trade_amount` are dropped
+  from the final output; no-ticker manual sleeve suggestions can still use
+  remaining cash.
 
 ---
 
@@ -31,8 +34,10 @@ find the globally optimal trade set in one pass. Real costs:
 - Overkill for single-portfolio individual use where "close enough" in
   milliseconds beats "optimal" in seconds.
 
-Our two-phase greedy algorithm achieves near-optimal results for typical inputs
-and is easy to audit step by step.
+The greedy algorithm below achieves near-optimal results for typical inputs and
+is easy to audit step by step. The `RebalanceOptimizer` trait is
+solver-compatible: a future `MilpOptimizer` can replace `DriftPriorityOptimizer`
+behind a feature flag without changing `RebalanceService`.
 
 ---
 
@@ -41,205 +46,190 @@ and is easy to audit step by step.
 ```
 Input: available_cash, target_profile, current_holdings, drift_report
 
-Phase 1 — Proportional allocation
-  Compute shortfall per underweight sleeve.
-  Scale sleeve budgets to fit available_cash.
-  For each sleeve:
-    For each holding (weighted by current market value):
-      holding_budget = sleeve_budget × holding_weight
-      If whole_shares_only:
-        shares = floor(holding_budget / price)
-        If shares == 0: track holding as "skipped"
-      Else:
-        amount = holding_budget    ← fractional, 100% deployed
+Build exposure vectors
+  For each non-cash holding with taxonomy assignments:
+    exposure_per_share[category] = contribution.value / quantity
+    (multi-category ETF → multiple entries summing to ≤ price)
+    Skip holding if all categories are __UNKNOWN__ (warn UnclassifiedAsset)
+    Include with partial exposure if some categories are __UNKNOWN__ (warn PartialClassification)
 
-Phase 2 — Intra-sleeve residue absorption (whole_shares_only only)
-  For each sleeve:
-    Sort holdings by price ASC
-    residue = sleeve_budget - sleeve_deployed
-    Loop:
-      For each holding (cheapest first):
-        If residue ≥ price: buy 1 share, residue -= price
-      Break if no holding bought a share this pass
+Greedy loop
+  while cash > 0:
+    drift_before = Σ |current_bps[c] − target_bps[c]|  for required non-cash categories
+    for each candidate asset:
+      if whole-share mode and cash < price: skip
+      quantity = 1 share in whole-share mode
+      quantity = fractional cash/price capped at the next target/band bend in fractional mode
+      simulate buy quantity → new_bps[c] = (current_value[c] + exposure_per_share[c] × quantity) / total_value
+      drift_after = Σ |new_bps[c] − target_bps[c]|
+      score = (drift_before − drift_after) / amount
+    pick candidate with highest score > 0
+    tie-break: price ASC (deterministic; lower-price assets preferred)
+    if no candidate improves drift: stop
+    apply buy: update current_value[c] for each category, cash -= amount
 
-  For each Phase-1-skipped holding still un-funded:
-    Emit WholeShareResidue warning with top-up suggestion.
+Post-processing
+  Aggregate shares by asset → SuggestedManualTrade (1 per asset)
+  Drop asset trades where estimated_amount < min_trade_amount
+  cash_used = sum of kept trade amounts
+  after_bps_by_category = recompute from initial values + kept trades only
 
-Output: trades[], warnings[], cash_used, cash_remaining
+Output: trades[], warnings[], cash_used, cash_remaining, after_bps_by_category
 ```
 
 ---
 
-## 4. Phase 1 — Proportional allocation
+## 4. Exposure vectors
 
-### Sleeve budget
+Each asset is represented as a vector of per-share exposures across taxonomy
+categories, derived from
+`AllocationService::get_holding_contributions_for_taxonomy_for_accounts`.
 
-Each underweight sleeve receives a budget proportional to its shortfall vs.
-target. `nearest_band` aims for the closest band edge; `exact_target` aims for
-the exact target percentage. When `total_shortfall > available_cash`, a
-`scale_factor = available_cash / total_shortfall` reduces all sleeve budgets
-proportionally so every underweight sleeve still gets a share.
+```
+              US equity   Intl equity   Bonds
+VT              $60          $40          $0     (price $100 — fully classified)
+AAPL           $100           $0          $0     (price $100 — single category)
+XYZ             $70           $0          $0     (price $100 — partial: 70% known, 30% __UNKNOWN__)
+```
 
-Sleeves already at or above target receive zero budget.
+For VT: buying 1 share adds $60 to US equity and $40 to international equity
+simultaneously, improving drift in both categories in a single step.
 
-### Holding distribution within a sleeve
+`__UNKNOWN__` exposure is excluded from the vector. Partial exposure means the
+greedy can improve drift for the known categories but not for the unclassified
+remainder.
 
-Within a sleeve, budget is distributed proportional to each holding's current
-market value. This keeps the relative composition of the sleeve stable — the
-same principle a passive index fund uses when it receives new money.
+### Classification edge cases
 
-Example: sleeve holdings = A €4000 (40 %), B €3000 (30 %), C €2000 (20 %), D
-€1000 (10 %). Sleeve budget €2000 → A gets €800, B €600, C €400, D €200.
-
-### Fractional vs whole-share mode
-
-| Mode        | Shares                          | Amount                            |
-| ----------- | ------------------------------- | --------------------------------- |
-| Fractional  | `holding_budget / price`        | `holding_budget` (100 % deployed) |
-| Whole-share | `floor(holding_budget / price)` | `shares × price`                  |
-
-Fractional mode deploys 100 % of the sleeve budget. Whole-share mode leaves a
-rounding residue that Phase 2 reclaims.
-
----
-
-## 5. Phase 2 — Intra-sleeve residue absorption (whole-share mode)
-
-### Why this phase exists
-
-With whole-share rounding, each holding may leave a fractional share's worth of
-cash undeployed. Across a sleeve with several holdings, this residue easily
-totals one or two full share prices — enough to buy at least one more share, but
-lost if we stop after Phase 1.
-
-### Algorithm: 1-share-at-a-time, price ascending
-
-1. Sort holdings by price ascending (cheapest first).
-2. Loop one pass over all holdings:
-   - If `residue ≥ price`, buy exactly **1 share**, reduce residue.
-3. Repeat until a full pass buys nothing.
-
-### Why 1-share-at-a-time (not `floor(residue / price)`)
-
-The naive approach `additional = floor(residue / price)` lets the cheapest
-holding absorb the entire residue in a single shot, badly skewing sleeve
-composition (one cheap ETF receiving 100+ shares while expensive holdings get
-zero extra). The 1-share-at-a-time loop preserves balance: each holding can
-receive at most one additional share per pass.
-
-### Why price ascending (not proportional weights)
-
-An earlier version used `floor(residue × weight / price)` to preserve
-proportions. This failed silently for small residues: when each holding's
-proportional slice was below its share price, no holding could buy anything and
-the entire residue stayed undeployed. Sorting by price ASC guarantees the
-cheapest holding gets the first chance, which is the standard greedy choice for
-maximising deployment.
-
-### What it does NOT do
-
-- **No cross-sleeve redistribution.** Residue stays within the sleeve that
-  generated it. Crossing sleeve boundaries would silently alter the target
-  allocation.
-- **No sell suggestions.** Phase 2 only buys.
-- **No expensive-holding rescue.** When a cheaper holding shares the sleeve,
-  Phase 2 ASC always satisfies the cheaper holding first. Expensive holdings
-  that were skipped in Phase 1 (because their proportional budget < price)
-  cannot be rescued — see the structural-starvation limitation below.
+| Situation                                     | Behaviour                                                                    |
+| --------------------------------------------- | ---------------------------------------------------------------------------- |
+| All exposure in `__UNKNOWN__`                 | Skip as candidate. Warn `UnclassifiedAsset`.                                 |
+| Partial exposure (<100% classified)           | Include with known exposure. Warn `PartialClassification`. Do not normalise. |
+| Weights >100%                                 | `AllocationService` normalises to 100% (consistent with drift view).         |
+| Cash holdings (`CASH` / `CASH_BANK_DEPOSITS`) | Excluded from candidates.                                                    |
+| No price available (whole-share mode)         | Skip. Warn `MissingQuote`.                                                   |
 
 ---
 
-## 6. Known limitation — structural starvation of expensive holdings
+## 5. Scoring
 
-### The problem
+**Score = drift_improvement / price**
 
-When a holding's proportional budget is less than its share price, Phase 1 skips
-it. Phase 2 cannot rescue it if any cheaper holding exists in the same sleeve —
-the cheaper holding will absorb the residue first, leaving less than one
-expensive share's worth behind.
+Where `drift_improvement = Σ|drift_bps[c]| before − Σ|drift_bps[c]| after`
+across all required non-cash categories.
 
-**Concrete example:** sleeve has holding X (price €240, 10 % weight). User
-deploys €2000/month. X's proportional budget each month is 10 % × €2000 = €200,
-which is less than the €240 share price. X never receives any cash, and over
-time its portfolio weight drifts toward zero while other holdings grow.
+Key properties:
 
-### Why this matters
-
-Without holding-level targets, the algorithm assumes "maintain current
-proportions" is the right default. Structurally expensive holdings break that
-assumption: their proportion silently decays each rebalance run.
-
-### Options considered
-
-| Option                      | Mechanism                                                           | Status                             |
-| --------------------------- | ------------------------------------------------------------------- | ---------------------------------- |
-| **A — 1-at-a-time Phase 2** | Absorbs cheap residue, no expensive rescue                          | ✅ Implemented                     |
-| **B — Robin Hood rescue**   | Reduce served holdings by 1 share to fund expensive starved holding | ⏳ Open design question for Afadil |
-| **C — Top-up warning**      | Emit explicit warning with suggested top-up cash amount             | ✅ Implemented                     |
-| **D — HoldingTarget**       | Per-ticker explicit weights override "maintain proportions"         | ⏳ Future (V2 data model)          |
-
-### Current behaviour (A + C)
-
-Phase 2 absorbs cheap residue. For any holding still starved after Phase 2, a
-`WholeShareResidue` warning is emitted with the top-up amount needed to fund one
-share. Example:
-
-> EXPENSIVE: proportional budget $200.00 short of 1 share at $240.00. Add
-> ~$40.00 more cash to fund 1 share, or EXPENSIVE will drift below target over
-> time.
-
-The user can then choose to add more cash or accept the drift.
-
-### Why we deferred Robin Hood (Option B)
-
-Reducing one holding's allocation to fund another is a design decision, not a
-pure algorithmic improvement. It alters the proportional contract Phase 1
-established. We want explicit sign-off from Afadil before changing this default
-— see the M2 PR open questions.
-
-### Why we deferred HoldingTarget (Option D)
-
-`HoldingTarget` is in the SOTA spec but not in V1. It requires a new data model,
-UI for per-ticker target weights, and downstream changes to drift calculation.
-Out of scope for V1/M2.
+- **Multi-category benefit.** An ETF that simultaneously reduces drift in two
+  categories scores higher than a single-category asset at the same price — the
+  numerator captures the combined improvement.
+- **Scale-invariant for same-category assets.** Two assets 100% in the same
+  underweight category have identical scores regardless of price (buying more of
+  a cheaper asset per dollar improves the category by the same bps as buying
+  less of an expensive one). The tie-break resolves them by price ASC.
+- **Stops when no improvement.** Once the portfolio reaches target (or no
+  candidate can further reduce drift without overshooting), the loop terminates.
+  Remaining cash stays as `cash_remaining`.
 
 ---
 
-## 7. Warnings emitted
+## 6. Whole-share vs fractional mode
 
-| Warning kind        | Condition                                                                          | User action                                 |
-| ------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------- |
-| `MissingQuote`      | Holding has no valid price or quantity (whole-share mode)                          | Refresh market data                         |
-| `WholeShareResidue` | Holding skipped because proportional budget < price, even after Phase 2 absorption | Top-up suggestion included (price − budget) |
-| `NoBuyCandidate`    | Sleeve has no holdings — sleeve-level dollar suggestion emitted                    | User picks a ticker manually                |
+| Mode        | Step                                  | Quantity |
+| ----------- | ------------------------------------- | -------- |
+| Whole-share | 1 share, batched within linear region | Integer  |
+| Fractional  | Drift-capped slice                    | Decimal  |
 
-The `WholeShareResidue` message names the symbol, original budget, share price,
-and exact top-up required. Aggregated at sleeve level: one warning per starved
-holding, emitted once per plan.
+Both modes use the same drift-improvement-per-dollar scoring and candidate
+tie-breaks.
 
----
-
-## 8. Possible future improvements
-
-| Idea                                              | Complexity | Status                                                                             |
-| ------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------- |
-| Robin Hood rescue (Option B above)                | Medium     | Open design question for Afadil                                                    |
-| HoldingTarget — per-ticker allocations (Option D) | High       | Requires V2 data model (SOTA Phase 2)                                              |
-| Sell-to-rebalance (`allow_sells`)                 | Medium     | Spec'd in V1, scoped for M3                                                        |
-| Tax-lot awareness                                 | High       | Out of V1 scope                                                                    |
-| Cross-sleeve residue redistribution               | High       | Would break target allocation contract                                             |
-| Persistent "owed" credit across runs              | High       | Solves expensive-holding drift more cleanly than Robin Hood, but needs schema + UX |
-| LP/MILP solver                                    | High       | Overkill for current use case                                                      |
-| Multi-account optimisation                        | High       | SOTA spec, future roadmap                                                          |
+- **Whole-share mode** buys integer quantities only. It batches repeated buys of
+  the selected candidate only when it is the sole improving candidate. If more
+  than one asset can improve drift, it buys one share and re-scores, preserving
+  strict greedy equivalence in coupled multi-category cases. Cash below the next
+  usable share price remains as `cash_remaining`.
+- **Fractional mode** sizes each selected buy as a decimal quantity from the
+  start, capped at available cash and the next target/band bend for categories
+  the candidate can improve. This avoids full-share overbuying when a fractional
+  quantity already closes the drift.
 
 ---
 
-## 9. Implementation reference
+## 7. After-drift computation
 
-- Algorithm: `crates/core/src/portfolio/allocation_targets/rebalance_service.rs`
-  — `calculate_plan()` method, Phase 1 lines ~241–333, Phase 2 lines ~335–460.
-- Types: `crates/core/src/portfolio/allocation_targets/model.rs` —
-  `RebalancePlan`, `SuggestedManualTrade`, `RebalanceWarning`.
-- Tests: same file, `mod tests` — 10 tests covering Phase 1 proportional split,
-  Phase 2 absorption + non-skew, scaling, warning emission, min-trade filter.
-- UI: `apps/frontend/src/pages/allocation-targets/components/rebalance-tab.tsx`.
+After filtering trades by `min_trade_amount`, `after_bps_by_category` is
+recomputed from the initial portfolio state plus the kept trades only (not the
+full greedy state). This keeps `cash_used`, `cash_remaining`, and
+`after_bps_by_category` mutually consistent with what the user will actually
+execute.
+
+The frontend `BeforeAfterStack` visualisation uses `after_bps_by_category`
+directly from the plan (not re-derived from trade amounts), which gives correct
+results for multi-category ETFs.
+
+---
+
+## 8. Warnings emitted
+
+| Warning kind            | Condition                                                    | User action                         |
+| ----------------------- | ------------------------------------------------------------ | ----------------------------------- |
+| `UnclassifiedAsset`     | Holding has no taxonomy assignments for the active taxonomy  | Classify the asset                  |
+| `PartialClassification` | Holding has partial weights (<100%); known exposure used     | Complete classification if possible |
+| `MissingQuote`          | No valid price in whole-share mode                           | Refresh market data                 |
+| `NoBuyCandidate`        | Required underweight category has no candidate with exposure | Allocate that category manually     |
+
+`NoBuyCandidate` emits a sleeve-level dollar trade (no ticker) so the user sees
+the suggested amount even when no holding covers that category.
+
+---
+
+## 9. PR-B decisions
+
+`AllocationService::contribution_shares_for_holding` normalises weights >10000
+bps silently (line 247: `weight_divisor = total.max(10000)`). This is consistent
+with how drift reports and allocation views already handle over-allocated
+assets. For the rebalance planner we align with this behaviour rather than
+blocking on >100% weights.
+
+If a hard block is desired, it should be write-time validation on
+`AssetTaxonomyAssignment` in a separate data-quality PR, not planner-only
+behaviour.
+
+The old `WholeShareResidue` top-up warning is not carried forward. It was tied
+to the old proportional sleeve planner and does not map cleanly to this
+exposure-aware optimiser. Whole-share residue is reported as `cash_remaining`; a
+future UI pass can add a non-blocking "add X for one more share" hint.
+
+---
+
+## 10. Possible future improvements
+
+| Idea                                                | Complexity | Status                                |
+| --------------------------------------------------- | ---------- | ------------------------------------- |
+| Sell-to-rebalance (`allow_sells`)                   | Medium     | M3                                    |
+| `HoldingTarget` — per-ticker allocations            | High       | V2 data model (SOTA Phase 2)          |
+| Tax-lot awareness                                   | High       | Out of V1 scope                       |
+| `TaxAwareOptimizer` (greedy + tax penalty in score) | Medium     | M3/M4                                 |
+| `MilpOptimizer` behind `--features milp`            | High       | When tax-aware / lot selection needed |
+| Multi-account optimisation                          | High       | SOTA spec, future roadmap             |
+| Whole-share top-up hint                             | Low        | UX polish                             |
+
+---
+
+## 11. Implementation reference
+
+- **Trait + types:** `crates/core/src/portfolio/allocation_targets/optimizer.rs`
+  — `RebalanceOptimizer`, `DriftPriorityOptimizer`, `RebalanceInput`,
+  `AssetCandidate`.
+- **Orchestration:**
+  `crates/core/src/portfolio/allocation_targets/rebalance_service.rs` —
+  `RebalanceService::calculate_plan()` fetches holdings + contributions, builds
+  candidates, calls optimizer.
+- **Types:** `crates/core/src/portfolio/allocation_targets/model.rs` —
+  `RebalancePlan`, `SuggestedManualTrade`, `RebalanceWarning`,
+  `RebalanceWarningKind`.
+- **Tests:** `rebalance_service.rs` `mod tests` — 53 tests covering cash
+  enforcement, greedy selection, multi-category ETF exposure, classification
+  edge cases, whole-share, nearest-band, min-trade filter.
+- **UI:**
+  `apps/frontend/src/pages/allocation-targets/components/rebalance-tab.tsx`.
