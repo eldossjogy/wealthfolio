@@ -172,10 +172,10 @@ function SymbolToolTip({ active, payload }: SymbolTooltipProps) {
               <div key={act.id} className="flex items-center justify-between space-x-2">
                 <div className="flex items-center space-x-1.5">
                   <span
-                    className={`block h-2.5 w-2.5 rounded-full ${isBuy ? "bg-success" : "bg-blue-600 dark:bg-blue-300"}`}
+                    className={`block h-2.5 w-2.5 rounded-full ${isBuy ? "bg-success" : "bg-destructive"}`}
                   />
                   <span
-                    className={`text-sm font-medium ${isBuy ? "text-success" : "text-blue-600 dark:text-blue-300"}`}
+                    className={`text-sm font-medium ${isBuy ? "text-success" : "text-destructive"}`}
                   >
                     {isBuy ? "Bought" : "Sold"}
                   </span>

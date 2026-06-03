@@ -51,7 +51,7 @@ export function HistoryChartMarkerShape({
 
   return (
     <g
-      className={isBuy ? "text-success" : "text-blue-600 dark:text-blue-300"}
+      className={isBuy ? "text-success" : "text-destructive"}
       style={{ pointerEvents: "none" }}
       transform={`translate(${cx ?? 0}, ${cy ?? 0})`}
     >
