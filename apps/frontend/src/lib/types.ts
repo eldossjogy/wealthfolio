@@ -2411,7 +2411,6 @@ export interface DriftHoldingsReport {
 export type RebalanceWarningKind =
   | "missing_quote"
   | "no_buy_candidate"
-  | "whole_share_residue"
   | "unclassified_asset"
   | "partial_classification";
 
