@@ -1300,9 +1300,31 @@ async fn test_staleness_detection() {
 }
 
 #[tokio::test]
-async fn test_zero_value_valuation_not_stale() {
-    // A paid-off liability (or any asset) sitting at $0 has nothing to update,
-    // so an old zero-value valuation must not be flagged as stale.
+async fn test_zero_value_liability_not_stale() {
+    // A paid-off liability sitting at $0 has nothing to update, so an old
+    // zero-value valuation must not be flagged as stale.
+    let liab_asset = create_test_asset("LIAB-mortgage", AssetKind::Liability, "USD");
+
+    // Old quote (100 days ago) priced at zero → market value of zero.
+    let old_date = NaiveDate::from_ymd_opt(2023, 10, 7).unwrap();
+    let quote = create_test_quote("LIAB-mortgage", dec!(0), old_date, "USD");
+
+    let service = create_net_worth_service(vec![], vec![liab_asset], vec![], vec![quote]);
+
+    let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+    let result = service.get_net_worth(date).await.unwrap();
+
+    // Zero-value liability is excluded from staleness even though it is >90 days old.
+    assert_eq!(result.stale_assets.len(), 0);
+    // It is also excluded from the oldest-valuation-date signal the widget uses,
+    // so the "stale valuations" banner stays hidden.
+    assert_eq!(result.oldest_valuation_date, None);
+}
+
+#[tokio::test]
+async fn test_zero_value_investment_still_stale() {
+    // A zero value on a non-liability asset is more likely a data issue (e.g. a
+    // bad quote), so it must still be flagged as stale to prompt a refresh.
     let account = create_test_account("acc1", "SECURITIES", "USD");
     let asset = create_test_asset("AAPL", AssetKind::Investment, "USD");
     let position = create_test_position("acc1", "AAPL", dec!(100), dec!(15000), "USD");
@@ -1317,11 +1339,8 @@ async fn test_zero_value_valuation_not_stale() {
     let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
     let result = service.get_net_worth(date).await.unwrap();
 
-    // Zero-value valuation is excluded from staleness even though it is >90 days old.
-    assert_eq!(result.stale_assets.len(), 0);
-    // It is also excluded from the oldest-valuation-date signal the widget uses,
-    // so the "stale valuations" banner stays hidden.
-    assert_eq!(result.oldest_valuation_date, None);
+    assert_eq!(result.stale_assets.len(), 1);
+    assert_eq!(result.stale_assets[0].asset_id, "AAPL");
 }
 
 #[tokio::test]

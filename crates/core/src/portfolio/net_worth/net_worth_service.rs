@@ -260,17 +260,22 @@ impl NetWorthService {
     }
 
     /// Calculate staleness info for valuations.
-    /// Cash-like balances and zero-value valuations are excluded since they have no
-    /// market data to keep up to date.
+    /// Cash-like balances and paid-off ($0) liabilities are excluded since they have
+    /// no market data to keep up to date.
     fn calculate_staleness(
         valuations: &[ValuationInfo],
         reference_date: NaiveDate,
     ) -> (Option<NaiveDate>, Vec<StaleAssetInfo>) {
-        // Exclude cash-like balances (no market data to update) and zero-value
-        // valuations (e.g. a paid-off liability sitting at $0 — nothing to update).
+        // Exclude cash-like balances (no market data to update) and paid-off
+        // liabilities sitting at $0 (nothing to update). A zero value on a
+        // non-liability asset is more likely a data issue (e.g. a bad quote), so
+        // those are still surfaced as stale to prompt the user to refresh them.
         let trackable_valuations: Vec<_> = valuations
             .iter()
-            .filter(|v| !v.is_cash_like && !v.market_value_base.is_zero())
+            .filter(|v| {
+                !v.is_cash_like
+                    && !(v.category == AssetCategory::Liability && v.market_value_base.is_zero())
+            })
             .collect();
 
         let oldest_date = trackable_valuations.iter().map(|v| v.valuation_date).min();
