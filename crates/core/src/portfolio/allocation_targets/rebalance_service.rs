@@ -47,6 +47,20 @@ impl RebalanceService {
             holdings_service,
         }
     }
+
+    fn currency_fraction_digits(currency: &str) -> u32 {
+        match currency.to_ascii_uppercase().as_str() {
+            "BIF" | "CLP" | "DJF" | "GNF" | "ISK" | "JPY" | "KMF" | "KRW" | "PYG" | "RWF"
+            | "UGX" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+            "BHD" | "IQD" | "JOD" | "KWD" | "LYD" | "OMR" | "TND" => 3,
+            "CLF" => 4,
+            _ => 2,
+        }
+    }
+
+    fn currency_rounding_tolerance(currency: &str) -> Decimal {
+        Decimal::ONE / Decimal::from(10_i64.pow(Self::currency_fraction_digits(currency)))
+    }
 }
 
 #[async_trait]
@@ -67,9 +81,10 @@ impl RebalanceServiceTrait for RebalanceService {
 
         // M2 deploys tracked cash only. Compute the cash in scope from holdings
         // (authoritative — does not trust a client-supplied figure) and reject
-        // attempts to deploy more than is actually held. Allow a tiny sub-cent
-        // overage from frontend decimal serialization / currency rounding, but
-        // cap planning at the authoritative tracked cash value.
+        // attempts to deploy more than is actually held. Allow a tiny overage
+        // within the base currency's minor unit from frontend decimal
+        // serialization / currency rounding, but cap planning at the
+        // authoritative tracked cash value.
         let cash_in_scope: Decimal = self
             .holdings_service
             .get_holdings_for_accounts(
@@ -85,7 +100,7 @@ impl RebalanceServiceTrait for RebalanceService {
 
         let available_cash = if input.available_cash > cash_in_scope {
             let overage = input.available_cash - cash_in_scope;
-            if overage <= dec!(0.01) {
+            if overage <= Self::currency_rounding_tolerance(&input.base_currency) {
                 cash_in_scope
             } else {
                 return Err(CoreError::Validation(
@@ -999,6 +1014,43 @@ mod tests {
         assert_eq!(plan.available_cash, dec!(100.005));
         assert_eq!(plan.cash_used, dec!(100));
         assert_eq!(plan.cash_remaining, dec!(0.005));
+    }
+
+    #[tokio::test]
+    async fn rounded_zero_decimal_cash_is_capped_to_tracked_cash() {
+        // Zero-decimal currencies can round 100.5 to 101 in the UI. That should
+        // still behave as "deploy all tracked cash", while planning remains
+        // capped to the authoritative backend value.
+        let total = dec!(1000);
+        let rows = vec![
+            make_drift_row("equity", 5000, 6000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 5000, 4000, total)
+            },
+        ];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(500))],
+        );
+        let svc = make_service_with_cash(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+            dec!(100.5),
+        );
+        let input = CalculateRebalancePlanInput {
+            base_currency: "JPY".to_string(),
+            ..make_input(dec!(101))
+        };
+
+        let plan = svc.calculate_plan(input).await.unwrap();
+
+        assert_eq!(plan.available_cash, dec!(100.5));
+        assert_eq!(plan.cash_used, dec!(100));
+        assert_eq!(plan.cash_remaining, dec!(0.5));
     }
 
     #[tokio::test]
