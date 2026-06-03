@@ -1171,6 +1171,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fractional_mode_deploys_partial_share() {
+        // Fractional mode (whole_shares_only = false): $50 cash, $100 ETF. No whole
+        // share fits, but the leftover should deploy as a 0.5-share fractional buy.
+        let total = dec!(10000);
+        let h = make_holding("h1", "ETF", dec!(1), dec!(100)); // $100/share
+        let c = make_contribution(&h, "equity", dec!(100));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(vec![make_drift_row("equity", 5000, 7000, total)], total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(50), "USD"), h],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(50))).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("ETF"))
+            .expect("fractional ETF trade expected");
+        assert_eq!(trade.quantity, Some(dec!(0.5)), "should buy 0.5 shares");
+        assert_eq!(plan.cash_used, dec!(50));
+    }
+
+    #[tokio::test]
     async fn whole_shares_only_buys_integer_shares() {
         let total = dec!(10000);
         // VTI: 10 shares @ $600 = $6000. Price = $600/share.

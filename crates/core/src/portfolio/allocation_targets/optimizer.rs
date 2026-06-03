@@ -286,6 +286,83 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             shares_bought[idx] += Decimal::ONE;
         }
 
+        // Fractional last slice: when the profile allows fractional shares, deploy the
+        // cash left over once no whole share fits. Pick the candidate whose fractional
+        // buy reduces drift the most, capping the size so no category overshoots its
+        // desired value (the exact target, or the band edge under NearestBand).
+        if !profile.whole_shares_only && cash > Decimal::ZERO {
+            let drift_before = Self::total_drift(
+                &values,
+                &categories,
+                total_value,
+                &profile.rebalance_goal,
+                drift_band,
+            );
+
+            let mut best_idx: Option<usize> = None;
+            let mut best_shares = Decimal::ZERO;
+            let mut best_improvement = Decimal::ZERO;
+
+            for (idx, candidate) in candidates.iter().enumerate() {
+                let mut max_shares = cash / candidate.price;
+                for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                    let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                        continue;
+                    };
+                    if *expo <= Decimal::ZERO {
+                        continue;
+                    }
+                    let desired_bps = match profile.rebalance_goal {
+                        RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
+                        RebalanceGoal::NearestBand => {
+                            (Decimal::from(cat.target_bps) - drift_band).max(Decimal::ZERO)
+                        }
+                    };
+                    let desired_value = desired_bps / scale * total_value;
+                    let base = values.get(&cat.category_id).copied().unwrap_or_default();
+                    if base >= desired_value {
+                        max_shares = Decimal::ZERO;
+                        break;
+                    }
+                    let cap = (desired_value - base) / expo;
+                    if cap < max_shares {
+                        max_shares = cap;
+                    }
+                }
+                if max_shares <= Decimal::ZERO {
+                    continue;
+                }
+                let delta: HashMap<String, Decimal> = candidate
+                    .exposure_per_share
+                    .iter()
+                    .map(|(cat_id, e)| (cat_id.clone(), e * max_shares))
+                    .collect();
+                let drift_after = Self::total_drift_with_buy(
+                    &values,
+                    &categories,
+                    total_value,
+                    &delta,
+                    &profile.rebalance_goal,
+                    drift_band,
+                );
+                let improvement = drift_before - drift_after;
+                if improvement > best_improvement {
+                    best_improvement = improvement;
+                    best_shares = max_shares;
+                    best_idx = Some(idx);
+                }
+            }
+
+            if let Some(idx) = best_idx {
+                let candidate = &candidates[idx];
+                for (cat_id, expo) in &candidate.exposure_per_share {
+                    *values.entry(cat_id.clone()).or_default() += expo * best_shares;
+                }
+                cash -= candidate.price * best_shares;
+                shares_bought[idx] += best_shares;
+            }
+        }
+
         // Build trades from accumulated shares; apply min_trade_amount filter.
         let mut trades: Vec<SuggestedManualTrade> = Vec::new();
 

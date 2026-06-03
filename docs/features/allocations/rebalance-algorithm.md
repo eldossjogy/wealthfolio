@@ -137,15 +137,16 @@ Key properties:
 | Whole-share | 1 share per iteration | Integer  |
 | Fractional  | 1 share per iteration | Decimal  |
 
-Both modes use the same greedy loop at 1-share granularity. The difference is in
-the output: whole-share mode produces integer quantities; fractional mode may
-produce fractional shares (e.g. 3.5 shares of an ETF). Cash left over after the
-loop when `cash < min(candidate prices)` is reported as `cash_remaining`.
+Both modes share the same greedy whole-share loop. The difference is what
+happens with the cash left over once no whole share fits:
 
-> **Note (known limitation):** fractional mode could in principle deploy the
-> last slice of cash as a sub-share purchase. The current implementation stops
-> when cash < cheapest candidate price. The gap is typically small (< 1 share
-> price) and is reported as `cash_remaining`.
+- **Whole-share mode** stops there. The leftover (< cheapest candidate price) is
+  reported as `cash_remaining`.
+- **Fractional mode** deploys a final fractional slice: it picks the candidate
+  whose sub-share buy reduces drift the most and sizes it `cash / price`, capped
+  so no category overshoots its desired value (the exact target, or the band
+  edge under `NearestBand`). Any residue below that cap stays as
+  `cash_remaining`.
 
 ---
 
@@ -197,7 +198,6 @@ the PR.
 | --------------------------------------------------- | ---------- | ------------------------------------- |
 | Sell-to-rebalance (`allow_sells`)                   | Medium     | M3                                    |
 | `HoldingTarget` — per-ticker allocations            | High       | V2 data model (SOTA Phase 2)          |
-| Sub-share fractional final top-up                   | Low        | Nice-to-have                          |
 | Tax-lot awareness                                   | High       | Out of V1 scope                       |
 | `TaxAwareOptimizer` (greedy + tax penalty in score) | Medium     | M3/M4                                 |
 | `MilpOptimizer` behind `--features milp`            | High       | When tax-aware / lot selection needed |
