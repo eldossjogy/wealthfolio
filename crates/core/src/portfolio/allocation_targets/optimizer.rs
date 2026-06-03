@@ -192,8 +192,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     category_id: cat.category_id.clone(),
                     message: format!(
                         "No classifiable holdings in {}. Allocate {:.2} to this category manually.",
-                        cat.category_name,
-                        shortfall.min(available_cash),
+                        cat.category_name, shortfall,
                     ),
                 });
                 no_candidate_categories.push(cat);
@@ -297,7 +296,13 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         }
 
         // Sleeve-level dollar trades for uncovered underweight categories.
+        // Draw from the cash left after the greedy whole-share buys, decrementing as we
+        // go, so multiple uncovered categories can never collectively overspend.
+        let mut manual_cash = cash;
         for cat in &no_candidate_categories {
+            if manual_cash <= Decimal::ZERO {
+                break;
+            }
             let desired_bps = match profile.rebalance_goal {
                 RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
                 RebalanceGoal::NearestBand => {
@@ -306,8 +311,9 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             };
             let shortfall =
                 ((desired_bps / scale * total_value) - cat.current_value).max(Decimal::ZERO);
-            let amount = shortfall.min(available_cash);
+            let amount = shortfall.min(manual_cash);
             if amount > Decimal::ZERO {
+                manual_cash -= amount;
                 trades.push(SuggestedManualTrade {
                     action: "buy".to_string(),
                     category_id: cat.category_id.clone(),

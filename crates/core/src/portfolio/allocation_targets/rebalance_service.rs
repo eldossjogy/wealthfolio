@@ -1007,6 +1007,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn multiple_uncovered_categories_never_overspend_cash() {
+        // Two required underweight categories with no buy candidates. Each shortfall
+        // ($2000) exceeds available cash ($1000). Manual sleeve trades must share the
+        // cash, never letting cash_used exceed available / cash_remaining go negative.
+        let total = dec!(10000);
+        let rows = vec![
+            make_drift_row("bonds", 2000, 4000, total),
+            make_drift_row("reit", 2000, 4000, total),
+            make_drift_row("equity", 6000, 2000, total),
+        ];
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(rows, total),
+            make_contributions(vec![]),
+            vec![make_cash_holding(dec!(1000), "USD")],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(1000))).await.unwrap();
+
+        assert!(
+            plan.cash_used <= dec!(1000),
+            "cash_used must not exceed available cash, got {}",
+            plan.cash_used
+        );
+        assert!(
+            plan.cash_remaining >= Decimal::ZERO,
+            "cash_remaining must not go negative, got {}",
+            plan.cash_remaining
+        );
+        assert_eq!(plan.cash_used + plan.cash_remaining, dec!(1000));
+    }
+
+    #[tokio::test]
     async fn unclassified_asset_emits_warning_and_is_skipped() {
         let total = dec!(10000);
         let h = make_holding("h1", "XYZ", dec!(10), dec!(5000));
