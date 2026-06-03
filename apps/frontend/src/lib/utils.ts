@@ -35,6 +35,14 @@ export function tryParseDate(dateStr: string): Date | null {
     "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", // Added Standard ISO format with milliseconds
     "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX", // Added Standard ISO timestamp with microsecond precision and timezone offset
 
+    // 12-hour / AM-PM Formats (e.g. Questrade exports)
+    "yyyy-MM-dd hh:mm:ss a", // "2024-05-01 12:00:00 AM"
+    "yyyy-MM-dd hh:mm a", // "2024-05-01 12:00 AM"
+    "MM/dd/yyyy hh:mm:ss a", // "05/01/2024 12:00:00 AM" - US
+    "MM/dd/yyyy hh:mm a", // "05/01/2024 12:00 AM" - US
+    "dd/MM/yyyy hh:mm:ss a", // "01/05/2024 12:00:00 AM" - UK/EU
+    "dd/MM/yyyy hh:mm a", // "01/05/2024 12:00 AM" - UK/EU
+
     // ISO and Technical Formats
     "yyyy-MM-dd", // "2024-05-01" - ISO 8601
     "yyyyMMdd", // "20240501" - Compact ISO
