@@ -177,6 +177,10 @@ pub struct DriftRow {
     pub status: DriftStatus,
     pub is_required: bool,
     pub is_zero_current: bool,
+    /// True when this category holds only cash. The rebalance planner reduces
+    /// this row by the deployed cash when estimating after-drift.
+    #[serde(default)]
+    pub is_cash: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,4 +227,60 @@ pub struct DriftHoldingsReport {
     pub total_value: Decimal,
     pub base_currency: String,
     pub rows: Vec<DriftHoldingRow>,
+}
+
+// ── Rebalance types ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalculateRebalancePlanInput {
+    pub target_id: String,
+    pub available_cash: Decimal,
+    pub account_ids: Vec<String>,
+    pub base_currency: String,
+    pub aggregated_account_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RebalanceWarningKind {
+    MissingQuote,
+    NoBuyCandidate,
+    WholeShareResidue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalanceWarning {
+    pub kind: RebalanceWarningKind,
+    pub category_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestedManualTrade {
+    pub action: String,
+    pub category_id: String,
+    pub category_name: String,
+    pub asset_id: Option<String>,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub quantity: Option<Decimal>,
+    pub estimated_price: Option<Decimal>,
+    pub estimated_amount: Decimal,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebalancePlan {
+    pub target_id: String,
+    pub available_cash: Decimal,
+    pub cash_used: Decimal,
+    pub cash_remaining: Decimal,
+    pub max_drift_bps_before: i32,
+    pub max_drift_bps_after: i32,
+    pub trades: Vec<SuggestedManualTrade>,
+    pub warnings: Vec<RebalanceWarning>,
 }

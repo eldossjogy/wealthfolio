@@ -378,6 +378,7 @@ export const COMMANDS: CommandMap = {
     path: "/allocation-targets/save-with-weights",
   },
   get_allocation_target_drift: { method: "POST", path: "/allocation-targets" },
+  calculate_rebalance_plan: { method: "POST", path: "/allocation-targets/rebalance/calculate" },
   // Alternative Assets
   create_alternative_asset: { method: "POST", path: "/alternative-assets" },
   update_alternative_asset_valuation: { method: "PUT", path: "/alternative-assets" },
@@ -1835,6 +1836,15 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       };
       url += `/${encodeURIComponent(targetId)}/drift`;
       body = JSON.stringify({ filter, includeHoldings: includeHoldings ?? false });
+      break;
+    }
+    case "calculate_rebalance_plan": {
+      const { targetId, availableCash, filter } = payload as {
+        targetId: string;
+        availableCash: number;
+        filter: unknown;
+      };
+      body = JSON.stringify({ targetId, availableCash, filter });
       break;
     }
     // AI Providers

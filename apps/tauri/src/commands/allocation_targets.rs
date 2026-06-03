@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use rust_decimal::Decimal;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
-        AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
-        NewAllocationTargetWeight, SaveAllocationTargetResult, ScopeType,
+        AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalancePlan, SaveAllocationTargetResult,
+        ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -201,4 +203,44 @@ pub async fn get_allocation_target_drift(
             .await
             .map_err(|e| e.to_string())
     }
+}
+
+// ── Rebalance ─────────────────────────────────────────────────────────────────
+
+fn resolve_rebalance_input(
+    state: &Arc<ServiceContext>,
+    target_id: String,
+    available_cash: Decimal,
+    filter: AccountScopeInput,
+) -> Result<CalculateRebalancePlanInput, String> {
+    let filter = filter.into_account_filter()?;
+    let base_currency = state.get_base_currency();
+    let resolved = wealthfolio_core::portfolios::PortfolioServiceTrait::resolve_account_scope(
+        state.portfolio_service.as_ref(),
+        &filter,
+        &base_currency,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(CalculateRebalancePlanInput {
+        target_id,
+        available_cash,
+        account_ids: resolved.account_ids,
+        base_currency,
+        aggregated_account_id: resolved.scope_id,
+    })
+}
+
+#[tauri::command]
+pub async fn calculate_rebalance_plan(
+    state: State<'_, Arc<ServiceContext>>,
+    target_id: String,
+    available_cash: Decimal,
+    filter: AccountScopeInput,
+) -> Result<RebalancePlan, String> {
+    let input = resolve_rebalance_input(&state, target_id, available_cash, filter)?;
+    state
+        .rebalance_service()
+        .calculate_plan(input)
+        .await
+        .map_err(|e| e.to_string())
 }

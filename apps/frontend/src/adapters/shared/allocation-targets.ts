@@ -6,6 +6,7 @@ import type {
   AllocationTargetWeight,
   AllocationTarget,
   SaveAllocationTargetResult,
+  RebalancePlan,
 } from "@/lib/types";
 
 import { invoke } from "./platform";
@@ -80,4 +81,14 @@ export const getAllocationTargetDrift = async (
     filter,
     includeHoldings: options?.includeHoldings ?? false,
   });
+};
+
+// ── Rebalance ─────────────────────────────────────────────────────────────────
+
+export const calculateRebalancePlan = async (
+  targetId: string,
+  availableCash: number,
+  filter: AccountScope,
+): Promise<RebalancePlan> => {
+  return invoke<RebalancePlan>("calculate_rebalance_plan", { targetId, availableCash, filter });
 };

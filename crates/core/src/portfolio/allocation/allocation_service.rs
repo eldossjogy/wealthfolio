@@ -833,6 +833,7 @@ impl AllocationService {
                     market_value: matched_value,
                     currency: base_currency.to_string(),
                     weight_in_category: Decimal::ZERO,
+                    unit_price: holding.price,
                 },
                 matched_value,
             ));

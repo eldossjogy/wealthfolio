@@ -6,11 +6,13 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use wealthfolio_core::{
     portfolio::allocation_targets::{
-        AllocationTarget, AllocationTargetWeight, DriftReport, NewAllocationTarget,
-        NewAllocationTargetWeight, SaveAllocationTargetResult, ScopeType,
+        AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalancePlan, SaveAllocationTargetResult,
+        ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -198,6 +200,45 @@ async fn get_drift_for_target(
     Ok(Json(report))
 }
 
+// ── Rebalance ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CalculatePlanBody {
+    target_id: String,
+    available_cash: Decimal,
+    filter: AccountScope,
+}
+
+fn resolve_rebalance_input(
+    state: &Arc<AppState>,
+    target_id: String,
+    available_cash: Decimal,
+    filter: &AccountScope,
+) -> ApiResult<CalculateRebalancePlanInput> {
+    let base_currency = state.base_currency.read().unwrap().clone();
+    let resolved = state
+        .portfolio_service
+        .resolve_account_scope(filter, &base_currency)
+        .map_err(crate::error::ApiError::from)?;
+    Ok(CalculateRebalancePlanInput {
+        target_id,
+        available_cash,
+        account_ids: resolved.account_ids,
+        base_currency,
+        aggregated_account_id: resolved.scope_id,
+    })
+}
+
+async fn calculate_plan(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CalculatePlanBody>,
+) -> ApiResult<Json<RebalancePlan>> {
+    let input = resolve_rebalance_input(&state, body.target_id, body.available_cash, &body.filter)?;
+    let plan = state.rebalance_service.calculate_plan(input).await?;
+    Ok(Json(plan))
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -217,4 +258,8 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_weights).post(save_weights),
         )
         .route("/allocation-targets/{id}/drift", post(get_drift_for_target))
+        .route(
+            "/allocation-targets/rebalance/calculate",
+            post(calculate_plan),
+        )
 }

@@ -2300,6 +2300,7 @@ export type TargetScopeType = "all" | "portfolio" | "account";
 export type TriggerType = "manual" | "threshold";
 export type RebalanceGoal = "nearest_band" | "exact_target";
 export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
+export type RebalanceTo = "nearest_band" | "exact_target";
 
 export interface AllocationTarget {
   id: string;
@@ -2366,6 +2367,7 @@ export interface DriftRow {
   status: DriftStatus;
   isRequired: boolean;
   isZeroCurrent: boolean;
+  isCash: boolean;
 }
 
 export interface DriftReport {
@@ -2404,4 +2406,36 @@ export interface DriftHoldingsReport {
   totalValue: number;
   baseCurrency: string;
   rows: DriftHoldingRow[];
+}
+
+export type RebalanceWarningKind = "missing_quote" | "no_buy_candidate" | "whole_share_residue";
+
+export interface RebalanceWarning {
+  kind: RebalanceWarningKind;
+  categoryId: string;
+  message: string;
+}
+
+export interface SuggestedManualTrade {
+  action: string;
+  categoryId: string;
+  categoryName: string;
+  assetId?: string | null;
+  symbol?: string | null;
+  name?: string | null;
+  quantity?: number | null;
+  estimatedPrice?: number | null;
+  estimatedAmount: number;
+  reason: string;
+}
+
+export interface RebalancePlan {
+  profileId: string;
+  availableCash: number;
+  cashUsed: number;
+  cashRemaining: number;
+  maxDriftBpsBefore: number;
+  maxDriftBpsAfter: number;
+  trades: SuggestedManualTrade[];
+  warnings: RebalanceWarning[];
 }
