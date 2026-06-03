@@ -201,7 +201,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         }
 
         // Sort by price ASC for deterministic tie-breaking on equal scores.
-        candidates.sort_by(|a, b| a.price.cmp(&b.price));
+        candidates.sort_by_key(|c| c.price);
 
         let mut shares_bought: Vec<Decimal> = vec![Decimal::ZERO; candidates.len()];
         let mut cash = available_cash;
