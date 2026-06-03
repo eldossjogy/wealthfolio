@@ -2408,7 +2408,12 @@ export interface DriftHoldingsReport {
   rows: DriftHoldingRow[];
 }
 
-export type RebalanceWarningKind = "missing_quote" | "no_buy_candidate" | "whole_share_residue";
+export type RebalanceWarningKind =
+  | "missing_quote"
+  | "no_buy_candidate"
+  | "whole_share_residue"
+  | "unclassified_asset"
+  | "partial_classification";
 
 export interface RebalanceWarning {
   kind: RebalanceWarningKind;
@@ -2438,4 +2443,5 @@ export interface RebalancePlan {
   maxDriftBpsAfter: number;
   trades: SuggestedManualTrade[];
   warnings: RebalanceWarning[];
+  afterBpsByCategory: Record<string, number>;
 }

@@ -258,6 +258,7 @@ impl RebalanceServiceTrait for RebalanceService {
                 max_drift_bps_after: 0,
                 trades: vec![],
                 warnings: vec![],
+                after_bps_by_category: std::collections::HashMap::new(),
             });
         }
 

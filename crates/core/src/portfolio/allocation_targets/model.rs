@@ -287,4 +287,9 @@ pub struct RebalancePlan {
     pub max_drift_bps_after: i32,
     pub trades: Vec<SuggestedManualTrade>,
     pub warnings: Vec<RebalanceWarning>,
+    /// After-trade allocation in bps per category_id.
+    /// Accounts for multi-category ETF exposure; use this for BeforeAfterStack
+    /// instead of re-deriving from trades (which only carry the primary category).
+    #[serde(default)]
+    pub after_bps_by_category: std::collections::HashMap<String, i32>,
 }

@@ -154,6 +154,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 max_drift_bps_after: 0,
                 trades: vec![],
                 warnings,
+                after_bps_by_category: HashMap::new(),
             });
         }
 
@@ -351,6 +352,22 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         }
         let max_drift_after = Self::max_drift_bps(&after_values, &categories, total_value);
 
+        let after_bps_by_category: HashMap<String, i32> = if total_value > Decimal::ZERO {
+            after_values
+                .iter()
+                .map(|(cat_id, val)| {
+                    let bps: i32 = (*val / total_value * scale)
+                        .round()
+                        .to_string()
+                        .parse()
+                        .unwrap_or(0);
+                    (cat_id.clone(), bps)
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
         Ok(RebalancePlan {
             target_id: profile.target_id,
             available_cash,
@@ -360,6 +377,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             max_drift_bps_after: max_drift_after,
             trades,
             warnings,
+            after_bps_by_category,
         })
     }
 }
