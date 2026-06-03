@@ -62,6 +62,61 @@ pub trait RebalanceOptimizer: Send + Sync {
 pub struct DriftPriorityOptimizer;
 
 impl DriftPriorityOptimizer {
+    fn desired_bps_for_goal(target_bps: i32, goal: &RebalanceGoal, band: Decimal) -> Decimal {
+        match goal {
+            RebalanceGoal::ExactTarget => Decimal::from(target_bps),
+            RebalanceGoal::NearestBand => (Decimal::from(target_bps) - band).max(Decimal::ZERO),
+        }
+    }
+
+    fn cap_fractional_shares_to_next_bend(
+        candidate: &AssetCandidate,
+        cash: Decimal,
+        values: &HashMap<String, Decimal>,
+        categories: &[CategoryState],
+        total_value: Decimal,
+        goal: &RebalanceGoal,
+        band: Decimal,
+    ) -> Decimal {
+        if candidate.price <= Decimal::ZERO || cash <= Decimal::ZERO {
+            return Decimal::ZERO;
+        }
+
+        let scale = dec!(10000);
+        let mut shares = cash / candidate.price;
+
+        for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+            let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                continue;
+            };
+            if *expo <= Decimal::ZERO {
+                continue;
+            }
+
+            let desired_bps = Self::desired_bps_for_goal(cat.target_bps, goal, band);
+            let desired_value = desired_bps / scale * total_value;
+            let base = values.get(&cat.category_id).copied().unwrap_or_default();
+            if base < desired_value {
+                let cap = (desired_value - base) / expo;
+                if cap < shares {
+                    shares = cap;
+                }
+            }
+        }
+
+        shares.max(Decimal::ZERO)
+    }
+
+    fn exposure_delta(
+        exposure_per_share: &HashMap<String, Decimal>,
+        shares: Decimal,
+    ) -> HashMap<String, Decimal> {
+        exposure_per_share
+            .iter()
+            .map(|(cat_id, e)| (cat_id.clone(), e * shares))
+            .collect()
+    }
+
     /// Per-category drift the planner tries to minimise.
     ///
     /// `ExactTarget` measures distance to the exact target. `NearestBand` only counts
@@ -234,7 +289,9 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         let mut cash = available_cash;
 
         // Greedy: each iteration buys 1 share of the candidate with the highest
-        // (drift_before - drift_after) / price score.
+        // (drift_before - drift_after) / price score. Fractional mode uses the
+        // same scoring, but the candidate quantity can be a decimal and is capped
+        // at the next target/band bend.
         loop {
             if cash <= Decimal::ZERO {
                 break;
@@ -249,16 +306,45 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
 
             let mut best_score = Decimal::ZERO;
             let mut best_idx: Option<usize> = None;
+            let mut best_fractional_shares = Decimal::ZERO;
+            let mut improving_whole_share_candidates = 0usize;
 
             for (idx, candidate) in candidates.iter().enumerate() {
-                if cash < candidate.price {
-                    continue;
-                }
+                let (shares_to_score, amount_to_score, exposure_to_score) =
+                    if profile.whole_shares_only {
+                        if cash < candidate.price {
+                            continue;
+                        }
+                        (
+                            Decimal::ONE,
+                            candidate.price,
+                            candidate.exposure_per_share.clone(),
+                        )
+                    } else {
+                        let shares = Self::cap_fractional_shares_to_next_bend(
+                            candidate,
+                            cash,
+                            &values,
+                            &categories,
+                            total_value,
+                            &profile.rebalance_goal,
+                            drift_band,
+                        );
+                        if shares <= Decimal::ZERO {
+                            continue;
+                        }
+                        (
+                            shares,
+                            candidate.price * shares,
+                            Self::exposure_delta(&candidate.exposure_per_share, shares),
+                        )
+                    };
+
                 let drift_after = Self::total_drift_with_buy(
                     &values,
                     &categories,
                     total_value,
-                    &candidate.exposure_per_share,
+                    &exposure_to_score,
                     &profile.rebalance_goal,
                     drift_band,
                 );
@@ -266,11 +352,15 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 if improvement <= Decimal::ZERO {
                     continue;
                 }
-                let score = improvement / candidate.price;
+                if profile.whole_shares_only {
+                    improving_whole_share_candidates += 1;
+                }
+                let score = improvement / amount_to_score;
                 // candidates sorted price ASC — first found wins ties (cheaper asset preferred)
                 if score > best_score {
                     best_score = score;
                     best_idx = Some(idx);
+                    best_fractional_shares = shares_to_score;
                 }
             }
 
@@ -280,33 +370,42 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
 
             let candidate = &candidates[idx];
 
-            // Batch: buy as many whole shares of the chosen candidate as stay within the
-            // current linear region — up to the point where a category it funds reaches
-            // its desired value (exact target, or band edge under NearestBand). The
-            // per-share drift improvement is constant across that region, so buying the
-            // whole batch is equivalent to that many single-share iterations, but avoids
-            // an O(cash / price) loop for cheap assets with large cash balances. The
-            // boundary share (which may overshoot) is left to the next scan to evaluate.
-            let mut batch = (cash / candidate.price).floor().max(Decimal::ONE);
-            for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
-                let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
-                    continue;
-                };
-                if *expo <= Decimal::ZERO {
-                    continue;
+            if !profile.whole_shares_only {
+                for (cat_id, expo) in &candidate.exposure_per_share {
+                    *values.entry(cat_id.clone()).or_default() += expo * best_fractional_shares;
                 }
-                let desired_bps = match profile.rebalance_goal {
-                    RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
-                    RebalanceGoal::NearestBand => {
-                        (Decimal::from(cat.target_bps) - drift_band).max(Decimal::ZERO)
+                cash -= candidate.price * best_fractional_shares;
+                shares_bought[idx] += best_fractional_shares;
+                continue;
+            }
+
+            // Batch only when this is the sole improving whole-share candidate. If
+            // multiple candidates improve drift, buy one share and re-score to preserve
+            // strict greedy equivalence in coupled multi-category cases.
+            let mut batch = Decimal::ONE;
+            if improving_whole_share_candidates == 1 {
+                // With no competing improving candidate, per-share improvement is
+                // constant until the selected asset reaches the next target/band bend.
+                batch = (cash / candidate.price).floor().max(Decimal::ONE);
+                for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                    let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                        continue;
+                    };
+                    if *expo <= Decimal::ZERO {
+                        continue;
                     }
-                };
-                let desired_value = desired_bps / scale * total_value;
-                let base = values.get(&cat.category_id).copied().unwrap_or_default();
-                if base < desired_value {
-                    let cap = ((desired_value - base) / expo).floor().max(Decimal::ONE);
-                    if cap < batch {
-                        batch = cap;
+                    let desired_bps = Self::desired_bps_for_goal(
+                        cat.target_bps,
+                        &profile.rebalance_goal,
+                        drift_band,
+                    );
+                    let desired_value = desired_bps / scale * total_value;
+                    let base = values.get(&cat.category_id).copied().unwrap_or_default();
+                    if base < desired_value {
+                        let cap = ((desired_value - base) / expo).floor().max(Decimal::ONE);
+                        if cap < batch {
+                            batch = cap;
+                        }
                     }
                 }
             }
@@ -316,83 +415,6 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             }
             cash -= candidate.price * batch;
             shares_bought[idx] += batch;
-        }
-
-        // Fractional last slice: when the profile allows fractional shares, deploy the
-        // cash left over once no whole share fits. Pick the candidate whose fractional
-        // buy reduces drift the most, capping the size so no category overshoots its
-        // desired value (the exact target, or the band edge under NearestBand).
-        if !profile.whole_shares_only && cash > Decimal::ZERO {
-            let drift_before = Self::total_drift(
-                &values,
-                &categories,
-                total_value,
-                &profile.rebalance_goal,
-                drift_band,
-            );
-
-            let mut best_idx: Option<usize> = None;
-            let mut best_shares = Decimal::ZERO;
-            let mut best_improvement = Decimal::ZERO;
-
-            for (idx, candidate) in candidates.iter().enumerate() {
-                let mut max_shares = cash / candidate.price;
-                for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
-                    let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
-                        continue;
-                    };
-                    if *expo <= Decimal::ZERO {
-                        continue;
-                    }
-                    let desired_bps = match profile.rebalance_goal {
-                        RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
-                        RebalanceGoal::NearestBand => {
-                            (Decimal::from(cat.target_bps) - drift_band).max(Decimal::ZERO)
-                        }
-                    };
-                    let desired_value = desired_bps / scale * total_value;
-                    let base = values.get(&cat.category_id).copied().unwrap_or_default();
-                    if base >= desired_value {
-                        max_shares = Decimal::ZERO;
-                        break;
-                    }
-                    let cap = (desired_value - base) / expo;
-                    if cap < max_shares {
-                        max_shares = cap;
-                    }
-                }
-                if max_shares <= Decimal::ZERO {
-                    continue;
-                }
-                let delta: HashMap<String, Decimal> = candidate
-                    .exposure_per_share
-                    .iter()
-                    .map(|(cat_id, e)| (cat_id.clone(), e * max_shares))
-                    .collect();
-                let drift_after = Self::total_drift_with_buy(
-                    &values,
-                    &categories,
-                    total_value,
-                    &delta,
-                    &profile.rebalance_goal,
-                    drift_band,
-                );
-                let improvement = drift_before - drift_after;
-                if improvement > best_improvement {
-                    best_improvement = improvement;
-                    best_shares = max_shares;
-                    best_idx = Some(idx);
-                }
-            }
-
-            if let Some(idx) = best_idx {
-                let candidate = &candidates[idx];
-                for (cat_id, expo) in &candidate.exposure_per_share {
-                    *values.entry(cat_id.clone()).or_default() += expo * best_shares;
-                }
-                cash -= candidate.price * best_shares;
-                shares_bought[idx] += best_shares;
-            }
         }
 
         // Build trades from accumulated shares; apply min_trade_amount filter.
@@ -441,19 +463,16 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         }
 
         // Sleeve-level dollar trades for uncovered underweight categories.
-        // Draw from the cash left after the greedy whole-share buys, decrementing as we
-        // go, so multiple uncovered categories can never collectively overspend.
-        let mut manual_cash = cash;
+        // Draw from cash left after kept asset trades. Greedy selections below the
+        // min-trade threshold are dropped, so they must not starve manual sleeve trades.
+        let mut manual_cash =
+            available_cash - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
         for cat in &no_candidate_categories {
             if manual_cash <= Decimal::ZERO {
                 break;
             }
-            let desired_bps = match profile.rebalance_goal {
-                RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
-                RebalanceGoal::NearestBand => {
-                    (Decimal::from(cat.target_bps) - drift_band).max(Decimal::ZERO)
-                }
-            };
+            let desired_bps =
+                Self::desired_bps_for_goal(cat.target_bps, &profile.rebalance_goal, drift_band);
             let shortfall =
                 ((desired_bps / scale * total_value) - cat.current_value).max(Decimal::ZERO);
             let amount = shortfall.min(manual_cash);

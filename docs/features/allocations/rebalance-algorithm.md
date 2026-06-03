@@ -18,8 +18,9 @@ Constraints:
   global ETF classified 60 % US equity / 40 % international). One buy must
   update all affected category exposures simultaneously.
 - **Whole-share mode** — when enabled, only round-lot quantities are suggested.
-- **Minimum trade size** — trades below `min_trade_amount` are dropped from the
-  final output.
+- **Minimum trade size** — asset trades below `min_trade_amount` are dropped from
+  the final output; no-ticker manual sleeve suggestions can still use remaining
+  cash.
 
 ---
 
@@ -56,18 +57,20 @@ Greedy loop
   while cash > 0:
     drift_before = Σ |current_bps[c] − target_bps[c]|  for required non-cash categories
     for each candidate asset:
-      if cash < price: skip
-      simulate buy 1 share → new_bps[c] = (current_value[c] + exposure_per_share[c]) / total_value
+      if whole-share mode and cash < price: skip
+      quantity = 1 share in whole-share mode
+      quantity = fractional cash/price capped at the next target/band bend in fractional mode
+      simulate buy quantity → new_bps[c] = (current_value[c] + exposure_per_share[c] × quantity) / total_value
       drift_after = Σ |new_bps[c] − target_bps[c]|
-      score = (drift_before − drift_after) / price
+      score = (drift_before − drift_after) / amount
     pick candidate with highest score > 0
     tie-break: price ASC (deterministic; lower-price assets preferred)
     if no candidate improves drift: stop
-    apply buy: update current_value[c] for each category, cash -= price
+    apply buy: update current_value[c] for each category, cash -= amount
 
 Post-processing
   Aggregate shares by asset → SuggestedManualTrade (1 per asset)
-  Drop trades where estimated_amount < min_trade_amount
+  Drop asset trades where estimated_amount < min_trade_amount
   cash_used = sum of kept trade amounts
   after_bps_by_category = recompute from initial values + kept trades only
 
@@ -132,21 +135,23 @@ Key properties:
 
 ## 6. Whole-share vs fractional mode
 
-| Mode        | Step                  | Quantity |
-| ----------- | --------------------- | -------- |
-| Whole-share | 1 share per iteration | Integer  |
-| Fractional  | 1 share per iteration | Decimal  |
+| Mode        | Step                                  | Quantity |
+| ----------- | ------------------------------------- | -------- |
+| Whole-share | 1 share, batched within linear region | Integer  |
+| Fractional  | Drift-capped slice                    | Decimal  |
 
-Both modes share the same greedy whole-share loop. The difference is what
-happens with the cash left over once no whole share fits:
+Both modes use the same drift-improvement-per-dollar scoring and candidate
+tie-breaks.
 
-- **Whole-share mode** stops there. The leftover (< cheapest candidate price) is
-  reported as `cash_remaining`.
-- **Fractional mode** deploys a final fractional slice: it picks the candidate
-  whose sub-share buy reduces drift the most and sizes it `cash / price`, capped
-  so no category overshoots its desired value (the exact target, or the band
-  edge under `NearestBand`). Any residue below that cap stays as
-  `cash_remaining`.
+- **Whole-share mode** buys integer quantities only. It batches repeated buys of
+  the selected candidate only when it is the sole improving candidate. If more
+  than one asset can improve drift, it buys one share and re-scores, preserving
+  strict greedy equivalence in coupled multi-category cases. Cash below the next
+  usable share price remains as `cash_remaining`.
+- **Fractional mode** sizes each selected buy as a decimal quantity from the
+  start, capped at available cash and the next target/band bend for categories
+  the candidate can improve. This avoids full-share overbuying when a fractional
+  quantity already closes the drift.
 
 ---
 
@@ -178,7 +183,7 @@ the suggested amount even when no holding covers that category.
 
 ---
 
-## 9. Open question for Afadil (PR-B)
+## 9. PR-B decisions
 
 `AllocationService::contribution_shares_for_holding` normalises weights >10000
 bps silently (line 247: `weight_divisor = total.max(10000)`). This is consistent
@@ -186,9 +191,14 @@ with how drift reports and allocation views already handle over-allocated
 assets. For the rebalance planner we align with this behaviour rather than
 blocking on >100% weights.
 
-If a hard block is desired, the right place is write-time validation on
-`AssetTaxonomyAssignment` (not in the planner). Flagged for Afadil's input in
-the PR.
+If a hard block is desired, it should be write-time validation on
+`AssetTaxonomyAssignment` in a separate data-quality PR, not planner-only
+behaviour.
+
+The old `WholeShareResidue` top-up warning is not carried forward. It was tied
+to the old proportional sleeve planner and does not map cleanly to this
+exposure-aware optimiser. Whole-share residue is reported as `cash_remaining`;
+a future UI pass can add a non-blocking "add X for one more share" hint.
 
 ---
 
@@ -202,6 +212,7 @@ the PR.
 | `TaxAwareOptimizer` (greedy + tax penalty in score) | Medium     | M3/M4                                 |
 | `MilpOptimizer` behind `--features milp`            | High       | When tax-aware / lot selection needed |
 | Multi-account optimisation                          | High       | SOTA spec, future roadmap             |
+| Whole-share top-up hint                             | Low        | UX polish                             |
 
 ---
 
@@ -217,7 +228,7 @@ the PR.
 - **Types:** `crates/core/src/portfolio/allocation_targets/model.rs` —
   `RebalancePlan`, `SuggestedManualTrade`, `RebalanceWarning`,
   `RebalanceWarningKind`.
-- **Tests:** `rebalance_service.rs` `mod tests` — 50 tests covering cash
+- **Tests:** `rebalance_service.rs` `mod tests` — 53 tests covering cash
   enforcement, greedy selection, multi-category ETF exposure, classification
   edge cases, whole-share, nearest-band, min-trade filter.
 - **UI:**

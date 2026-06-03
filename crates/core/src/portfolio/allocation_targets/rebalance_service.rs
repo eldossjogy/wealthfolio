@@ -65,6 +65,21 @@ impl RebalanceService {
         Decimal::ONE / Decimal::from(10_i64.pow(Self::currency_fraction_digits(currency)))
     }
 
+    fn base_price_per_unit(holding: &crate::portfolio::holdings::Holding) -> Option<Decimal> {
+        if holding.quantity > Decimal::ZERO && holding.market_value.base > Decimal::ZERO {
+            return Some(holding.market_value.base / holding.quantity);
+        }
+
+        holding.price.filter(|p| *p > Decimal::ZERO).map(|price| {
+            let fx_rate = if holding.local_currency == holding.base_currency {
+                Decimal::ONE
+            } else {
+                holding.fx_rate.unwrap_or(Decimal::ONE)
+            };
+            price * fx_rate
+        })
+    }
+
     /// Build `AssetCandidate` list from holdings + contributions.
     ///
     /// Rules (Afadil, #1036):
@@ -279,20 +294,11 @@ impl RebalanceServiceTrait for RebalanceService {
             )
             .await?;
 
-        // Price map: holding_id → price per share in base currency.
+        // Price map: holding_id → price per unit in base currency.
         let price_by_holding: HashMap<String, Decimal> = all_holdings
             .iter()
             .filter(|h| h.holding_type != HoldingType::Cash)
-            .filter_map(|h| {
-                let price = h.price.filter(|&p| p > Decimal::ZERO).or_else(|| {
-                    if h.quantity > Decimal::ZERO {
-                        Some(h.market_value.base / h.quantity)
-                    } else {
-                        None
-                    }
-                })?;
-                Some((h.id.clone(), price))
-            })
+            .filter_map(|h| Some((h.id.clone(), Self::base_price_per_unit(h)?)))
             .collect();
 
         let (candidates, classification_warnings) = Self::build_candidates(
@@ -1195,6 +1201,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fractional_mode_caps_trade_at_target_shortfall() {
+        // Fractional mode should size the whole recommendation fractionally, not buy
+        // a full share first and only fractionalize leftover cash.
+        let total = dec!(10000);
+        let h = make_holding("h1", "ETF", dec!(1), dec!(100)); // $100/share
+        let c = make_contribution(&h, "equity", dec!(100));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(vec![make_drift_row("equity", 6925, 7000, total)], total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(1000), "USD"), h],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(1000))).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("ETF"))
+            .expect("fractional ETF trade expected");
+        assert_eq!(trade.quantity, Some(dec!(0.75)));
+        assert_eq!(plan.cash_used, dec!(75));
+    }
+
+    #[tokio::test]
+    async fn trade_sizing_uses_base_currency_price() {
+        // USD asset in a CAD-base portfolio: local quote is 100 USD, base unit price
+        // is 140 CAD. CAD 1000 can fund 7 whole units, not 10.
+        let total = dec!(10000);
+        let mut h = make_holding("h1", "USETF", dec!(10), dec!(1400));
+        h.local_currency = "USD".to_string();
+        h.base_currency = "CAD".to_string();
+        h.fx_rate = Some(dec!(1.4));
+        h.price = Some(dec!(100));
+        h.market_value.local = dec!(1000);
+
+        let c = make_contribution(&h, "equity", dec!(1400));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, true),
+            make_report(vec![make_drift_row("equity", 1000, 9000, total)], total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(1000), "CAD"), h],
+        );
+        let input = CalculateRebalancePlanInput {
+            base_currency: "CAD".to_string(),
+            ..make_input(dec!(1000))
+        };
+        let plan = svc.calculate_plan(input).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("USETF"))
+            .expect("USETF trade expected");
+        assert_eq!(trade.quantity, Some(dec!(7)));
+        assert_eq!(trade.estimated_price, Some(dec!(140)));
+        assert_eq!(plan.cash_used, dec!(980));
+    }
+
+    #[tokio::test]
     async fn whole_shares_only_buys_integer_shares() {
         let total = dec!(10000);
         // VTI: 10 shares @ $600 = $6000. Price = $600/share.
@@ -1348,6 +1413,46 @@ mod tests {
                 .any(|t| t.symbol.as_deref() == Some("VTI")),
             "VTI should survive min_trade when total >= threshold"
         );
+    }
+
+    #[tokio::test]
+    async fn dropped_min_trade_does_not_starve_manual_sleeve_trade() {
+        let total = dec!(10000);
+        let h = make_holding("h1", "VTI", dec!(60), dec!(6000)); // $100/share
+        let c = make_contribution(&h, "equity", dec!(6000));
+        let profile = AllocationTarget {
+            min_trade_amount: "200".to_string(),
+            ..make_profile(RebalanceGoal::ExactTarget, false)
+        };
+        let rows = vec![
+            make_drift_row("equity", 6000, 7000, total),
+            make_drift_row("bonds", 0, 1000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 4000, 2000, total)
+            },
+        ];
+        let svc = make_service(
+            profile,
+            make_report(rows, total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(100), "USD"), h],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(100))).await.unwrap();
+
+        assert!(
+            plan.trades
+                .iter()
+                .all(|t| t.symbol.as_deref() != Some("VTI")),
+            "sub-min asset trade should be dropped"
+        );
+        let manual = plan
+            .trades
+            .iter()
+            .find(|t| t.category_id == "bonds")
+            .expect("manual sleeve trade should use cash from dropped asset trade");
+        assert_eq!(manual.estimated_amount, dec!(100));
+        assert_eq!(plan.cash_used, dec!(100));
     }
 
     #[tokio::test]
