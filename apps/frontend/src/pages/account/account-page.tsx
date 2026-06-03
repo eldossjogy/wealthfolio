@@ -47,7 +47,7 @@ import {
   TrackedItem,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ActivityTableMobile } from "@/pages/activity/components/activity-table/activity-table-mobile";
+import { ActivityDateSheet } from "@/pages/activity/components/activity-date-sheet";
 import { BulkHoldingsModal } from "@/pages/activity/components/forms/bulk-holdings-modal";
 import { PortfolioUpdateTrigger } from "@/pages/dashboard/portfolio-update-trigger";
 import { HoldingsEditMode } from "@/pages/holdings/components/holdings-edit-mode";
@@ -73,7 +73,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { format, parseISO, subMonths } from "date-fns";
+import { format, subMonths } from "date-fns";
 import { useNavigate, useParams } from "react-router-dom";
 import { AccountContributionLimit } from "./account-contribution-limit";
 import AccountHoldings from "./account-holdings";
@@ -102,15 +102,6 @@ const getInitialDateRange = (): DateRange => ({
   from: subMonths(new Date(), 3),
   to: new Date(),
 });
-
-// Format date for display
-const formatDate = (dateStr: string): string => {
-  try {
-    return format(parseISO(dateStr), "MMMM d, yyyy");
-  } catch {
-    return dateStr;
-  }
-};
 
 // Define the initial interval code (consistent with other pages)
 const INITIAL_INTERVAL_CODE: TimePeriod = "3M";
@@ -750,34 +741,13 @@ const AccountPage = () => {
         </Sheet>
       )}
 
-      {/* Activities Sheet for Transactions mode marker click */}
-      <Sheet open={isActivitySheetOpen} onOpenChange={setIsActivitySheetOpen}>
-        <SheetContent side="right" className="flex h-full w-full flex-col p-0 sm:max-w-md">
-          <SheetHeader className="border-b px-6 py-4">
-            <SheetTitle>
-              Activities on {selectedActivityDate ? formatDate(selectedActivityDate) : ""}
-            </SheetTitle>
-            <SheetDescription>
-              {dateActivities?.length ?? 0} activities recorded on this date
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-auto px-4 py-4">
-            {isDateActivitiesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Icons.Spinner className="size-6 animate-spin" />
-              </div>
-            ) : (
-              <ActivityTableMobile
-                activities={dateActivities ?? []}
-                isCompactView={true}
-                handleEdit={() => {}}
-                handleDelete={() => {}}
-                onDuplicate={async () => {}}
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      <ActivityDateSheet
+        open={isActivitySheetOpen}
+        onOpenChange={setIsActivitySheetOpen}
+        date={selectedActivityDate}
+        activities={dateActivities ?? []}
+        isLoading={isDateActivitiesLoading}
+      />
 
       {/* Bulk Holdings Modal for Transfer Holdings */}
       <BulkHoldingsModal
