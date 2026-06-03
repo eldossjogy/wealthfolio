@@ -5,33 +5,63 @@ import { parseDateValue } from "./draft-utils";
  * Regression coverage for issue #984: Questrade exports dates as
  * "YYYY-MM-DD HH:MM:SS AM/PM" (e.g. "2026-05-04 12:00:00 AM"), which previously
  * failed to parse and surfaced as an epoch date (1969-12-31).
+ *
+ * Assertions read local Date fields rather than the ISO string, because
+ * parseDateValue serializes a local-time Date via toISOString() — comparing the
+ * UTC prefix would be timezone-dependent (local midnight rolls to the previous
+ * UTC day east of UTC).
  */
+function local(iso: string) {
+  const d = new Date(iso);
+  return { y: d.getFullYear(), mo: d.getMonth() + 1, day: d.getDate(), h: d.getHours() };
+}
+
 describe("parseDateValue — 12-hour AM/PM (issue #984)", () => {
   it("auto-detects the Questrade format without explicit config", () => {
-    const iso = parseDateValue("2026-05-04 12:00:00 AM", "auto");
     // 12:00:00 AM == local midnight of 2026-05-04
-    expect(iso.startsWith("2026-05-04")).toBe(true);
-    expect(new Date(iso).getHours()).toBe(0);
+    expect(local(parseDateValue("2026-05-04 12:00:00 AM", "auto"))).toEqual({
+      y: 2026,
+      mo: 5,
+      day: 4,
+      h: 0,
+    });
   });
 
   it("auto-detects PM correctly (noon, not midnight)", () => {
-    const iso = parseDateValue("2026-05-04 12:00:00 PM", "auto");
-    expect(iso.startsWith("2026-05-04")).toBe(true);
-    expect(new Date(iso).getHours()).toBe(12);
+    expect(local(parseDateValue("2026-05-04 12:00:00 PM", "auto"))).toEqual({
+      y: 2026,
+      mo: 5,
+      day: 4,
+      h: 12,
+    });
   });
 
   it("distinguishes 1 AM from 1 PM", () => {
-    expect(new Date(parseDateValue("2026-05-04 01:30:00 AM", "auto")).getHours()).toBe(1);
-    expect(new Date(parseDateValue("2026-05-04 01:30:00 PM", "auto")).getHours()).toBe(13);
+    expect(local(parseDateValue("2026-05-04 01:30:00 AM", "auto")).h).toBe(1);
+    expect(local(parseDateValue("2026-05-04 01:30:00 PM", "auto")).h).toBe(13);
   });
 
   it("respects the explicit AM/PM preset", () => {
-    const iso = parseDateValue("2026-05-04 12:00:00 PM", "YYYY-MM-DD hh:mm:ss A");
-    expect(iso.startsWith("2026-05-04")).toBe(true);
-    expect(new Date(iso).getHours()).toBe(12);
+    expect(local(parseDateValue("2026-05-04 12:00:00 PM", "YYYY-MM-DD hh:mm:ss A"))).toEqual({
+      y: 2026,
+      mo: 5,
+      day: 4,
+      h: 12,
+    });
+  });
+
+  it("respects an explicit EU day/month AM/PM preset (no US-order fallback)", () => {
+    // 04/05/2026 under DD/MM order is 4 May, not 5 April
+    expect(local(parseDateValue("04/05/2026 09:15:00 PM", "DD/MM/YYYY hh:mm:ss A"))).toEqual({
+      y: 2026,
+      mo: 5,
+      day: 4,
+      h: 21,
+    });
   });
 
   it("still parses plain date-only values", () => {
-    expect(parseDateValue("2026-05-04", "auto").startsWith("2026-05-04")).toBe(true);
+    const r = local(parseDateValue("2026-05-04", "auto"));
+    expect({ y: r.y, mo: r.mo, day: r.day }).toEqual({ y: 2026, mo: 5, day: 4 });
   });
 });
