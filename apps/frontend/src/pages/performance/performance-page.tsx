@@ -20,6 +20,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { AccountPurpose, PORTFOLIO_SCOPE_ID } from "@/lib/constants";
 import { performancePeriodPnl } from "@/lib/performance";
+import { getPerformanceDateRangeForRequest } from "@/lib/performance-date-range";
 import { DateRange, PerformanceResult, TrackedItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -312,10 +313,6 @@ interface SelectedItemPlotState {
 
 const PLOTTED_ITEM_STATE: SelectedItemPlotState = { isPlotted: true };
 const PERFORMANCE_HIDDEN_DATE_RANGES = ["1D"] as const;
-
-function isAllTimeDateRange(range: DateRange | undefined): boolean {
-  return !!range?.from && isSameDay(range.from, new Date(1970, 0, 1));
-}
 
 function amountTone(value: number): string {
   if (value < 0) return "text-destructive";
@@ -838,7 +835,7 @@ export default function PerformancePage() {
     displayDateRange,
   } = useCalculatePerformanceHistory({
     selectedItems,
-    dateRange: isAllTimeDateRange(dateRange) ? undefined : dateRange,
+    dateRange: getPerformanceDateRangeForRequest(dateRange),
   });
 
   const selectedPerformanceData = useMemo(() => {

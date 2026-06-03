@@ -1955,6 +1955,8 @@ impl PerformanceService {
         };
 
         metrics.scope.id = scope_id.to_string();
+        // Mixed scopes keep period-start attribution because their holdings-mode
+        // portion is inherently period-based.
         let attribution_baseline = if scoped_tracking_composition
             == ScopedTrackingComposition::TransactionsOnly
             && start_date_opt.is_none()
