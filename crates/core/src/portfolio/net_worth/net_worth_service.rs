@@ -273,8 +273,8 @@ impl NetWorthService {
         let trackable_valuations: Vec<_> = valuations
             .iter()
             .filter(|v| {
-                !v.is_cash_like
-                    && !(v.category == AssetCategory::Liability && v.market_value_base.is_zero())
+                !(v.is_cash_like
+                    || (v.category == AssetCategory::Liability && v.market_value_base.is_zero()))
             })
             .collect();
 
