@@ -1300,6 +1300,31 @@ async fn test_staleness_detection() {
 }
 
 #[tokio::test]
+async fn test_zero_value_valuation_not_stale() {
+    // A paid-off liability (or any asset) sitting at $0 has nothing to update,
+    // so an old zero-value valuation must not be flagged as stale.
+    let account = create_test_account("acc1", "SECURITIES", "USD");
+    let asset = create_test_asset("AAPL", AssetKind::Investment, "USD");
+    let position = create_test_position("acc1", "AAPL", dec!(100), dec!(15000), "USD");
+    let snapshot = create_test_snapshot("acc1", vec![position], HashMap::new());
+
+    // Old quote (100 days ago) priced at zero → market value of zero.
+    let old_date = NaiveDate::from_ymd_opt(2023, 10, 7).unwrap();
+    let quote = create_test_quote("AAPL", dec!(0), old_date, "USD");
+
+    let service = create_net_worth_service(vec![account], vec![asset], vec![snapshot], vec![quote]);
+
+    let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+    let result = service.get_net_worth(date).await.unwrap();
+
+    // Zero-value valuation is excluded from staleness even though it is >90 days old.
+    assert_eq!(result.stale_assets.len(), 0);
+    // It is also excluded from the oldest-valuation-date signal the widget uses,
+    // so the "stale valuations" banner stays hidden.
+    assert_eq!(result.oldest_valuation_date, None);
+}
+
+#[tokio::test]
 async fn test_multiple_asset_categories() {
     // Securities account
     let sec_account = create_test_account("sec1", "SECURITIES", "USD");

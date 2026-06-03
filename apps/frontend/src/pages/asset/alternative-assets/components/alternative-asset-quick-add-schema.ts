@@ -64,7 +64,7 @@ export const alternativeAssetQuickAddSchema = z
         required_error: "Please enter a valid value.",
         invalid_type_error: "Value must be a number.",
       })
-      .positive("Value must be greater than 0"),
+      .min(0, "Value cannot be negative"),
     valueDate: z.date({
       required_error: "Value date is required",
     }),
