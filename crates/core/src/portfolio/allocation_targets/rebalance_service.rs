@@ -91,7 +91,13 @@ impl RebalanceService {
         let mut candidates: Vec<AssetCandidate> = Vec::new();
         let mut warnings: Vec<RebalanceWarning> = Vec::new();
 
-        for (holding_id, contribs) in by_holding {
+        // Iterate holdings in a stable order so emitted warnings are reproducible
+        // run-to-run (HashMap iteration order is otherwise non-deterministic).
+        let mut holding_ids: Vec<&str> = by_holding.keys().copied().collect();
+        holding_ids.sort_unstable();
+
+        for holding_id in holding_ids {
+            let contribs = &by_holding[holding_id];
             // Skip cash holdings.
             if contribs.iter().all(|c| c.holding_type == HoldingType::Cash) {
                 continue;
@@ -151,7 +157,7 @@ impl RebalanceService {
                 continue;
             }
             let mut exposure_per_share: HashMap<String, Decimal> = HashMap::new();
-            for c in &contribs {
+            for c in contribs.iter() {
                 if c.category_id == "__UNKNOWN__" {
                     continue;
                 }
@@ -1003,6 +1009,36 @@ mod tests {
         assert!(
             trade.unwrap().symbol.is_none(),
             "sleeve trade has no ticker"
+        );
+    }
+
+    #[tokio::test]
+    async fn equal_price_candidates_break_ties_by_symbol() {
+        // Two equity candidates, identical price ($100) and exposure. Cash funds exactly
+        // one share. The stable (price, symbol, asset_id) sort must always pick the
+        // lexicographically smaller symbol (AAA), regardless of HashMap iteration order.
+        let total = dec!(10000);
+        let h_z = make_holding("z1", "ZZZ", dec!(1), dec!(100));
+        let h_a = make_holding("a1", "AAA", dec!(1), dec!(100));
+        let c_z = make_contribution(&h_z, "equity", dec!(100));
+        let c_a = make_contribution(&h_a, "equity", dec!(100));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(vec![make_drift_row("equity", 5000, 7000, total)], total),
+            make_contributions(vec![c_z, c_a]),
+            vec![make_cash_holding(dec!(100), "USD"), h_z, h_a],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(100))).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.asset_id.is_some())
+            .expect("one share bought");
+        assert_eq!(
+            trade.symbol.as_deref(),
+            Some("AAA"),
+            "equal-price tie must resolve to the smaller symbol"
         );
     }
 
