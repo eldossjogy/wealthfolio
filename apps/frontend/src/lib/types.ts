@@ -2430,7 +2430,7 @@ export interface SuggestedManualTrade {
 }
 
 export interface RebalancePlan {
-  profileId: string;
+  targetId: string;
   availableCash: number;
   cashUsed: number;
   cashRemaining: number;

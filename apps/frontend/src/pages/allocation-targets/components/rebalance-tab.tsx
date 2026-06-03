@@ -23,6 +23,7 @@ import {
   allocationTargetColorForRow,
   buildAllocationTargetColorMap,
 } from "./allocation-target-colors";
+import { accountScopeKey } from "./target-scope";
 import { useCalculateRebalancePlan } from "../hooks/use-rebalance";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,18 +44,49 @@ function currencySymbol(code: string): string {
   }
 }
 
+function currencyFractionDigits(code: string): number {
+  try {
+    return (
+      new Intl.NumberFormat(undefined, { style: "currency", currency: code }).resolvedOptions()
+        .maximumFractionDigits ?? 2
+    );
+  } catch {
+    return 2;
+  }
+}
+
+function cashInputLimit(availableCash: number, currency: string): number {
+  const factor = 10 ** currencyFractionDigits(currency);
+  return Math.round((availableCash + Number.EPSILON) * factor) / factor;
+}
+
+function cashValueFromAvailable(availableCash: number, currency: string): string {
+  const amount = cashInputLimit(availableCash, currency);
+  return amount > 0 ? amount.toFixed(currencyFractionDigits(currency)) : "";
+}
+
+function parseCashValue(value: string): number {
+  return parseFloat(value.replace(/,/g, "")) || 0;
+}
+
 function computeSleeveSummary(driftReport: DriftReport, plan: RebalancePlan) {
   // Total value is constant — cash moves within the portfolio, not added from outside.
   const total = driftReport.totalValue;
   const colorMap = buildAllocationTargetColorMap(driftReport.rows);
+  const deployedByCategory = new Map<string, number>();
+  for (const trade of plan.trades) {
+    deployedByCategory.set(
+      trade.categoryId,
+      (deployedByCategory.get(trade.categoryId) ?? 0) + trade.estimatedAmount,
+    );
+  }
+
   return driftReport.rows
     .filter((r) => r.status !== "not_targeted")
     .map((row, i) => {
       // Deploying cash moves value out of the cash sleeve into buy sleeves.
       // Total value is unchanged, so the cash row sheds cash_used.
-      const deployed = plan.trades
-        .filter((t) => t.categoryId === row.categoryId)
-        .reduce((sum, t) => sum + t.estimatedAmount, 0);
+      const deployed = deployedByCategory.get(row.categoryId) ?? 0;
       const afterValue = row.isCash
         ? Math.max(row.currentValue - plan.cashUsed, 0)
         : row.currentValue + deployed;
@@ -441,6 +473,7 @@ function InputBar({
   onCalculate,
   hasPlan,
   isCalculating,
+  isSourceLoading,
 }: {
   cashValue: string;
   availableCash: number;
@@ -449,9 +482,18 @@ function InputBar({
   onCalculate: () => void;
   hasPlan: boolean;
   isCalculating: boolean;
+  isSourceLoading: boolean;
 }) {
-  const deploy = parseFloat(cashValue.replace(/,/g, "")) || 0;
-  const overBudget = availableCash > 0 && deploy > availableCash;
+  const deploy = parseCashValue(cashValue);
+  const availableCashLimit = cashInputLimit(availableCash, currency);
+  const overBudget = deploy > availableCashLimit;
+  const canCalculate =
+    !isCalculating &&
+    !isSourceLoading &&
+    availableCashLimit > 0 &&
+    cashValue.trim().length > 0 &&
+    deploy > 0 &&
+    !overBudget;
 
   return (
     <Card>
@@ -488,10 +530,11 @@ function InputBar({
               <input
                 value={cashValue}
                 onChange={(e) => onCashChange(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onCalculate()}
+                onKeyDown={(e) => e.key === "Enter" && canCalculate && onCalculate()}
+                disabled={isSourceLoading || availableCash <= 0}
                 inputMode="decimal"
                 placeholder="0"
-                className="text-foreground placeholder:text-muted-foreground/60 w-32 bg-transparent text-[15px] font-medium tabular-nums outline-none"
+                className="text-foreground placeholder:text-muted-foreground/60 disabled:text-muted-foreground w-32 bg-transparent text-[15px] font-medium tabular-nums outline-none disabled:cursor-not-allowed"
               />
             </div>
             {overBudget && (
@@ -500,9 +543,15 @@ function InputBar({
           </div>
         </div>
 
-        <Button onClick={onCalculate} disabled={isCalculating || !cashValue.trim() || deploy <= 0}>
+        <Button onClick={onCalculate} disabled={!canCalculate}>
           <Icons.BarChart className="mr-1.5 h-4 w-4" />
-          {isCalculating ? "Calculating…" : hasPlan ? "Recalculate" : "Calculate plan"}
+          {isCalculating
+            ? "Calculating…"
+            : isSourceLoading
+              ? "Loading…"
+              : hasPlan
+                ? "Recalculate"
+                : "Calculate plan"}
         </Button>
       </CardContent>
     </Card>
@@ -516,6 +565,8 @@ interface RebalanceTabProps {
   driftReport: DriftReport | null;
   accountScope: AccountScope;
   availableCash: number;
+  sourceVersion: string;
+  isSourceLoading: boolean;
 }
 
 export function RebalanceTab({
@@ -523,30 +574,62 @@ export function RebalanceTab({
   driftReport,
   accountScope,
   availableCash,
+  sourceVersion,
+  isSourceLoading,
 }: RebalanceTabProps) {
-  const [cashValue, setCashValue] = useState(() =>
-    availableCash > 0 ? String(availableCash) : "",
-  );
-  const [plan, setPlan] = useState<RebalancePlan | null>(null);
+  const [cashDraft, setCashDraft] = useState<{ key: string; value: string } | null>(null);
+  const [planResult, setPlanResult] = useState<{
+    key: string;
+    sourceKey: string;
+    inputContextKey: string;
+    plan: RebalancePlan;
+  } | null>(null);
 
   const calculatePlan = useCalculateRebalancePlan();
   const currency = driftReport?.baseCurrency ?? "USD";
+  const inputContextKey = `${profile?.id ?? "no-profile"}:${accountScopeKey(accountScope)}:${currency}`;
+  const cashValue =
+    cashDraft?.key === inputContextKey
+      ? cashDraft.value
+      : cashValueFromAvailable(availableCash, currency);
+  const cash = parseCashValue(cashValue);
+  const availableCashLimit = cashInputLimit(availableCash, currency);
+  const sourceReady = !isSourceLoading && !!driftReport;
+  const sourceKey = `${inputContextKey}:${availableCash}:${sourceVersion}`;
+  const planKey = `${sourceKey}:${cash}`;
+  const plan = planResult?.key === planKey ? planResult.plan : null;
+  const hasStalePlan =
+    !!planResult &&
+    planResult.inputContextKey === inputContextKey &&
+    planResult.sourceKey !== sourceKey;
 
-  function parseCash(): number {
-    return parseFloat(cashValue.replace(/,/g, "")) || 0;
+  function handleCashChange(value: string) {
+    setCashDraft({ key: inputContextKey, value });
   }
 
   function handleCalculate() {
     if (!profile) return;
-    const cash = parseCash();
+    if (!sourceReady) {
+      toast.error("Portfolio data is still loading");
+      return;
+    }
+    if (availableCashLimit <= 0) {
+      toast.error("No cash available in scope");
+      return;
+    }
     if (cash <= 0) {
       toast.error("Enter a valid cash amount");
+      return;
+    }
+    if (cash > availableCashLimit) {
+      toast.error("Cash to deploy exceeds available cash");
       return;
     }
     calculatePlan.mutate(
       { targetId: profile.id, availableCash: cash, filter: accountScope },
       {
-        onSuccess: (result) => setPlan(result),
+        onSuccess: (result) =>
+          setPlanResult({ key: planKey, sourceKey, inputContextKey, plan: result }),
         onError: (err) => toast.error(`Failed to calculate plan: ${err.message}`),
       },
     );
@@ -584,11 +667,18 @@ export function RebalanceTab({
         cashValue={cashValue}
         availableCash={availableCash}
         currency={currency}
-        onCashChange={setCashValue}
+        onCashChange={handleCashChange}
         onCalculate={handleCalculate}
-        hasPlan={!!plan}
+        hasPlan={!!plan || hasStalePlan}
         isCalculating={isCalculating}
+        isSourceLoading={!sourceReady}
       />
+
+      {hasStalePlan && sourceReady && !isCalculating && (
+        <div className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-4 py-3 text-[13px]">
+          Portfolio data changed. Recalculate to refresh this plan.
+        </div>
+      )}
 
       {/* Loading skeletons */}
       {isCalculating && (

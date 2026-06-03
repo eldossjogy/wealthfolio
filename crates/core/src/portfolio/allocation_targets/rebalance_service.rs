@@ -47,6 +47,20 @@ impl RebalanceService {
             holdings_service,
         }
     }
+
+    fn currency_fraction_digits(currency: &str) -> u32 {
+        match currency.to_ascii_uppercase().as_str() {
+            "BIF" | "CLP" | "DJF" | "GNF" | "ISK" | "JPY" | "KMF" | "KRW" | "PYG" | "RWF"
+            | "UGX" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+            "BHD" | "IQD" | "JOD" | "KWD" | "LYD" | "OMR" | "TND" => 3,
+            "CLF" => 4,
+            _ => 2,
+        }
+    }
+
+    fn currency_rounding_tolerance(currency: &str) -> Decimal {
+        Decimal::ONE / Decimal::from(10_i64.pow(Self::currency_fraction_digits(currency)))
+    }
 }
 
 #[async_trait]
@@ -67,7 +81,10 @@ impl RebalanceServiceTrait for RebalanceService {
 
         // M2 deploys tracked cash only. Compute the cash in scope from holdings
         // (authoritative — does not trust a client-supplied figure) and reject
-        // attempts to deploy more than is actually held.
+        // attempts to deploy more than is actually held. Allow a tiny overage
+        // within the base currency's minor unit from frontend decimal
+        // serialization / currency rounding, but cap planning at the
+        // authoritative tracked cash value.
         let cash_in_scope: Decimal = self
             .holdings_service
             .get_holdings_for_accounts(
@@ -81,13 +98,20 @@ impl RebalanceServiceTrait for RebalanceService {
             .map(|holding| holding.market_value.base)
             .sum();
 
-        if input.available_cash > cash_in_scope {
-            return Err(CoreError::Validation(
-                crate::errors::ValidationError::InvalidInput(
-                    "cash to deploy exceeds tracked cash in scope".to_string(),
-                ),
-            ));
-        }
+        let available_cash = if input.available_cash > cash_in_scope {
+            let overage = input.available_cash - cash_in_scope;
+            if overage <= Self::currency_rounding_tolerance(&input.base_currency) {
+                cash_in_scope
+            } else {
+                return Err(CoreError::Validation(
+                    crate::errors::ValidationError::InvalidInput(
+                        "cash to deploy exceeds tracked cash in scope".to_string(),
+                    ),
+                ));
+            }
+        } else {
+            input.available_cash
+        };
 
         // --- 1. Load profile -------------------------------------------------
         let profile = self
@@ -117,7 +141,7 @@ impl RebalanceServiceTrait for RebalanceService {
             Decimal::from_str(&profile.min_trade_amount).unwrap_or(Decimal::ZERO);
 
         // Nothing to plan against.
-        if total_value == Decimal::ZERO && input.available_cash == Decimal::ZERO {
+        if total_value == Decimal::ZERO && available_cash == Decimal::ZERO {
             return Ok(RebalancePlan {
                 target_id: input.target_id.clone(),
                 available_cash: Decimal::ZERO,
@@ -149,6 +173,9 @@ impl RebalanceServiceTrait for RebalanceService {
 
         let mut sleeves: Vec<SleeveShortfall> = Vec::new();
         for row in &drift.rows {
+            if row.is_cash {
+                continue;
+            }
             let target_bps_dec = Decimal::from(row.target_bps);
             let desired_bps = match profile.rebalance_goal {
                 RebalanceGoal::ExactTarget => target_bps_dec,
@@ -167,14 +194,13 @@ impl RebalanceServiceTrait for RebalanceService {
 
         // --- 4. Scale shortfalls to available cash ---------------------------
         let total_shortfall: Decimal = sleeves.iter().map(|s| s.shortfall).sum();
-        let scale_factor =
-            if total_shortfall == Decimal::ZERO || input.available_cash == Decimal::ZERO {
-                Decimal::ZERO
-            } else if total_shortfall <= input.available_cash {
-                Decimal::ONE
-            } else {
-                input.available_cash / total_shortfall
-            };
+        let scale_factor = if total_shortfall == Decimal::ZERO || available_cash == Decimal::ZERO {
+            Decimal::ZERO
+        } else if total_shortfall <= available_cash {
+            Decimal::ONE
+        } else {
+            available_cash / total_shortfall
+        };
 
         // --- 5. Build trades per sleeve, proportional to holdings weights ----
         let mut trades: Vec<SuggestedManualTrade> = Vec::new();
@@ -187,7 +213,7 @@ impl RebalanceServiceTrait for RebalanceService {
 
         for sleeve in &sleeves {
             // Cap budget at remaining cash to guard against Decimal precision drift.
-            let remaining = input.available_cash - total_cash_used;
+            let remaining = available_cash - total_cash_used;
             if remaining <= Decimal::ZERO {
                 break;
             }
@@ -481,11 +507,11 @@ impl RebalanceServiceTrait for RebalanceService {
                 .unwrap_or(0)
         };
 
-        let cash_remaining = input.available_cash - total_cash_used;
+        let cash_remaining = available_cash - total_cash_used;
 
         Ok(RebalancePlan {
             target_id: input.target_id.clone(),
-            available_cash: input.available_cash,
+            available_cash,
             cash_used: total_cash_used,
             cash_remaining,
             max_drift_bps_before,
@@ -958,6 +984,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rounded_cash_within_cent_is_capped_to_tracked_cash() {
+        // Frontend currency rounding can submit $100.01 for a tracked raw cash
+        // balance of $100.005. Treat that as "deploy all cash" and cap to the
+        // authoritative backend value instead of rejecting.
+        let total = dec!(1000);
+        let rows = vec![
+            make_drift_row("equity", 5000, 6000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 5000, 4000, total)
+            },
+        ];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(500))],
+        );
+        let svc = make_service_with_cash(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+            dec!(100.005),
+        );
+
+        let plan = svc.calculate_plan(make_input(dec!(100.01))).await.unwrap();
+
+        assert_eq!(plan.available_cash, dec!(100.005));
+        assert_eq!(plan.cash_used, dec!(100));
+        assert_eq!(plan.cash_remaining, dec!(0.005));
+    }
+
+    #[tokio::test]
+    async fn rounded_zero_decimal_cash_is_capped_to_tracked_cash() {
+        // Zero-decimal currencies can round 100.5 to 101 in the UI. That should
+        // still behave as "deploy all tracked cash", while planning remains
+        // capped to the authoritative backend value.
+        let total = dec!(1000);
+        let rows = vec![
+            make_drift_row("equity", 5000, 6000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 5000, 4000, total)
+            },
+        ];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "equity".to_string(),
+            vec![make_holding("h1", "VTI", dec!(10), dec!(500))],
+        );
+        let svc = make_service_with_cash(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+            dec!(100.5),
+        );
+        let input = CalculateRebalancePlanInput {
+            base_currency: "JPY".to_string(),
+            ..make_input(dec!(101))
+        };
+
+        let plan = svc.calculate_plan(input).await.unwrap();
+
+        assert_eq!(plan.available_cash, dec!(100.5));
+        assert_eq!(plan.cash_used, dec!(100));
+        assert_eq!(plan.cash_remaining, dec!(0.5));
+    }
+
+    #[tokio::test]
     async fn total_value_stays_constant_when_cash_deployed() {
         // Portfolio: equity $6000 (60%), cash $4000 (40%). Total = $10000.
         // Target: equity 70%, cash 30%.
@@ -994,6 +1090,41 @@ mod tests {
             plan.max_drift_bps_after, 0,
             "cash sleeve must drop by cash_used so both sleeves reach target"
         );
+    }
+
+    #[tokio::test]
+    async fn underweight_cash_is_not_a_buy_candidate() {
+        // Portfolio: equity $8000 (80%), cash $2000 (20%).
+        // Target: equity 70%, cash 30%. Cash is underweight, but cash is the funding source,
+        // so a cash-flow-only plan must not suggest "buying" the cash sleeve with cash.
+        let total = dec!(10000);
+        let rows = vec![
+            make_drift_row("equity", 8000, 7000, total),
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 2000, 3000, total)
+            },
+        ];
+        let report = make_report(rows, total);
+        let mut holdings = std::collections::HashMap::new();
+        holdings.insert(
+            "cash".to_string(),
+            vec![make_holding("cash-usd", "USD", dec!(2000), dec!(2000))],
+        );
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            report,
+            holdings,
+        );
+
+        let plan = svc.calculate_plan(make_input(dec!(1000))).await.unwrap();
+
+        assert!(
+            plan.trades.is_empty(),
+            "cash must not be selected as a buy sleeve"
+        );
+        assert_eq!(plan.cash_used, Decimal::ZERO);
+        assert_eq!(plan.max_drift_bps_after, plan.max_drift_bps_before);
     }
 
     #[tokio::test]

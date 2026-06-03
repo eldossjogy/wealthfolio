@@ -8,6 +8,7 @@ export function useHoldings(accountFilter: AccountScope) {
 
   const {
     data: holdings = [],
+    dataUpdatedAt,
     isLoading,
     isError,
     error,
@@ -17,5 +18,5 @@ export function useHoldings(accountFilter: AccountScope) {
     enabled: isEnabled,
   });
 
-  return { holdings, isLoading, isError, error };
+  return { holdings, dataUpdatedAt, isLoading, isError, error };
 }
