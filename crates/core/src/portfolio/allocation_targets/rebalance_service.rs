@@ -1351,6 +1351,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cheap_asset_large_cash_batches_shares() {
+        // Equity 10% (target 90%), funded by a $1 asset, with $8000 cash. A one-share
+        // loop would iterate 8000 times; batching deploys it in one step. Verify the
+        // plan completes and buys the full 8000 shares to reach the target.
+        let total = dec!(10000);
+        let h = make_holding("h1", "CHEAP", dec!(1000), dec!(1000)); // $1/share
+        let c = make_contribution(&h, "equity", dec!(1000));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(vec![make_drift_row("equity", 1000, 9000, total)], total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(8000), "USD"), h],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(8000))).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("CHEAP"))
+            .expect("CHEAP trade expected");
+        assert_eq!(trade.quantity, Some(dec!(8000)), "should buy 8000 shares");
+        assert_eq!(plan.cash_used, dec!(8000));
+    }
+
+    #[tokio::test]
     async fn total_value_stays_constant_when_cash_deployed() {
         // Portfolio: equity $6000 (60%), cash $4000 (40%). Total = $10000.
         // Target: equity 70%, cash 30%.

@@ -279,11 +279,43 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             };
 
             let candidate = &candidates[idx];
-            for (cat_id, expo) in &candidate.exposure_per_share {
-                *values.entry(cat_id.clone()).or_default() += expo;
+
+            // Batch: buy as many whole shares of the chosen candidate as stay within the
+            // current linear region — up to the point where a category it funds reaches
+            // its desired value (exact target, or band edge under NearestBand). The
+            // per-share drift improvement is constant across that region, so buying the
+            // whole batch is equivalent to that many single-share iterations, but avoids
+            // an O(cash / price) loop for cheap assets with large cash balances. The
+            // boundary share (which may overshoot) is left to the next scan to evaluate.
+            let mut batch = (cash / candidate.price).floor().max(Decimal::ONE);
+            for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                    continue;
+                };
+                if *expo <= Decimal::ZERO {
+                    continue;
+                }
+                let desired_bps = match profile.rebalance_goal {
+                    RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
+                    RebalanceGoal::NearestBand => {
+                        (Decimal::from(cat.target_bps) - drift_band).max(Decimal::ZERO)
+                    }
+                };
+                let desired_value = desired_bps / scale * total_value;
+                let base = values.get(&cat.category_id).copied().unwrap_or_default();
+                if base < desired_value {
+                    let cap = ((desired_value - base) / expo).floor().max(Decimal::ONE);
+                    if cap < batch {
+                        batch = cap;
+                    }
+                }
             }
-            cash -= candidate.price;
-            shares_bought[idx] += Decimal::ONE;
+
+            for (cat_id, expo) in &candidate.exposure_per_share {
+                *values.entry(cat_id.clone()).or_default() += expo * batch;
+            }
+            cash -= candidate.price * batch;
+            shares_bought[idx] += batch;
         }
 
         // Fractional last slice: when the profile allows fractional shares, deploy the
