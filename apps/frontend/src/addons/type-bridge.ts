@@ -116,8 +116,8 @@ export interface InternalHostAPI {
   calculatePerformanceHistory(
     itemType: "account" | "symbol",
     itemId: string,
-    startDate: string,
-    endDate: string,
+    startDate?: string,
+    endDate?: string,
   ): Promise<PerformanceResult>;
   calculatePerformanceSummary(args: {
     itemType: "account" | "symbol";

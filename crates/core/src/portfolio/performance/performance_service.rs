@@ -169,6 +169,12 @@ enum ExternalFlowBasis {
     BaseCurrency,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AttributionBaseline {
+    PeriodStart,
+    Inception,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct DailyExternalFlow {
     date: NaiveDate,
@@ -458,6 +464,16 @@ impl PerformanceService {
         }
     }
 
+    fn return_net_contribution(
+        point: &DailyAccountValuation,
+        flow_basis: ExternalFlowBasis,
+    ) -> Decimal {
+        match flow_basis {
+            ExternalFlowBasis::AccountCurrency => point.net_contribution,
+            ExternalFlowBasis::BaseCurrency => point.net_contribution_base,
+        }
+    }
+
     fn return_investment_market_value(
         point: &DailyAccountValuation,
         flow_basis: ExternalFlowBasis,
@@ -498,6 +514,51 @@ impl PerformanceService {
             (Decimal::ZERO, Decimal::ZERO),
             |(inflows, outflows), flow| (inflows + flow.inflow, outflows + flow.outflow),
         )
+    }
+
+    fn attribution_baseline(
+        is_holdings_mode: bool,
+        start_date_opt: Option<NaiveDate>,
+    ) -> AttributionBaseline {
+        if !is_holdings_mode && start_date_opt.is_none() {
+            AttributionBaseline::Inception
+        } else {
+            AttributionBaseline::PeriodStart
+        }
+    }
+
+    fn total_external_flows_for_attribution(
+        daily_flows: &[DailyExternalFlow],
+        start_point: &DailyAccountValuation,
+        flow_basis: ExternalFlowBasis,
+        baseline: AttributionBaseline,
+    ) -> (Decimal, Decimal) {
+        let (mut contributions, mut distributions) = Self::total_external_flows(daily_flows);
+
+        if matches!(baseline, AttributionBaseline::Inception) {
+            let opening_net_contribution = Self::return_net_contribution(start_point, flow_basis);
+            if opening_net_contribution.is_sign_negative() {
+                distributions += -opening_net_contribution;
+            } else {
+                contributions += opening_net_contribution;
+            }
+        }
+
+        (contributions, distributions)
+    }
+
+    fn attribution_total_value_delta(
+        start_point: &DailyAccountValuation,
+        end_point: &DailyAccountValuation,
+        flow_basis: ExternalFlowBasis,
+        baseline: AttributionBaseline,
+    ) -> Decimal {
+        let end_value = Self::return_total_value(end_point, flow_basis);
+        if matches!(baseline, AttributionBaseline::Inception) {
+            end_value
+        } else {
+            end_value - Self::return_total_value(start_point, flow_basis)
+        }
     }
 
     fn calculate_xirr(
@@ -748,19 +809,26 @@ impl PerformanceService {
         result: &mut PerformanceResult,
         account_ids: &[String],
         history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
-        self.apply_activity_attribution_best_effort(result, account_ids, history)
+        self.apply_activity_attribution_best_effort(result, account_ids, history, baseline)
             .await;
         let period_disposals = self
             .load_period_lot_disposals_best_effort(result, account_ids)
             .await;
-        self.apply_realized_attribution_best_effort(result, period_disposals.as_deref(), history)
-            .await;
+        self.apply_realized_attribution_best_effort(
+            result,
+            period_disposals.as_deref(),
+            history,
+            baseline,
+        )
+        .await;
         self.apply_trade_fee_pnl_gross_up_best_effort(
             result,
             account_ids,
             period_disposals.as_deref(),
             history,
+            baseline,
         )
         .await;
     }
@@ -797,6 +865,7 @@ impl PerformanceService {
         result: &mut PerformanceResult,
         account_ids: &[String],
         aggregate_history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
         let Some(start_date) = result.period.start_date else {
             return;
@@ -836,6 +905,7 @@ impl PerformanceService {
             &account_histories,
             start_date,
             end_date,
+            baseline,
         );
         result.data_quality.warnings.extend(attribution.warnings);
         if !attribution.complete {
@@ -849,6 +919,7 @@ impl PerformanceService {
             result,
             aggregate_history,
             ExternalFlowBasis::BaseCurrency,
+            baseline,
         );
     }
 
@@ -857,6 +928,7 @@ impl PerformanceService {
         result: &mut PerformanceResult,
         account_ids: &[String],
         history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
         let Some(activity_repository) = &self.activity_repository else {
             return;
@@ -1002,7 +1074,12 @@ impl PerformanceService {
             result.data_quality.warnings.extend(warnings);
         }
         if changed || !result.data_quality.warnings.is_empty() {
-            Self::recompute_attribution_residual(result, history, ExternalFlowBasis::BaseCurrency);
+            Self::recompute_attribution_residual(
+                result,
+                history,
+                ExternalFlowBasis::BaseCurrency,
+                baseline,
+            );
         }
     }
 
@@ -1011,6 +1088,7 @@ impl PerformanceService {
         result: &mut PerformanceResult,
         account_ids: &[String],
         history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
         let Some(activity_repository) = &self.activity_repository else {
             return;
@@ -1119,7 +1197,12 @@ impl PerformanceService {
             result.data_quality.warnings.extend(warnings);
         }
         if changed || !result.data_quality.warnings.is_empty() {
-            Self::recompute_attribution_residual(result, history, ExternalFlowBasis::BaseCurrency);
+            Self::recompute_attribution_residual(
+                result,
+                history,
+                ExternalFlowBasis::BaseCurrency,
+                baseline,
+            );
         }
     }
 
@@ -1223,6 +1306,7 @@ impl PerformanceService {
         result: &mut PerformanceResult,
         period_disposals: Option<&[LotDisposal]>,
         history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
         let Some(disposals) = period_disposals else {
             return;
@@ -1245,7 +1329,12 @@ impl PerformanceService {
         }
 
         result.attribution.realized_pnl = realized_pnl_base.round_dp(DECIMAL_PRECISION);
-        Self::recompute_attribution_residual(result, history, ExternalFlowBasis::BaseCurrency);
+        Self::recompute_attribution_residual(
+            result,
+            history,
+            ExternalFlowBasis::BaseCurrency,
+            baseline,
+        );
     }
 
     async fn apply_trade_fee_pnl_gross_up_best_effort(
@@ -1254,6 +1343,7 @@ impl PerformanceService {
         account_ids: &[String],
         period_disposals: Option<&[LotDisposal]>,
         history: &[DailyAccountValuation],
+        baseline: AttributionBaseline,
     ) {
         let Some(activity_repository) = &self.activity_repository else {
             return;
@@ -1414,13 +1504,19 @@ impl PerformanceService {
         result.attribution.unrealized_pnl_change = (result.attribution.unrealized_pnl_change
             + remaining_period_buy_fees)
             .round_dp(DECIMAL_PRECISION);
-        Self::recompute_attribution_residual(result, history, ExternalFlowBasis::BaseCurrency);
+        Self::recompute_attribution_residual(
+            result,
+            history,
+            ExternalFlowBasis::BaseCurrency,
+            baseline,
+        );
     }
 
     fn recompute_attribution_residual(
         result: &mut PerformanceResult,
         history: &[DailyAccountValuation],
         flow_basis: ExternalFlowBasis,
+        baseline: AttributionBaseline,
     ) {
         let Some(start_point) = history.first() else {
             return;
@@ -1429,9 +1525,9 @@ impl PerformanceService {
             return;
         };
 
-        let start_value = Self::return_total_value(start_point, flow_basis);
         let end_value = Self::return_total_value(end_point, flow_basis);
-        let delta_total_value = end_value - start_value;
+        let delta_total_value =
+            Self::attribution_total_value_delta(start_point, end_point, flow_basis, baseline);
         result.attribution.residual = (delta_total_value
             - (result.attribution.contributions - result.attribution.distributions
                 + result.attribution.income
@@ -1507,11 +1603,17 @@ impl PerformanceService {
         start_point: &DailyAccountValuation,
         end_point: &DailyAccountValuation,
         flow_basis: ExternalFlowBasis,
+        baseline: AttributionBaseline,
     ) -> (Decimal, Decimal) {
-        let base_unrealized_change = (Self::return_investment_market_value(end_point, flow_basis)
-            - Self::return_cost_basis(end_point, flow_basis))
-            - (Self::return_investment_market_value(start_point, flow_basis)
-                - Self::return_cost_basis(start_point, flow_basis));
+        let end_base_unrealized = Self::return_investment_market_value(end_point, flow_basis)
+            - Self::return_cost_basis(end_point, flow_basis);
+        let start_base_unrealized = if matches!(baseline, AttributionBaseline::Inception) {
+            Decimal::ZERO
+        } else {
+            Self::return_investment_market_value(start_point, flow_basis)
+                - Self::return_cost_basis(start_point, flow_basis)
+        };
+        let base_unrealized_change = end_base_unrealized - start_base_unrealized;
 
         if !matches!(flow_basis, ExternalFlowBasis::BaseCurrency)
             || start_point.account_currency == start_point.base_currency
@@ -1519,8 +1621,13 @@ impl PerformanceService {
             return (base_unrealized_change, Decimal::ZERO);
         }
 
-        let local_unrealized_change = (end_point.investment_market_value - end_point.cost_basis)
-            - (start_point.investment_market_value - start_point.cost_basis);
+        let start_local_unrealized = if matches!(baseline, AttributionBaseline::Inception) {
+            Decimal::ZERO
+        } else {
+            start_point.investment_market_value - start_point.cost_basis
+        };
+        let local_unrealized_change =
+            (end_point.investment_market_value - end_point.cost_basis) - start_local_unrealized;
         let local_change_at_end_fx = local_unrealized_change * end_point.fx_rate_to_base;
         (
             local_change_at_end_fx.round_dp(DECIMAL_PRECISION),
@@ -1540,6 +1647,7 @@ impl PerformanceService {
         account_histories: &[Vec<DailyAccountValuation>],
         start_date: NaiveDate,
         end_date: NaiveDate,
+        baseline: AttributionBaseline,
     ) -> ScopedUnrealizedAttribution {
         let mut unrealized_pnl_change = Decimal::ZERO;
         let mut fx_effect = Decimal::ZERO;
@@ -1552,10 +1660,14 @@ impl PerformanceService {
                 continue;
             }
 
-            let start_point = history
-                .iter()
-                .filter(|point| point.valuation_date <= start_date)
-                .max_by_key(|point| point.valuation_date);
+            let start_point = if matches!(baseline, AttributionBaseline::Inception) {
+                None
+            } else {
+                history
+                    .iter()
+                    .filter(|point| point.valuation_date <= start_date)
+                    .max_by_key(|point| point.valuation_date)
+            };
             let Some(end_point) = history
                 .iter()
                 .filter(|point| point.valuation_date <= end_date)
@@ -1650,10 +1762,15 @@ impl PerformanceService {
         let mut metrics =
             Self::compute_account_performance(&full_history, tracking_mode, start_date_opt, true)?;
         metrics.scope.id = account_id.to_string();
+        let attribution_baseline = Self::attribution_baseline(
+            matches!(tracking_mode, Some(TrackingMode::Holdings)),
+            start_date_opt,
+        );
         self.apply_external_attribution_best_effort(
             &mut metrics,
             &[account_id.to_string()],
             &full_history,
+            attribution_baseline,
         )
         .await;
         Ok(metrics)
@@ -1719,10 +1836,15 @@ impl PerformanceService {
             profile,
         )?;
         metrics.scope.id = account_id.to_string();
+        let attribution_baseline = Self::attribution_baseline(
+            matches!(tracking_mode, Some(TrackingMode::Holdings)),
+            start_date_opt,
+        );
         self.apply_external_attribution_best_effort(
             &mut metrics,
             &[account_id.to_string()],
             &full_history,
+            attribution_baseline,
         )
         .await;
         Ok(metrics)
@@ -1833,20 +1955,35 @@ impl PerformanceService {
         };
 
         metrics.scope.id = scope_id.to_string();
+        let attribution_baseline = if scoped_tracking_composition
+            == ScopedTrackingComposition::TransactionsOnly
+            && start_date_opt.is_none()
+        {
+            AttributionBaseline::Inception
+        } else {
+            AttributionBaseline::PeriodStart
+        };
         self.apply_scoped_unrealized_attribution_best_effort(
             &mut metrics,
             account_ids,
             &full_history,
+            attribution_baseline,
         )
         .await;
         self.apply_scoped_transfer_pair_attribution_best_effort(
             &mut metrics,
             account_ids,
             &full_history,
+            attribution_baseline,
         )
         .await;
-        self.apply_external_attribution_best_effort(&mut metrics, account_ids, &full_history)
-            .await;
+        self.apply_external_attribution_best_effort(
+            &mut metrics,
+            account_ids,
+            &full_history,
+            attribution_baseline,
+        )
+        .await;
         Ok(metrics)
     }
 
@@ -1939,11 +2076,11 @@ impl PerformanceService {
             ExternalFlowBasis::BaseCurrency => start_point.base_currency.clone(),
         };
         let is_holdings_mode = matches!(tracking_mode, Some(TrackingMode::Holdings));
+        let attribution_baseline = Self::attribution_baseline(is_holdings_mode, start_date_opt);
         let include_irr = profile == PerformanceSummaryProfile::Full;
         let include_risk = profile == PerformanceSummaryProfile::Full;
         let include_annualized_returns = profile == PerformanceSummaryProfile::Full;
 
-        let start_value = Self::return_total_value(start_point, flow_basis);
         let end_value = Self::return_total_value(end_point, flow_basis);
         let daily_flows = Self::daily_external_flow_series(full_history, flow_basis);
 
@@ -2074,10 +2211,24 @@ impl PerformanceService {
             (ReturnMethod::TimeWeighted, value_return, reason)
         };
 
-        let (contributions, distributions) = Self::total_external_flows(&daily_flows);
-        let (unrealized_pnl_change, fx_effect) =
-            Self::unrealized_attribution_components(start_point, end_point, flow_basis);
-        let delta_total_value = end_value - start_value;
+        let (contributions, distributions) = Self::total_external_flows_for_attribution(
+            &daily_flows,
+            start_point,
+            flow_basis,
+            attribution_baseline,
+        );
+        let (unrealized_pnl_change, fx_effect) = Self::unrealized_attribution_components(
+            start_point,
+            end_point,
+            flow_basis,
+            attribution_baseline,
+        );
+        let delta_total_value = Self::attribution_total_value_delta(
+            start_point,
+            end_point,
+            flow_basis,
+            attribution_baseline,
+        );
         let mut attribution = PerformanceAttribution {
             contributions,
             distributions,
@@ -2266,8 +2417,12 @@ impl PerformanceService {
         }
 
         let (contributions, distributions) = Self::total_external_flows(&daily_flows);
-        let (unrealized_pnl_change, fx_effect) =
-            Self::unrealized_attribution_components(start_point, end_point, flow_basis);
+        let (unrealized_pnl_change, fx_effect) = Self::unrealized_attribution_components(
+            start_point,
+            end_point,
+            flow_basis,
+            AttributionBaseline::PeriodStart,
+        );
         let delta_total_value = end_value - start_value;
         let mut attribution = PerformanceAttribution {
             contributions,
@@ -4760,6 +4915,110 @@ mod tests {
     }
 
     #[test]
+    fn perf_all_time_transactions_pnl_uses_inception_baseline() {
+        let history = vec![
+            valuation("2026-01-10", dec!(1015), dec!(1000), dec!(915), dec!(900)),
+            valuation("2026-01-11", dec!(1025), dec!(1000), dec!(925), dec!(900)),
+            valuation("2026-01-12", dec!(1040), dec!(1000), dec!(940), dec!(900)),
+        ];
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            false,
+        )
+        .expect("all-time performance should compute");
+
+        assert_eq!(result.mode, ReturnMethod::TimeWeighted);
+        assert_eq!(result.attribution.contributions, dec!(1000));
+        assert_eq!(result.attribution.distributions, Decimal::ZERO);
+        assert_eq!(result.attribution.unrealized_pnl_change, dec!(40));
+        assert_eq!(result.attribution.residual, Decimal::ZERO);
+        assert_eq!(attribution_pnl(&result), dec!(40));
+        assert_eq!(result.returns.twr.unwrap().round_dp(4), dec!(0.0246));
+        assert!(!result
+            .data_quality
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("Attribution residual ")));
+    }
+
+    #[test]
+    fn perf_all_time_recompute_preserves_inception_baseline_after_attribution_enrichment() {
+        let history = vec![
+            valuation("2026-01-10", dec!(1015), dec!(1000), dec!(915), dec!(900)),
+            valuation("2026-01-12", dec!(1040), dec!(1000), dec!(940), dec!(900)),
+        ];
+
+        let mut result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            false,
+        )
+        .expect("all-time performance should compute");
+
+        result.attribution.income = dec!(5);
+        result.attribution.unrealized_pnl_change -= dec!(5);
+        PerformanceService::recompute_attribution_residual(
+            &mut result,
+            &history,
+            ExternalFlowBasis::BaseCurrency,
+            AttributionBaseline::Inception,
+        );
+
+        assert_eq!(result.attribution.residual, Decimal::ZERO);
+        assert_eq!(attribution_pnl(&result), dec!(40));
+    }
+
+    #[test]
+    fn perf_bounded_transactions_pnl_keeps_period_start_baseline() {
+        let history = vec![
+            valuation("2026-01-10", dec!(1015), dec!(1000), dec!(915), dec!(900)),
+            valuation("2026-01-11", dec!(1025), dec!(1000), dec!(925), dec!(900)),
+            valuation("2026-01-12", dec!(1040), dec!(1000), dec!(940), dec!(900)),
+        ];
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            Some(date("2026-01-10")),
+            false,
+        )
+        .expect("bounded performance should compute");
+
+        assert_eq!(result.attribution.contributions, Decimal::ZERO);
+        assert_eq!(result.attribution.distributions, Decimal::ZERO);
+        assert_eq!(result.attribution.unrealized_pnl_change, dec!(25));
+        assert_eq!(result.attribution.residual, Decimal::ZERO);
+        assert_eq!(attribution_pnl(&result), dec!(25));
+    }
+
+    #[test]
+    fn perf_all_time_transactions_with_negative_net_contribution_keeps_lifetime_pnl() {
+        let history = vec![
+            valuation("2026-02-01", dec!(1030), dec!(1000), dec!(930), dec!(900)),
+            valuation("2026-02-10", dec!(1400), dec!(1000), dec!(1200), dec!(900)),
+            valuation("2026-02-20", dec!(50), dec!(-400), dec!(50), Decimal::ZERO),
+        ];
+
+        let result = PerformanceService::compute_account_performance(
+            &history,
+            Some(TrackingMode::Transactions),
+            None,
+            false,
+        )
+        .expect("all-time performance should compute");
+
+        assert_eq!(result.attribution.contributions, dec!(1000));
+        assert_eq!(result.attribution.distributions, dec!(1400));
+        assert_eq!(result.attribution.unrealized_pnl_change, dec!(50));
+        assert_eq!(result.attribution.residual, dec!(400));
+        assert_eq!(attribution_pnl(&result), dec!(450));
+    }
+
+    #[test]
     fn twr_uses_start_of_day_inflow_convention() {
         let history = vec![
             valuation(
@@ -4925,7 +5184,7 @@ mod tests {
         )
         .expect("performance should compute");
 
-        assert_eq!(result.attribution.contributions, dec!(50));
+        assert_eq!(result.attribution.contributions, dec!(150));
         assert_eq!(result.attribution.distributions, Decimal::ZERO);
         assert_eq!(result.attribution.unrealized_pnl_change, dec!(10));
         assert_eq!(result.attribution.residual, Decimal::ZERO);
@@ -4955,7 +5214,7 @@ mod tests {
         )
         .expect("performance should compute");
 
-        assert_eq!(result.attribution.contributions, Decimal::ZERO);
+        assert_eq!(result.attribution.contributions, dec!(100));
         assert_eq!(result.attribution.distributions, Decimal::ZERO);
         assert_eq!(result.attribution.unrealized_pnl_change, dec!(10));
         assert_eq!(result.attribution.residual, Decimal::ZERO);
@@ -4987,7 +5246,7 @@ mod tests {
         )
         .expect("performance should compute");
 
-        assert_eq!(result.attribution.contributions, dec!(100));
+        assert_eq!(result.attribution.contributions, dec!(200));
         assert_eq!(result.attribution.distributions, dec!(100));
         assert_eq!(result.attribution.unrealized_pnl_change, dec!(20));
         assert_eq!(result.attribution.residual, Decimal::ZERO);
@@ -5252,11 +5511,40 @@ mod tests {
             &[vec![usd_start, usd_end], vec![cad_start, cad_end]],
             date("2026-05-01"),
             date("2026-05-02"),
+            AttributionBaseline::PeriodStart,
         );
 
         assert!(attribution.complete);
         assert_eq!(attribution.unrealized_pnl_change, dec!(34));
         assert_eq!(attribution.fx_effect, dec!(10));
+    }
+
+    #[test]
+    fn scoped_attribution_uses_inception_unrealized_pnl_for_all_time_transactions() {
+        let history = vec![
+            valuation("2026-01-10", dec!(1015), dec!(1000), dec!(915), dec!(900)),
+            valuation("2026-01-12", dec!(1040), dec!(1000), dec!(940), dec!(900)),
+        ];
+
+        let all_time = PerformanceService::scoped_unrealized_attribution_components(
+            std::slice::from_ref(&history),
+            date("2026-01-10"),
+            date("2026-01-12"),
+            AttributionBaseline::Inception,
+        );
+        let bounded = PerformanceService::scoped_unrealized_attribution_components(
+            &[history],
+            date("2026-01-10"),
+            date("2026-01-12"),
+            AttributionBaseline::PeriodStart,
+        );
+
+        assert!(all_time.complete);
+        assert_eq!(all_time.unrealized_pnl_change, dec!(40));
+        assert_eq!(all_time.fx_effect, Decimal::ZERO);
+        assert!(bounded.complete);
+        assert_eq!(bounded.unrealized_pnl_change, dec!(25));
+        assert_eq!(bounded.fx_effect, Decimal::ZERO);
     }
 
     /// Negative portfolio value (like TEST's unfunded-BUY shape) surfaces as a

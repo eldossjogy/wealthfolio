@@ -135,4 +135,47 @@ describe("useCalculatePerformanceHistory", () => {
       undefined,
     );
   });
+
+  it("allows all-time performance queries without explicit dates", async () => {
+    const { result } = renderHook(
+      () =>
+        useCalculatePerformanceHistory({
+          selectedItems: [{ id: "portfolio:all", type: "account", name: "Total Portfolio" }],
+          dateRange: undefined,
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mocks.calculatePerformanceHistory).toHaveBeenCalled();
+    });
+
+    expect(mocks.calculatePerformanceHistory).toHaveBeenCalledWith(
+      "account",
+      "portfolio:all",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(result.current.displayDateRange).toBe("All Time");
+  });
+
+  it("does not query when the date range is only partially populated", async () => {
+    renderHook(
+      () =>
+        useCalculatePerformanceHistory({
+          selectedItems: [{ id: "portfolio:all", type: "account", name: "Total Portfolio" }],
+          dateRange: {
+            from: new Date(2026, 2, 4),
+            to: undefined,
+          },
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mocks.calculatePerformanceHistory).not.toHaveBeenCalled();
+    });
+  });
 });

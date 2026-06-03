@@ -7,7 +7,8 @@ import { TrackedItem } from "@/lib/types";
 
 /**
  * Hook to calculate cumulative returns for a list of comparison items.
- * Uses the user-selected date range directly for all queries.
+ * Uses the user-selected date range directly for queries, except when the
+ * caller passes `undefined` to request all-time performance.
  *
  * @param selectedItems List of comparison items to calculate cumulative returns for.
  * @param dateRange The date range for the calculation period.
@@ -35,7 +36,8 @@ export function useCalculatePerformanceHistory({
       item && typeof item.id === "string" && item.id && typeof item.type === "string" && item.type,
   );
 
-  // Get the formatted date range for API calls, keep as undefined if not present
+  // Keep dates undefined for all-time queries so the backend can apply
+  // inception semantics instead of treating "ALL" as an explicit bounded range.
   const startDate = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
   const endDate = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
 
@@ -63,8 +65,8 @@ export function useCalculatePerformanceHistory({
             item.type === "account" ? trackingMode : undefined,
             accountFilter,
           ),
-        // Enable query only if dates are present (item validation done above).
-        enabled: !!startDate && !!endDate,
+        // Enable query for all-time (`dateRange === undefined`) or valid bounded ranges.
+        enabled: dateRange === undefined || (!!startDate && !!endDate),
         staleTime: 30 * 1000,
         retry: false,
         placeholderData: keepPreviousData,
@@ -102,9 +104,11 @@ export function useCalculatePerformanceHistory({
   const displayEndDate = dateRange?.to ? format(dateRange.to, "MMM d, yyyy") : "";
 
   const displayDateRange =
-    displayStartDate && displayEndDate
-      ? `${displayStartDate} - ${displayEndDate}`
-      : "Compare account performance over time";
+    dateRange === undefined
+      ? "All Time"
+      : displayStartDate && displayEndDate
+        ? `${displayStartDate} - ${displayEndDate}`
+        : "Compare account performance over time";
 
   return {
     data: chartData,

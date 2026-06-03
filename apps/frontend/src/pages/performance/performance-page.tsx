@@ -313,6 +313,10 @@ interface SelectedItemPlotState {
 const PLOTTED_ITEM_STATE: SelectedItemPlotState = { isPlotted: true };
 const PERFORMANCE_HIDDEN_DATE_RANGES = ["1D"] as const;
 
+function isAllTimeDateRange(range: DateRange | undefined): boolean {
+  return !!range?.from && isSameDay(range.from, new Date(1970, 0, 1));
+}
+
 function amountTone(value: number): string {
   if (value < 0) return "text-destructive";
   if (value > 0) return "text-success";
@@ -834,7 +838,7 @@ export default function PerformancePage() {
     displayDateRange,
   } = useCalculatePerformanceHistory({
     selectedItems,
-    dateRange,
+    dateRange: isAllTimeDateRange(dateRange) ? undefined : dateRange,
   });
 
   const selectedPerformanceData = useMemo(() => {

@@ -262,6 +262,8 @@ const AccountPage = () => {
     return undefined;
   }, [account, supportsPerformance]);
 
+  const performanceDateRange = selectedIntervalCode === "ALL" ? undefined : dateRange;
+
   // Pass tracking mode to the performance hook for SOTA calculations
   const {
     data: performanceResponse,
@@ -270,7 +272,7 @@ const AccountPage = () => {
     errorMessages: performanceErrorMessages,
   } = useCalculatePerformanceHistory({
     selectedItems: accountTrackedItem ? [accountTrackedItem] : [],
-    dateRange: dateRange,
+    dateRange: performanceDateRange,
     trackingMode: isHoldingsMode ? "HOLDINGS" : "TRANSACTIONS",
   });
 
