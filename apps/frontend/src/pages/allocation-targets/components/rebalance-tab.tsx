@@ -89,7 +89,22 @@ function csvCell(value: string): string {
   return `"${escaped}"`;
 }
 
-function exportCsv(plan: RebalancePlan, currency: string) {
+function exportCsv(plan: RebalancePlan, currency: string, profileName: string) {
+  const generated = new Date().toISOString().slice(0, 10);
+  const fractionDigits = currencyFractionDigits(currency);
+
+  const meta = [
+    ["Generated", generated],
+    ["Profile", profileName],
+    ["Currency", currency],
+    ["Cash deployed", plan.cashUsed.toFixed(fractionDigits)],
+    ["Cash available", plan.availableCash.toFixed(fractionDigits)],
+    ["Max drift before", fmtBps(plan.maxDriftBpsBefore)],
+    ["Max drift after", fmtBps(plan.maxDriftBpsAfter)],
+  ]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+
   const header = [
     "Action",
     "Symbol",
@@ -102,26 +117,28 @@ function exportCsv(plan: RebalancePlan, currency: string) {
   ]
     .map(csvCell)
     .join(",");
+
   const rows = plan.trades.map((t) =>
     [
       t.action,
       t.symbol ?? "",
       t.name ?? "",
       t.categoryName,
-      t.estimatedAmount.toFixed(2),
-      t.quantity != null ? t.quantity.toFixed(4) : "",
-      t.estimatedPrice != null ? t.estimatedPrice.toFixed(2) : "",
+      t.estimatedAmount.toFixed(fractionDigits),
+      t.quantity != null ? t.quantity.toFixed(t.quantity % 1 === 0 ? 0 : 4) : "",
+      t.estimatedPrice != null ? t.estimatedPrice.toFixed(fractionDigits) : "",
       t.reason,
     ]
       .map(csvCell)
       .join(","),
   );
-  const csv = [header, ...rows].join("\n");
+
+  const csv = [meta, "", header, ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `rebalance-plan-${currency}.csv`;
+  a.download = `rebalance-plan-${profileName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-${generated}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -759,7 +776,7 @@ export function RebalanceTab({
             <Button
               size="sm"
               onClick={() => {
-                exportCsv(plan, currency);
+                exportCsv(plan, currency, profile.name);
                 toast.success("CSV downloaded");
               }}
             >
