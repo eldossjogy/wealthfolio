@@ -4,13 +4,13 @@ import * as z from "zod";
  * Zod schema for the update valuation form
  */
 export const updateValuationSchema = z.object({
-  // New value - must be positive
+  // New value - allow zero (e.g. a paid-off liability) but not negative
   value: z.coerce
     .number({
       required_error: "Please enter a valid value.",
       invalid_type_error: "Value must be a number.",
     })
-    .positive("Value must be greater than 0"),
+    .min(0, "Value cannot be negative"),
 
   // As of date - required
   date: z.date({

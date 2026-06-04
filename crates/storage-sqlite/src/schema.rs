@@ -213,6 +213,7 @@ diesel::table! {
         net_contribution_base -> Text,
         external_inflow_base -> Text,
         external_outflow_base -> Text,
+        external_flow_source -> Text,
         performance_eligible_value_base -> Text,
         calculated_at -> Text,
     }
@@ -316,6 +317,29 @@ diesel::table! {
 }
 
 diesel::table! {
+    lot_disposals (id) {
+        id -> Text,
+        lot_id -> Text,
+        account_id -> Text,
+        asset_id -> Text,
+        disposal_activity_id -> Text,
+        disposal_date -> Text,
+        quantity -> Text,
+        proceeds -> Text,
+        cost_basis -> Text,
+        realized_pnl -> Text,
+        proceeds_base -> Text,
+        cost_basis_base -> Text,
+        realized_pnl_base -> Text,
+        currency -> Text,
+        base_currency -> Text,
+        fx_rate_to_base -> Text,
+        cost_basis_method -> Text,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     lots (id) {
         id -> Text,
         account_id -> Text,
@@ -326,7 +350,14 @@ diesel::table! {
         cost_per_unit -> Text,
         original_cost_basis -> Text,
         remaining_cost_basis -> Text,
+        original_cost_basis_base -> Text,
+        remaining_cost_basis_base -> Text,
         fee_allocated -> Text,
+        fee_allocated_base -> Text,
+        currency -> Text,
+        base_currency -> Text,
+        fx_rate_to_base -> Text,
+        cost_basis_method -> Text,
         remaining_quantity -> Text,
         split_ratio -> Text,
         is_closed -> Integer,
@@ -685,6 +716,40 @@ diesel::table! {
 diesel::joinable!(portfolio_accounts -> portfolios (portfolio_id));
 diesel::joinable!(portfolio_accounts -> accounts (account_id));
 
+diesel::table! {
+    allocation_targets (id) {
+        id -> Text,
+        name -> Text,
+        scope_type -> Text,
+        scope_id -> Nullable<Text>,
+        taxonomy_id -> Text,
+        trigger_type -> Text,
+        drift_band_bps -> Integer,
+        rebalance_goal -> Text,
+        min_trade_amount -> Text,
+        whole_shares_only -> Integer,
+        created_at -> Text,
+        updated_at -> Text,
+        archived_at -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    allocation_target_weights (id) {
+        id -> Text,
+        target_id -> Text,
+        taxonomy_id -> Text,
+        category_id -> Text,
+        target_bps -> Integer,
+        is_locked -> Integer,
+        is_required -> Integer,
+        created_at -> Text,
+        updated_at -> Text,
+    }
+}
+
+diesel::joinable!(allocation_target_weights -> allocation_targets (target_id));
+
 diesel::joinable!(accounts -> platforms (platform_id));
 diesel::joinable!(activities -> accounts (account_id));
 diesel::joinable!(activities -> assets (asset_id));
@@ -703,6 +768,10 @@ diesel::joinable!(lots -> assets (asset_id));
 diesel::joinable!(quotes -> assets (asset_id));
 diesel::joinable!(snapshot_positions -> holdings_snapshots (snapshot_id));
 diesel::joinable!(snapshot_positions -> assets (asset_id));
+diesel::joinable!(lot_disposals -> lots (lot_id));
+diesel::joinable!(lot_disposals -> accounts (account_id));
+diesel::joinable!(lot_disposals -> assets (asset_id));
+diesel::joinable!(lot_disposals -> activities (disposal_activity_id));
 diesel::joinable!(taxonomy_categories -> taxonomies (taxonomy_id));
 diesel::joinable!(activity_taxonomy_assignments -> activities (activity_id));
 diesel::joinable!(activity_taxonomy_assignments -> taxonomies (taxonomy_id));
@@ -743,6 +812,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     holdings_snapshots,
     import_templates,
     import_runs,
+    lot_disposals,
     lots,
     market_data_providers,
     platforms,
@@ -768,4 +838,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     budget_group_assignments,
     budget_targets,
     budget_rollover_settings,
+    allocation_targets,
+    allocation_target_weights,
 );

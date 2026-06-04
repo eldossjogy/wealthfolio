@@ -10,7 +10,7 @@ import { AmountDisplay, GainPercent, QuantityDisplay } from "@wealthfolio/ui";
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { Holding, HOLDING_GROUP_ORDER } from "@/lib/types";
-import { AccountType, AssetKind } from "@/lib/constants";
+import { AccountType, AssetKind, HoldingType } from "@/lib/constants";
 import { cn, safeDivide } from "@/lib/utils";
 import { useSettingsContext } from "@/lib/settings-provider";
 import { useState, useMemo } from "react";
@@ -185,6 +185,8 @@ function HoldingRow({
   isIndented = false,
 }: HoldingRowProps) {
   const symbol = holding.instrument?.symbol ?? holding.id;
+  const avatarSymbol =
+    holding.holdingType === HoldingType.CASH ? `CASH:${holding.localCurrency}` : symbol;
 
   const handleNavigate = () => {
     // Use instrument.id (asset ID) for navigation, not symbol (which may be stripped)
@@ -221,7 +223,7 @@ function HoldingRow({
       >
         {/* Symbol/Name Column */}
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <TickerAvatar symbol={symbol} className="h-8 w-8 flex-shrink-0" />
+          <TickerAvatar symbol={avatarSymbol} className="h-8 w-8 flex-shrink-0" />
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex items-center gap-2">
               <span className="truncate font-medium">{symbol}</span>

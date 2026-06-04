@@ -606,7 +606,7 @@ export const HoldingsEditMode = ({
                       {/* Currency */}
                       <div className="col-span-6">
                         <div className="flex items-center gap-2">
-                          <TickerAvatar symbol="$CASH" className="size-7" />
+                          <TickerAvatar symbol={`CASH:${cash.currency}`} className="size-7" />
                           <span className="text-sm font-medium">{cash.currency}</span>
                         </div>
                       </div>

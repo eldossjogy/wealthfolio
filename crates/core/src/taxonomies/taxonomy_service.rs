@@ -183,6 +183,16 @@ impl TaxonomyServiceTrait for TaxonomyService {
             ))
             .into());
         }
+        let allocation_target_references = self
+            .repository
+            .get_category_allocation_target_weight_count(taxonomy_id, category_id)?;
+        if allocation_target_references > 0 {
+            return Err(ValidationError::InvalidInput(format!(
+                "Cannot delete category with {} allocation target references",
+                allocation_target_references
+            ))
+            .into());
+        }
 
         self.repository
             .delete_category(taxonomy_id, category_id)
@@ -265,6 +275,13 @@ impl TaxonomyServiceTrait for TaxonomyService {
 
     fn get_asset_assignments(&self, asset_id: &str) -> Result<Vec<AssetTaxonomyAssignment>> {
         self.repository.get_asset_assignments(asset_id)
+    }
+
+    fn get_asset_assignments_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<Vec<AssetTaxonomyAssignment>> {
+        self.repository.get_asset_assignments_for_assets(asset_ids)
     }
 
     fn get_category_assignments(

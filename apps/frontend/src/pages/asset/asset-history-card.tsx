@@ -1,7 +1,17 @@
-import HistoryChart from "@/components/history-chart-symbol";
+import { searchActivities } from "@/adapters";
+import HistoryChart, {
+  type HistoryChartActivity,
+  type HistoryChartActivityMarker,
+  type HistoryChartData,
+} from "@/components/history-chart-symbol";
+import type { TradeMarkerVariant } from "@/components/history-chart-marker";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { useSyncMarketDataMutation } from "@/hooks/use-sync-market-data";
-import { DateRange, Quote, TimePeriod } from "@/lib/types";
+import { QueryKeys } from "@/lib/query-keys";
+import { ActivityDetails, ActivityType, DateRange, Quote, TimePeriod } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { ActivityDateSheet } from "@/pages/activity/components/activity-date-sheet";
+import { useQuery } from "@tanstack/react-query";
 import {
   AmountDisplay,
   Badge,
@@ -10,12 +20,16 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  formatPercent,
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
   Icons,
   IntervalSelector,
-  formatPercent,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@wealthfolio/ui";
 import { format, subMonths } from "date-fns";
 import React, { useCallback, useMemo, useState } from "react";
@@ -43,6 +57,9 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
   const syncMarketDataMutation = useSyncMarketDataMutation(true);
   const { isBalanceHidden } = useBalancePrivacy();
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
+  const [showActivityMarkers, setShowActivityMarkers] = useState(false);
+  const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
+  const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
 
   const handleRefreshQuotes = useCallback(() => {
     syncMarketDataMutation.mutate([assetId]);
@@ -55,7 +72,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
     to: new Date(),
   });
 
-  const filteredData = useMemo(() => {
+  const filteredData: FilteredData[] = useMemo(() => {
     if (!quoteHistory) return [];
 
     // Sort quotes chronologically (oldest first) for proper chart display
@@ -85,6 +102,24 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
       }));
   }, [dateRange, quoteHistory, currency, selectedIntervalCode]);
 
+  const activityDateFrom = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined;
+  const activityDateTo = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined;
+  const { data: tradeActivities = [], isLoading: isTradeActivitiesLoading } =
+    useAssetTradeActivities({
+      assetId,
+      dateFrom: activityDateFrom,
+      dateTo: activityDateTo,
+      enabled: showActivityMarkers,
+    });
+  const { chartData, activityMarkers } = useMemo(
+    () => buildChartActivityData(filteredData, showActivityMarkers ? tradeActivities : []),
+    [filteredData, showActivityMarkers, tradeActivities],
+  );
+  const selectedDateActivities = useMemo(() => {
+    if (!selectedActivityDate) return [];
+    return tradeActivities.filter((activity) => dateKey(activity) === selectedActivityDate);
+  }, [selectedActivityDate, tradeActivities]);
+
   const { ganAmount, percentage, calculatedAt } = useMemo(() => {
     const lastFilteredDate = filteredData.at(-1)?.timestamp;
     const startValue = filteredData[0]?.totalValue;
@@ -95,7 +130,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
       if (typeof startValue === "number" && typeof endValue === "number") {
         return {
           ganAmount: endValue - startValue,
-          percentage: isValidStartValue ? (endValue - startValue) / startValue : 0,
+          percentage: isValidStartValue ? (endValue - startValue) / startValue : null,
           calculatedAt: lastFilteredDate,
         };
       }
@@ -115,7 +150,7 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
       percentage:
         isValidStartValue && typeof endValue === "number"
           ? (endValue - startValue) / startValue
-          : 0,
+          : null,
       calculatedAt: lastFilteredDate,
     };
   }, [filteredData, selectedIntervalCode, quoteHistory, totalGainAmount, totalGainPercent]);
@@ -156,7 +191,8 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
                       currency={currency}
                       isHidden={isBalanceHidden}
                     />{" "}
-                    ({formatPercent(percentage)}) {selectedIntervalDesc}
+                    ({percentage == null ? "N/A" : formatPercent(percentage)}){" "}
+                    {selectedIntervalDesc}
                   </p>
                 </div>
               </HoverCardTrigger>
@@ -189,9 +225,38 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
               </HoverCardContent>
             </HoverCard>
           </CardTitle>
+          <div className="mt-2 flex items-center gap-1 self-start">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showActivityMarkers ? "default" : "secondary"}
+                    size="icon-xs"
+                    className={cn("rounded-full", !showActivityMarkers && "bg-secondary/50")}
+                    onClick={() => setShowActivityMarkers((current) => !current)}
+                    aria-label={
+                      showActivityMarkers ? "Hide activity markers" : "Show activity markers"
+                    }
+                  >
+                    <Icons.History className="size-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{showActivityMarkers ? "Hide" : "Show"} activity markers</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </CardHeader>
         <CardContent className="relative flex-1 p-0">
-          <HistoryChart data={filteredData} />
+          <HistoryChart
+            data={chartData}
+            activityMarkers={activityMarkers}
+            onActivityMarkerClick={(marker) => {
+              setSelectedActivityDate(dateKey(marker.point));
+              setIsActivitySheetOpen(true);
+            }}
+          />
           <IntervalSelector
             onIntervalSelect={handleIntervalSelect}
             className="absolute bottom-2 left-1/2 -translate-x-1/2 transform"
@@ -200,8 +265,149 @@ const AssetHistoryCard: React.FC<AssetHistoryProps> = ({
           />
         </CardContent>
       </Card>
+      <ActivityDateSheet
+        open={isActivitySheetOpen}
+        onOpenChange={setIsActivitySheetOpen}
+        date={selectedActivityDate}
+        activities={selectedDateActivities}
+        isLoading={isTradeActivitiesLoading}
+      />
     </>
   );
 };
+
+interface FilteredData {
+  timestamp: string;
+  totalValue: number;
+  currency: string;
+}
+
+interface UseAssetTradeActivitiesOptions {
+  assetId: string;
+  dateFrom?: string;
+  dateTo?: string;
+  enabled: boolean;
+}
+
+function useAssetTradeActivities({
+  assetId,
+  dateFrom,
+  dateTo,
+  enabled,
+}: UseAssetTradeActivitiesOptions) {
+  return useQuery({
+    queryKey: [QueryKeys.ACTIVITY_DATA, "asset-trade-markers", assetId, dateFrom, dateTo],
+    queryFn: () => fetchAssetTradeActivities({ assetId, dateFrom, dateTo }),
+    enabled: enabled && assetId.length > 0,
+  });
+}
+
+async function fetchAssetTradeActivities({
+  assetId,
+  dateFrom,
+  dateTo,
+}: {
+  assetId: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  const pageSize = 500;
+  let page = 0;
+  let totalRowCount = 0;
+  const activities: ActivityDetails[] = [];
+
+  do {
+    const response = await searchActivities(
+      page,
+      pageSize,
+      {
+        symbol: assetId,
+        dateFrom,
+        dateTo,
+        activityTypes: [ActivityType.BUY, ActivityType.SELL],
+        needsReview: false,
+      },
+      "",
+      { id: "date", desc: false },
+    );
+    activities.push(
+      ...response.data.filter(
+        (activity) =>
+          activity.assetId === assetId &&
+          (activity.activityType === ActivityType.BUY ||
+            activity.activityType === ActivityType.SELL),
+      ),
+    );
+    totalRowCount = response.meta.totalRowCount;
+    page += 1;
+  } while (page * pageSize < totalRowCount);
+
+  return activities;
+}
+
+function buildChartActivityData(
+  data: FilteredData[],
+  activities: ActivityDetails[],
+): {
+  chartData: HistoryChartData[];
+  activityMarkers: HistoryChartActivityMarker[];
+} {
+  if (activities.length === 0) {
+    return { chartData: data, activityMarkers: [] };
+  }
+
+  const activitiesByDate = new Map<string, HistoryChartActivity[]>();
+  for (const activity of activities) {
+    const key = dateKey(activity);
+    const chartActivity = {
+      id: activity.id,
+      variant: tradeMarkerVariant(activity.activityType),
+      date: activity.date,
+      quantity: activity.quantity,
+      unitPrice: activity.unitPrice,
+    };
+    const existing = activitiesByDate.get(key);
+    if (existing) {
+      existing.push(chartActivity);
+    } else {
+      activitiesByDate.set(key, [chartActivity]);
+    }
+  }
+
+  const chartData: HistoryChartData[] = [];
+  const activityMarkers: HistoryChartActivityMarker[] = [];
+
+  data.forEach((point) => {
+    const activitiesForPoint = activitiesByDate.get(dateKey(point));
+
+    if (!activitiesForPoint) {
+      chartData.push(point);
+      return;
+    }
+
+    const chartPoint = { ...point, activities: activitiesForPoint };
+    chartData.push(chartPoint);
+    for (const activity of activitiesForPoint) {
+      activityMarkers.push({
+        id: activity.id,
+        point: chartPoint,
+        variant: activity.variant,
+      });
+    }
+  });
+
+  return { chartData, activityMarkers };
+}
+
+function dateKey(value: { timestamp: string } | { date?: string | Date }) {
+  const date = "timestamp" in value ? value.timestamp : value.date;
+  if (!date) return "";
+  if (typeof date === "string") return date.slice(0, 10);
+  return format(date, "yyyy-MM-dd");
+}
+
+function tradeMarkerVariant(activityType: ActivityType): TradeMarkerVariant {
+  return activityType === ActivityType.BUY ? "buy" : "sell";
+}
 
 export default AssetHistoryCard;

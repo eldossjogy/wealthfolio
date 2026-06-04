@@ -141,6 +141,18 @@ export const QueryKeys = {
   assetTaxonomyAssignments: (assetId: string) => [QueryKeys.ASSET_TAXONOMY_ASSIGNMENTS, assetId],
   ASSET_CLASSIFICATIONS: "asset-classifications",
 
+  // Allocation Targets
+  ALLOCATION_TARGETS: "allocationTargets",
+  ALLOCATION_TARGET_WEIGHTS: "allocationTargetWeights",
+  ALLOCATION_TARGET_DRIFT: "allocationTargetDrift",
+  allocationTargetWeights: (targetId: string) => [QueryKeys.ALLOCATION_TARGET_WEIGHTS, targetId],
+  allocationTargetDrift: (targetId: string, scope: unknown, includeHoldings = false) => [
+    QueryKeys.ALLOCATION_TARGET_DRIFT,
+    targetId,
+    scope,
+    includeHoldings,
+  ],
+
   // Health Center
   HEALTH_STATUS: "healthStatus",
   HEALTH_CONFIG: "healthConfig",

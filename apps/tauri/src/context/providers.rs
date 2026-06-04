@@ -21,6 +21,7 @@ use wealthfolio_core::{
     limits::ContributionLimitService,
     portfolio::{
         allocation::AllocationService,
+        allocation_targets::{AllocationTargetService, DriftService, RebalanceService},
         holdings::{HoldingsService, HoldingsValuationService},
         income::IncomeService,
         net_worth::NetWorthService,
@@ -45,7 +46,10 @@ use wealthfolio_storage_sqlite::{
     health::HealthDismissalRepository,
     limits::ContributionLimitRepository,
     market_data::{MarketDataRepository, QuoteSyncStateRepository},
-    portfolio::{snapshot::SnapshotRepository, valuation::ValuationRepository},
+    portfolio::{
+        allocation_targets::AllocationTargetRepository, snapshot::SnapshotRepository,
+        valuation::ValuationRepository,
+    },
     portfolios::PortfolioRepository,
     settings::SettingsRepository,
     sync::{AppSyncRepository, BrokerSyncStateRepository, ImportRunRepository, PlatformRepository},
@@ -399,25 +403,51 @@ pub async fn initialize_context(
         .with_activity_repository(activity_repository.clone(), timezone.clone()),
     );
 
-    let performance_service = Arc::new(PerformanceService::new_with_timezone(
-        valuation_service.clone(),
-        quote_service.clone(),
-        timezone.clone(),
-    ));
+    let performance_service = Arc::new(
+        PerformanceService::new_with_timezone(
+            valuation_service.clone(),
+            quote_service.clone(),
+            timezone.clone(),
+        )
+        .with_activity_repository(activity_repository.clone(), fx_service.clone())
+        .with_lot_repository(lots_repository.clone()),
+    );
 
     let classification_service =
         Arc::new(AssetClassificationService::new(taxonomy_service.clone()));
-    let holdings_service = Arc::new(HoldingsService::new_with_timezone(
-        asset_service.clone(),
-        snapshot_service.clone(),
-        holdings_valuation_service.clone(),
-        classification_service.clone(),
-        timezone.clone(),
-    ));
+    let holdings_service = Arc::new(
+        HoldingsService::new_with_timezone(
+            asset_service.clone(),
+            snapshot_service.clone(),
+            holdings_valuation_service.clone(),
+            classification_service.clone(),
+            timezone.clone(),
+        )
+        .with_lot_repository(lots_repository.clone()),
+    );
 
     let allocation_service = Arc::new(AllocationService::new(
         holdings_service.clone(),
         taxonomy_service.clone(),
+    ));
+
+    let allocation_target_repository = Arc::new(AllocationTargetRepository::new(
+        pool.clone(),
+        writer.clone(),
+    ));
+    let allocation_target_service = Arc::new(AllocationTargetService::new(
+        allocation_target_repository,
+        taxonomy_service.clone(),
+    ));
+    let drift_service = Arc::new(DriftService::new(
+        allocation_target_service.clone(),
+        allocation_service.clone(),
+    ));
+    let rebalance_service = Arc::new(RebalanceService::new(
+        allocation_target_service.clone(),
+        drift_service.clone(),
+        allocation_service.clone(),
+        holdings_service.clone(),
     ));
 
     let net_worth_service = Arc::new(NetWorthService::new(
@@ -545,6 +575,9 @@ pub async fn initialize_context(
             app_sync_repository,
             holdings_service,
             allocation_service,
+            allocation_target_service,
+            drift_service,
+            rebalance_service,
             valuation_service,
             net_worth_service,
             sync_service,

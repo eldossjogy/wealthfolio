@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use wealthfolio_core::constants::DECIMAL_PRECISION;
-use wealthfolio_core::portfolio::valuation::DailyAccountValuation;
+use wealthfolio_core::portfolio::valuation::{DailyAccountValuation, ExternalFlowSource};
 
 /// Database model for daily account valuations
 #[derive(
@@ -35,6 +35,7 @@ pub struct DailyAccountValuationDB {
     pub net_contribution_base: String,
     pub external_inflow_base: String,
     pub external_outflow_base: String,
+    pub external_flow_source: String,
     pub performance_eligible_value_base: String,
     pub calculated_at: String,
 }
@@ -87,6 +88,7 @@ impl From<DailyAccountValuation> for DailyAccountValuationDB {
                 .external_outflow_base
                 .round_dp(DECIMAL_PRECISION)
                 .to_string(),
+            external_flow_source: value.external_flow_source.as_str().to_string(),
             performance_eligible_value_base: value
                 .performance_eligible_value_base
                 .round_dp(DECIMAL_PRECISION)
@@ -124,6 +126,7 @@ impl From<DailyAccountValuationDB> for DailyAccountValuation {
                 .unwrap_or_default(),
             external_outflow_base: Decimal::from_str(&value.external_outflow_base)
                 .unwrap_or_default(),
+            external_flow_source: ExternalFlowSource::from_code(&value.external_flow_source),
             performance_eligible_value_base: Decimal::from_str(
                 &value.performance_eligible_value_base,
             )
@@ -170,6 +173,7 @@ mod tests {
             net_contribution_base: "5".to_string(),
             external_inflow_base: "0".to_string(),
             external_outflow_base: "0".to_string(),
+            external_flow_source: "NET_CONTRIBUTION_FALLBACK".to_string(),
             performance_eligible_value_base: "30".to_string(),
             calculated_at: "2026-04-22T00:00:00Z".to_string(),
         };
@@ -177,5 +181,9 @@ mod tests {
         let valuation = DailyAccountValuation::from(db_value);
 
         assert_eq!(valuation.fx_rate_to_base, Decimal::ONE);
+        assert_eq!(
+            valuation.external_flow_source,
+            wealthfolio_core::portfolio::valuation::ExternalFlowSource::NetContributionFallback
+        );
     }
 }

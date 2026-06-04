@@ -15,7 +15,7 @@ fn transfer_match_tolerance() -> Decimal {
     Decimal::new(1, 6)
 }
 
-fn is_external_transfer(activity: &Activity) -> bool {
+pub fn is_external_transfer(activity: &Activity) -> bool {
     activity
         .metadata
         .as_ref()
@@ -107,19 +107,17 @@ pub fn classify_transfer_for_account_scope(
         return classify_flow_for_scope(activity, PerformanceScope::Portfolio);
     }
 
-    if is_external_transfer(activity) {
-        return FlowType::External;
-    }
-
     let current_inside = scope_account_ids.contains(&activity.account_id);
-    let paired_inside = paired_account_id
-        .map(|account_id| scope_account_ids.contains(account_id))
-        .unwrap_or(false);
+    if let Some(paired_account_id) = paired_account_id {
+        let paired_inside = scope_account_ids.contains(paired_account_id);
 
-    match (current_inside, paired_inside) {
-        (true, true) | (false, false) => FlowType::Internal,
-        (true, false) | (false, true) => FlowType::External,
+        return match (current_inside, paired_inside) {
+            (true, true) | (false, false) => FlowType::Internal,
+            (true, false) | (false, true) => FlowType::External,
+        };
     }
+
+    FlowType::External
 }
 
 fn opposite_transfer_type(activity_type: &str) -> Option<&'static str> {
@@ -197,12 +195,15 @@ where
     let mut matches = candidates.iter().filter(|candidate| {
         activity_local_date(candidate) == activity_date && transfer_match(activity, candidate)
     });
-    let first = matches.next()?;
-    if matches.next().is_none() {
-        Some(first.account_id.clone())
-    } else {
-        None
+    if let Some(first) = matches.next() {
+        return if matches.next().is_none() {
+            Some(first.account_id.clone())
+        } else {
+            None
+        };
     }
+
+    None
 }
 
 /// Classify flow for portfolio-level performance.
@@ -402,12 +403,23 @@ mod tests {
     }
 
     #[test]
-    fn metadata_can_force_transfer_external() {
+    fn paired_transfer_overrides_stale_external_metadata() {
         let mut activity = create_test_activity("TRANSFER_OUT");
         activity.metadata = Some(json!({ "flow": { "is_external": true } }));
         let scope = account_scope(&["account-1", "account-2"]);
         assert_eq!(
             classify_transfer_for_account_scope(&activity, &scope, Some("account-2")),
+            FlowType::Internal
+        );
+    }
+
+    #[test]
+    fn unpaired_external_metadata_marks_transfer_external() {
+        let mut activity = create_test_activity("TRANSFER_OUT");
+        activity.metadata = Some(json!({ "flow": { "is_external": true } }));
+        let scope = account_scope(&["account-1", "account-2"]);
+        assert_eq!(
+            classify_transfer_for_account_scope(&activity, &scope, None),
             FlowType::External
         );
     }
@@ -449,6 +461,29 @@ mod tests {
         assert_eq!(
             infer_paired_transfer_account_id(&transfer_out, &candidates, local_date),
             Some("account-2".to_string())
+        );
+    }
+
+    #[test]
+    fn unlinked_multi_currency_transfer_pair_is_not_inferred_without_reliable_match() {
+        let mut transfer_out = create_test_activity("TRANSFER_OUT");
+        transfer_out.id = "out".to_string();
+        transfer_out.activity_date = Utc.with_ymd_and_hms(2026, 5, 2, 12, 0, 0).unwrap();
+        transfer_out.currency = "CAD".to_string();
+        transfer_out.amount = Some(rust_decimal::Decimal::from(140));
+
+        let mut transfer_in = create_test_activity("TRANSFER_IN");
+        transfer_in.id = "in".to_string();
+        transfer_in.account_id = "account-2".to_string();
+        transfer_in.activity_date = transfer_out.activity_date;
+        transfer_in.currency = "USD".to_string();
+        transfer_in.amount = Some(rust_decimal::Decimal::from(100));
+
+        let candidates = vec![transfer_out.clone(), transfer_in];
+
+        assert_eq!(
+            infer_paired_transfer_account_id(&transfer_out, &candidates, local_date),
+            None
         );
     }
 

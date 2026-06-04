@@ -1,5 +1,6 @@
 import { TickerAvatar } from "@/components/ticker-avatar";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
+import { HoldingType } from "@/lib/constants";
 import { parseOccSymbol } from "@/lib/occ-symbol";
 import { Account, AccountScope, Holding } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -161,9 +162,13 @@ export const HoldingsTableMobile = ({
         {filteredHoldings.length > 0 ? (
           filteredHoldings.map((holding) => {
             const symbol = holding.instrument?.symbol ?? holding.id;
-            const isCash = symbol.startsWith("$CASH");
+            const isCash = holding.holdingType === HoldingType.CASH || symbol.startsWith("$CASH");
             const parsedOption = isCash ? null : parseOccSymbol(symbol);
-            const avatarSymbol = isCash ? "$CASH" : parsedOption ? parsedOption.underlying : symbol;
+            const avatarSymbol = isCash
+              ? `CASH:${holding.localCurrency}`
+              : parsedOption
+                ? parsedOption.underlying
+                : symbol;
             const displaySymbol = isCash
               ? symbol.split("-")[0]
               : parsedOption

@@ -1,8 +1,5 @@
 import { useMemo } from "react";
 
-import { BankIcon } from "@phosphor-icons/react/dist/csr/Bank";
-import { CreditCardIcon } from "@phosphor-icons/react/dist/csr/CreditCard";
-
 import { useAccounts } from "@/hooks/use-accounts";
 import type { Account } from "@/lib/types";
 import {
@@ -87,7 +84,7 @@ export function AccountsCard() {
               const tracked = accountIds.includes(account.id);
               const isCredit = isCreditCardAccountType(account.accountType);
               const typeLabel = isCredit ? "Credit card" : "Cash";
-              const TypeIcon = isCredit ? CreditCardIcon : BankIcon;
+              const TypeIcon = isCredit ? Icons.CreditCard : Icons.Wallet;
               return (
                 <div
                   key={account.id}

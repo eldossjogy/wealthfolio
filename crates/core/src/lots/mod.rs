@@ -57,13 +57,51 @@ pub struct LotClosure {
     /// Cost basis at lot creation (cost_per_unit × original_quantity + fee).
     /// Immutable.
     pub original_cost_basis: String,
+    /// Original cost basis converted to base currency at acquisition date.
+    pub original_cost_basis_base: String,
+    /// Remaining cost basis converted with the acquisition-date FX rate.
+    pub remaining_cost_basis_base: String,
     /// Transaction fees allocated to this lot.
     pub fee_allocated: String,
+    /// Transaction fees converted to base currency at acquisition date.
+    pub fee_allocated_base: String,
+    /// Lot currency, normally the asset quote currency.
+    pub currency: String,
+    /// User base currency used by the base fields.
+    pub base_currency: String,
+    /// FX rate from lot currency to base currency at acquisition.
+    pub fx_rate_to_base: String,
+    /// Cost-basis method used when this generated lot row was rebuilt.
+    pub cost_basis_method: String,
     /// Cumulative product of post-acquisition SPLIT ratios at the time of
     /// closure. A lot opened before a 2:1 split and fully consumed after the
     /// split should persist with split_ratio = "2", not "1" — otherwise
     /// downstream tax-lot consumers see a misleading split history.
     pub split_ratio: String,
+}
+
+/// A deterministic disposal slice produced when a sell consumes a FIFO lot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LotDisposal {
+    pub id: String,
+    pub lot_id: String,
+    pub account_id: String,
+    pub asset_id: String,
+    pub disposal_activity_id: String,
+    pub disposal_date: String,
+    pub quantity: String,
+    pub proceeds: String,
+    pub cost_basis: String,
+    pub realized_pnl: String,
+    pub proceeds_base: String,
+    pub cost_basis_base: String,
+    pub realized_pnl_base: String,
+    pub currency: String,
+    pub base_currency: String,
+    pub fx_rate_to_base: String,
+    pub cost_basis_method: String,
+    pub created_at: String,
 }
 
 /// Persistence interface for lot rows.
@@ -123,6 +161,53 @@ pub trait LotRepositoryTrait: Send + Sync {
         closures: &[LotClosure],
     ) -> Result<()>;
 
+    /// Synchronizes deterministic disposal slices for an account.
+    ///
+    /// Full replays pass `replace_all=true` to rebuild the account read model
+    /// from scratch. Incremental replays pass the activity ids in the replay
+    /// window so stale rows for edited sells are removed without dropping older
+    /// realized P&L history.
+    async fn sync_lot_disposals_for_account(
+        &self,
+        _account_id: &str,
+        _affected_activity_ids: &[String],
+        _disposals: &[LotDisposal],
+        _replace_all: bool,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Returns deterministic disposal slices for an account.
+    async fn get_lot_disposals_for_account(&self, _account_id: &str) -> Result<Vec<LotDisposal>> {
+        Ok(Vec::new())
+    }
+
+    /// Returns deterministic disposal slices for accounts inside the performance period.
+    ///
+    /// Performance periods use the same convention as valuation flows:
+    /// `(start_date, end_date]`.
+    async fn get_lot_disposals_for_accounts_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_date_exclusive: NaiveDate,
+        end_date_inclusive: NaiveDate,
+    ) -> Result<Vec<LotDisposal>> {
+        let mut disposals = Vec::new();
+        for account_id in account_ids {
+            for disposal in self.get_lot_disposals_for_account(account_id).await? {
+                let Ok(disposal_date) =
+                    NaiveDate::parse_from_str(&disposal.disposal_date, "%Y-%m-%d")
+                else {
+                    continue;
+                };
+                if disposal_date > start_date_exclusive && disposal_date <= end_date_inclusive {
+                    disposals.push(disposal);
+                }
+            }
+        }
+        Ok(disposals)
+    }
+
     /// Returns total quantity per asset across all open lots (all accounts).
     /// Used for quote sync planning — determines which assets need price data.
     async fn get_open_position_quantities(&self) -> Result<HashMap<String, Decimal>>;
@@ -163,8 +248,22 @@ pub struct LotRecord {
     /// partial sells: `remaining_cost_basis -= (consumed_qty / original_quantity) × original_cost_basis`.
     /// Reaches zero on full close.
     pub remaining_cost_basis: String,
+    /// Original cost basis converted to base currency at acquisition date.
+    pub original_cost_basis_base: String,
+    /// Open cost basis remaining converted with the acquisition-date FX rate.
+    pub remaining_cost_basis_base: String,
     /// Transaction fees allocated to this lot. Immutable.
     pub fee_allocated: String,
+    /// Transaction fees converted to base currency at acquisition date.
+    pub fee_allocated_base: String,
+    /// Lot currency, normally the asset quote currency.
+    pub currency: String,
+    /// User base currency used by the base fields.
+    pub base_currency: String,
+    /// FX rate from lot currency to base currency at acquisition.
+    pub fx_rate_to_base: String,
+    /// Cost-basis method used when this generated lot row was rebuilt.
+    pub cost_basis_method: String,
 
     /// Cumulative product of post-acquisition SPLIT activity ratios for this lot's asset.
     /// Defaults to "1" (no splits since open_date). Multiplied by `remaining_quantity` to
@@ -215,19 +314,25 @@ pub struct AssetLotView {
     /// positions report the aggregate snapshot quantity here.
     pub remaining_quantity: Decimal,
     pub cost_basis: Decimal,
+    pub cost_basis_base: Option<Decimal>,
     pub unit_cost: Decimal,
     pub fees: Decimal,
+    pub fx_rate_to_base: Option<Decimal>,
     pub split_ratio: Decimal,
     pub contract_multiplier: Decimal,
     pub acquisition_date: Option<String>,
     pub snapshot_date: Option<String>,
     pub is_closed: bool,
     pub close_date: Option<String>,
+    pub disposal_proceeds: Option<Decimal>,
+    pub disposal_cost_basis: Option<Decimal>,
+    pub realized_pnl: Option<Decimal>,
+    pub realized_pnl_base: Option<Decimal>,
 }
 
-// Tax-conclusion concepts (disposal method, wash-sale, holding period) live in
-// future tax-overlay tables. The neutral lots table intentionally stores only
-// inventory facts.
+// The cost_basis_method field is generation provenance for inventory rows.
+// Tax-conclusion concepts (wash sale, holding period, tax character) belong in
+// future tax-overlay tables.
 
 // ── Extraction helpers ────────────────────────────────────────────────────────
 
@@ -243,8 +348,18 @@ pub struct AssetLotView {
 /// snapshots). For old snapshots that predate the field (where it deserializes
 /// as zero), falls back to `lot.quantity` (the remaining amount).
 pub fn extract_lot_records(snapshot: &AccountStateSnapshot) -> Vec<LotRecord> {
+    extract_lot_records_with_cost_basis_method(snapshot, "FIFO")
+}
+
+/// Converts in-memory lots to [`LotRecord`]s and records the cost-basis method
+/// used by the generation pass.
+pub fn extract_lot_records_with_cost_basis_method(
+    snapshot: &AccountStateSnapshot,
+    cost_basis_method: &str,
+) -> Vec<LotRecord> {
     let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let mut records = Vec::new();
+    let cost_basis_method = cost_basis_method.trim().to_ascii_uppercase();
 
     for position in snapshot.positions.values() {
         for lot in &position.lots {
@@ -272,7 +387,14 @@ pub fn extract_lot_records(snapshot: &AccountStateSnapshot) -> Vec<LotRecord> {
                 cost_per_unit: lot.acquisition_price.to_string(),
                 original_cost_basis: original_cost_basis.to_string(),
                 remaining_cost_basis: lot.cost_basis.to_string(),
+                original_cost_basis_base: original_cost_basis.to_string(),
+                remaining_cost_basis_base: lot.cost_basis.to_string(),
                 fee_allocated: orig_fees.to_string(),
+                fee_allocated_base: orig_fees.to_string(),
+                currency: position.currency.clone(),
+                base_currency: snapshot.currency.clone(),
+                fx_rate_to_base: Decimal::ONE.to_string(),
+                cost_basis_method: cost_basis_method.clone(),
                 split_ratio: lot.effective_split_ratio().to_string(),
                 is_closed: false,
                 close_date: None,
@@ -446,6 +568,7 @@ mod tests {
         for r in &records {
             assert_eq!(r.account_id, "acc1");
             assert_eq!(r.asset_id, "AAPL");
+            assert_eq!(r.cost_basis_method, "FIFO");
             assert!(r.open_activity_id.is_none());
             assert!(!r.is_closed);
         }
@@ -759,7 +882,14 @@ mod tests {
             cost_per_unit: "185".to_string(),
             original_cost_basis: "9250".to_string(),
             remaining_cost_basis: "9250".to_string(),
+            original_cost_basis_base: "9250".to_string(),
+            remaining_cost_basis_base: "9250".to_string(),
             fee_allocated: "0".to_string(),
+            fee_allocated_base: "0".to_string(),
+            currency: "USD".to_string(),
+            base_currency: "USD".to_string(),
+            fx_rate_to_base: "1".to_string(),
+            cost_basis_method: "FIFO".to_string(),
             split_ratio: "1".to_string(),
             is_closed: false,
             close_date: None,

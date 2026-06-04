@@ -1,6 +1,6 @@
 import { expect, Page } from "@playwright/test";
 
-export const BASE_URL = "http://localhost:1420";
+export const BASE_URL = process.env.WF_E2E_BASE_URL || "http://localhost:1420";
 export const TEST_PASSWORD = "password001";
 
 export function getDatePartsAgo(daysAgo: number): { month: string; day: string; year: string } {

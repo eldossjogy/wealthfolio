@@ -7,7 +7,10 @@ mod tests {
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::sync::{Arc, RwLock};
 
-    use crate::accounts::{Account, AccountRepositoryTrait, AccountUpdate, NewAccount};
+    use crate::accounts::{
+        Account, AccountAccountingSettings, AccountRepositoryTrait, AccountUpdate, CostBasisMethod,
+        NewAccount,
+    };
     use crate::activities::{
         Activity, ActivityRepositoryTrait, ActivitySearchResponse, ActivityStatus, ActivityUpdate,
         ImportMapping as ActivityImportMapping, IncomeData as ActivityIncomeData, NewActivity,
@@ -19,7 +22,7 @@ mod tests {
     use crate::constants::DECIMAL_PRECISION;
     use crate::errors::{Error, Result as AppResult};
     use crate::fx::{ExchangeRate, FxServiceTrait, NewExchangeRate};
-    use crate::lots::{AssetLotView, LotClosure, LotRecord, LotRepositoryTrait};
+    use crate::lots::{AssetLotView, LotClosure, LotDisposal, LotRecord, LotRepositoryTrait};
     use crate::portfolio::snapshot::{
         AccountStateSnapshot, Position, SnapshotRecalcMode, SnapshotRepositoryTrait,
         SnapshotService, SnapshotServiceTrait,
@@ -270,11 +273,13 @@ mod tests {
     #[derive(Clone, Debug)]
     struct MockAccountRepository {
         accounts: Arc<RwLock<HashMap<String, Account>>>,
+        accounting_settings: Arc<RwLock<HashMap<String, AccountAccountingSettings>>>,
     }
     impl MockAccountRepository {
         fn new() -> Self {
             Self {
                 accounts: Arc::new(RwLock::new(HashMap::new())),
+                accounting_settings: Arc::new(RwLock::new(HashMap::new())),
             }
         }
         #[allow(dead_code)]
@@ -283,6 +288,13 @@ mod tests {
                 .write()
                 .unwrap()
                 .insert(account.id.clone(), account);
+        }
+
+        fn set_accounting_settings(&mut self, settings: AccountAccountingSettings) {
+            self.accounting_settings
+                .write()
+                .unwrap()
+                .insert(settings.account_id.clone(), settings);
         }
     }
     #[async_trait]
@@ -315,6 +327,23 @@ mod tests {
                 filtered_accounts.retain(|acc| ids_filter.contains(&acc.id));
             }
             Ok(filtered_accounts)
+        }
+        fn get_accounting_settings_by_account_ids(
+            &self,
+            account_ids: &[String],
+        ) -> AppResult<HashMap<String, AccountAccountingSettings>> {
+            let explicit = self.accounting_settings.read().unwrap();
+            Ok(account_ids
+                .iter()
+                .map(|account_id| {
+                    (
+                        account_id.clone(),
+                        explicit.get(account_id).cloned().unwrap_or_else(|| {
+                            AccountAccountingSettings::default_for_account(account_id.clone())
+                        }),
+                    )
+                })
+                .collect())
         }
         async fn update(&self, _account_update: AccountUpdate) -> AppResult<Account> {
             unimplemented!("MockAccountRepository::update")
@@ -863,17 +892,31 @@ mod tests {
     #[derive(Clone, Debug)]
     struct RecordingLotRepository {
         replaced_accounts: Arc<RwLock<Vec<String>>>,
+        synced_lots: Arc<RwLock<Vec<LotRecord>>>,
+        synced_closures: Arc<RwLock<Vec<LotClosure>>>,
+        synced_disposals: Arc<RwLock<Vec<LotDisposal>>>,
     }
 
     impl RecordingLotRepository {
         fn new() -> Self {
             Self {
                 replaced_accounts: Arc::new(RwLock::new(Vec::new())),
+                synced_lots: Arc::new(RwLock::new(Vec::new())),
+                synced_closures: Arc::new(RwLock::new(Vec::new())),
+                synced_disposals: Arc::new(RwLock::new(Vec::new())),
             }
         }
 
         fn replaced_accounts(&self) -> Vec<String> {
             self.replaced_accounts.read().unwrap().clone()
+        }
+
+        fn synced_lots(&self) -> Vec<LotRecord> {
+            self.synced_lots.read().unwrap().clone()
+        }
+
+        fn synced_disposals(&self) -> Vec<LotDisposal> {
+            self.synced_disposals.read().unwrap().clone()
         }
     }
 
@@ -930,9 +973,31 @@ mod tests {
         async fn sync_lots_for_account(
             &self,
             _account_id: &str,
-            _open_lots: &[LotRecord],
-            _closures: &[LotClosure],
+            open_lots: &[LotRecord],
+            closures: &[LotClosure],
         ) -> AppResult<()> {
+            self.synced_lots
+                .write()
+                .unwrap()
+                .extend(open_lots.iter().cloned());
+            self.synced_closures
+                .write()
+                .unwrap()
+                .extend(closures.iter().cloned());
+            Ok(())
+        }
+
+        async fn sync_lot_disposals_for_account(
+            &self,
+            _account_id: &str,
+            _affected_activity_ids: &[String],
+            disposals: &[LotDisposal],
+            _replace_all: bool,
+        ) -> AppResult<()> {
+            self.synced_disposals
+                .write()
+                .unwrap()
+                .extend(disposals.iter().cloned());
             Ok(())
         }
 
@@ -1490,6 +1555,132 @@ mod tests {
             "stale snapshots for the account should be deleted"
         );
         assert_eq!(lot_repo_assert.replaced_accounts(), vec![acc.id]);
+    }
+
+    #[tokio::test]
+    async fn test_lot_dual_write_records_fifo_method() {
+        let base_currency_arc = Arc::new(RwLock::new("USD".to_string()));
+
+        let mut account_repo = MockAccountRepository::new();
+        let acc = create_test_account("acc1", "USD", "Lot Method Account");
+        account_repo.add_account(acc.clone());
+        let account_repo = Arc::new(account_repo);
+
+        let today = valuation_date_today();
+        let buy_date = today.pred_opt().unwrap_or(today);
+        let deposit_date = buy_date.pred_opt().unwrap_or(buy_date);
+        let deposit = create_test_activity(
+            "deposit1",
+            &acc.id,
+            Some("CASH:USD"),
+            "DEPOSIT",
+            deposit_date,
+            None,
+            None,
+            Some(dec!(10000)),
+            "USD",
+        );
+        let buy = create_test_activity(
+            "buy1",
+            &acc.id,
+            Some("AAPL"),
+            "BUY",
+            buy_date,
+            Some(dec!(10)),
+            Some(dec!(100)),
+            Some(dec!(1000)),
+            "USD",
+        );
+        let sell = create_test_activity(
+            "sell1",
+            &acc.id,
+            Some("AAPL"),
+            "SELL",
+            today,
+            Some(dec!(4)),
+            Some(dec!(120)),
+            Some(dec!(480)),
+            "USD",
+        );
+        let activity_repo = Arc::new(MockActivityRepositoryWithData::new(vec![
+            deposit, buy, sell,
+        ]));
+
+        let fx = Arc::new(MockFxService::new());
+        let snapshot_repo = Arc::new(MockSnapshotRepository::new());
+        let asset_repo = Arc::new(MockAssetRepository::new());
+        let lot_repo = RecordingLotRepository::new();
+        let lot_repo_assert = lot_repo.clone();
+
+        let svc = SnapshotService::new(
+            base_currency_arc,
+            account_repo,
+            activity_repo,
+            snapshot_repo,
+            asset_repo,
+            fx,
+        )
+        .with_lot_repository(Arc::new(lot_repo));
+
+        svc.recalculate_holdings_snapshots(None, SnapshotRecalcMode::Full)
+            .await
+            .unwrap();
+
+        let synced_lots = lot_repo_assert.synced_lots();
+        assert_eq!(synced_lots.len(), 1);
+        assert_eq!(synced_lots[0].cost_basis_method, "FIFO");
+
+        let synced_disposals = lot_repo_assert.synced_disposals();
+        assert_eq!(synced_disposals.len(), 1);
+        assert_eq!(synced_disposals[0].cost_basis_method, "FIFO");
+    }
+
+    #[tokio::test]
+    async fn test_non_fifo_accounting_method_is_rejected_by_snapshot_calculator() {
+        let base_currency_arc = Arc::new(RwLock::new("USD".to_string()));
+
+        let mut account_repo = MockAccountRepository::new();
+        let acc = create_test_account("acc1", "USD", "LIFO Account");
+        account_repo.add_account(acc.clone());
+        let mut settings = AccountAccountingSettings::default_for_account(acc.id.clone());
+        settings.cost_basis_method = CostBasisMethod::Lifo;
+        account_repo.set_accounting_settings(settings);
+        let account_repo = Arc::new(account_repo);
+
+        let today = valuation_date_today();
+        let buy = create_test_activity(
+            "buy1",
+            &acc.id,
+            Some("AAPL"),
+            "BUY",
+            today,
+            Some(dec!(10)),
+            Some(dec!(100)),
+            Some(dec!(1000)),
+            "USD",
+        );
+        let activity_repo = Arc::new(MockActivityRepositoryWithData::new(vec![buy]));
+
+        let fx = Arc::new(MockFxService::new());
+        let snapshot_repo = Arc::new(MockSnapshotRepository::new());
+        let asset_repo = Arc::new(MockAssetRepository::new());
+
+        let svc = SnapshotService::new(
+            base_currency_arc,
+            account_repo,
+            activity_repo,
+            snapshot_repo,
+            asset_repo,
+            fx,
+        );
+
+        let err = svc
+            .recalculate_holdings_snapshots(None, SnapshotRecalcMode::Full)
+            .await
+            .expect_err("non-FIFO methods should not run through the FIFO calculator");
+
+        assert!(err.to_string().contains("only FIFO is supported"));
+        assert!(err.to_string().contains("LIFO"));
     }
 
     #[tokio::test]

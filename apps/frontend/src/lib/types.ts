@@ -632,14 +632,20 @@ export interface AssetLotView {
   originalQuantity: number;
   remainingQuantity: number;
   costBasis: number;
+  costBasisBase?: number | null;
   unitCost: number;
   fees: number;
+  fxRateToBase?: number | null;
   splitRatio: number;
   contractMultiplier: number;
   acquisitionDate?: string | null;
   snapshotDate?: string | null;
   isClosed: boolean;
   closeDate?: string | null;
+  disposalProceeds?: number | null;
+  disposalCostBasis?: number | null;
+  realizedPnl?: number | null;
+  realizedPnlBase?: number | null;
 }
 
 export interface Position {
@@ -806,6 +812,7 @@ export interface Settings {
   theme: string;
   font: string;
   baseCurrency: string;
+  defaultReturnMetric: "twr" | "irr" | "valueReturn";
   timezone: string;
   instanceId: string;
   onboardingCompleted: boolean;
@@ -956,6 +963,12 @@ export interface AccountValuation {
   netContributionBase: number;
   externalInflowBase: number;
   externalOutflowBase: number;
+  externalFlowSource:
+    | "UNKNOWN"
+    | "ACTIVITY_DERIVED"
+    | "STORED_GROSS"
+    | "NET_CONTRIBUTION_FALLBACK"
+    | "MIXED";
   performanceEligibleValueBase: number;
   calculatedAt: string;
 }
@@ -969,10 +982,10 @@ export interface AccountSummaryView {
   totalValueAccountCurrency: number;
   totalValueBaseCurrency: number;
   baseCurrency: string;
-  performance: SimplePerformanceMetrics;
+  performance: SimplePerformanceResult;
 }
 
-export interface SimplePerformanceMetrics {
+export interface SimplePerformanceResult {
   accountId: string;
   totalValue?: number | null;
   accountCurrency?: string | null;
@@ -980,8 +993,6 @@ export interface SimplePerformanceMetrics {
   fxRateToBase?: number | null;
   totalGainLossAmount?: number | null;
   cumulativeReturnPercent?: number | null;
-  dayGainLossAmount?: number | null;
-  dayReturnPercentModDietz?: number | null;
   portfolioWeight?: number | null;
 }
 
@@ -990,7 +1001,7 @@ export interface AccountGroup {
   accounts: AccountSummaryView[];
   totalValueBaseCurrency: number;
   baseCurrency: string;
-  performance: SimplePerformanceMetrics;
+  performance: SimplePerformanceResult;
   accountCount: number;
 }
 
@@ -1038,47 +1049,76 @@ export interface ReturnData {
   value: number;
 }
 
-// Renamed from PerformanceData to match Rust struct
-export interface PerformanceMetrics {
-  id: string;
-  returns: ReturnData[];
-  periodStartDate?: string | null;
-  periodEndDate?: string | null;
-  currency: string;
-  /** Period gain in dollars (SOTA: change in unrealized P&L for HOLDINGS mode) */
-  periodGain: number;
-  /** Period return percentage (SOTA formula for HOLDINGS mode). Null when start value ≤ 0. */
-  periodReturn: number | null;
-  /** Time-weighted return (null for HOLDINGS mode - requires cash flow tracking) */
-  cumulativeTwr?: number | null;
-  /** Legacy field for backward compatibility */
-  gainLossAmount?: number | null;
-  /** Annualized TWR (null for HOLDINGS mode) */
-  annualizedTwr?: number | null;
-  simpleReturn: number;
-  annualizedSimpleReturn: number;
-  /** Modified Dietz return (null for HOLDINGS mode - requires cash flow tracking) */
-  cumulativeModifiedDietz?: number | null;
-  /** Annualized Modified Dietz return (null for HOLDINGS mode) */
-  annualizedModifiedDietz?: number | null;
-  /** Legacy alias for Modified Dietz */
-  cumulativeMwr?: number | null;
-  /** Legacy alias for annualized Modified Dietz */
-  annualizedMwr?: number | null;
-  volatility: number;
-  maxDrawdown: number;
-  /** Indicates if this is a HOLDINGS mode account (no cash flow tracking) */
+export interface PerformanceResult {
+  scope: PerformanceScopeDescriptor;
+  period: PerformancePeriod;
+  mode: ReturnMethod;
+  returns: PerformanceReturns;
+  attribution: PerformanceAttribution;
+  risk: PerformanceRisk;
+  dataQuality: PerformanceDataQuality;
+  series: ReturnData[];
   isHoldingsMode?: boolean;
-  returnMethod?:
-    | "timeWeighted"
-    | "moneyWeighted"
-    | "modifiedDietz"
-    | "simpleReturn"
-    | "symbolPriceBased"
-    | "notApplicable";
   isMixedTrackingMode?: boolean;
-  warnings?: string[];
 }
+
+export type PerformanceSummaryProfile = "full" | "headline";
+
+export interface PerformanceScopeDescriptor {
+  id: string;
+  currency: string;
+}
+
+export interface PerformancePeriod {
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export type ReturnMethod = "timeWeighted" | "valueReturn" | "symbolPriceBased" | "notApplicable";
+
+export interface PerformanceReturns {
+  twr?: number | null;
+  annualizedTwr?: number | null;
+  /** Selected-period money-weighted return derived from annualized XIRR. */
+  irr?: number | null;
+  /** Annualized XIRR using dated cash flows. */
+  annualizedIrr?: number | null;
+  valueReturn?: number | null;
+  annualizedValueReturn?: number | null;
+}
+
+export interface PerformanceAttribution {
+  contributions: number;
+  distributions: number;
+  income: number;
+  realizedPnl: number;
+  unrealizedPnlChange: number;
+  fxEffect: number;
+  fees: number;
+  taxes: number;
+  residual: number;
+}
+
+export interface PerformanceRisk {
+  volatility?: number | null;
+  maxDrawdown?: number | null;
+  peakDate?: string | null;
+  troughDate?: string | null;
+  recoveryDate?: string | null;
+  drawdownDurationDays?: number | null;
+}
+
+export interface PerformanceDataQuality {
+  status: "ok" | "partial" | "noData" | "notApplicable";
+  warnings?: string[];
+  notApplicableReasons?: string[];
+}
+
+export interface PerformanceSummaryScope {
+  accountIds: string[];
+}
+
+export type PerformanceSummaryMap = Record<string, PerformanceResult>;
 
 export interface NewAsset {
   id?: string;
@@ -2278,4 +2318,157 @@ export interface SaveUpTrajectoryPointDTO {
 
 export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
   range: [number, number];
+}
+
+// ============================================================================
+// Allocation Target Types
+// ============================================================================
+
+export type TargetScopeType = "all" | "portfolio" | "account";
+export type TriggerType = "manual" | "threshold";
+export type RebalanceGoal = "nearest_band" | "exact_target";
+export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
+export type RebalanceTo = "nearest_band" | "exact_target";
+
+export interface AllocationTarget {
+  id: string;
+  name: string;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  taxonomyId: string;
+  triggerType: TriggerType;
+  driftBandBps: number;
+  rebalanceGoal: RebalanceGoal;
+  minTradeAmount: string;
+  wholeSharesOnly: boolean;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+}
+
+export interface NewAllocationTarget {
+  name: string;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  taxonomyId: string;
+  triggerType: TriggerType;
+  driftBandBps: number;
+  rebalanceGoal?: RebalanceGoal;
+  minTradeAmount?: string;
+  wholeSharesOnly?: boolean;
+}
+
+export interface AllocationTargetWeight {
+  id: string;
+  targetId: string;
+  taxonomyId: string;
+  categoryId: string;
+  targetBps: number;
+  isLocked: boolean;
+  isRequired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewAllocationTargetWeight {
+  categoryId: string;
+  targetBps: number;
+  isLocked: boolean;
+  isRequired: boolean;
+}
+
+export interface SaveAllocationTargetResult {
+  target: AllocationTarget;
+  weights: AllocationTargetWeight[];
+}
+
+export interface DriftRow {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  currentBps: number;
+  targetBps: number;
+  driftBps: number;
+  currentValue: number;
+  targetValue: number;
+  valueDelta: number;
+  status: DriftStatus;
+  isRequired: boolean;
+  isZeroCurrent: boolean;
+  isCash: boolean;
+}
+
+export interface DriftReport {
+  targetId: string;
+  scopeType: TargetScopeType;
+  scopeId?: string | null;
+  totalValue: number;
+  baseCurrency: string;
+  maxDriftBps: number;
+  outOfBandCount: number;
+  rows: DriftRow[];
+  holdings?: DriftHoldingsReport | null;
+}
+
+export interface DriftHoldingRow {
+  id: string;
+  holdingId: string;
+  assetId: string;
+  accountId: string;
+  sourceAccountIds?: string[];
+  symbol: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  categoryColor?: string | null;
+  value: number;
+  currentPct: number;
+  targetPct?: number | null;
+  driftBps?: number | null;
+  isUnknownCategory: boolean;
+  isCash: boolean;
+}
+
+export interface DriftHoldingsReport {
+  targetId: string;
+  totalValue: number;
+  baseCurrency: string;
+  rows: DriftHoldingRow[];
+}
+
+export type RebalanceWarningKind =
+  | "missing_quote"
+  | "no_buy_candidate"
+  | "unclassified_asset"
+  | "partial_classification";
+
+export interface RebalanceWarning {
+  kind: RebalanceWarningKind;
+  categoryId: string;
+  message: string;
+}
+
+export interface SuggestedManualTrade {
+  action: string;
+  categoryId: string;
+  categoryName: string;
+  assetId?: string | null;
+  symbol?: string | null;
+  name?: string | null;
+  quantity?: number | null;
+  estimatedPrice?: number | null;
+  estimatedAmount: number;
+  reason: string;
+}
+
+export interface RebalancePlan {
+  targetId: string;
+  availableCash: number;
+  cashUsed: number;
+  cashRemaining: number;
+  maxDriftBpsBefore: number;
+  maxDriftBpsAfter: number;
+  trades: SuggestedManualTrade[];
+  warnings: RebalanceWarning[];
+  afterBpsByCategory: Record<string, number>;
 }

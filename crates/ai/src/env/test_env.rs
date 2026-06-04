@@ -31,10 +31,17 @@ use wealthfolio_core::{
     },
     holdings::{Holding, HoldingsServiceTrait},
     planning::SaveUpOverview,
-    portfolio::allocation::{AllocationHoldings, AllocationServiceTrait, PortfolioAllocations},
+    portfolio::allocation::{
+        AllocationHoldings, AllocationServiceTrait, PortfolioAllocations,
+        TaxonomyHoldingContributions,
+    },
     portfolio::fire::RetirementOverview,
     portfolio::income::{IncomeServiceTrait, IncomeSummary},
-    portfolio::performance::{PerformanceMetrics, PerformanceServiceTrait, ReturnMethod},
+    portfolio::performance::{
+        DataQualityStatus, PerformanceAttribution, PerformanceDataQuality, PerformancePeriod,
+        PerformanceResult, PerformanceReturns, PerformanceRisk, PerformanceScopeDescriptor,
+        PerformanceServiceTrait, PerformanceSummaryProfile, ReturnMethod,
+    },
     quotes::{
         LatestQuotePair, LatestQuoteSnapshot, ProviderInfo, Quote, QuoteImport, QuoteServiceTrait,
         QuoteSyncState, SymbolSearchResult, SymbolSyncPlan, SyncMode, SyncResult,
@@ -1103,9 +1110,9 @@ impl AllocationServiceTrait for MockAllocationService {
         &self,
         _account_ids: &[String],
         base_currency: &str,
-        _aggregated_account_id: &str,
         taxonomy_id: &str,
         category_id: &str,
+        _aggregated_account_id: &str,
     ) -> CoreResult<AllocationHoldings> {
         Ok(AllocationHoldings {
             taxonomy_id: taxonomy_id.to_string(),
@@ -1116,6 +1123,22 @@ impl AllocationServiceTrait for MockAllocationService {
             holdings: Vec::new(),
             total_value: rust_decimal::Decimal::ZERO,
             currency: base_currency.to_string(),
+        })
+    }
+
+    async fn get_holding_contributions_for_taxonomy_for_accounts(
+        &self,
+        _account_ids: &[String],
+        base_currency: &str,
+        taxonomy_id: &str,
+        _aggregated_account_id: &str,
+    ) -> CoreResult<TaxonomyHoldingContributions> {
+        Ok(TaxonomyHoldingContributions {
+            taxonomy_id: taxonomy_id.to_string(),
+            taxonomy_name: "Mock Taxonomy".to_string(),
+            total_value: rust_decimal::Decimal::ZERO,
+            currency: base_currency.to_string(),
+            contributions: Vec::new(),
         })
     }
 }
@@ -1141,6 +1164,45 @@ impl IncomeServiceTrait for MockIncomeService {
 #[derive(Default)]
 pub struct MockPerformanceService;
 
+fn mock_performance_result(id: &str) -> PerformanceResult {
+    PerformanceResult {
+        scope: PerformanceScopeDescriptor {
+            id: id.to_string(),
+            currency: "USD".to_string(),
+        },
+        period: PerformancePeriod {
+            start_date: None,
+            end_date: None,
+        },
+        mode: ReturnMethod::NotApplicable,
+        returns: PerformanceReturns {
+            twr: Some(rust_decimal::Decimal::ZERO),
+            annualized_twr: Some(rust_decimal::Decimal::ZERO),
+            irr: Some(rust_decimal::Decimal::ZERO),
+            annualized_irr: Some(rust_decimal::Decimal::ZERO),
+            value_return: Some(rust_decimal::Decimal::ZERO),
+            annualized_value_return: Some(rust_decimal::Decimal::ZERO),
+        },
+        attribution: PerformanceAttribution::default(),
+        risk: PerformanceRisk {
+            volatility: Some(rust_decimal::Decimal::ZERO),
+            max_drawdown: Some(rust_decimal::Decimal::ZERO),
+            peak_date: None,
+            trough_date: None,
+            recovery_date: None,
+            drawdown_duration_days: None,
+        },
+        data_quality: PerformanceDataQuality {
+            status: DataQualityStatus::Ok,
+            warnings: Vec::new(),
+            not_applicable_reasons: Vec::new(),
+        },
+        series: Vec::new(),
+        is_holdings_mode: false,
+        is_mixed_tracking_mode: false,
+    }
+}
+
 #[async_trait]
 impl PerformanceServiceTrait for MockPerformanceService {
     async fn calculate_performance_history(
@@ -1150,31 +1212,8 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
         _tracking_mode: Option<TrackingMode>,
-    ) -> CoreResult<PerformanceMetrics> {
-        Ok(PerformanceMetrics {
-            id: item_id.to_string(),
-            returns: Vec::new(),
-            period_start_date: None,
-            period_end_date: None,
-            currency: "USD".to_string(),
-            period_gain: rust_decimal::Decimal::ZERO,
-            period_return: Some(rust_decimal::Decimal::ZERO),
-            cumulative_twr: Some(rust_decimal::Decimal::ZERO),
-            gain_loss_amount: Some(rust_decimal::Decimal::ZERO),
-            annualized_twr: Some(rust_decimal::Decimal::ZERO),
-            simple_return: rust_decimal::Decimal::ZERO,
-            annualized_simple_return: rust_decimal::Decimal::ZERO,
-            cumulative_modified_dietz: Some(rust_decimal::Decimal::ZERO),
-            annualized_modified_dietz: Some(rust_decimal::Decimal::ZERO),
-            cumulative_mwr: Some(rust_decimal::Decimal::ZERO),
-            annualized_mwr: Some(rust_decimal::Decimal::ZERO),
-            volatility: rust_decimal::Decimal::ZERO,
-            max_drawdown: rust_decimal::Decimal::ZERO,
-            is_holdings_mode: false,
-            return_method: ReturnMethod::NotApplicable,
-            is_mixed_tracking_mode: false,
-            warnings: Vec::new(),
-        })
+    ) -> CoreResult<PerformanceResult> {
+        Ok(mock_performance_result(item_id))
     }
 
     async fn calculate_performance_history_for_accounts(
@@ -1185,7 +1224,7 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _account_tracking_modes: &std::collections::HashMap<String, TrackingMode>,
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
-    ) -> CoreResult<PerformanceMetrics> {
+    ) -> CoreResult<PerformanceResult> {
         self.calculate_performance_history("account", scope_id, None, None, None)
             .await
     }
@@ -1197,31 +1236,9 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
         _tracking_mode: Option<TrackingMode>,
-    ) -> CoreResult<PerformanceMetrics> {
-        Ok(PerformanceMetrics {
-            id: item_id.to_string(),
-            returns: Vec::new(),
-            period_start_date: None,
-            period_end_date: None,
-            currency: "USD".to_string(),
-            period_gain: rust_decimal::Decimal::ZERO,
-            period_return: Some(rust_decimal::Decimal::ZERO),
-            cumulative_twr: Some(rust_decimal::Decimal::ZERO),
-            gain_loss_amount: Some(rust_decimal::Decimal::ZERO),
-            annualized_twr: Some(rust_decimal::Decimal::ZERO),
-            simple_return: rust_decimal::Decimal::ZERO,
-            annualized_simple_return: rust_decimal::Decimal::ZERO,
-            cumulative_modified_dietz: Some(rust_decimal::Decimal::ZERO),
-            annualized_modified_dietz: Some(rust_decimal::Decimal::ZERO),
-            cumulative_mwr: Some(rust_decimal::Decimal::ZERO),
-            annualized_mwr: Some(rust_decimal::Decimal::ZERO),
-            volatility: rust_decimal::Decimal::ZERO,
-            max_drawdown: rust_decimal::Decimal::ZERO,
-            is_holdings_mode: false,
-            return_method: ReturnMethod::NotApplicable,
-            is_mixed_tracking_mode: false,
-            warnings: Vec::new(),
-        })
+        _profile: PerformanceSummaryProfile,
+    ) -> CoreResult<PerformanceResult> {
+        Ok(mock_performance_result(item_id))
     }
 
     async fn calculate_performance_summary_for_accounts(
@@ -1232,9 +1249,17 @@ impl PerformanceServiceTrait for MockPerformanceService {
         _account_tracking_modes: &std::collections::HashMap<String, TrackingMode>,
         _start_date: Option<NaiveDate>,
         _end_date: Option<NaiveDate>,
-    ) -> CoreResult<PerformanceMetrics> {
-        self.calculate_performance_summary("account", scope_id, None, None, None)
-            .await
+        _profile: PerformanceSummaryProfile,
+    ) -> CoreResult<PerformanceResult> {
+        self.calculate_performance_summary(
+            "account",
+            scope_id,
+            None,
+            None,
+            None,
+            PerformanceSummaryProfile::Full,
+        )
+        .await
     }
 
     fn calculate_accounts_simple_performance(

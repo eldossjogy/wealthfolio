@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "@/pages/layouts/app-layout";
 import { OnboardingLayout } from "@/pages/layouts/onboarding-layout";
@@ -25,7 +25,6 @@ import AccountPage from "./pages/account/account-page";
 import AiAssistantPage from "./pages/ai-assistant/ai-assistant-page";
 import AssetProfilePage from "./pages/asset/asset-profile-page";
 import HealthPage from "./pages/health/health-page";
-import HoldingsInsightsPage from "./pages/holdings/holdings-insights-page";
 import OnboardingPage from "./pages/onboarding/onboarding-page";
 import AboutSettingsPage from "./pages/settings/about/about-page";
 import AddonSettingsPage from "./pages/settings/addons/addon-settings";
@@ -92,7 +91,6 @@ export function AppRoutes() {
           <Route path="activities" element={<ActivityPage />} />
           <Route path="activities/manage" element={<ActivityManagerPage />} />
           <Route path="holdings" element={<HoldingsPage />} />
-          <Route path="holdings-insights" element={<HoldingsInsightsPage />} />
           <Route path="holdings/:assetId" element={<AssetProfilePage />} />
           <Route path="import" element={<ActivityImportPage />} />
           <Route path="accounts/:id" element={<AccountPage />} />
@@ -102,6 +100,10 @@ export function AppRoutes() {
           <Route path="health" element={<HealthPage />} />
           <Route path="assistant" element={<AiAssistantPage />} />
           <Route path="connect" element={<ConnectPage />} />
+          <Route
+            path="allocation-targets"
+            element={<Navigate to="/insights?tab=overview" replace />}
+          />
           <Route path="goals" element={<GoalsDashboardPage />} />
           <Route path="goals/new" element={<GoalNewPage />} />
           <Route path="goals/:goalId/guide" element={<GoalRetirementGuidePage />} />

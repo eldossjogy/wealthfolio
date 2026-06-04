@@ -372,4 +372,24 @@ describe("scope-based routing — performance filters", () => {
       });
     }
   }
+
+  it("get_performance_summaries sends batch scopes", async () => {
+    const mock = stubFetch();
+    await invoke("get_performance_summaries", {
+      scopes: [{ accountIds: ["acc_2", "acc_1"] }],
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      profile: "headline",
+    });
+
+    const { url, method, body } = lastCall(mock);
+    expect(url).toBe("/api/v1/performance/summaries");
+    expect(method).toBe("POST");
+    expect(JSON.parse(body as string)).toEqual({
+      scopes: [{ accountIds: ["acc_2", "acc_1"] }],
+      startDate: "2026-01-01",
+      endDate: "2026-01-31",
+      profile: "headline",
+    });
+  });
 });

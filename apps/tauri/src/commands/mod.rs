@@ -3,6 +3,7 @@ pub mod activity;
 pub mod addon;
 pub mod ai_chat;
 pub mod ai_providers;
+pub mod allocation_targets;
 pub mod alternative_assets;
 pub mod asset;
 #[cfg(feature = "connect-sync")]

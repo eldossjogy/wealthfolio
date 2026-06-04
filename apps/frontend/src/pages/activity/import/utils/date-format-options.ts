@@ -73,6 +73,28 @@ export const DATE_FORMAT_OPTIONS: DateFormatOption[] = [
     dateFnsPattern: "MM-dd-yyyy HH:mm",
   },
 
+  // ── Date & Time (12-hour AM/PM) ──────────────────────────────────────────────
+  {
+    value: "YYYY-MM-DD hh:mm:ss A",
+    label: "YYYY-MM-DD hh:mm:ss AM/PM — 2024-05-01 12:00:00 AM",
+    dateFnsPattern: "yyyy-MM-dd hh:mm:ss a",
+  },
+  {
+    value: "YYYY-MM-DD hh:mm A",
+    label: "YYYY-MM-DD hh:mm AM/PM — 2024-05-01 12:00 AM",
+    dateFnsPattern: "yyyy-MM-dd hh:mm a",
+  },
+  {
+    value: "MM/DD/YYYY hh:mm:ss A",
+    label: "MM/DD/YYYY hh:mm:ss AM/PM — 05/01/2024 12:00:00 AM",
+    dateFnsPattern: "MM/dd/yyyy hh:mm:ss a",
+  },
+  {
+    value: "DD/MM/YYYY hh:mm:ss A",
+    label: "DD/MM/YYYY hh:mm:ss AM/PM — 01/05/2024 12:00:00 AM",
+    dateFnsPattern: "dd/MM/yyyy hh:mm:ss a",
+  },
+
   // ── ISO 8601 ───────────────────────────────────────────────────────────────
   { value: "ISO8601", label: "ISO 8601 — 2024-05-01T14:30:00Z", dateFnsPattern: null },
 ];

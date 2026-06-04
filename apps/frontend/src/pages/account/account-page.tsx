@@ -34,6 +34,8 @@ import {
   HoldingType,
   isLiabilityAccountType,
 } from "@/lib/constants";
+import { performanceHeadlineReturn, performancePeriodPnl } from "@/lib/performance";
+import { getPerformanceDateRangeForRequest } from "@/lib/performance-date-range";
 import { QueryKeys } from "@/lib/query-keys";
 import { useSettingsContext } from "@/lib/settings-provider";
 import {
@@ -46,7 +48,7 @@ import {
   TrackedItem,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ActivityTableMobile } from "@/pages/activity/components/activity-table/activity-table-mobile";
+import { ActivityDateSheet } from "@/pages/activity/components/activity-date-sheet";
 import { BulkHoldingsModal } from "@/pages/activity/components/forms/bulk-holdings-modal";
 import { PortfolioUpdateTrigger } from "@/pages/dashboard/portfolio-update-trigger";
 import { HoldingsEditMode } from "@/pages/holdings/components/holdings-edit-mode";
@@ -72,7 +74,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@wealthfolio/ui/components/ui/sheet";
-import { format, parseISO, subMonths } from "date-fns";
+import { format, subMonths } from "date-fns";
 import { useNavigate, useParams } from "react-router-dom";
 import { AccountContributionLimit } from "./account-contribution-limit";
 import AccountHoldings from "./account-holdings";
@@ -101,15 +103,6 @@ const getInitialDateRange = (): DateRange => ({
   from: subMonths(new Date(), 3),
   to: new Date(),
 });
-
-// Format date for display
-const formatDate = (dateStr: string): string => {
-  try {
-    return format(parseISO(dateStr), "MMMM d, yyyy");
-  } catch {
-    return dateStr;
-  }
-};
 
 // Define the initial interval code (consistent with other pages)
 const INITIAL_INTERVAL_CODE: TimePeriod = "3M";
@@ -270,6 +263,8 @@ const AccountPage = () => {
     return undefined;
   }, [account, supportsPerformance]);
 
+  const performanceDateRange = getPerformanceDateRangeForRequest(dateRange, selectedIntervalCode);
+
   // Pass tracking mode to the performance hook for SOTA calculations
   const {
     data: performanceResponse,
@@ -278,7 +273,7 @@ const AccountPage = () => {
     errorMessages: performanceErrorMessages,
   } = useCalculatePerformanceHistory({
     selectedItems: accountTrackedItem ? [accountTrackedItem] : [],
-    dateRange: dateRange,
+    dateRange: performanceDateRange,
     trackingMode: isHoldingsMode ? "HOLDINGS" : "TRANSACTIONS",
   });
 
@@ -291,9 +286,13 @@ const AccountPage = () => {
 
   const currentValuation = valuationHistory?.[valuationHistory.length - 1];
 
-  // Use period gain and return from backend (SOTA calculations for HOLDINGS mode)
-  const frontendGainLossAmount = accountPerformance?.periodGain ?? 0;
-  const frontendSimpleReturn = accountPerformance?.periodReturn ?? 0;
+  const frontendGainLossAmount = performancePeriodPnl(accountPerformance);
+  const frontendSimpleReturn = performanceHeadlineReturn(accountPerformance);
+  const displayedValueCurrency =
+    account?.currency ?? currentValuation?.accountCurrency ?? baseCurrency;
+  const performanceCurrency = accountPerformance?.scope.currency ?? baseCurrency;
+  const showPerformanceCurrency =
+    performanceCurrency.toUpperCase() !== displayedValueCurrency.toUpperCase();
 
   const chartData: HistoryChartData[] = useMemo(() => {
     if (!valuationHistory) return [];
@@ -318,19 +317,17 @@ const AccountPage = () => {
   };
 
   const percentageToDisplay = useMemo(() => {
-    // For HOLDINGS mode, always use simple return since flow-adjusted returns are not meaningful
-    // (they require transaction history to track cash flows)
+    // Holdings mode has no transaction cash-flow history, so show value return.
     if (isHoldingsMode) {
       return frontendSimpleReturn;
     }
     if (selectedIntervalCode === "ALL") {
       return frontendSimpleReturn;
     }
-    // For other intervals, use Modified Dietz with the legacy MWR alias as fallback.
     if (accountPerformance) {
-      return accountPerformance.cumulativeModifiedDietz ?? accountPerformance.cumulativeMwr ?? 0;
+      return performanceHeadlineReturn(accountPerformance);
     }
-    return 0; // Default if no specific logic matches or data is unavailable
+    return null;
   }, [accountPerformance, selectedIntervalCode, frontendSimpleReturn, isHoldingsMode]);
 
   const handleAccountSwitch = (selectedAccount: Account) => {
@@ -575,22 +572,34 @@ const AccountPage = () => {
                           <p className="pt-3 text-xl font-bold">
                             <PrivacyAmount
                               value={currentValuation?.totalValue ?? 0}
-                              currency={account?.currency ?? baseCurrency}
+                              currency={displayedValueCurrency}
                             />
                           </p>
                           {!hasPerformanceError && (
                             <div className="flex items-center gap-2 text-sm">
-                              <GainAmount
-                                className="text-sm font-light"
-                                value={frontendGainLossAmount}
-                                currency={account?.currency ?? baseCurrency}
-                                displayCurrency={false}
-                              />
-                              <GainPercent
-                                value={percentageToDisplay}
-                                variant="badge"
-                                className="text-xs"
-                              />
+                              {frontendGainLossAmount == null ? (
+                                <span className="text-muted-foreground text-sm font-light">
+                                  N/A
+                                </span>
+                              ) : (
+                                <GainAmount
+                                  className="text-sm font-light"
+                                  value={frontendGainLossAmount}
+                                  currency={performanceCurrency}
+                                  displayCurrency={showPerformanceCurrency}
+                                />
+                              )}
+                              {percentageToDisplay == null ? (
+                                <span className="text-muted-foreground bg-foreground/10 rounded-md px-2 py-px text-xs font-light">
+                                  N/A
+                                </span>
+                              ) : (
+                                <GainPercent
+                                  value={percentageToDisplay}
+                                  variant="badge"
+                                  className="text-xs"
+                                />
+                              )}
                             </div>
                           )}
                         </div>
@@ -735,34 +744,13 @@ const AccountPage = () => {
         </Sheet>
       )}
 
-      {/* Activities Sheet for Transactions mode marker click */}
-      <Sheet open={isActivitySheetOpen} onOpenChange={setIsActivitySheetOpen}>
-        <SheetContent side="right" className="flex h-full w-full flex-col p-0 sm:max-w-md">
-          <SheetHeader className="border-b px-6 py-4">
-            <SheetTitle>
-              Activities on {selectedActivityDate ? formatDate(selectedActivityDate) : ""}
-            </SheetTitle>
-            <SheetDescription>
-              {dateActivities?.length ?? 0} activities recorded on this date
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-auto px-4 py-4">
-            {isDateActivitiesLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Icons.Spinner className="size-6 animate-spin" />
-              </div>
-            ) : (
-              <ActivityTableMobile
-                activities={dateActivities ?? []}
-                isCompactView={true}
-                handleEdit={() => {}}
-                handleDelete={() => {}}
-                onDuplicate={async () => {}}
-              />
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      <ActivityDateSheet
+        open={isActivitySheetOpen}
+        onOpenChange={setIsActivitySheetOpen}
+        date={selectedActivityDate}
+        activities={dateActivities ?? []}
+        isLoading={isDateActivitiesLoading}
+      />
 
       {/* Bulk Holdings Modal for Transfer Holdings */}
       <BulkHoldingsModal

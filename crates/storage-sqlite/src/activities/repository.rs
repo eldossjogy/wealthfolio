@@ -3,7 +3,7 @@ use diesel::expression_methods::ExpressionMethods;
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::sql_query;
-use diesel::sql_types::{Nullable, Text};
+use diesel::sql_types::{Bool, Nullable, Text};
 use diesel::sqlite::Sqlite;
 use diesel::sqlite::SqliteConnection;
 use rust_decimal::Decimal;
@@ -917,6 +917,82 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .map_err(StorageError::from)?;
 
         Ok(activities_db.into_iter().map(Activity::from).collect())
+    }
+
+    fn get_transfer_activities_touching_account_ids_in_date_range(
+        &self,
+        account_ids: &[String],
+        start_utc: Option<DateTime<Utc>>,
+        end_exclusive_utc: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Activity>> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let mut touching_query = activities::table
+            .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+            .filter(accounts::is_archived.eq(false))
+            .filter(activities::account_id.eq_any(account_ids))
+            .filter(activities::status.eq("POSTED"))
+            .filter(diesel::dsl::sql::<Bool>(
+                "COALESCE(activity_type_override, activity_type) IN ('TRANSFER_IN', 'TRANSFER_OUT')",
+            ))
+            .into_boxed();
+
+        if let Some(start_utc) = start_utc {
+            touching_query =
+                touching_query.filter(activities::activity_date.ge(start_utc.to_rfc3339()));
+        }
+        if let Some(end_exclusive_utc) = end_exclusive_utc {
+            touching_query =
+                touching_query.filter(activities::activity_date.lt(end_exclusive_utc.to_rfc3339()));
+        }
+
+        let touching = touching_query
+            .select(ActivityDB::as_select())
+            .order(activities::activity_date.asc())
+            .load::<ActivityDB>(&mut conn)
+            .map_err(StorageError::from)?;
+
+        let group_ids: Vec<String> = touching
+            .iter()
+            .filter_map(|activity| activity.source_group_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let mut by_id: HashMap<String, ActivityDB> = touching
+            .into_iter()
+            .map(|activity| (activity.id.clone(), activity))
+            .collect();
+
+        for chunk in chunk_for_sqlite(&group_ids) {
+            if chunk.is_empty() {
+                continue;
+            }
+
+            let grouped = activities::table
+                .inner_join(accounts::table.on(activities::account_id.eq(accounts::id)))
+                .filter(accounts::is_archived.eq(false))
+                .filter(activities::status.eq("POSTED"))
+                .filter(diesel::dsl::sql::<Bool>(
+                    "COALESCE(activity_type_override, activity_type) IN ('TRANSFER_IN', 'TRANSFER_OUT')",
+                ))
+                .filter(activities::source_group_id.eq_any(chunk))
+                .select(ActivityDB::as_select())
+                .order(activities::activity_date.asc())
+                .load::<ActivityDB>(&mut conn)
+                .map_err(StorageError::from)?;
+
+            for activity in grouped {
+                by_id.entry(activity.id.clone()).or_insert(activity);
+            }
+        }
+
+        let mut activities: Vec<Activity> = by_id.into_values().map(Activity::from).collect();
+        activities.sort_by_key(|activity| activity.activity_date);
+        Ok(activities)
     }
 
     /// Calculates the average cost for an asset in an account
@@ -2651,6 +2727,86 @@ mod tests {
         );
         assert_eq!(activity_user_modified(&mut conn, "transfer-in"), 1);
         assert_eq!(activity_user_modified(&mut conn, "transfer-out"), 1);
+    }
+
+    #[tokio::test]
+    async fn transfer_scope_query_fetches_touching_rows_and_counterparts() {
+        let (pool, writer) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "acc-a");
+        insert_account(&mut conn, "acc-b");
+        insert_account(&mut conn, "acc-c");
+        insert_transfer_activity(
+            &mut conn,
+            "out-a",
+            "acc-a",
+            "TRANSFER_OUT",
+            Some("g1"),
+            None,
+        );
+        insert_transfer_activity(&mut conn, "in-b", "acc-b", "TRANSFER_IN", Some("g1"), None);
+        insert_transfer_activity(&mut conn, "ungrouped-a", "acc-a", "TRANSFER_IN", None, None);
+        insert_transfer_activity(
+            &mut conn,
+            "out-c",
+            "acc-c",
+            "TRANSFER_OUT",
+            Some("g2"),
+            None,
+        );
+        insert_transfer_activity(
+            &mut conn,
+            "in-b-g2",
+            "acc-b",
+            "TRANSFER_IN",
+            Some("g2"),
+            None,
+        );
+        insert_transfer_activity(
+            &mut conn,
+            "override-out-a",
+            "acc-a",
+            "FEE",
+            Some("g3"),
+            None,
+        );
+        diesel::update(activities::table.filter(activities::id.eq("override-out-a")))
+            .set(activities::activity_type_override.eq(Some("TRANSFER_OUT".to_string())))
+            .execute(&mut conn)
+            .expect("set transfer override");
+        insert_transfer_activity(
+            &mut conn,
+            "override-in-b",
+            "acc-b",
+            "TRANSFER_IN",
+            Some("g3"),
+            None,
+        );
+
+        let start = DateTime::parse_from_rfc3339("2024-01-14T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let end = DateTime::parse_from_rfc3339("2024-01-16T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let rows = repo
+            .get_transfer_activities_touching_account_ids_in_date_range(
+                &["acc-a".to_string()],
+                Some(start),
+                Some(end),
+            )
+            .expect("transfer rows");
+        let ids: HashSet<_> = rows.into_iter().map(|activity| activity.id).collect();
+
+        assert!(ids.contains("out-a"));
+        assert!(ids.contains("in-b"));
+        assert!(ids.contains("ungrouped-a"));
+        assert!(ids.contains("override-out-a"));
+        assert!(ids.contains("override-in-b"));
+        assert!(!ids.contains("out-c"));
+        assert!(!ids.contains("in-b-g2"));
     }
 
     #[tokio::test]

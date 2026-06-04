@@ -64,6 +64,7 @@ export const COMMANDS: CommandMap = {
   calculate_accounts_simple_performance: { method: "POST", path: "/performance/accounts/simple" },
   calculate_performance_history: { method: "POST", path: "/performance/history" },
   calculate_performance_summary: { method: "POST", path: "/performance/summary" },
+  get_performance_summaries: { method: "POST", path: "/performance/summaries" },
   get_income_summary: { method: "POST", path: "/income/summary/query" },
   // Goals
   get_goals: { method: "GET", path: "/goals" },
@@ -365,6 +366,21 @@ export const COMMANDS: CommandMap = {
   remove_ai_thread_tag: { method: "DELETE", path: "/ai/threads" },
   get_ai_thread_tags: { method: "GET", path: "/ai/threads" },
   update_tool_result: { method: "PATCH", path: "/ai/tool-result" },
+  // Allocation Targets
+  list_allocation_targets: { method: "GET", path: "/allocation-targets" },
+  get_allocation_target: { method: "GET", path: "/allocation-targets" },
+  create_allocation_target: { method: "POST", path: "/allocation-targets" },
+  update_allocation_target: { method: "PUT", path: "/allocation-targets" },
+  archive_allocation_target: { method: "POST", path: "/allocation-targets" },
+  delete_allocation_target: { method: "DELETE", path: "/allocation-targets" },
+  list_allocation_target_weights: { method: "GET", path: "/allocation-targets" },
+  save_allocation_target_weights: { method: "POST", path: "/allocation-targets" },
+  save_allocation_target_with_weights: {
+    method: "POST",
+    path: "/allocation-targets/save-with-weights",
+  },
+  get_allocation_target_drift: { method: "POST", path: "/allocation-targets" },
+  calculate_rebalance_plan: { method: "POST", path: "/allocation-targets/rebalance/calculate" },
   // Alternative Assets
   create_alternative_asset: { method: "POST", path: "/alternative-assets" },
   update_alternative_asset_valuation: { method: "PUT", path: "/alternative-assets" },
@@ -637,15 +653,34 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "calculate_performance_summary": {
-      const { itemType, itemId, startDate, endDate, trackingMode, filter } = payload as {
+      const { itemType, itemId, startDate, endDate, trackingMode, filter, profile } = payload as {
         itemType: string;
         itemId: string;
         startDate?: string;
         endDate?: string;
         trackingMode?: string;
         filter?: unknown;
+        profile?: string;
       };
-      body = JSON.stringify({ itemType, itemId, startDate, endDate, trackingMode, filter });
+      body = JSON.stringify({
+        itemType,
+        itemId,
+        startDate,
+        endDate,
+        trackingMode,
+        filter,
+        profile,
+      });
+      break;
+    }
+    case "get_performance_summaries": {
+      const { scopes, startDate, endDate, profile } = payload as {
+        scopes: unknown[];
+        startDate?: string | null;
+        endDate?: string | null;
+        profile?: string;
+      };
+      body = JSON.stringify({ scopes, startDate, endDate, profile });
       break;
     }
     case "check_update": {
@@ -1756,6 +1791,74 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     }
     case "get_alternative_holdings":
       break;
+    // Allocation Targets
+    case "list_allocation_targets":
+      break;
+    case "get_allocation_target": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "create_allocation_target": {
+      const { input } = payload as { input: Record<string, unknown> };
+      body = JSON.stringify(input);
+      break;
+    }
+    case "update_allocation_target": {
+      const { id, input } = payload as { id: string; input: Record<string, unknown> };
+      url += `/${encodeURIComponent(id)}`;
+      body = JSON.stringify(input);
+      break;
+    }
+    case "archive_allocation_target": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}/archive`;
+      break;
+    }
+    case "delete_allocation_target": {
+      const { id } = payload as { id: string };
+      url += `/${encodeURIComponent(id)}`;
+      break;
+    }
+    case "list_allocation_target_weights": {
+      const { targetId } = payload as { targetId: string };
+      url += `/${encodeURIComponent(targetId)}/weights`;
+      break;
+    }
+    case "save_allocation_target_weights": {
+      const { targetId, weights } = payload as { targetId: string; weights: unknown[] };
+      url += `/${encodeURIComponent(targetId)}/weights`;
+      body = JSON.stringify(weights);
+      break;
+    }
+    case "save_allocation_target_with_weights": {
+      const { id, input, weights } = payload as {
+        id: string | null;
+        input: Record<string, unknown>;
+        weights: unknown[];
+      };
+      body = JSON.stringify({ id, input, weights });
+      break;
+    }
+    case "get_allocation_target_drift": {
+      const { targetId, filter, includeHoldings } = payload as {
+        targetId: string;
+        filter: unknown;
+        includeHoldings?: boolean;
+      };
+      url += `/${encodeURIComponent(targetId)}/drift`;
+      body = JSON.stringify({ filter, includeHoldings: includeHoldings ?? false });
+      break;
+    }
+    case "calculate_rebalance_plan": {
+      const { targetId, availableCash, filter } = payload as {
+        targetId: string;
+        availableCash: number;
+        filter: unknown;
+      };
+      body = JSON.stringify({ targetId, availableCash, filter });
+      break;
+    }
     // AI Providers
     case "get_ai_providers":
       break;

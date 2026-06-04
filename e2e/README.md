@@ -100,8 +100,8 @@ npx playwright test && npx playwright show-report
 - **Always run `prep-e2e.mjs` before starting the server.** Tests assume an
   empty database. If you run against an existing database, setup steps may
   silently skip asset creation and tests may fail for unrelated reasons.
-- **Do not run E2E tests against the Tauri desktop app.** The tests are
-  hardcoded to `http://localhost:1420`.
+- **Do not run E2E tests against the Tauri desktop app.** The tests default to
+  `http://localhost:1420`; use `WF_E2E_BASE_URL` when that port is occupied.
 - **Do not run E2E tests while the Tauri dev server (`pnpm tauri dev`) is
   running** on the same ports — they conflict.
 - Tests run **serially** (1 worker, serial mode). Do not try to parallelize

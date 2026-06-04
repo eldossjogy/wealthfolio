@@ -4,7 +4,6 @@ import { format, isValid, parse, parseISO } from "date-fns";
 import { twMerge } from "tailwind-merge";
 import { getQuoteUnitCurrency } from "@wealthfolio/ui/lib/currencies";
 import { DECIMAL_PRECISION, DISPLAY_DECIMAL_PRECISION } from "./constants";
-import { AccountValuation } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -35,6 +34,12 @@ export function tryParseDate(dateStr: string): Date | null {
     "yyyy-MM-dd'T'HH:mm:ss'Z'", // Added Standard ISO format
     "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", // Added Standard ISO format with milliseconds
     "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX", // Added Standard ISO timestamp with microsecond precision and timezone offset
+
+    // 12-hour / AM-PM Formats (e.g. Questrade exports). Only the unambiguous
+    // ISO date order is auto-detected; slash orders (MM/dd vs dd/MM) are
+    // ambiguous and must be chosen explicitly via an import format preset.
+    "yyyy-MM-dd hh:mm:ss a", // "2024-05-01 12:00:00 AM"
+    "yyyy-MM-dd hh:mm a", // "2024-05-01 12:00 AM"
 
     // ISO and Technical Formats
     "yyyy-MM-dd", // "2024-05-01" - ISO 8601
@@ -378,57 +383,6 @@ export function safeDivide(numerator: number, denominator: number): number {
     return 0;
   }
   return numerator / denominator;
-}
-
-export function calculatePerformanceMetrics(
-  history: AccountValuation[] | null | undefined,
-  isAllTime = false,
-): { gainLossAmount: number; simpleReturn: number } {
-  if (!history?.length) return { gainLossAmount: 0, simpleReturn: 0 };
-
-  const first = history[0];
-  const last = history[history.length - 1];
-
-  const valueFor = (valuation: AccountValuation) => Number(valuation.totalValueBase);
-  const contributionFor = (valuation: AccountValuation) => Number(valuation.netContributionBase);
-
-  const ncFlow = contributionFor(last) - contributionFor(first);
-  const mvGain = valueFor(last) - valueFor(first);
-  const gain$ = mvGain - ncFlow; // profit / loss
-
-  // ── all‑time ROI ────────────────────────────────────────────────
-  if (isAllTime) {
-    const totalNC = contributionFor(last);
-    const gain = valueFor(last) - totalNC;
-
-    return {
-      gainLossAmount: gain,
-      simpleReturn: totalNC !== 0 ? gain / totalNC : 0,
-    };
-  }
-
-  // ── period Perf: daily time‑weighted return (TWR) ───────────────
-  let twr = 1;
-  for (let i = 1; i < history.length; i++) {
-    const prev = history[i - 1];
-    const curr = history[i];
-
-    const cf = contributionFor(curr) - contributionFor(prev); // deposit(+)/withdraw(-)
-    const mv0 = valueFor(prev);
-    if (mv0 === 0) {
-      continue; // skip day zero if portfolio just opened
-    }
-
-    const dailyReturn = (valueFor(curr) - cf) / mv0;
-    twr *= dailyReturn;
-  }
-
-  const result = {
-    gainLossAmount: gain$,
-    simpleReturn: twr - 1, // e.g. 0.034 -> 3.4 %
-  };
-
-  return result;
 }
 
 /**

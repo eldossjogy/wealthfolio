@@ -237,7 +237,7 @@ mod tests {
     use wealthfolio_core::{
         accounts::Account,
         holdings::{Holding, HoldingType, Instrument, MonetaryValue},
-        valuation::DailyAccountValuation,
+        valuation::{DailyAccountValuation, ExternalFlowSource},
     };
 
     fn cash_holding(
@@ -342,6 +342,7 @@ mod tests {
                     net_contribution_base: Decimal::ZERO,
                     external_inflow_base: Decimal::ZERO,
                     external_outflow_base: Decimal::ZERO,
+                    external_flow_source: ExternalFlowSource::Unknown,
                     performance_eligible_value_base: Decimal::from(2350),
                     calculated_at: Utc::now(),
                 }],

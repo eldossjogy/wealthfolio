@@ -1,6 +1,7 @@
 import { logger, deleteQuote, updateQuote } from "@/adapters";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import { Quote } from "@/lib/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -9,6 +10,9 @@ export const useQuoteMutations = (assetId: string) => {
 
   const handleSuccess = (message: string) => {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.ASSET_DATA, assetId] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.QUOTE_HISTORY, assetId] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.LATEST_QUOTES] });
+    invalidatePerformanceCaches(queryClient);
     toast({
       title: message,
       variant: "success",
@@ -32,9 +36,9 @@ export const useQuoteMutations = (assetId: string) => {
         createdAt: quote.createdAt || new Date().toISOString(),
       });
     },
-    // onSuccess: (_, quote) => {
-    //   handleSuccess(quote.id ? "Quote updated successfully." : "Quote added successfully.");
-    // },
+    onSuccess: (_, quote) => {
+      handleSuccess(quote.id ? "Quote updated successfully." : "Quote added successfully.");
+    },
     onError: (error) => {
       logger.error(`Error saving quote: ${error}`);
       handleError("saving the quote");

@@ -154,6 +154,7 @@ export {
   calculateAccountsSimplePerformance,
   calculatePerformanceHistory,
   calculatePerformanceSummary,
+  calculatePerformanceSummaries,
   checkHoldingsImport,
   deleteSnapshot,
   getAssetHoldings,
@@ -168,6 +169,7 @@ export {
   getSnapshotByDate,
   getSnapshots,
   importHoldingsCsv,
+  performanceSummaryScopeKey,
   recalculatePortfolio,
   saveManualHoldings,
   updatePortfolio,
@@ -320,6 +322,20 @@ export {
   runHealthChecks,
   updateHealthConfig,
 } from "../shared/health";
+
+// Allocation Target Commands
+export {
+  archiveAllocationTarget,
+  createAllocationTarget,
+  deleteAllocationTarget,
+  getAllocationTargetDrift,
+  getAllocationTarget,
+  listAllocationTargetWeights,
+  listAllocationTargets,
+  saveAllocationTargetWeights,
+  saveAllocationTargetWithWeights,
+  updateAllocationTarget,
+} from "../shared/allocation-targets";
 
 // Data Export Commands
 export { exportDataFile } from "./exports";

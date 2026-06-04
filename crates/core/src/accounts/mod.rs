@@ -7,7 +7,10 @@ mod accounts_traits;
 
 // Re-export the public interface
 pub use accounts_constants::*;
-pub use accounts_model::{Account, AccountUpdate, NewAccount, TrackingMode};
+pub use accounts_model::{
+    Account, AccountAccountingSettings, AccountUpdate, CostBasisMethod, CostBasisProfile,
+    LotSelectionStrategy, NewAccount, PoolingScope, TrackingMode,
+};
 pub use accounts_service::AccountService;
 pub use accounts_traits::{AccountRepositoryTrait, AccountServiceTrait};
 

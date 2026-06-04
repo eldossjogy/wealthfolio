@@ -27,6 +27,11 @@ pub trait TaxonomyRepositoryTrait: Send + Sync {
         taxonomy_id: &str,
         category_id: &str,
     ) -> Result<usize>;
+    fn get_category_allocation_target_weight_count(
+        &self,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> Result<usize>;
     async fn create_category(&self, category: NewCategory) -> Result<Category>;
     async fn update_category(&self, category: Category) -> Result<Category>;
     async fn delete_category(&self, taxonomy_id: &str, category_id: &str) -> Result<usize>;
@@ -34,6 +39,16 @@ pub trait TaxonomyRepositoryTrait: Send + Sync {
 
     // Assignment operations
     fn get_asset_assignments(&self, asset_id: &str) -> Result<Vec<AssetTaxonomyAssignment>>;
+    fn get_asset_assignments_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<Vec<AssetTaxonomyAssignment>> {
+        let mut assignments = Vec::new();
+        for asset_id in asset_ids {
+            assignments.extend(self.get_asset_assignments(asset_id)?);
+        }
+        Ok(assignments)
+    }
     fn get_category_assignments(
         &self,
         taxonomy_id: &str,
@@ -80,6 +95,16 @@ pub trait TaxonomyServiceTrait: Send + Sync {
 
     // Assignment operations
     fn get_asset_assignments(&self, asset_id: &str) -> Result<Vec<AssetTaxonomyAssignment>>;
+    fn get_asset_assignments_for_assets(
+        &self,
+        asset_ids: &[String],
+    ) -> Result<Vec<AssetTaxonomyAssignment>> {
+        let mut assignments = Vec::new();
+        for asset_id in asset_ids {
+            assignments.extend(self.get_asset_assignments(asset_id)?);
+        }
+        Ok(assignments)
+    }
     fn get_category_assignments(
         &self,
         taxonomy_id: &str,

@@ -64,6 +64,10 @@ pub struct HoldingSummary {
     pub market_value: Decimal,
     pub currency: String,
     pub weight_in_category: Decimal,
+    /// Actual market price per share from the quote provider.
+    /// Use this for trade sizing instead of market_value/quantity,
+    /// which gives a wrong result when market_value is weighted across categories.
+    pub unit_price: Option<Decimal>,
 }
 
 /// Position view model for frontend display with daily and total performance

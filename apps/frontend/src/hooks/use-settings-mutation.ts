@@ -1,6 +1,7 @@
 import { logger, updateSettings } from "@/adapters";
 import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { QueryKeys } from "@/lib/query-keys";
+import { invalidatePerformanceCaches } from "@/lib/performance-cache";
 import { Settings } from "@/lib/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -13,6 +14,9 @@ export function useSettingsMutation(
     mutationFn: updateSettings,
     onSuccess: (updatedSettings, variables) => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.SETTINGS] });
+      if ("baseCurrency" in variables || "defaultReturnMetric" in variables) {
+        invalidatePerformanceCaches(queryClient);
+      }
       setSettings(updatedSettings);
       applySettingsToDocument(updatedSettings);
       // Don't show toast during onboarding

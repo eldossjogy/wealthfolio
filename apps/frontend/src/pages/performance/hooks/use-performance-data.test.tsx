@@ -25,14 +25,45 @@ describe("useCalculatePerformanceHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.calculatePerformanceHistory.mockResolvedValue({
-      id: "portfolio:all",
+      scope: { id: "portfolio:all", currency: "USD" },
+      period: { startDate: "2026-03-09", endDate: "2026-03-10" },
+      mode: "timeWeighted",
+      returns: {
+        twr: 0,
+        annualizedTwr: 0,
+        irr: null,
+        annualizedIrr: null,
+        valueReturn: 0,
+      },
+      attribution: {
+        contributions: 0,
+        distributions: 0,
+        income: 0,
+        realizedPnl: 0,
+        unrealizedPnlChange: 0,
+        fxEffect: 0,
+        fees: 0,
+        taxes: 0,
+        residual: 0,
+      },
+      risk: {
+        volatility: 0,
+        maxDrawdown: 0,
+        peakDate: null,
+        troughDate: null,
+        recoveryDate: null,
+        drawdownDurationDays: null,
+      },
+      dataQuality: {
+        status: "ok",
+        warnings: [],
+        notApplicableReasons: [],
+      },
       // Return data starts on a later date than requested start to ensure
       // the hook does not mutate the query start date.
-      returns: [{ date: "2026-03-09", value: "0" }],
-      cumulativeTwr: "0",
-      annualizedTwr: "0",
-      volatility: "0",
-      maxDrawdown: "0",
+      series: [{ date: "2026-03-09", value: 0 }],
+      isHoldingsMode: false,
+      isMixedTrackingMode: false,
     });
   });
 
@@ -103,5 +134,48 @@ describe("useCalculatePerformanceHistory", () => {
       "TRANSACTIONS",
       undefined,
     );
+  });
+
+  it("allows all-time performance queries without explicit dates", async () => {
+    const { result } = renderHook(
+      () =>
+        useCalculatePerformanceHistory({
+          selectedItems: [{ id: "portfolio:all", type: "account", name: "Total Portfolio" }],
+          dateRange: undefined,
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mocks.calculatePerformanceHistory).toHaveBeenCalled();
+    });
+
+    expect(mocks.calculatePerformanceHistory).toHaveBeenCalledWith(
+      "account",
+      "portfolio:all",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(result.current.displayDateRange).toBe("All Time");
+  });
+
+  it("does not query when the date range is only partially populated", async () => {
+    renderHook(
+      () =>
+        useCalculatePerformanceHistory({
+          selectedItems: [{ id: "portfolio:all", type: "account", name: "Total Portfolio" }],
+          dateRange: {
+            from: new Date(2026, 2, 4),
+            to: undefined,
+          },
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mocks.calculatePerformanceHistory).not.toHaveBeenCalled();
+    });
   });
 });

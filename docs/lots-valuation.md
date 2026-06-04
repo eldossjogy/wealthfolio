@@ -49,14 +49,12 @@ pub struct ResolvedAccountScope {
   - `portfolio:<portfolio_id>`
   - `accounts:<sha16>` from lex-sorted, deduped account IDs
 
-- Add explicit Modified Dietz fields and keep old aliases temporarily:
-  - `cumulative_modified_dietz`
-  - `annualized_modified_dietz`
-  - deprecated aliases: `cumulative_mwr`, `annualized_mwr`
-
-- Later add XIRR fields:
-  - `period_xirr`
-  - `annualized_xirr`
+- Add explicit return fields:
+  - `returns.twr`
+  - `returns.annualized_twr`
+  - `returns.irr` as selected-period money-weighted return
+  - `returns.annualized_irr` as annualized XIRR
+  - `returns.value_return`
 
 ## Phase 1: Scope Engine And Aggregate Retirement
 
@@ -201,7 +199,7 @@ Checks:
 - Holdings-mode accounts are excluded from transaction-flow performance and use
   snapshot/simple-return behavior.
 
-## Phase 5: TWR And Modified Dietz
+## Phase 5: TWR And IRR
 
 Goal:
 
@@ -209,8 +207,7 @@ Goal:
 
 Implementation:
 
-- Keep current Modified Dietz logic but rename it explicitly.
-- Compute daily TWR approximation with locked convention:
+- Compute daily TWR with locked convention:
 
 ```text
 r_D = (V_D + outflow_D - V_{D-1} - inflow_D) / (V_{D-1} + inflow_D)
@@ -227,8 +224,7 @@ Checks:
 - Numeric fixture proves deposit-on-up-day does not become investment gain.
 - Numeric fixture proves withdrawal-on-up-day is handled consistently.
 - Negative or zero denominator period is excluded with warning.
-- Existing frontend uses new Modified Dietz fields while old MWR aliases remain
-  during compatibility window.
+- Existing frontend uses the nested `PerformanceResult.returns` fields.
 
 ## Phase 6: Scoped Aggregation And Portfolio Views
 
@@ -260,22 +256,23 @@ Checks:
 - Cache invalidates when underlying valuation rows change.
 - Cache invalidates when portfolio membership changes.
 
-## Phase 7: Period XIRR
+## Phase 7: IRR And XIRR
 
 Goal:
 
-- Add a true money-weighted return metric without overloading Modified Dietz.
+- Add a true money-weighted return metric.
 
 Implementation:
 
 - Implement Brent solver only.
-- Name the metric “Period XIRR”.
+- Calculate annualized XIRR and derive selected-period IRR/MWR from it.
 - Cash-flow convention:
   - starting market value is negative anchor flow
   - external inflows are negative flows
   - external outflows are positive flows
   - ending market value is positive terminal flow
-- Expose XIRR alongside TWR and Modified Dietz.
+- Expose selected-period IRR plus annualized XIRR alongside TWR and value
+  return.
 
 Checks:
 

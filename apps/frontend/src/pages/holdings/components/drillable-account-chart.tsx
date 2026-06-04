@@ -159,10 +159,10 @@ export function DrillableAccountChart({
   if (isLoading) {
     return (
       <Card className="overflow-hidden backdrop-blur-sm">
-        <CardHeader>
-          <Skeleton className="h-5 w-[140px]" />
+        <CardHeader className="px-5 pb-1 pt-5">
+          <Skeleton className="h-4 w-[120px]" />
         </CardHeader>
-        <CardContent className="p-6">
+        <CardContent className="px-5 pb-5 pt-0">
           <div className="flex h-[160px] items-center justify-center">
             <Skeleton className="h-[120px] w-[120px] rounded-full" />
           </div>
@@ -173,9 +173,9 @@ export function DrillableAccountChart({
 
   return (
     <Card className="overflow-hidden backdrop-blur-sm">
-      <CardHeader>
+      <CardHeader className="px-5 pb-1 pt-5">
         {isAtRoot ? (
-          <CardTitle className="text-muted-foreground text-sm font-medium uppercase tracking-wider">
+          <CardTitle className="text-muted-foreground text-[12px] font-semibold uppercase tracking-[0.18em]">
             Accounts
           </CardTitle>
         ) : (
@@ -186,7 +186,7 @@ export function DrillableAccountChart({
           />
         )}
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="px-5 pb-5 pt-0">
         {data.length > 0 ? (
           <DonutChart
             data={data}

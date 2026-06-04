@@ -84,6 +84,9 @@ pub trait BrokerSyncServiceTrait: Send + Sync {
     /// Get all synced accounts (accounts with provider_account_id set)
     fn get_synced_accounts(&self) -> Result<Vec<Account>>;
 
+    /// Whether the account already has a broker-imported holdings snapshot.
+    fn has_broker_imported_holdings_snapshot(&self, account_id: &str) -> Result<bool>;
+
     /// Get all platforms
     fn get_platforms(&self) -> Result<Vec<Platform>>;
 

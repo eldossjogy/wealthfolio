@@ -9,7 +9,7 @@ import { CategoryIcon } from "../category-chips";
 import type { BudgetCategoryRow, BudgetGroupRow } from "../../types/budget";
 import type { CategoryBreakdownRow } from "../../types/report";
 import {
-  buildGroupNodes,
+  buildGroupWeights,
   buildTree,
   formatDelta,
   type CategorySort,
@@ -81,7 +81,7 @@ export function CategoryHierarchyTable({
 
   const groups = useMemo(
     () =>
-      groupRows && groupRows.length > 0 ? buildGroupNodes({ tree, groupRows, budgetRows }) : null,
+      groupRows && groupRows.length > 0 ? buildGroupWeights({ tree, groupRows, budgetRows }) : null,
     [tree, groupRows, budgetRows],
   );
 

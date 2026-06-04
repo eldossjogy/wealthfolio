@@ -28,10 +28,10 @@ import type {
   IncomeSummary,
   MarketDataProviderInfo,
   NewContributionLimit,
-  PerformanceMetrics,
+  PerformanceResult,
   Quote,
   Settings,
-  SimplePerformanceMetrics,
+  SimplePerformanceResult,
   SnapshotHoldingInput,
   SnapshotImportResult,
   SnapshotInfo,
@@ -332,9 +332,9 @@ export interface PerformanceAPI {
   calculateHistory(
     itemType: 'account' | 'symbol',
     itemId: string,
-    startDate: string,
-    endDate: string,
-  ): Promise<PerformanceMetrics>;
+    startDate?: string,
+    endDate?: string,
+  ): Promise<PerformanceResult>;
 
   /**
    * Calculate performance summary
@@ -346,14 +346,14 @@ export interface PerformanceAPI {
     itemId: string;
     startDate?: string | null;
     endDate?: string | null;
-  }): Promise<PerformanceMetrics>;
+  }): Promise<PerformanceResult>;
 
   /**
    * Calculate simple performance for multiple accounts
    * @param accountIds Array of account identifiers
    * @returns Promise resolving to array of simple performance metrics
    */
-  calculateAccountsSimple(accountIds: string[]): Promise<SimplePerformanceMetrics[]>;
+  calculateAccountsSimple(accountIds: string[]): Promise<SimplePerformanceResult[]>;
 }
 
 /**
