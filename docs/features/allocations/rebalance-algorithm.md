@@ -56,18 +56,17 @@ Build exposure vectors (buy candidates)
     Skip if all categories are __UNKNOWN__ (warn UnclassifiedAsset)
     Include with partial exposure if some are __UNKNOWN__ (warn PartialClassification)
 
-Sell phase  (SellToRebalance / Hybrid — skipped for CashFlowOnly or allow_sells=false)
-  Hybrid: if total_drift == 0 before any trades → skip sell phase
+Sell phase  (SellToRebalance only — runs before buy phase)
   while overweight drift > 0:
     for each sell candidate (holding with qty_owned > 0, classified):
       simulate sell quantity → values[c] -= exposure[c] × qty
       score = (drift_before − drift_after) / sell_proceeds
     pick candidate with highest score > 0
     apply sell: update values[c], proceeds += price × qty, qty_remaining[idx] -= qty
-  sell_proceeds accumulate into the buy phase cash pool
+  sell_proceeds become the buy phase cash pool (available_cash untouched)
 
 Buy phase
-  cash = available_cash + sell_proceeds
+  CashFlowOnly / SellToRebalance: cash = available_cash  |  sell_proceeds
   while cash > 0:
     drift_before = Σ |current_bps[c] − target_bps[c]|  for required non-cash categories
     for each candidate asset:
@@ -80,10 +79,21 @@ Buy phase
     if no candidate improves drift: stop
     apply buy: update values[c], cash -= amount
 
+Hybrid pass-2 (after cash buys, if still overweight outside goal threshold)
+  Check: any required category bps > threshold?
+    ExactTarget → threshold = target_bps
+    NearestBand → threshold = target_bps + drift_band
+  If yes: run sell phase on post-buy values → sell_proceeds_2
+    then run buy phase again with sell_proceeds_2
+  Note: total_value is fixed. Cash buys are a cash↔asset swap and do not
+  reduce an untouched overweight category's bps. Hybrid differs from
+  SellToRebalance by ordering (buy first, sell residual), not by cash dilution.
+
 Post-processing
   Sell trades + buy trades → SuggestedManualTrade[] (1 per asset per action)
+  Drop sell trades where estimated_amount < min_trade_amount (recompute proceeds from kept)
   Drop buy trades where estimated_amount < min_trade_amount
-  cash_used = sum of buy trade amounts (post filter)
+  cash_used = sum of kept buy trade amounts
   cash_remaining = available_cash + sell_proceeds − cash_used
   after_bps_by_category = recompute from initial values + all kept trades
 
