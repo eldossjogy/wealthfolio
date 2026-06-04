@@ -199,6 +199,7 @@ impl DriftPriorityOptimizer {
 
     /// Sell greedy: each iteration sells 1 share of the asset with the highest
     /// drift-improvement/dollar score. Returns (updated values, proceeds, sell trades).
+    #[allow(clippy::too_many_arguments)]
     fn run_sell_phase(
         values: &HashMap<String, Decimal>,
         total_value: Decimal,
