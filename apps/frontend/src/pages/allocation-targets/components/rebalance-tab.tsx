@@ -9,6 +9,7 @@ import {
   Icons,
   Skeleton,
 } from "@wealthfolio/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
 import { cn, formatAmount } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -25,7 +26,7 @@ import {
   buildAllocationTargetColorMap,
 } from "./allocation-target-colors";
 import { accountScopeKey } from "./target-scope";
-import { useCalculateRebalancePlan } from "../hooks/use-rebalance";
+import { useRebalancePlan } from "../hooks/use-rebalance";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -218,32 +219,42 @@ function ModeSwitch({
   ];
 
   return (
-    <div className="border-border bg-card inline-flex items-center gap-1 rounded-lg border p-1">
+    <div className="border-border/60 bg-card/40 inline-flex items-center gap-1 overflow-x-auto rounded-2xl border p-1 backdrop-blur-xl">
       {modes.map((m) => {
         const disabled = !allowSells && m.id !== "cash_flow_only";
         const active = value === m.id;
-        return (
+        const button = (
           <button
             key={m.id}
             type="button"
             disabled={disabled}
             onClick={() => !disabled && onChange(m.id)}
-            title={disabled ? "Enable 'Allow sells' on this target to use this mode" : undefined}
             className={cn(
-              "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] transition-colors",
+              "group inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2.5 text-xs transition-colors",
               active
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground",
-              disabled && "cursor-not-allowed opacity-40",
+                ? "bg-foreground text-background"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+              disabled && "cursor-not-allowed opacity-40 hover:bg-transparent",
             )}
           >
             <span className="font-medium">{m.label}</span>
-            <span
-              className={cn("text-[11px]", active ? "text-primary-foreground/65" : "opacity-70")}
-            >
+            <span className={cn("text-[11px]", active ? "text-background/65" : "opacity-70")}>
               {m.hint}
             </span>
           </button>
+        );
+
+        if (!disabled) return button;
+
+        return (
+          <Tooltip key={m.id}>
+            <TooltipTrigger asChild>
+              <span className="inline-flex cursor-not-allowed">{button}</span>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">
+              Enable &apos;Allow sells&apos; on this target to use this mode
+            </TooltipContent>
+          </Tooltip>
         );
       })}
     </div>
@@ -639,14 +650,7 @@ export function RebalanceTab({
 }: RebalanceTabProps) {
   const [cashDraft, setCashDraft] = useState<{ key: string; value: string } | null>(null);
   const [scenarioMode, setScenarioMode] = useState<ScenarioMode>("cash_flow_only");
-  const [planResult, setPlanResult] = useState<{
-    key: string;
-    sourceKey: string;
-    inputContextKey: string;
-    plan: RebalancePlan;
-  } | null>(null);
 
-  const calculatePlan = useCalculateRebalancePlan();
   const currency = driftReport?.baseCurrency ?? "USD";
   const inputContextKey = `${profile?.id ?? "no-profile"}:${accountScopeKey(accountScope)}:${currency}`;
   const cashValue =
@@ -657,12 +661,17 @@ export function RebalanceTab({
   const availableCashLimit = cashInputLimit(availableCash, currency);
   const sourceReady = !isSourceLoading && !!driftReport;
   const sourceKey = `${inputContextKey}:${availableCash}:${sourceVersion}`;
-  const planKey = `${sourceKey}:${cash}:${scenarioMode}`;
-  const plan = planResult?.key === planKey ? planResult.plan : null;
-  const hasStalePlan =
-    !!planResult &&
-    planResult.inputContextKey === inputContextKey &&
-    planResult.sourceKey !== sourceKey;
+
+  const planQuery = useRebalancePlan({
+    targetId: profile?.id ?? "",
+    cash,
+    filter: accountScope,
+    scenarioMode,
+    sourceKey,
+  });
+  const cachedPlan = planQuery.data ?? null;
+  const hasStalePlan = !!cachedPlan && cachedPlan.sourceKey !== sourceKey;
+  const plan = hasStalePlan ? null : (cachedPlan?.plan ?? null);
   const isSellMode = scenarioMode !== "cash_flow_only";
 
   useEffect(() => {
@@ -693,14 +702,9 @@ export function RebalanceTab({
       toast.error("Cash to deploy exceeds available cash");
       return;
     }
-    calculatePlan.mutate(
-      { targetId: profile.id, availableCash: cash, filter: accountScope, scenarioMode },
-      {
-        onSuccess: (result) =>
-          setPlanResult({ key: planKey, sourceKey, inputContextKey, plan: result }),
-        onError: (err) => toast.error(`Failed to calculate plan: ${err.message}`),
-      },
-    );
+    void planQuery.refetch().then((res) => {
+      if (res.error) toast.error(`Failed to calculate plan: ${res.error.message}`);
+    });
   }
 
   if (!profile) {
@@ -716,7 +720,7 @@ export function RebalanceTab({
   }
 
   const sleeveSummary = plan && driftReport ? computeSleeveSummary(driftReport, plan) : [];
-  const isCalculating = calculatePlan.isPending;
+  const isCalculating = planQuery.isFetching;
 
   return (
     <div className="space-y-6">

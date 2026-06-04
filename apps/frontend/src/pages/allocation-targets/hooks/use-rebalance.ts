@@ -1,19 +1,49 @@
-import { useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { calculateRebalancePlan } from "@/adapters";
-import type { AccountScope, ScenarioMode } from "@/lib/types";
+import { accountScopeKey } from "../components/target-scope";
+import type { AccountScope, RebalancePlan, ScenarioMode } from "@/lib/types";
 
-export function useCalculateRebalancePlan() {
-  return useMutation({
-    mutationFn: ({
-      targetId,
-      availableCash,
-      filter,
-      scenarioMode,
-    }: {
-      targetId: string;
-      availableCash: number;
-      filter: AccountScope;
-      scenarioMode?: ScenarioMode;
-    }) => calculateRebalancePlan(targetId, availableCash, filter, scenarioMode),
+export interface RebalancePlanParams {
+  targetId: string;
+  /** Cash to deploy (the editable amount). */
+  cash: number;
+  filter: AccountScope;
+  scenarioMode: ScenarioMode;
+  /** Snapshot of the portfolio source (available cash + holdings version) at calc time, for staleness detection. */
+  sourceKey: string;
+}
+
+export interface CachedRebalancePlan {
+  plan: RebalancePlan;
+  sourceKey: string;
+}
+
+/**
+ * Caches a calculated rebalance plan keyed by its user-controlled inputs.
+ * Never fetches automatically — the caller triggers it via `refetch()` (the
+ * "Calculate / Recalculate" button). The cached plan survives unmount, so
+ * navigating away from the rebalance view and back shows it without recomputing.
+ */
+export function useRebalancePlan(params: RebalancePlanParams) {
+  return useQuery({
+    queryKey: [
+      "rebalance-plan",
+      params.targetId,
+      accountScopeKey(params.filter),
+      params.scenarioMode,
+      params.cash,
+    ],
+    queryFn: async (): Promise<CachedRebalancePlan> => {
+      const plan = await calculateRebalancePlan(
+        params.targetId,
+        params.cash,
+        params.filter,
+        params.scenarioMode,
+      );
+      return { plan, sourceKey: params.sourceKey };
+    },
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
   });
 }

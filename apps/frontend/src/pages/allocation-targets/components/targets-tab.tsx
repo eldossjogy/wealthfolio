@@ -510,7 +510,6 @@ function TargetEditor({
           {target ? (
             <>
               <Button
-                variant="outline"
                 size="sm"
                 disabled={!canSave || isSaving || !hasUnsavedChanges}
                 onClick={() => persistTarget()}
