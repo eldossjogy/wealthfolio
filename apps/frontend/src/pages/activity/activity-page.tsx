@@ -472,6 +472,21 @@ const ActivityPage = () => {
   const spendingActions = (
     <div className="flex flex-wrap items-center gap-2">
       <SyncButton />
+      {/* Ask AI to categorize uncategorized transactions */}
+      <Button
+        asChild
+        size="icon"
+        variant="outline"
+        title="Ask AI to categorize"
+        aria-label="Ask AI to categorize"
+      >
+        <Link
+          to="/assistant"
+          state={{ aiPrompt: "Help me categorize all my uncategorized transactions." }}
+        >
+          <Icons.Sparkles className="size-4" />
+        </Link>
+      </Button>
       {/* Desktop action palette */}
       <div className="hidden sm:flex">
         <ActionPalette

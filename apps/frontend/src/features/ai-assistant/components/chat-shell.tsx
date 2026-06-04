@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { useState, useMemo, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AssistantRuntimeProvider, useThreadRuntime } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
@@ -178,6 +178,33 @@ function NoProvidersEmptyState({ className }: { className?: string }) {
   );
 }
 
+// Tracks history entries whose prompt has already been auto-sent, so a
+// re-render or React strict-mode double-invoke can't resend the same message.
+const consumedPromptKeys = new Set<string>();
+
+/**
+ * Reads an `aiPrompt` passed via navigation state (e.g. from the spending
+ * insights "Ask AI to categorize" action), auto-sends it as a new message,
+ * then clears the state so it isn't resent on refresh or back navigation.
+ * Renders nothing; must live under AssistantRuntimeProvider.
+ */
+function InitialPromptSender() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const threadRuntime = useThreadRuntime();
+
+  useEffect(() => {
+    const prompt = (location.state as { aiPrompt?: string } | null)?.aiPrompt;
+    if (!prompt || consumedPromptKeys.has(location.key)) return;
+    consumedPromptKeys.add(location.key);
+    // Clear navigation state first so a refresh or back nav won't resend.
+    navigate(location.pathname, { replace: true, state: null });
+    threadRuntime.append(prompt);
+  }, [location, navigate, threadRuntime]);
+
+  return null;
+}
+
 /**
  * Inner chat shell component that uses the chat model context.
  */
@@ -234,6 +261,8 @@ function ChatShellInner({ className }: ChatShellProps) {
         <AssetClassificationToolUI />
         <ListCategorizationContextToolUI />
         <CategorizationProposalsToolUI />
+
+        <InitialPromptSender />
 
         <div className={cn("bg-background flex h-full min-h-0 w-full", className)}>
           {/* Desktop Sidebar */}

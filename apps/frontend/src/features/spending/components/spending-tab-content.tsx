@@ -513,7 +513,12 @@ export default function SpendingTabContent() {
   }, [report, priorReport, categoriesMeta]);
 
   const insights = useMemo(() => {
-    const items: { icon: string; title: React.ReactNode; sub: React.ReactNode }[] = [];
+    const items: {
+      icon: string;
+      title: React.ReactNode;
+      sub: React.ReactNode;
+      action?: React.ReactNode;
+    }[] = [];
     if (priorSpending > 0 && deltaPct > 0.2) {
       items.push({
         icon: "!",
@@ -542,6 +547,19 @@ export default function SpendingTabContent() {
           </>
         ),
         sub: "Categorize them to improve breakdowns",
+        action: (
+          <Link
+            to="/assistant"
+            state={{
+              aiPrompt: "Help me categorize all my uncategorized transactions.",
+            }}
+            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium underline-offset-4 hover:underline"
+            style={{ color: theme.deep }}
+          >
+            <Icons.Sparkles className="h-3 w-3" />
+            Ask AI to categorize
+          </Link>
+        ),
       });
       if (hasNoCategorizationRules) {
         items.push({
@@ -571,6 +589,7 @@ export default function SpendingTabContent() {
     isBalanceHidden,
     categorizationRules,
     categorizationRulesLoading,
+    theme.deep,
   ]);
 
   return (
@@ -826,6 +845,7 @@ export default function SpendingTabContent() {
                         <div>
                           <div className="text-foreground">{ins.title}</div>
                           <div className="text-muted-foreground/80 mt-0.5">{ins.sub}</div>
+                          {ins.action && <div>{ins.action}</div>}
                         </div>
                       </div>
                     ))}
