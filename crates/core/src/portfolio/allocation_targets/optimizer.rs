@@ -855,9 +855,15 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
 
         // Sleeve-level dollar trades for uncovered underweight categories.
         // Draw from cash left after kept asset trades (including sell proceeds).
-        // Greedy selections below min-trade threshold are dropped, so they must not
-        // starve manual sleeve trades.
-        let mut manual_cash = buy_pool - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
+        // For Hybrid, buy_pool = available_cash but pass-2b also consumed sell_proceeds —
+        // so the actual pool is available_cash + sell_proceeds.
+        let total_buy_pool = match &scenario_mode {
+            ScenarioMode::Hybrid => available_cash + sell_proceeds,
+            _ => buy_pool,
+        };
+        let mut manual_cash = (total_buy_pool
+            - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>())
+        .max(Decimal::ZERO);
         for cat in &no_candidate_categories {
             if manual_cash <= Decimal::ZERO {
                 break;
