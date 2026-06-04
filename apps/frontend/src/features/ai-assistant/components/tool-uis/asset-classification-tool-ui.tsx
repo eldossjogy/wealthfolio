@@ -538,6 +538,9 @@ export function AssetClassificationToolUIContentImpl({
   const appliedAt = parsedResult.appliedAt
     ? new Date(parsedResult.appliedAt).toLocaleString()
     : null;
+  const appliedCategoryCount = proposedAssignments.filter(
+    (assignment) => assignment.weightBasisPoints > 0,
+  ).length;
 
   const handleDraftPercentValueChange = (categoryId: string, value: string) => {
     setDraftPercentValues((current) => ({
@@ -780,6 +783,23 @@ export function AssetClassificationToolUIContentImpl({
           <p className="text-destructive text-xs">
             Classification changed, but this chat could not be updated.
           </p>
+        ) : null}
+
+        {isApplied ? (
+          <div className="border-success/30 bg-success/10 flex items-center gap-3 rounded-md border px-3 py-2">
+            <div className="bg-success/20 text-success flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
+              <Icons.Check className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-success text-sm font-medium">
+                {appliedCategoryCount} {appliedCategoryCount === 1 ? "category" : "categories"}{" "}
+                classified
+              </p>
+              <p className="text-muted-foreground text-xs">
+                Allocations saved to {selectedAsset?.label ?? "your asset"}.
+              </p>
+            </div>
+          </div>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
