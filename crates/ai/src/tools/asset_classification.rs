@@ -49,6 +49,7 @@ pub struct PrepareAssetClassificationArgs {
 pub struct PreparedAssignmentInput {
     pub category_id: String,
     pub weight_basis_points: i32,
+    pub source_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +136,8 @@ pub struct AssignmentPreviewDto {
     pub category_color: String,
     pub weight_basis_points: i32,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -381,7 +384,9 @@ impl<E: AiEnvironment + 'static> Tool for PrepareAssetClassificationTool<E> {
                  when that is the requested granularity; aggregate to root regions only for \
                  top-level/root region requests. \
                  Omit screenshot buckets such as Unknown, Other, Unclassified, or N/A when they \
-                 do not exactly match an available category; never invent placeholder category IDs. \
+                 do not exactly match an available category. Never map Other/Unknown/residual \
+                 bucket weights to a plausible country, region, sector, or industry. Never invent \
+                 placeholder category IDs. \
                  This tool does not apply changes; the user must confirm the widget."
                     .to_string(),
             parameters: serde_json::json!({
@@ -406,9 +411,13 @@ impl<E: AiEnvironment + 'static> Tool for PrepareAssetClassificationTool<E> {
                                     "type": "integer",
                                     "minimum": 0,
                                     "maximum": 10000
+                                },
+                                "sourceLabel": {
+                                    "type": "string",
+                                    "description": "Original label exactly as shown by the user or screenshot before mapping to categoryId, for example 'United States'. Do not rewrite residual labels such as 'Other' or 'Unknown' as a country/category; omit those residual buckets unless they exactly match an available category."
                                 }
                             },
-                            "required": ["categoryId", "weightBasisPoints"]
+                            "required": ["categoryId", "weightBasisPoints", "sourceLabel"]
                         }
                     }
                 },
@@ -891,12 +900,19 @@ fn validate_proposed_assignments(
         if assignment.weight_basis_points == 0 {
             continue;
         }
-        if !category_lookup.contains_key(assignment.category_id.as_str()) {
+        if assignment.source_label.trim().is_empty() {
+            return Err(AiError::invalid_input(format!(
+                "sourceLabel is required for category '{}'",
+                assignment.category_id
+            )));
+        }
+        let Some(category) = category_lookup.get(assignment.category_id.as_str()) else {
             return Err(AiError::invalid_input(format!(
                 "Category '{}' does not belong to the selected taxonomy",
                 assignment.category_id
             )));
-        }
+        };
+        validate_source_label_mapping(assignment, category)?;
         if !seen.insert(assignment.category_id.as_str()) {
             return Err(AiError::invalid_input(format!(
                 "Duplicate category ID '{}'",
@@ -925,6 +941,67 @@ fn validate_proposed_assignments(
     }
 
     Ok(())
+}
+
+fn validate_source_label_mapping(
+    assignment: &PreparedAssignmentInput,
+    category: &Category,
+) -> Result<(), AiError> {
+    let source_label = assignment.source_label.trim();
+    if !is_residual_bucket_label(source_label)
+        || category_matches_source_label(category, source_label)
+    {
+        return Ok(());
+    }
+
+    Err(AiError::invalid_input(format!(
+        "Residual bucket '{}' cannot be mapped to category '{}'. Omit that bucket so it remains unallocated.",
+        source_label, category.name
+    )))
+}
+
+fn category_matches_source_label(category: &Category, source_label: &str) -> bool {
+    let normalized_source = normalize_category_label(source_label);
+    [
+        category.name.as_str(),
+        category.key.as_str(),
+        category.id.as_str(),
+    ]
+    .iter()
+    .any(|value| normalize_category_label(value) == normalized_source)
+}
+
+fn is_residual_bucket_label(label: &str) -> bool {
+    matches!(
+        normalize_category_label(label).as_str(),
+        "unknown"
+            | "other"
+            | "unclassified"
+            | "uncategorized"
+            | "unallocated"
+            | "not classified"
+            | "not applicable"
+            | "n a"
+            | "na"
+            | "misc"
+            | "miscellaneous"
+            | "remainder"
+            | "remaining"
+            | "residual"
+            | "rest"
+    )
+}
+
+fn normalize_category_label(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn current_assignments_for_asset<E: AiEnvironment>(
@@ -1033,6 +1110,7 @@ fn current_preview_dto(
         category_color: category.color.clone(),
         weight_basis_points: assignment.weight,
         source: assignment.source.clone(),
+        source_label: None,
     })
 }
 
@@ -1056,6 +1134,7 @@ fn proposed_preview_dto(
         category_color: category.color.clone(),
         weight_basis_points: assignment.weight_basis_points,
         source: AI_ASSIGNMENT_SOURCE.to_string(),
+        source_label: Some(assignment.source_label.clone()),
     })
 }
 
@@ -1210,6 +1289,22 @@ mod tests {
             source: source.to_string(),
             created_at: NaiveDateTime::default(),
             updated_at: NaiveDateTime::default(),
+        }
+    }
+
+    fn prepared(category_id: &str, weight_basis_points: i32) -> PreparedAssignmentInput {
+        prepared_with_source(category_id, weight_basis_points, category_id)
+    }
+
+    fn prepared_with_source(
+        category_id: &str,
+        weight_basis_points: i32,
+        source_label: &str,
+    ) -> PreparedAssignmentInput {
+        PreparedAssignmentInput {
+            category_id: category_id.to_string(),
+            weight_basis_points,
+            source_label: source_label.to_string(),
         }
     }
 
@@ -1454,16 +1549,7 @@ mod tests {
             .call(PrepareAssetClassificationArgs {
                 asset_query: "AAPL".to_string(),
                 taxonomy_id: "asset-tax".to_string(),
-                assignments: vec![
-                    PreparedAssignmentInput {
-                        category_id: "equity".to_string(),
-                        weight_basis_points: 6000,
-                    },
-                    PreparedAssignmentInput {
-                        category_id: "cash".to_string(),
-                        weight_basis_points: 3000,
-                    },
-                ],
+                assignments: vec![prepared("equity", 6000), prepared("cash", 3000)],
             })
             .await
             .unwrap();
@@ -1524,10 +1610,7 @@ mod tests {
             .call(PrepareAssetClassificationArgs {
                 asset_query: "VT".to_string(),
                 taxonomy_id: "asset-tax".to_string(),
-                assignments: vec![PreparedAssignmentInput {
-                    category_id: "equity".to_string(),
-                    weight_basis_points: 9000,
-                }],
+                assignments: vec![prepared("equity", 9000)],
             })
             .await
             .unwrap();
@@ -1602,10 +1685,7 @@ mod tests {
             .call(PrepareAssetClassificationArgs {
                 asset_query: "AAPL".to_string(),
                 taxonomy_id: "asset-tax".to_string(),
-                assignments: vec![PreparedAssignmentInput {
-                    category_id: "equity".to_string(),
-                    weight_basis_points: 10000,
-                }],
+                assignments: vec![prepared("equity", 10000)],
             })
             .await
             .unwrap();
@@ -1904,73 +1984,90 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_rejects_duplicate_categories() {
-        let error = prepare_error(vec![
-            PreparedAssignmentInput {
-                category_id: "equity".to_string(),
-                weight_basis_points: 5000,
-            },
-            PreparedAssignmentInput {
-                category_id: "equity".to_string(),
-                weight_basis_points: 5000,
-            },
-        ])
-        .await;
+        let error = prepare_error(vec![prepared("equity", 5000), prepared("equity", 5000)]).await;
 
         assert!(error.to_string().contains("Duplicate category ID"));
     }
 
     #[tokio::test]
     async fn prepare_rejects_single_select_multiple_categories() {
-        let error = prepare_single_select_error(vec![
-            PreparedAssignmentInput {
-                category_id: "equity".to_string(),
-                weight_basis_points: 5000,
-            },
-            PreparedAssignmentInput {
-                category_id: "cash".to_string(),
-                weight_basis_points: 5000,
-            },
-        ])
-        .await;
+        let error =
+            prepare_single_select_error(vec![prepared("equity", 5000), prepared("cash", 5000)])
+                .await;
 
         assert!(error.to_string().contains("allow only one category"));
     }
 
     #[tokio::test]
     async fn prepare_rejects_single_select_partial_weight() {
-        let error = prepare_single_select_error(vec![PreparedAssignmentInput {
-            category_id: "equity".to_string(),
-            weight_basis_points: 5000,
-        }])
-        .await;
+        let error = prepare_single_select_error(vec![prepared("equity", 5000)]).await;
 
         assert!(error.to_string().contains("require 10000 basis points"));
     }
 
     #[tokio::test]
     async fn prepare_rejects_invalid_weights() {
-        let error = prepare_error(vec![PreparedAssignmentInput {
-            category_id: "equity".to_string(),
-            weight_basis_points: -1,
-        }])
-        .await;
+        let error = prepare_error(vec![prepared("equity", -1)]).await;
 
         assert!(error.to_string().contains("between 0 and 10000"));
     }
 
     #[tokio::test]
+    async fn prepare_rejects_missing_source_label() {
+        let error = prepare_error(vec![prepared_with_source("equity", 10000, "")]).await;
+
+        assert!(error.to_string().contains("sourceLabel is required"));
+    }
+
+    #[tokio::test]
+    async fn prepare_rejects_residual_bucket_mapped_to_category() {
+        let error = prepare_error(vec![prepared_with_source("cash", 935, "Other")]).await;
+
+        let message = error.to_string();
+        assert!(message.contains("Residual bucket"));
+        assert!(message.contains("cannot be mapped"));
+    }
+
+    #[tokio::test]
+    async fn prepare_allows_residual_bucket_when_category_matches_exactly() {
+        let env = env_with(
+            vec![test_asset(
+                "asset-aapl",
+                "AAPL",
+                "AAPL",
+                Some("XNAS"),
+                "Apple Inc.",
+                true,
+            )],
+            vec![test_taxonomy(
+                "asset-tax",
+                "asset",
+                false,
+                vec![test_category("asset-tax", "other", "Other")],
+            )],
+            vec![],
+        );
+
+        let output = PrepareAssetClassificationTool::new(env)
+            .call(PrepareAssetClassificationArgs {
+                asset_query: "AAPL".to_string(),
+                taxonomy_id: "asset-tax".to_string(),
+                assignments: vec![prepared_with_source("other", 935, "Other")],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(output.proposed_assignments.len(), 1);
+        assert_eq!(output.proposed_assignments[0].category_id, "other");
+        assert_eq!(
+            output.proposed_assignments[0].source_label.as_deref(),
+            Some("Other")
+        );
+    }
+
+    #[tokio::test]
     async fn prepare_allows_over_allocation_as_invalid_draft() {
-        let output = prepare_success(vec![
-            PreparedAssignmentInput {
-                category_id: "equity".to_string(),
-                weight_basis_points: 7000,
-            },
-            PreparedAssignmentInput {
-                category_id: "cash".to_string(),
-                weight_basis_points: 4000,
-            },
-        ])
-        .await;
+        let output = prepare_success(vec![prepared("equity", 7000), prepared("cash", 4000)]).await;
 
         assert_eq!(output.unallocated_basis_points, -1000);
         assert_eq!(output.proposed_assignments.len(), 2);
@@ -1978,11 +2075,7 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_allows_under_allocation() {
-        let output = prepare_success(vec![PreparedAssignmentInput {
-            category_id: "equity".to_string(),
-            weight_basis_points: 6000,
-        }])
-        .await;
+        let output = prepare_success(vec![prepared("equity", 6000)]).await;
 
         assert_eq!(output.unallocated_basis_points, 4000);
     }
@@ -2031,16 +2124,7 @@ mod tests {
             .call(PrepareAssetClassificationArgs {
                 asset_query: "AAPL".to_string(),
                 taxonomy_id: "asset-tax".to_string(),
-                assignments: vec![
-                    PreparedAssignmentInput {
-                        category_id: "equity".to_string(),
-                        weight_basis_points: 6000,
-                    },
-                    PreparedAssignmentInput {
-                        category_id: "cash".to_string(),
-                        weight_basis_points: 0,
-                    },
-                ],
+                assignments: vec![prepared("equity", 6000), prepared("cash", 0)],
             })
             .await
             .unwrap();
@@ -2057,17 +2141,7 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_ignores_zero_weight_unknown_category() {
-        let output = prepare_success(vec![
-            PreparedAssignmentInput {
-                category_id: "UNKNOWN".to_string(),
-                weight_basis_points: 0,
-            },
-            PreparedAssignmentInput {
-                category_id: "equity".to_string(),
-                weight_basis_points: 10000,
-            },
-        ])
-        .await;
+        let output = prepare_success(vec![prepared("UNKNOWN", 0), prepared("equity", 10000)]).await;
 
         assert_eq!(output.proposed_assignments.len(), 1);
         assert_eq!(output.proposed_assignments[0].category_id, "equity");

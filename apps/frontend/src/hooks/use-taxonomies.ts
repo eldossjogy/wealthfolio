@@ -15,6 +15,7 @@ import {
   exportTaxonomyJson,
   getAssetTaxonomyAssignments,
   assignAssetToCategory,
+  replaceAssetTaxonomyAssignments,
   removeAssetTaxonomyAssignment,
   getMigrationStatus,
   migrateLegacyClassifications,
@@ -259,6 +260,30 @@ export function useRemoveAssetTaxonomyAssignment() {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
       invalidateAllocationTargetDriftCaches(queryClient);
+    },
+  });
+}
+
+export function useReplaceAssetTaxonomyAssignments() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      assetId,
+      taxonomyId,
+      assignments,
+    }: {
+      assetId: string;
+      taxonomyId: string;
+      assignments: NewAssetTaxonomyAssignment[];
+    }) => replaceAssetTaxonomyAssignments(assetId, taxonomyId, assignments),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: QueryKeys.assetTaxonomyAssignments(variables.assetId),
+      });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.PORTFOLIO_ALLOCATIONS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.HOLDINGS] });
+      invalidateAllocationTargetDriftCaches(queryClient, variables.taxonomyId);
     },
   });
 }

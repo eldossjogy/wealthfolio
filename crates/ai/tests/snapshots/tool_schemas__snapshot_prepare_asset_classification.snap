@@ -15,6 +15,9 @@ expression: snapshot
             "categoryId": {
               "type": "string"
             },
+            "sourceLabel": {
+              "type": "string"
+            },
             "weightBasisPoints": {
               "maximum": 10000,
               "minimum": 0,
@@ -23,7 +26,8 @@ expression: snapshot
           },
           "required": [
             "categoryId",
-            "weightBasisPoints"
+            "weightBasisPoints",
+            "sourceLabel"
           ],
           "type": "object"
         },

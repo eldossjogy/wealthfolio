@@ -10,29 +10,19 @@ const adapterMocks = vi.hoisted(() => ({
 }));
 
 const taxonomyHookMocks = vi.hoisted(() => ({
-  assignMutateAsync: vi.fn(),
-  removeMutateAsync: vi.fn(),
-}));
-
-const runtimeMocks = vi.hoisted(() => ({
-  submitUserMessage: vi.fn<(text: string) => void>(),
+  replaceMutateAsync: vi.fn(),
 }));
 
 vi.mock("@/adapters", () => adapterMocks);
 vi.mock("@/hooks/use-taxonomies", () => ({
-  useAssignAssetToCategory: () => ({
+  useReplaceAssetTaxonomyAssignments: () => ({
     isPending: false,
-    mutateAsync: taxonomyHookMocks.assignMutateAsync,
-  }),
-  useRemoveAssetTaxonomyAssignment: () => ({
-    isPending: false,
-    mutateAsync: taxonomyHookMocks.removeMutateAsync,
+    mutateAsync: taxonomyHookMocks.replaceMutateAsync,
   }),
 }));
 vi.mock("../../hooks/use-runtime-context", () => ({
   useRuntimeContext: () => ({
     currentThreadId: "thread-1",
-    submitUserMessage: runtimeMocks.submitUserMessage,
   }),
 }));
 
@@ -178,8 +168,9 @@ describe("AssetClassificationToolUIContentImpl", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     adapterMocks.updateToolResult.mockResolvedValue(undefined);
-    taxonomyHookMocks.assignMutateAsync.mockResolvedValue({ id: "assignment-equity" });
-    taxonomyHookMocks.removeMutateAsync.mockResolvedValue(1);
+    taxonomyHookMocks.replaceMutateAsync.mockResolvedValue([
+      { id: "assignment-equity", categoryId: "equity", weight: 10000 },
+    ]);
   });
 
   it("disables confirm for applied drafts", () => {
@@ -194,16 +185,18 @@ describe("AssetClassificationToolUIContentImpl", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
 
     await waitFor(() => {
-      expect(taxonomyHookMocks.removeMutateAsync).toHaveBeenCalledWith({
-        id: "assignment-stale",
-        assetId: "asset-aapl",
-      });
-      expect(taxonomyHookMocks.assignMutateAsync).toHaveBeenCalledWith({
+      expect(taxonomyHookMocks.replaceMutateAsync).toHaveBeenCalledWith({
         assetId: "asset-aapl",
         taxonomyId: "asset-class",
-        categoryId: "equity",
-        weight: 10000,
-        source: "ai",
+        assignments: [
+          {
+            assetId: "asset-aapl",
+            taxonomyId: "asset-class",
+            categoryId: "equity",
+            weight: 10000,
+            source: "ai",
+          },
+        ],
       });
       const request = adapterMocks.updateToolResult.mock.calls[0]?.[0];
       expect(request).toBeDefined();
@@ -235,12 +228,18 @@ describe("AssetClassificationToolUIContentImpl", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
 
     await waitFor(() => {
-      expect(taxonomyHookMocks.assignMutateAsync).toHaveBeenCalledWith({
+      expect(taxonomyHookMocks.replaceMutateAsync).toHaveBeenCalledWith({
         assetId: "asset-aapl",
         taxonomyId: "asset-class",
-        categoryId: "equity",
-        weight: 7525,
-        source: "ai",
+        assignments: [
+          {
+            assetId: "asset-aapl",
+            taxonomyId: "asset-class",
+            categoryId: "equity",
+            weight: 7525,
+            source: "ai",
+          },
+        ],
       });
 
       const request = adapterMocks.updateToolResult.mock.calls[0]?.[0];
@@ -260,7 +259,7 @@ describe("AssetClassificationToolUIContentImpl", () => {
     });
   });
 
-  it("selects an ambiguous asset inside the draft without submitting chat", async () => {
+  it("selects an ambiguous asset inside the draft", async () => {
     renderWidget(ambiguousResult());
 
     expect(screen.getByRole("button", { name: /confirm/i })).toBeDisabled();
@@ -281,7 +280,6 @@ describe("AssetClassificationToolUIContentImpl", () => {
         exchangeMic: "ARCX",
       });
       expect(typeof request?.resultPatch.selectedAt).toBe("string");
-      expect(runtimeMocks.submitUserMessage).not.toHaveBeenCalled();
     });
 
     expect(screen.getByRole("button", { name: /confirm/i })).toBeEnabled();
@@ -303,7 +301,6 @@ describe("AssetClassificationToolUIContentImpl", () => {
       expect(adapterMocks.updateToolResult.mock.calls[1]?.[0].resultPatch.selectedAssetId).toBe(
         "asset-vt-xnas",
       );
-      expect(runtimeMocks.submitUserMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -321,16 +318,18 @@ describe("AssetClassificationToolUIContentImpl", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
 
     await waitFor(() => {
-      expect(taxonomyHookMocks.removeMutateAsync).toHaveBeenCalledWith({
-        id: "assignment-xnas-old",
-        assetId: "asset-vt-xnas",
-      });
-      expect(taxonomyHookMocks.assignMutateAsync).toHaveBeenCalledWith({
+      expect(taxonomyHookMocks.replaceMutateAsync).toHaveBeenCalledWith({
         assetId: "asset-vt-xnas",
         taxonomyId: "asset-class",
-        categoryId: "equity",
-        weight: 10000,
-        source: "ai",
+        assignments: [
+          {
+            assetId: "asset-vt-xnas",
+            taxonomyId: "asset-class",
+            categoryId: "equity",
+            weight: 10000,
+            source: "ai",
+          },
+        ],
       });
       const appliedRequest = adapterMocks.updateToolResult.mock.calls[1]?.[0];
       expect(appliedRequest?.resultPatch).toMatchObject({
@@ -370,13 +369,18 @@ describe("AssetClassificationToolUIContentImpl", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
 
     await waitFor(() => {
-      expect(taxonomyHookMocks.removeMutateAsync).not.toHaveBeenCalled();
-      expect(taxonomyHookMocks.assignMutateAsync).toHaveBeenCalledWith({
+      expect(taxonomyHookMocks.replaceMutateAsync).toHaveBeenCalledWith({
         assetId: "asset-vt-arcx",
         taxonomyId: "asset-class",
-        categoryId: "equity",
-        weight: 10000,
-        source: "ai",
+        assignments: [
+          {
+            assetId: "asset-vt-arcx",
+            taxonomyId: "asset-class",
+            categoryId: "equity",
+            weight: 10000,
+            source: "ai",
+          },
+        ],
       });
 
       const appliedRequest = adapterMocks.updateToolResult.mock.calls[1]?.[0];
@@ -421,7 +425,6 @@ describe("AssetClassificationToolUIContentImpl", () => {
     await waitFor(() => {
       expect(adapterMocks.updateToolResult).toHaveBeenCalledTimes(2);
       expect(screen.queryByText(/could not be updated/i)).not.toBeInTheDocument();
-      expect(runtimeMocks.submitUserMessage).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,6 +1,6 @@
 import { updateToolResult } from "@/adapters";
 import { TickerAvatar } from "@/components/ticker-avatar";
-import { useAssignAssetToCategory, useRemoveAssetTaxonomyAssignment } from "@/hooks/use-taxonomies";
+import { useReplaceAssetTaxonomyAssignments } from "@/hooks/use-taxonomies";
 import { cn } from "@/lib/utils";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { makeAssistantToolUI } from "@assistant-ui/react";
@@ -36,6 +36,7 @@ type AssetClassificationToolUIContentProps = ToolCallMessagePartProps<
 
 type UnknownRecord = Record<string, unknown>;
 
+// Selection can be clicked while the streamed assistant message is still being persisted.
 const TOOL_RESULT_PATCH_RETRY_DELAYS_MS = [500, 1500, 3000, 6000];
 
 function delay(ms: number) {
@@ -152,6 +153,10 @@ function friendlyToolError(raw: string): string {
 
   if (lower.includes("unknown") && lower.includes("category")) {
     return "The image includes an Unknown slice. It is not a category here, so it should be left unallocated.";
+  }
+
+  if (lower.includes("residual bucket") && lower.includes("cannot be mapped")) {
+    return "The image includes an Other or Unknown slice. It should be left unallocated unless there is an exact matching category.";
   }
 
   if (lower.includes("does not belong to the selected taxonomy")) {
@@ -470,8 +475,7 @@ export function AssetClassificationToolUIContentImpl({
 }: AssetClassificationToolUIContentProps) {
   const runtime = useRuntimeContext();
   const threadId = runtime.currentThreadId;
-  const assignAssetToCategory = useAssignAssetToCategory();
-  const removeAssetTaxonomyAssignment = useRemoveAssetTaxonomyAssignment();
+  const replaceAssetTaxonomyAssignments = useReplaceAssetTaxonomyAssignments();
   const [localApplied, setLocalApplied] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [persistError, setPersistError] = useState(false);
@@ -527,7 +531,7 @@ export function AssetClassificationToolUIContentImpl({
     : (selectedCandidateAssignments?.currentAssignments ?? []);
   const plan = buildAssetClassificationApplyPlan(currentAssignments, proposedAssignments);
   const isApplied = localApplied || parsedResult.draftStatus === "applied";
-  const isSubmitting = assignAssetToCategory.isPending || removeAssetTaxonomyAssignment.isPending;
+  const isSubmitting = replaceAssetTaxonomyAssignments.isPending;
   const isValid = validationIssues.length === 0;
   const canConfirm =
     Boolean(selectedAsset) && !isApplied && !isSubmitting && isValid && plan.hasChanges;
@@ -554,6 +558,7 @@ export function AssetClassificationToolUIContentImpl({
         categoryColor: row.categoryColor,
         weightBasisPoints,
         source: "ai",
+        sourceLabel: existing?.sourceLabel ?? row.categoryName,
       };
 
       if (existing) {
@@ -599,22 +604,19 @@ export function AssetClassificationToolUIContentImpl({
     setPersistError(false);
 
     try {
-      for (const removal of plan.removals) {
-        await removeAssetTaxonomyAssignment.mutateAsync({
-          id: removal.assignmentId,
-          assetId: selectedAsset.assetId,
-        });
-      }
-
-      for (const upsert of plan.upserts) {
-        await assignAssetToCategory.mutateAsync({
-          assetId: selectedAsset.assetId,
-          taxonomyId: parsedResult.taxonomy.taxonomyId,
-          categoryId: upsert.categoryId,
-          weight: upsert.weightBasisPoints,
-          source: "ai",
-        });
-      }
+      await replaceAssetTaxonomyAssignments.mutateAsync({
+        assetId: selectedAsset.assetId,
+        taxonomyId: parsedResult.taxonomy.taxonomyId,
+        assignments: proposedAssignments
+          .filter((assignment) => assignment.weightBasisPoints > 0)
+          .map((assignment) => ({
+            assetId: selectedAsset.assetId,
+            taxonomyId: parsedResult.taxonomy.taxonomyId,
+            categoryId: assignment.categoryId,
+            weight: assignment.weightBasisPoints,
+            source: "ai",
+          })),
+      });
     } catch (error) {
       setApplyError(error instanceof Error ? error.message : "Failed to apply classification.");
       return;

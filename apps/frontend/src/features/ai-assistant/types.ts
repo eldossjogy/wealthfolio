@@ -808,6 +808,7 @@ export interface PrepareAssetClassificationArgs {
   assignments: {
     categoryId: string;
     weightBasisPoints: number;
+    sourceLabel: string;
   }[];
 }
 
@@ -825,6 +826,7 @@ export interface AssetClassificationAssignmentPreview {
   categoryColor?: string | null;
   weightBasisPoints: number;
   source: string;
+  sourceLabel?: string | null;
 }
 
 export interface AssetClassificationChanges {

@@ -367,6 +367,15 @@ impl TaxonomyServiceTrait for MockTaxonomyService {
         unimplemented!("MockTaxonomyService::assign_asset_to_category")
     }
 
+    async fn replace_asset_taxonomy_assignments(
+        &self,
+        _asset_id: &str,
+        _taxonomy_id: &str,
+        _assignments: Vec<NewAssetTaxonomyAssignment>,
+    ) -> CoreResult<Vec<AssetTaxonomyAssignment>> {
+        unimplemented!("MockTaxonomyService::replace_asset_taxonomy_assignments")
+    }
+
     async fn remove_asset_assignment(&self, _id: &str) -> CoreResult<usize> {
         unimplemented!("MockTaxonomyService::remove_asset_assignment")
     }

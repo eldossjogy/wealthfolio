@@ -400,6 +400,8 @@ impl<E: AiEnvironment + 'static> ChatService<E> {
         let repo = self.env.chat_repository();
 
         let mut target_message: Option<ChatMessage> = None;
+        // The frontend may patch a tool result before the streamed assistant message
+        // has finished writing to storage.
         let retry_delays = [
             Duration::from_millis(150),
             Duration::from_millis(350),

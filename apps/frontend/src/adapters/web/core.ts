@@ -173,6 +173,7 @@ export const COMMANDS: CommandMap = {
   export_taxonomy_json: { method: "GET", path: "/taxonomies" },
   get_asset_taxonomy_assignments: { method: "GET", path: "/taxonomies/assignments/asset" },
   assign_asset_to_category: { method: "POST", path: "/taxonomies/assignments" },
+  replace_asset_taxonomy_assignments: { method: "PUT", path: "/taxonomies/assignments/asset" },
   remove_asset_taxonomy_assignment: { method: "DELETE", path: "/taxonomies/assignments" },
   get_migration_status: { method: "GET", path: "/taxonomies/migration/status" },
   migrate_legacy_classifications: { method: "POST", path: "/taxonomies/migration/run" },
@@ -1126,6 +1127,16 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "assign_asset_to_category": {
       const { assignment } = payload as { assignment: Record<string, unknown> };
       body = JSON.stringify(assignment);
+      break;
+    }
+    case "replace_asset_taxonomy_assignments": {
+      const { assetId, taxonomyId, assignments } = payload as {
+        assetId: string;
+        taxonomyId: string;
+        assignments: Record<string, unknown>[];
+      };
+      url += `/${encodeURIComponent(assetId)}/taxonomy/${encodeURIComponent(taxonomyId)}`;
+      body = JSON.stringify(assignments);
       break;
     }
     case "remove_asset_taxonomy_assignment": {

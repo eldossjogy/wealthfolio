@@ -668,6 +668,28 @@ mod tests {
             })
         }
 
+        async fn replace_asset_taxonomy_assignments(
+            &self,
+            _asset_id: &str,
+            _taxonomy_id: &str,
+            assignments: Vec<NewAssetTaxonomyAssignment>,
+        ) -> CoreResult<Vec<AssetTaxonomyAssignment>> {
+            let now = chrono::Utc::now().naive_utc();
+            Ok(assignments
+                .into_iter()
+                .map(|assignment| AssetTaxonomyAssignment {
+                    id: assignment.id.unwrap_or_else(|| "assignment-1".to_string()),
+                    asset_id: assignment.asset_id,
+                    taxonomy_id: assignment.taxonomy_id,
+                    category_id: assignment.category_id,
+                    weight: assignment.weight,
+                    source: assignment.source,
+                    created_at: now,
+                    updated_at: now,
+                })
+                .collect())
+        }
+
         async fn remove_asset_assignment(&self, _id: &str) -> CoreResult<usize> {
             Ok(1)
         }

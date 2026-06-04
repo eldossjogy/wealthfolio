@@ -185,6 +185,24 @@ pub async fn assign_asset_to_category(
 }
 
 #[tauri::command]
+pub async fn replace_asset_taxonomy_assignments(
+    asset_id: String,
+    taxonomy_id: String,
+    assignments: Vec<NewAssetTaxonomyAssignment>,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<Vec<AssetTaxonomyAssignment>, String> {
+    debug!(
+        "Replacing taxonomy {} assignments for asset {}...",
+        taxonomy_id, asset_id
+    );
+    state
+        .taxonomy_service()
+        .replace_asset_taxonomy_assignments(&asset_id, &taxonomy_id, assignments)
+        .await
+        .map_err(|e| format!("Failed to replace assignments: {}", e))
+}
+
+#[tauri::command]
 pub async fn remove_asset_taxonomy_assignment(
     id: String,
     state: State<'_, Arc<ServiceContext>>,

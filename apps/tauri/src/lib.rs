@@ -583,6 +583,7 @@ pub fn run() {
             commands::taxonomy::export_taxonomy_json,
             commands::taxonomy::get_asset_taxonomy_assignments,
             commands::taxonomy::assign_asset_to_category,
+            commands::taxonomy::replace_asset_taxonomy_assignments,
             commands::taxonomy::remove_asset_taxonomy_assignment,
             // Taxonomy migration commands
             commands::taxonomy::get_migration_status,

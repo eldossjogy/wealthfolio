@@ -14,7 +14,7 @@ import {
   type PendingAttachment,
   type CompleteAttachment,
 } from "@assistant-ui/react";
-import { useMemo, useCallback, useEffect, useRef, useState } from "react";
+import { useMemo, useCallback, useRef, useState } from "react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 
 import { streamChatResponse, type ChatModelConfig } from "../api";
@@ -193,19 +193,6 @@ type ContentPart =
       argsText: string;
       result?: unknown;
     };
-
-function buildPlainUserAppendMessage(text: string): AppendMessage {
-  return {
-    role: "user",
-    content: [{ type: "text", text }],
-    attachments: [],
-    metadata: { custom: {} },
-    createdAt: new Date(),
-    parentId: null,
-    sourceId: null,
-    runConfig: {},
-  };
-}
 
 /**
  * Thread list data for assistant-ui thread list adapter.
@@ -441,9 +428,6 @@ export function useChatRuntime(config?: ChatModelConfig) {
 
   // Abort controller for cancelling streams
   const abortControllerRef = useRef<AbortController | null>(null);
-
-  // User messages submitted by widgets while the current assistant turn is still finishing.
-  const pendingUserMessageRef = useRef<string | null>(null);
 
   // Haptic feedback for streaming start
   const { triggerHapticPattern } = useHapticFeedback();
@@ -975,31 +959,6 @@ export function useChatRuntime(config?: ChatModelConfig) {
 
   const runtime = useExternalStoreRuntime(adapter);
 
-  useEffect(() => {
-    if (isRunning) return;
-
-    const pendingUserMessage = pendingUserMessageRef.current;
-    if (!pendingUserMessage) return;
-
-    pendingUserMessageRef.current = null;
-    void handleNew(buildPlainUserAppendMessage(pendingUserMessage));
-  }, [handleNew, isRunning]);
-
-  const submitUserMessage = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-
-      if (isRunning) {
-        pendingUserMessageRef.current = trimmed;
-        return;
-      }
-
-      void handleNew(buildPlainUserAppendMessage(trimmed));
-    },
-    [handleNew, isRunning],
-  );
-
   // Extended API for thread management
   return useMemo(
     () => ({
@@ -1018,8 +977,6 @@ export function useChatRuntime(config?: ChatModelConfig) {
       },
       /** Get current thread ID */
       getCurrentThreadId: () => threadIdRef.current,
-      /** Submit a plain user message through the same path as the composer. */
-      submitUserMessage,
     }),
     [
       runtime,
@@ -1028,7 +985,6 @@ export function useChatRuntime(config?: ChatModelConfig) {
       updateThreadListState,
       setCurrentThreadId,
       handleSwitchToNewThread,
-      submitUserMessage,
     ],
   );
 }

@@ -4,7 +4,7 @@ use crate::{error::ApiResult, main_lib::AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::Deserialize;
@@ -185,6 +185,22 @@ async fn assign_asset_to_category(
     Ok(Json(created))
 }
 
+async fn replace_asset_taxonomy_assignments(
+    Path((asset_id, taxonomy_id)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+    Json(assignments): Json<Vec<NewAssetTaxonomyAssignment>>,
+) -> ApiResult<Json<Vec<AssetTaxonomyAssignment>>> {
+    debug!(
+        "Replacing taxonomy {} assignments for asset {}...",
+        taxonomy_id, asset_id
+    );
+    let replaced = state
+        .taxonomy_service
+        .replace_asset_taxonomy_assignments(&asset_id, &taxonomy_id, assignments)
+        .await?;
+    Ok(Json(replaced))
+}
+
 async fn remove_asset_taxonomy_assignment(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -255,6 +271,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/taxonomies/assignments/asset/{assetId}",
             get(get_asset_taxonomy_assignments),
+        )
+        .route(
+            "/taxonomies/assignments/asset/{assetId}/taxonomy/{taxonomyId}",
+            put(replace_asset_taxonomy_assignments),
         )
         .route("/taxonomies/assignments", post(assign_asset_to_category))
         .route(

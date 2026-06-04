@@ -41,7 +41,7 @@ function friendlyErrorMessage(raw: string): string {
   }
 
   if (lower.includes("ambiguous")) {
-    return "More than one asset matched. Choose the exact asset in the draft widget.";
+    return "More than one asset matched. Ask again with the exchange, currency, or asset ID.";
   }
 
   if (lower.includes("not found among active assets")) {

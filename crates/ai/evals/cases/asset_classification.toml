@@ -70,3 +70,33 @@ get_asset_taxonomy_assignments = "draft flow should not separately read current 
 
 [case.max_tool_calls]
 prepare_asset_classification = 1
+
+[[case]]
+id = "asset_classification_countries_leaves_other_unallocated"
+description = "Country screenshot Other bucket should remain unallocated, not become a plausible country"
+prompt = "Draft VT Countries from this country allocation: United States 67.33%, Japan 5.63%, United Kingdom 3.36%, Canada 3.18%, France 2.35%, Germany 2.25%, Switzerland 2.24%, Australia 1.64%, Netherlands 1.48%, Ireland 1.19%, Other 9.35%. Leave Other unallocated."
+fixture = "asset_classification_vt"
+severity = "P1"
+tags = ["asset-classification", "countries", "other"]
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+[case.expected_tools.args]
+includeCategories = { exact = true }
+categoryDepth = "all"
+
+[[case.expected_tools]]
+name = "prepare_asset_classification"
+[case.expected_tools.args]
+assetQuery = { contains = "VT" }
+taxonomyId = "countries"
+assignments = "not_empty"
+
+[case.forbidden_tools]
+get_asset_taxonomy_assignments = "draft flow should not separately read current assignments"
+
+[case.max_tool_calls]
+prepare_asset_classification = 1

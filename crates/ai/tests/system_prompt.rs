@@ -92,6 +92,7 @@ fn asset_classification_ambiguity_requires_user_choice() {
     assert!(SYSTEM_PROMPT.contains("includeCategories"));
     assert!(SYSTEM_PROMPT.contains("categoryDepth"));
     assert!(SYSTEM_PROMPT.contains("Unknown"));
+    assert!(SYSTEM_PROMPT.contains("sourceLabel"));
     assert!(SYSTEM_PROMPT.contains("__placeholder__"));
     assert!(lower.contains("root category ids"));
     assert!(lower.contains("never mix category ids"));
