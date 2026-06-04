@@ -431,6 +431,139 @@ impl DriftPriorityOptimizer {
         (values, proceeds, sell_trades)
     }
 
+    /// Greedy buy loop. Mutates `values` and returns shares bought per candidate index.
+    fn run_buy_greedy(
+        values: &mut HashMap<String, Decimal>,
+        candidates: &[AssetCandidate],
+        cash_pool: Decimal,
+        categories: &[CategoryState],
+        profile: &RebalanceProfile,
+        drift_band: Decimal,
+        total_value: Decimal,
+        scale: Decimal,
+    ) -> Vec<Decimal> {
+        let mut shares_bought = vec![Decimal::ZERO; candidates.len()];
+        let mut cash = cash_pool;
+
+        loop {
+            if cash <= Decimal::ZERO {
+                break;
+            }
+            let drift_before = Self::total_drift(
+                values,
+                categories,
+                total_value,
+                &profile.rebalance_goal,
+                drift_band,
+            );
+
+            let mut best_score = Decimal::ZERO;
+            let mut best_idx: Option<usize> = None;
+            let mut best_fractional_shares = Decimal::ZERO;
+            let mut improving_whole_share_candidates = 0usize;
+
+            for (idx, candidate) in candidates.iter().enumerate() {
+                let (shares_to_score, amount_to_score, exposure_to_score) =
+                    if profile.whole_shares_only {
+                        if cash < candidate.price {
+                            continue;
+                        }
+                        (
+                            Decimal::ONE,
+                            candidate.price,
+                            candidate.exposure_per_share.clone(),
+                        )
+                    } else {
+                        let shares = Self::cap_fractional_shares_to_next_bend(
+                            candidate,
+                            cash,
+                            values,
+                            categories,
+                            total_value,
+                            &profile.rebalance_goal,
+                            drift_band,
+                        );
+                        if shares <= Decimal::ZERO {
+                            continue;
+                        }
+                        (
+                            shares,
+                            candidate.price * shares,
+                            Self::exposure_delta(&candidate.exposure_per_share, shares),
+                        )
+                    };
+
+                let drift_after = Self::total_drift_with_buy(
+                    values,
+                    categories,
+                    total_value,
+                    &exposure_to_score,
+                    &profile.rebalance_goal,
+                    drift_band,
+                );
+                let improvement = drift_before - drift_after;
+                if improvement <= Decimal::ZERO {
+                    continue;
+                }
+                if profile.whole_shares_only {
+                    improving_whole_share_candidates += 1;
+                }
+                let score = improvement / amount_to_score;
+                if score > best_score {
+                    best_score = score;
+                    best_idx = Some(idx);
+                    best_fractional_shares = shares_to_score;
+                }
+            }
+
+            let Some(idx) = best_idx else { break };
+            let candidate = &candidates[idx];
+
+            if !profile.whole_shares_only {
+                for (cat_id, expo) in &candidate.exposure_per_share {
+                    *values.entry(cat_id.clone()).or_default() += expo * best_fractional_shares;
+                }
+                cash -= candidate.price * best_fractional_shares;
+                shares_bought[idx] += best_fractional_shares;
+                continue;
+            }
+
+            let mut batch = Decimal::ONE;
+            if improving_whole_share_candidates == 1 {
+                batch = (cash / candidate.price).floor().max(Decimal::ONE);
+                for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                    let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                        continue;
+                    };
+                    if *expo <= Decimal::ZERO {
+                        continue;
+                    }
+                    let desired_bps = Self::desired_bps_for_goal(
+                        cat.target_bps,
+                        &profile.rebalance_goal,
+                        drift_band,
+                    );
+                    let desired_value = desired_bps / scale * total_value;
+                    let base = values.get(&cat.category_id).copied().unwrap_or_default();
+                    if base < desired_value {
+                        let cap = ((desired_value - base) / expo).floor().max(Decimal::ONE);
+                        if cap < batch {
+                            batch = cap;
+                        }
+                    }
+                }
+            }
+
+            for (cat_id, expo) in &candidate.exposure_per_share {
+                *values.entry(cat_id.clone()).or_default() += expo * batch;
+            }
+            cash -= candidate.price * batch;
+            shares_bought[idx] += batch;
+        }
+
+        shares_bought
+    }
+
     /// Max |current_bps[c] - target_bps[c]| for required categories (including cash).
     fn max_drift_bps(
         values: &HashMap<String, Decimal>,
@@ -506,22 +639,9 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         //
         // CashFlowOnly: no sells, buy pool = available_cash.
 
-        // Hybrid: check analytically whether any required category is overweight
-        // outside its band. Cash can never fix overweight (only sells can).
-        let has_overweight_outside_band = categories
-            .iter()
-            .filter(|c| c.is_required && !c.is_cash)
-            .any(|c| {
-                if total_value == Decimal::ZERO {
-                    return false;
-                }
-                let current_bps = c.current_value / total_value * scale;
-                let upper_band = Decimal::from(c.target_bps) + drift_band;
-                current_bps > upper_band
-            });
-
-        let (sell_trades, sell_proceeds) = match &scenario_mode {
-            ScenarioMode::CashFlowOnly => (vec![], Decimal::ZERO),
+        // Sell phase runs here only for SellToRebalance.
+        // Hybrid defers its sell phase to after the cash buy pass (two-pass below).
+        let (mut sell_trades, mut sell_proceeds) = match &scenario_mode {
             ScenarioMode::SellToRebalance => {
                 let (updated_values, proceeds, trades) = Self::run_sell_phase(
                     &values,
@@ -535,32 +655,16 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 values = updated_values;
                 (trades, proceeds)
             }
-            ScenarioMode::Hybrid => {
-                if !has_overweight_outside_band {
-                    // Cash alone is sufficient — no overweight to sell.
-                    (vec![], Decimal::ZERO)
-                } else {
-                    let (updated_values, proceeds, trades) = Self::run_sell_phase(
-                        &values,
-                        total_value,
-                        &categories,
-                        &sell_candidates,
-                        &profile.rebalance_goal,
-                        drift_band,
-                        profile.whole_shares_only,
-                    );
-                    values = updated_values;
-                    (trades, proceeds)
-                }
-            }
+            _ => (vec![], Decimal::ZERO),
         };
 
-        // Buy pool: SellToRebalance uses sell proceeds only (available_cash stays
-        // in the account). Hybrid and CashFlowOnly use available_cash (+ proceeds
-        // if sells occurred in Hybrid).
+        // Buy pool:
+        //   SellToRebalance → sell proceeds only (available_cash untouched).
+        //   Hybrid          → available_cash only for pass 1; proceeds added in pass 2.
+        //   CashFlowOnly    → available_cash only.
         let buy_pool = match &scenario_mode {
             ScenarioMode::SellToRebalance => sell_proceeds,
-            _ => available_cash + sell_proceeds,
+            _ => available_cash,
         };
 
         // ── Emit NoBuyCandidate for required underweight categories with no candidate coverage.
@@ -603,137 +707,92 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 .then_with(|| a.asset_id.cmp(&b.asset_id))
         });
 
-        let mut shares_bought: Vec<Decimal> = vec![Decimal::ZERO; candidates.len()];
-        let mut cash = buy_pool;
+        // ── Buy phase(s) via run_buy_greedy ──────────────────────────────────
+        //
+        // CashFlowOnly / SellToRebalance: single pass with buy_pool.
+        //
+        // Hybrid (two-pass):
+        //   Pass 1 — deploy available_cash first.
+        //   Pass 2 — if overweight categories remain after cash buys, run sell
+        //             phase on the post-buy state, then deploy proceeds.
+        //   This implements "use cash first, sell only what cash cannot fix."
 
-        // Greedy: each iteration buys 1 share of the candidate with the highest
-        // (drift_before - drift_after) / price score. Fractional mode uses the
-        // same scoring, but the candidate quantity can be a decimal and is capped
-        // at the next target/band bend.
-        loop {
-            if cash <= Decimal::ZERO {
-                break;
-            }
-            let drift_before = Self::total_drift(
-                &values,
-                &categories,
-                total_value,
-                &profile.rebalance_goal,
-                drift_band,
-            );
-
-            let mut best_score = Decimal::ZERO;
-            let mut best_idx: Option<usize> = None;
-            let mut best_fractional_shares = Decimal::ZERO;
-            let mut improving_whole_share_candidates = 0usize;
-
-            for (idx, candidate) in candidates.iter().enumerate() {
-                let (shares_to_score, amount_to_score, exposure_to_score) =
-                    if profile.whole_shares_only {
-                        if cash < candidate.price {
-                            continue;
-                        }
-                        (
-                            Decimal::ONE,
-                            candidate.price,
-                            candidate.exposure_per_share.clone(),
-                        )
-                    } else {
-                        let shares = Self::cap_fractional_shares_to_next_bend(
-                            candidate,
-                            cash,
-                            &values,
-                            &categories,
-                            total_value,
-                            &profile.rebalance_goal,
-                            drift_band,
-                        );
-                        if shares <= Decimal::ZERO {
-                            continue;
-                        }
-                        (
-                            shares,
-                            candidate.price * shares,
-                            Self::exposure_delta(&candidate.exposure_per_share, shares),
-                        )
-                    };
-
-                let drift_after = Self::total_drift_with_buy(
-                    &values,
+        let shares_bought: Vec<Decimal> = match &scenario_mode {
+            ScenarioMode::Hybrid => {
+                // Pass 1: buy with available_cash only.
+                let mut sb = Self::run_buy_greedy(
+                    &mut values,
+                    &candidates,
+                    available_cash,
                     &categories,
-                    total_value,
-                    &exposure_to_score,
-                    &profile.rebalance_goal,
+                    &profile,
                     drift_band,
+                    total_value,
+                    scale,
                 );
-                let improvement = drift_before - drift_after;
-                if improvement <= Decimal::ZERO {
-                    continue;
-                }
-                if profile.whole_shares_only {
-                    improving_whole_share_candidates += 1;
-                }
-                let score = improvement / amount_to_score;
-                // candidates sorted price ASC — first found wins ties (cheaper asset preferred)
-                if score > best_score {
-                    best_score = score;
-                    best_idx = Some(idx);
-                    best_fractional_shares = shares_to_score;
-                }
-            }
 
-            let Some(idx) = best_idx else {
-                break;
-            };
+                // Check if any required category is still overweight outside band
+                // in the post-cash-buy state. Cash cannot reduce overweight (only
+                // selling can), so this check is authoritative.
+                let still_overweight = categories
+                    .iter()
+                    .filter(|c| c.is_required && !c.is_cash)
+                    .any(|c| {
+                        if total_value == Decimal::ZERO {
+                            return false;
+                        }
+                        let v = values.get(&c.category_id).copied().unwrap_or_default();
+                        let bps = v / total_value * scale;
+                        bps > Decimal::from(c.target_bps) + drift_band
+                    });
 
-            let candidate = &candidates[idx];
-
-            if !profile.whole_shares_only {
-                for (cat_id, expo) in &candidate.exposure_per_share {
-                    *values.entry(cat_id.clone()).or_default() += expo * best_fractional_shares;
-                }
-                cash -= candidate.price * best_fractional_shares;
-                shares_bought[idx] += best_fractional_shares;
-                continue;
-            }
-
-            // Batch only when this is the sole improving whole-share candidate. If
-            // multiple candidates improve drift, buy one share and re-score to preserve
-            // strict greedy equivalence in coupled multi-category cases.
-            let mut batch = Decimal::ONE;
-            if improving_whole_share_candidates == 1 {
-                // With no competing improving candidate, per-share improvement is
-                // constant until the selected asset reaches the next target/band bend.
-                batch = (cash / candidate.price).floor().max(Decimal::ONE);
-                for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
-                    let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
-                        continue;
-                    };
-                    if *expo <= Decimal::ZERO {
-                        continue;
-                    }
-                    let desired_bps = Self::desired_bps_for_goal(
-                        cat.target_bps,
+                if still_overweight && !sell_candidates.is_empty() {
+                    // Pass 2a: sell overweight on the post-cash-buy values.
+                    let (updated_values, proceeds, extra_sell_trades) = Self::run_sell_phase(
+                        &values,
+                        total_value,
+                        &categories,
+                        &sell_candidates,
                         &profile.rebalance_goal,
                         drift_band,
+                        profile.whole_shares_only,
                     );
-                    let desired_value = desired_bps / scale * total_value;
-                    let base = values.get(&cat.category_id).copied().unwrap_or_default();
-                    if base < desired_value {
-                        let cap = ((desired_value - base) / expo).floor().max(Decimal::ONE);
-                        if cap < batch {
-                            batch = cap;
-                        }
+                    values = updated_values;
+                    // Merge sell trades into sell_trades (already empty for Hybrid first pass).
+                    // We reassign the outer sell_trades/sell_proceeds below by reconstructing.
+                    // Pass 2b: buy with proceeds from the hybrid sell.
+                    let sb2 = Self::run_buy_greedy(
+                        &mut values,
+                        &candidates,
+                        proceeds,
+                        &categories,
+                        &profile,
+                        drift_band,
+                        total_value,
+                        scale,
+                    );
+                    // Accumulate shares and merge sell trades.
+                    for (i, s) in sb2.into_iter().enumerate() {
+                        sb[i] += s;
                     }
+                    // Prepend the hybrid sell trades (before buy trades at output).
+                    sell_trades = extra_sell_trades;
+                    sell_proceeds = proceeds;
                 }
-            }
 
-            for (cat_id, expo) in &candidate.exposure_per_share {
-                *values.entry(cat_id.clone()).or_default() += expo * batch;
+                sb
             }
-            cash -= candidate.price * batch;
-            shares_bought[idx] += batch;
-        }
+            _ => Self::run_buy_greedy(
+                &mut values,
+                &candidates,
+                buy_pool,
+                &categories,
+                &profile,
+                drift_band,
+                total_value,
+                scale,
+            ),
+        };
 
         // Build trades from accumulated shares; apply min_trade_amount filter.
         let mut trades: Vec<SuggestedManualTrade> = Vec::new();
