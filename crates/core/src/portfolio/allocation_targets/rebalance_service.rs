@@ -15,7 +15,7 @@ use super::model::{
 };
 use super::optimizer::{
     AssetCandidate, CategoryState, DriftPriorityOptimizer, RebalanceInput, RebalanceOptimizer,
-    RebalanceProfile,
+    RebalanceProfile, SellCandidate,
 };
 use super::target_service::AllocationTargetServiceTrait;
 
@@ -195,6 +195,72 @@ impl RebalanceService {
 
         (candidates, warnings)
     }
+
+    /// Build sell candidates from non-cash holdings that have known prices and
+    /// taxonomy classifications. All holdings with quantity > 0 are eligible.
+    fn build_sell_candidates(
+        contributions: &[HoldingAllocationContribution],
+        price_by_holding: &HashMap<String, Decimal>,
+        quantity_by_holding: &HashMap<String, Decimal>,
+    ) -> Vec<SellCandidate> {
+        let mut by_holding: HashMap<&str, Vec<&HoldingAllocationContribution>> = HashMap::new();
+        for c in contributions {
+            by_holding.entry(c.holding_id.as_str()).or_default().push(c);
+        }
+
+        let mut sell_candidates: Vec<SellCandidate> = Vec::new();
+        let mut holding_ids: Vec<&str> = by_holding.keys().copied().collect();
+        holding_ids.sort_unstable();
+
+        for holding_id in holding_ids {
+            let contribs = &by_holding[holding_id];
+            if contribs.iter().all(|c| c.holding_type == HoldingType::Cash) {
+                continue;
+            }
+            let all_unknown = contribs.iter().all(|c| c.category_id == "__UNKNOWN__");
+            if all_unknown {
+                continue;
+            }
+
+            let price = match price_by_holding.get(holding_id) {
+                Some(&p) if p > Decimal::ZERO => p,
+                _ => continue,
+            };
+            let qty_owned = match quantity_by_holding.get(holding_id) {
+                Some(&q) if q > Decimal::ZERO => q,
+                _ => continue,
+            };
+
+            let repr = contribs[0];
+            let qty = repr.quantity;
+            if qty <= Decimal::ZERO {
+                continue;
+            }
+
+            let mut exposure_per_share: HashMap<String, Decimal> = HashMap::new();
+            for c in contribs.iter() {
+                if c.category_id == "__UNKNOWN__" {
+                    continue;
+                }
+                *exposure_per_share.entry(c.category_id.clone()).or_default() += c.value / qty;
+            }
+            if exposure_per_share.is_empty() {
+                continue;
+            }
+
+            sell_candidates.push(SellCandidate {
+                holding_id: holding_id.to_string(),
+                asset_id: repr.asset_id.clone(),
+                symbol: repr.symbol.clone(),
+                name: Some(repr.name.clone()),
+                price,
+                quantity_owned: qty_owned,
+                exposure_per_share,
+            });
+        }
+
+        sell_candidates
+    }
 }
 
 #[async_trait]
@@ -294,11 +360,16 @@ impl RebalanceServiceTrait for RebalanceService {
             )
             .await?;
 
-        // Price map: holding_id → price per unit in base currency.
+        // Price map and quantity map: holding_id → value in base currency.
         let price_by_holding: HashMap<String, Decimal> = all_holdings
             .iter()
             .filter(|h| h.holding_type != HoldingType::Cash)
             .filter_map(|h| Some((h.id.clone(), Self::base_price_per_unit(h)?)))
+            .collect();
+        let quantity_by_holding: HashMap<String, Decimal> = all_holdings
+            .iter()
+            .filter(|h| h.holding_type != HoldingType::Cash)
+            .map(|h| (h.id.clone(), h.quantity))
             .collect();
 
         let (candidates, classification_warnings) = Self::build_candidates(
@@ -306,6 +377,20 @@ impl RebalanceServiceTrait for RebalanceService {
             &price_by_holding,
             profile.whole_shares_only,
         );
+
+        let sell_candidates = if profile.allow_sells
+            && !matches!(
+                input.scenario_mode,
+                crate::portfolio::allocation_targets::ScenarioMode::CashFlowOnly
+            ) {
+            Self::build_sell_candidates(
+                &taxonomy_contributions.contributions,
+                &price_by_holding,
+                &quantity_by_holding,
+            )
+        } else {
+            vec![]
+        };
 
         // Map drift rows to CategoryState for the optimizer.
         let categories: Vec<CategoryState> = drift
@@ -330,10 +415,12 @@ impl RebalanceServiceTrait for RebalanceService {
                     .unwrap_or(Decimal::ZERO),
                 whole_shares_only: profile.whole_shares_only,
             },
+            scenario_mode: input.scenario_mode,
             available_cash,
             total_value,
             categories,
             candidates,
+            sell_candidates,
             warnings: classification_warnings,
         };
 
@@ -352,7 +439,8 @@ mod tests {
     };
     use crate::portfolio::allocation_targets::{
         AllocationTarget, AllocationTargetWeight, DriftReport, DriftRow, DriftStatus,
-        NewAllocationTarget, NewAllocationTargetWeight, RebalanceGoal, ScopeType, TriggerType,
+        NewAllocationTarget, NewAllocationTargetWeight, RebalanceGoal, ScenarioMode, ScopeType,
+        TriggerType,
     };
     use crate::portfolio::holdings::{Holding, HoldingType, Instrument, MonetaryValue};
     use rust_decimal_macros::dec;
@@ -371,6 +459,7 @@ mod tests {
             rebalance_goal,
             min_trade_amount: "0".to_string(),
             whole_shares_only,
+            allow_sells: false,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             archived_at: None,
@@ -750,6 +839,7 @@ mod tests {
             account_ids: vec!["acc-1".to_string()],
             base_currency: "USD".to_string(),
             aggregated_account_id: "agg".to_string(),
+            scenario_mode: ScenarioMode::CashFlowOnly,
         }
     }
 
@@ -1511,6 +1601,207 @@ mod tests {
         assert!(
             plan.max_drift_bps_after <= plan.max_drift_bps_before,
             "drift must not increase after buying"
+        );
+    }
+
+    // ── Sell-to-rebalance tests ────────────────────────────────────────────────
+
+    fn make_input_with_mode(
+        available_cash: Decimal,
+        mode: ScenarioMode,
+    ) -> CalculateRebalancePlanInput {
+        CalculateRebalancePlanInput {
+            scenario_mode: mode,
+            ..make_input(available_cash)
+        }
+    }
+
+    fn make_sell_profile(rebalance_goal: RebalanceGoal) -> AllocationTarget {
+        AllocationTarget {
+            allow_sells: true,
+            ..make_profile(rebalance_goal, false)
+        }
+    }
+
+    #[tokio::test]
+    async fn sell_to_rebalance_generates_sell_trades() {
+        // Bond 60% (target 30%) — overweight. Equity 40% (target 70%) — underweight.
+        // SellToRebalance: should sell BND to fund VTI buy.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(10), dec!(4000));
+        let h_bnd = make_holding("h2", "BND", dec!(60), dec!(6000)); // $100/share
+        let c_vti = make_contribution(&h_vti, "equity", dec!(4000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(6000));
+        let rows = vec![
+            make_drift_row("equity", 4000, 7000, total),
+            make_drift_row("bond", 6000, 3000, total),
+        ];
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(0), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(0), ScenarioMode::SellToRebalance))
+            .await
+            .unwrap();
+
+        assert!(
+            plan.trades.iter().any(|t| t.action == "sell"),
+            "sell trades expected"
+        );
+        assert!(
+            plan.trades.iter().any(|t| t.action == "buy"),
+            "buy trades expected"
+        );
+        assert!(
+            plan.trades
+                .iter()
+                .filter(|t| t.action == "sell")
+                .all(|t| t.symbol.as_deref() == Some("BND")),
+            "only BND should be sold (overweight bond)"
+        );
+        assert!(
+            plan.max_drift_bps_after < plan.max_drift_bps_before,
+            "drift must improve: before={} after={}",
+            plan.max_drift_bps_before,
+            plan.max_drift_bps_after
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_flow_only_never_generates_sells_even_when_allow_sells_true() {
+        // Profile has allow_sells = true but mode is CashFlowOnly — must not sell.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(10), dec!(3000));
+        let h_bnd = make_holding("h2", "BND", dec!(70), dec!(7000));
+        let c_vti = make_contribution(&h_vti, "equity", dec!(3000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(7000));
+        let rows = vec![
+            make_drift_row("equity", 3000, 6000, total),
+            make_drift_row("bond", 7000, 4000, total),
+        ];
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(500), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(500), ScenarioMode::CashFlowOnly))
+            .await
+            .unwrap();
+
+        assert!(
+            plan.trades.iter().all(|t| t.action == "buy"),
+            "CashFlowOnly must not sell even when allow_sells=true on profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn sell_to_rebalance_ignored_when_allow_sells_false() {
+        // Profile has allow_sells = false — sell phase must be skipped regardless of mode.
+        let total = dec!(10000);
+        let h = make_holding("h1", "BND", dec!(80), dec!(8000));
+        let c = make_contribution(&h, "bond", dec!(8000));
+        let rows = vec![
+            make_drift_row("equity", 2000, 6000, total),
+            make_drift_row("bond", 8000, 4000, total),
+        ];
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false), // allow_sells = false
+            make_report(rows, total),
+            make_contributions(vec![c]),
+            vec![make_cash_holding(dec!(0), "USD"), h],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(0), ScenarioMode::SellToRebalance))
+            .await
+            .unwrap();
+
+        assert!(
+            plan.trades.iter().all(|t| t.action != "sell"),
+            "allow_sells=false must prevent sell trades regardless of scenario_mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_skips_sells_when_nothing_is_overweight() {
+        // Equity 60% (target 70%), bond 30% (target 30%), cash 10% (target 0%).
+        // Only equity is out of band. Bond and cash are at/within target — nothing is
+        // overweight, so the sell phase has no candidates that improve drift.
+        // Hybrid should produce only buy trades.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(60), dec!(6000)); // $100/share
+        let h_bnd = make_holding("h2", "BND", dec!(30), dec!(3000));
+        let c_vti = make_contribution(&h_vti, "equity", dec!(6000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(3000));
+        let rows = vec![
+            make_drift_row("equity", 6000, 7000, total),
+            make_drift_row("bond", 3000, 3000, total), // at target — not overweight
+            DriftRow {
+                is_cash: true,
+                ..make_drift_row("cash", 1000, 0, total)
+            },
+        ];
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::NearestBand),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(1000), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(1000), ScenarioMode::Hybrid))
+            .await
+            .unwrap();
+
+        assert!(
+            plan.trades.iter().all(|t| t.action == "buy"),
+            "hybrid should not sell when nothing is overweight outside band"
+        );
+    }
+
+    #[tokio::test]
+    async fn sell_proceeds_fund_buys_increasing_total_deployed() {
+        // Equity 30% (target 70%), Bond 70% (target 30%). Zero cash.
+        // SellToRebalance: sells of BND should generate proceeds that fund VTI buys.
+        // cash_remaining = available_cash + sell_proceeds - buy_cash_used >= 0.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(30), dec!(3000));
+        let h_bnd = make_holding("h2", "BND", dec!(70), dec!(7000)); // $100/share
+        let c_vti = make_contribution(&h_vti, "equity", dec!(3000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(7000));
+        let rows = vec![
+            make_drift_row("equity", 3000, 7000, total),
+            make_drift_row("bond", 7000, 3000, total),
+        ];
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(0), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(0), ScenarioMode::SellToRebalance))
+            .await
+            .unwrap();
+
+        let sell_proceeds: rust_decimal::Decimal = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "sell")
+            .map(|t| t.estimated_amount)
+            .sum();
+        assert!(sell_proceeds > dec!(0), "sell proceeds should be > 0");
+        assert!(
+            plan.cash_remaining >= dec!(0),
+            "cash_remaining must not go negative: {}",
+            plan.cash_remaining
+        );
+        assert!(
+            plan.max_drift_bps_after < plan.max_drift_bps_before,
+            "drift must improve"
         );
     }
 }

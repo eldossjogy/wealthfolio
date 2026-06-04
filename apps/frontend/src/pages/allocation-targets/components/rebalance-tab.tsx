@@ -16,6 +16,7 @@ import type {
   DriftReport,
   RebalancePlan,
   RebalanceWarning,
+  ScenarioMode,
   SuggestedManualTrade,
   AllocationTarget,
 } from "@/lib/types";
@@ -152,7 +153,7 @@ function copyToText(plan: RebalancePlan, currency: string) {
     "PROPOSED TRADES",
     ...plan.trades.map(
       (t) =>
-        `BUY  ${t.symbol ?? t.categoryName}  ${formatAmount(t.estimatedAmount, currency)}` +
+        `${t.action.toUpperCase()}  ${t.symbol ?? t.categoryName}  ${formatAmount(t.estimatedAmount, currency)}` +
         (t.quantity != null ? `  ${t.quantity.toFixed(t.quantity % 1 === 0 ? 0 : 4)} sh` : "") +
         (t.estimatedPrice != null ? ` @ ${formatAmount(t.estimatedPrice, currency)}` : ""),
     ),
@@ -166,30 +167,45 @@ function copyToText(plan: RebalancePlan, currency: string) {
 
 // ── Mode switcher ─────────────────────────────────────────────────────────────
 
-function ModeSwitch({ currency }: { currency: string }) {
-  const modes = [
+function ModeSwitch({
+  currency,
+  allowSells,
+  value,
+  onChange,
+}: {
+  currency: string;
+  allowSells: boolean;
+  value: ScenarioMode;
+  onChange: (mode: ScenarioMode) => void;
+}) {
+  const modes: { id: ScenarioMode; label: string; hint: string }[] = [
     {
-      id: "cash",
+      id: "cash_flow_only",
       label: "Cash-flow only",
       hint: `deploy new ${currencySymbol(currency)}`,
-      soon: false,
     },
-    { id: "sell", label: "Sell to rebalance", hint: "sells fund buys", soon: true },
-    { id: "hybrid", label: "Hybrid", hint: "cash + sells", soon: true },
-  ] as const;
+    { id: "sell_to_rebalance", label: "Sell to rebalance", hint: "sells fund buys" },
+    { id: "hybrid", label: "Hybrid", hint: "cash + sells" },
+  ];
 
   return (
     <div className="border-border bg-card inline-flex items-center gap-1 rounded-lg border p-1">
       {modes.map((m) => {
-        const active = m.id === "cash";
+        const disabled = !allowSells && m.id !== "cash_flow_only";
+        const active = value === m.id;
         return (
-          <div
+          <button
             key={m.id}
-            title={m.soon ? "Coming in a later milestone" : undefined}
+            type="button"
+            disabled={disabled}
+            onClick={() => !disabled && onChange(m.id)}
+            title={disabled ? "Enable 'Allow sells' on this target to use this mode" : undefined}
             className={cn(
               "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] transition-colors",
-              active ? "bg-primary text-primary-foreground" : "text-muted-foreground",
-              m.soon && "cursor-not-allowed opacity-50",
+              active
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-40",
             )}
           >
             <span className="font-medium">{m.label}</span>
@@ -198,12 +214,7 @@ function ModeSwitch({ currency }: { currency: string }) {
             >
               {m.hint}
             </span>
-            {m.soon && (
-              <span className="border-border text-muted-foreground ml-0.5 rounded border px-1 py-px text-[9px] font-medium uppercase tracking-wider">
-                soon
-              </span>
-            )}
-          </div>
+          </button>
         );
       })}
     </div>
@@ -213,11 +224,17 @@ function ModeSwitch({ currency }: { currency: string }) {
 // ── KPI strip ─────────────────────────────────────────────────────────────────
 
 function KpiStrip({ plan, currency }: { plan: RebalancePlan; currency: string }) {
+  const buys = plan.trades.filter((t) => t.action === "buy").length;
+  const sells = plan.trades.filter((t) => t.action === "sell").length;
+  const tradeLabel =
+    sells > 0
+      ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""}`
+      : `${buys} trade${buys !== 1 ? "s" : ""}`;
   const cells = [
     {
-      label: "Buys",
+      label: "Trades",
       value: String(plan.trades.length),
-      sub: `${plan.trades.length} trade${plan.trades.length !== 1 ? "s" : ""}`,
+      sub: tradeLabel,
     },
     {
       label: "Cash deployed",
@@ -341,9 +358,15 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
           {trades.map((t, i) => (
             <tr key={i} className="border-border hover:bg-muted/30 h-12 border-b last:border-b-0">
               <td className="pl-5 pr-2">
-                <span className="inline-flex items-center rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-semibold text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                  Buy
-                </span>
+                {t.action === "sell" ? (
+                  <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-semibold text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                    Sell
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-semibold text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                    Buy
+                  </span>
+                )}
               </td>
               <td className="pr-3">
                 {t.symbol ? (
@@ -381,7 +404,10 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
         <tfoot>
           <tr className="text-[12px]">
             <td colSpan={3} className="text-muted-foreground py-3 pl-5">
-              Total deployed across {trades.length} buy{trades.length !== 1 ? "s" : ""}
+              {trades.filter((t) => t.action === "buy").length} buy
+              {trades.filter((t) => t.action === "buy").length !== 1 ? "s" : ""}
+              {trades.some((t) => t.action === "sell") &&
+                ` · ${trades.filter((t) => t.action === "sell").length} sell${trades.filter((t) => t.action === "sell").length !== 1 ? "s" : ""}`}
             </td>
             <td className="text-foreground py-3 pr-3 text-right font-semibold tabular-nums">
               {formatAmount(
@@ -578,6 +604,7 @@ export function RebalanceTab({
   isSourceLoading,
 }: RebalanceTabProps) {
   const [cashDraft, setCashDraft] = useState<{ key: string; value: string } | null>(null);
+  const [scenarioMode, setScenarioMode] = useState<ScenarioMode>("cash_flow_only");
   const [planResult, setPlanResult] = useState<{
     key: string;
     sourceKey: string;
@@ -596,12 +623,13 @@ export function RebalanceTab({
   const availableCashLimit = cashInputLimit(availableCash, currency);
   const sourceReady = !isSourceLoading && !!driftReport;
   const sourceKey = `${inputContextKey}:${availableCash}:${sourceVersion}`;
-  const planKey = `${sourceKey}:${cash}`;
+  const planKey = `${sourceKey}:${cash}:${scenarioMode}`;
   const plan = planResult?.key === planKey ? planResult.plan : null;
   const hasStalePlan =
     !!planResult &&
     planResult.inputContextKey === inputContextKey &&
     planResult.sourceKey !== sourceKey;
+  const isSellMode = scenarioMode !== "cash_flow_only";
 
   function handleCashChange(value: string) {
     setCashDraft({ key: inputContextKey, value });
@@ -613,11 +641,11 @@ export function RebalanceTab({
       toast.error("Portfolio data is still loading");
       return;
     }
-    if (availableCashLimit <= 0) {
+    if (availableCashLimit <= 0 && !isSellMode) {
       toast.error("No cash available in scope");
       return;
     }
-    if (cash <= 0) {
+    if (cash <= 0 && !isSellMode) {
       toast.error("Enter a valid cash amount");
       return;
     }
@@ -626,7 +654,7 @@ export function RebalanceTab({
       return;
     }
     calculatePlan.mutate(
-      { targetId: profile.id, availableCash: cash, filter: accountScope },
+      { targetId: profile.id, availableCash: cash, filter: accountScope, scenarioMode },
       {
         onSuccess: (result) =>
           setPlanResult({ key: planKey, sourceKey, inputContextKey, plan: result }),
@@ -657,8 +685,9 @@ export function RebalanceTab({
         <div>
           <h2 className="text-foreground text-xl font-semibold tracking-tight">Rebalance</h2>
           <p className="text-muted-foreground mt-1 text-[13px]">
-            Deploy new cash to pull underweight categories back toward target. Buys only — nothing
-            is sold.
+            {isSellMode
+              ? "Sells overweight positions to fund underweight ones. Tax impact not estimated."
+              : "Deploy new cash to pull underweight categories back toward target. Buys only — nothing is sold."}
           </p>
         </div>
         <span className="border-border text-muted-foreground mt-1 shrink-0 rounded border px-2 py-0.5 text-[11px] font-medium">
@@ -666,7 +695,12 @@ export function RebalanceTab({
         </span>
       </div>
 
-      <ModeSwitch currency={currency} />
+      <ModeSwitch
+        currency={currency}
+        allowSells={profile?.allowSells ?? false}
+        value={scenarioMode}
+        onChange={setScenarioMode}
+      />
 
       <InputBar
         cashValue={cashValue}
@@ -730,8 +764,13 @@ export function RebalanceTab({
                 <div>
                   <CardTitle className="text-base">Proposed trades</CardTitle>
                   <CardDescription>
-                    {plan.trades.length} buy{plan.trades.length !== 1 ? "s" : ""} ·{" "}
-                    {formatAmount(plan.cashUsed, currency)} deployed
+                    {(() => {
+                      const buys = plan.trades.filter((t) => t.action === "buy").length;
+                      const sells = plan.trades.filter((t) => t.action === "sell").length;
+                      return sells > 0
+                        ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""} · ${formatAmount(plan.cashUsed, currency)} net deployed`
+                        : `${buys} buy${buys !== 1 ? "s" : ""} · ${formatAmount(plan.cashUsed, currency)} deployed`;
+                    })()}
                   </CardDescription>
                 </div>
               </div>

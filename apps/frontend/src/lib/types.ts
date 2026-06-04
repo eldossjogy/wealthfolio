@@ -2299,6 +2299,7 @@ export interface SaveUpProjectionPointDTO extends SaveUpTrajectoryPointDTO {
 export type TargetScopeType = "all" | "portfolio" | "account";
 export type TriggerType = "manual" | "threshold";
 export type RebalanceGoal = "nearest_band" | "exact_target";
+export type ScenarioMode = "cash_flow_only" | "sell_to_rebalance" | "hybrid";
 export type DriftStatus = "in_band" | "underweight" | "overweight" | "not_targeted";
 export type RebalanceTo = "nearest_band" | "exact_target";
 
@@ -2313,6 +2314,7 @@ export interface AllocationTarget {
   rebalanceGoal: RebalanceGoal;
   minTradeAmount: string;
   wholeSharesOnly: boolean;
+  allowSells: boolean;
   createdAt: string;
   updatedAt: string;
   archivedAt?: string | null;
@@ -2328,6 +2330,7 @@ export interface NewAllocationTarget {
   rebalanceGoal?: RebalanceGoal;
   minTradeAmount?: string;
   wholeSharesOnly?: boolean;
+  allowSells?: boolean;
 }
 
 export interface AllocationTargetWeight {

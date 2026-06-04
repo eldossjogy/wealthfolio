@@ -7,6 +7,7 @@ import type {
   AllocationTarget,
   SaveAllocationTargetResult,
   RebalancePlan,
+  ScenarioMode,
 } from "@/lib/types";
 
 import { invoke } from "./platform";
@@ -89,6 +90,12 @@ export const calculateRebalancePlan = async (
   targetId: string,
   availableCash: number,
   filter: AccountScope,
+  scenarioMode: ScenarioMode = "cash_flow_only",
 ): Promise<RebalancePlan> => {
-  return invoke<RebalancePlan>("calculate_rebalance_plan", { targetId, availableCash, filter });
+  return invoke<RebalancePlan>("calculate_rebalance_plan", {
+    targetId,
+    availableCash,
+    filter,
+    scenarioMode,
+  });
 };

@@ -8,6 +8,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AnimatedToggleGroup,
   Button,
   Icons,
   Skeleton,
@@ -263,6 +264,7 @@ function TargetEditor({
   const [targetName, setTargetName] = useState(target?.name ?? "");
   const [nameTouched, setNameTouched] = useState(!!target);
   const [driftBandPct, setDriftBandPct] = useState(target ? target.driftBandBps / 100 : 5);
+  const [allowSells, setAllowSells] = useState(target?.allowSells ?? false);
   const [weights, setWeights] = useState<WeightDraft[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -335,12 +337,14 @@ function TargetEditor({
       setTargetName(resetTargetName);
       setNameTouched(true);
       setDriftBandPct(resetTargetDriftBandBps / 100);
+      setAllowSells(target?.allowSells ?? false);
     } else {
       setTaxonomyId("asset_classes");
       setStartId("current");
       setTargetName("");
       setNameTouched(false);
       setDriftBandPct(5);
+      setAllowSells(false);
     }
     setWeights([]);
     setHasUnsavedChanges(false);
@@ -423,6 +427,7 @@ function TargetEditor({
         taxonomyId,
         triggerType: "threshold",
         driftBandBps: Math.round(driftBandPct * 100),
+        allowSells,
       } as const;
 
       const saved = await saveTarget.mutateAsync({
@@ -453,6 +458,7 @@ function TargetEditor({
       setTargetName(target.name);
       setNameTouched(true);
       setDriftBandPct(target.driftBandBps / 100);
+      setAllowSells(target.allowSells ?? false);
       if (savedWeightDrafts) setWeights(savedWeightDrafts);
     } else {
       setTaxonomyId("asset_classes");
@@ -601,6 +607,30 @@ function TargetEditor({
                 );
               })}
             </div>
+          </section>
+
+          <section className="bg-card/80 rounded-lg border p-5 shadow-sm">
+            <div className="text-muted-foreground mb-3 text-[11px] font-medium uppercase tracking-wider">
+              Rebalance mode
+            </div>
+            <AnimatedToggleGroup<"buy_only" | "allow_sells">
+              value={allowSells ? "allow_sells" : "buy_only"}
+              onValueChange={(v) => {
+                setAllowSells(v === "allow_sells");
+                markDirty();
+              }}
+              items={[
+                { value: "buy_only", label: "Buy only" },
+                { value: "allow_sells", label: "Allow sells" },
+              ]}
+              rounded="lg"
+              className="bg-muted/30 w-full border [&_button]:flex-1 [&_button]:py-2.5 [&_button]:text-[13px]"
+            />
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              {allowSells
+                ? "Sell overweight positions to fund underweight ones."
+                : "Deploy new cash only — no positions are sold."}
+            </p>
           </section>
         </div>
 

@@ -74,6 +74,7 @@ mod tests {
             rebalance_goal: None,
             min_trade_amount: None,
             whole_shares_only: None,
+            allow_sells: None,
         }
     }
 

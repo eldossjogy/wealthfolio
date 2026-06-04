@@ -728,6 +728,7 @@ diesel::table! {
         rebalance_goal -> Text,
         min_trade_amount -> Text,
         whole_shares_only -> Integer,
+        allow_sells -> Integer,
         created_at -> Text,
         updated_at -> Text,
         archived_at -> Nullable<Text>,

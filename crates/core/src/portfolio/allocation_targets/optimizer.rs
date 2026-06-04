@@ -6,7 +6,8 @@ use rust_decimal_macros::dec;
 use crate::errors::Result as CoreResult;
 
 use super::model::{
-    RebalanceGoal, RebalancePlan, RebalanceWarning, RebalanceWarningKind, SuggestedManualTrade,
+    RebalanceGoal, RebalancePlan, RebalanceWarning, RebalanceWarningKind, ScenarioMode,
+    SuggestedManualTrade,
 };
 
 // ── Input types ───────────────────────────────────────────────────────────────
@@ -39,12 +40,25 @@ pub struct AssetCandidate {
     pub exposure_per_share: HashMap<String, Decimal>,
 }
 
+pub struct SellCandidate {
+    pub holding_id: String,
+    pub asset_id: String,
+    pub symbol: String,
+    pub name: Option<String>,
+    pub price: Decimal,
+    pub quantity_owned: Decimal,
+    /// Same semantics as AssetCandidate: value removed per share sold.
+    pub exposure_per_share: HashMap<String, Decimal>,
+}
+
 pub struct RebalanceInput {
     pub profile: RebalanceProfile,
+    pub scenario_mode: ScenarioMode,
     pub available_cash: Decimal,
     pub total_value: Decimal,
     pub categories: Vec<CategoryState>,
     pub candidates: Vec<AssetCandidate>,
+    pub sell_candidates: Vec<SellCandidate>,
     /// Pre-populated classification warnings (UnclassifiedAsset, PartialClassification).
     pub warnings: Vec<RebalanceWarning>,
 }
@@ -183,6 +197,240 @@ impl DriftPriorityOptimizer {
             .sum()
     }
 
+    /// Sell greedy: each iteration sells 1 share of the asset with the highest
+    /// drift-improvement/dollar score. Returns (updated values, proceeds, sell trades).
+    fn run_sell_phase(
+        values: &HashMap<String, Decimal>,
+        total_value: Decimal,
+        categories: &[CategoryState],
+        sell_candidates: &[SellCandidate],
+        goal: &RebalanceGoal,
+        drift_band: Decimal,
+        whole_shares_only: bool,
+    ) -> (HashMap<String, Decimal>, Decimal, Vec<SuggestedManualTrade>) {
+        if total_value == Decimal::ZERO || sell_candidates.is_empty() {
+            return (values.clone(), Decimal::ZERO, vec![]);
+        }
+
+        let scale = dec!(10000);
+        let mut values = values.clone();
+        let mut qty_remaining: Vec<Decimal> =
+            sell_candidates.iter().map(|c| c.quantity_owned).collect();
+        let mut shares_sold: Vec<Decimal> = vec![Decimal::ZERO; sell_candidates.len()];
+        let mut proceeds = Decimal::ZERO;
+
+        loop {
+            let drift_before =
+                Self::total_drift(&values, categories, total_value, goal, drift_band);
+            if drift_before == Decimal::ZERO {
+                break;
+            }
+
+            let mut best_score = Decimal::ZERO;
+            let mut best_idx: Option<usize> = None;
+            let mut best_sell_shares = Decimal::ZERO;
+
+            for (idx, candidate) in sell_candidates.iter().enumerate() {
+                if qty_remaining[idx] <= Decimal::ZERO {
+                    continue;
+                }
+                if candidate.price <= Decimal::ZERO {
+                    continue;
+                }
+
+                let sell_qty = if whole_shares_only {
+                    if qty_remaining[idx] < Decimal::ONE {
+                        continue;
+                    }
+                    Decimal::ONE
+                } else {
+                    // Cap fractional sell at the band edge for each exposed category
+                    let mut max_shares = qty_remaining[idx];
+                    for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                        let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                            continue;
+                        };
+                        if *expo <= Decimal::ZERO {
+                            continue;
+                        }
+                        let current_v = values.get(&cat.category_id).copied().unwrap_or_default();
+                        let current_bps = current_v / total_value * scale;
+                        // For NearestBand: stop at target + band (overweight edge)
+                        // For ExactTarget: stop at exact target
+                        let stop_bps = match goal {
+                            RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
+                            RebalanceGoal::NearestBand => {
+                                (Decimal::from(cat.target_bps) + drift_band).min(dec!(10000))
+                            }
+                        };
+                        if current_bps <= stop_bps {
+                            // Already at or below stop — no sell benefit for this category
+                            max_shares = Decimal::ZERO;
+                            break;
+                        }
+                        let stop_value = stop_bps / scale * total_value;
+                        let cap = (current_v - stop_value) / expo;
+                        if cap < max_shares {
+                            max_shares = cap;
+                        }
+                    }
+                    max_shares.min(qty_remaining[idx]).max(Decimal::ZERO)
+                };
+
+                if sell_qty <= Decimal::ZERO {
+                    continue;
+                }
+
+                // Simulate sell: subtract exposure from values
+                let neg_exposure: HashMap<String, Decimal> = candidate
+                    .exposure_per_share
+                    .iter()
+                    .map(|(k, v)| (k.clone(), -(*v) * sell_qty))
+                    .collect();
+                let drift_after = Self::total_drift_with_buy(
+                    &values,
+                    categories,
+                    total_value,
+                    &neg_exposure,
+                    goal,
+                    drift_band,
+                );
+                let improvement = drift_before - drift_after;
+                if improvement <= Decimal::ZERO {
+                    continue;
+                }
+                let cost = candidate.price * sell_qty;
+                if cost <= Decimal::ZERO {
+                    continue;
+                }
+                let score = improvement / cost;
+                if score > best_score {
+                    best_score = score;
+                    best_idx = Some(idx);
+                    best_sell_shares = sell_qty;
+                }
+            }
+
+            let Some(idx) = best_idx else {
+                break;
+            };
+
+            let candidate = &sell_candidates[idx];
+            let batch = if whole_shares_only {
+                // Batch only when sole improving candidate
+                let improving_count = sell_candidates
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, c)| {
+                        if qty_remaining[*i] < Decimal::ONE || c.price <= Decimal::ZERO {
+                            return false;
+                        }
+                        let neg: HashMap<String, Decimal> = c
+                            .exposure_per_share
+                            .iter()
+                            .map(|(k, v)| (k.clone(), -*v))
+                            .collect();
+                        let da = Self::total_drift_with_buy(
+                            &values,
+                            categories,
+                            total_value,
+                            &neg,
+                            goal,
+                            drift_band,
+                        );
+                        (drift_before - da) > Decimal::ZERO
+                    })
+                    .count();
+
+                if improving_count == 1 {
+                    let mut cap = qty_remaining[idx].floor().max(Decimal::ONE);
+                    for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
+                        let Some(expo) = candidate.exposure_per_share.get(&cat.category_id) else {
+                            continue;
+                        };
+                        if *expo <= Decimal::ZERO {
+                            continue;
+                        }
+                        let current_v = values.get(&cat.category_id).copied().unwrap_or_default();
+                        let stop_bps = match goal {
+                            RebalanceGoal::ExactTarget => Decimal::from(cat.target_bps),
+                            RebalanceGoal::NearestBand => {
+                                (Decimal::from(cat.target_bps) + drift_band).min(dec!(10000))
+                            }
+                        };
+                        let stop_value = stop_bps / dec!(10000) * total_value;
+                        if current_v > stop_value {
+                            let shares_to_stop =
+                                ((current_v - stop_value) / expo).floor().max(Decimal::ONE);
+                            if shares_to_stop < cap {
+                                cap = shares_to_stop;
+                            }
+                        }
+                    }
+                    cap.min(qty_remaining[idx])
+                } else {
+                    Decimal::ONE
+                }
+            } else {
+                best_sell_shares
+            };
+
+            let actual = batch.min(qty_remaining[idx]);
+            if actual <= Decimal::ZERO {
+                break;
+            }
+
+            for (cat_id, expo) in &candidate.exposure_per_share {
+                let entry = values.entry(cat_id.clone()).or_default();
+                *entry = (*entry - expo * actual).max(Decimal::ZERO);
+            }
+            proceeds += candidate.price * actual;
+            qty_remaining[idx] -= actual;
+            shares_sold[idx] += actual;
+        }
+
+        // Build sell trades
+        let sell_trades: Vec<SuggestedManualTrade> = sell_candidates
+            .iter()
+            .zip(shares_sold.iter())
+            .filter(|(_, &shares)| shares > Decimal::ZERO)
+            .map(|(candidate, &shares)| {
+                let estimated_amount = shares * candidate.price;
+                let (primary_cat_id, primary_cat_name) = candidate
+                    .exposure_per_share
+                    .iter()
+                    .max_by(|(_, a), (_, b)| a.cmp(b))
+                    .map(|(cat_id, _)| {
+                        let name = categories
+                            .iter()
+                            .find(|c| &c.category_id == cat_id)
+                            .map(|c| c.category_name.clone())
+                            .unwrap_or_else(|| cat_id.clone());
+                        (cat_id.clone(), name)
+                    })
+                    .unwrap_or_else(|| ("unknown".to_string(), "Unknown".to_string()));
+
+                SuggestedManualTrade {
+                    action: "sell".to_string(),
+                    category_id: primary_cat_id,
+                    category_name: primary_cat_name,
+                    asset_id: Some(candidate.asset_id.clone()),
+                    symbol: Some(candidate.symbol.clone()),
+                    name: candidate.name.clone(),
+                    quantity: Some(shares),
+                    estimated_price: Some(candidate.price),
+                    estimated_amount,
+                    reason: format!(
+                        "{} is overweight — selling reduces portfolio drift.",
+                        candidate.symbol
+                    ),
+                }
+            })
+            .collect();
+
+        (values, proceeds, sell_trades)
+    }
+
     /// Max |current_bps[c] - target_bps[c]| for required categories (including cash).
     fn max_drift_bps(
         values: &HashMap<String, Decimal>,
@@ -214,10 +462,12 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
     fn plan(&self, input: RebalanceInput) -> CoreResult<RebalancePlan> {
         let RebalanceInput {
             profile,
+            scenario_mode,
             available_cash,
             total_value,
             categories,
             mut candidates,
+            sell_candidates,
             mut warnings,
         } = input;
 
@@ -245,7 +495,52 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
 
         let max_drift_before = Self::max_drift_bps(&values, &categories, total_value);
 
-        // Emit NoBuyCandidate for required underweight categories with no candidate coverage.
+        // ── Sell phase (SellToRebalance / Hybrid) ────────────────────────────
+        // For Hybrid: first check whether cash alone can fix all breached sleeves.
+        // If yes, skip sells. If no, run the sell phase to generate proceeds.
+        let (sell_trades, sell_proceeds) = match &scenario_mode {
+            ScenarioMode::CashFlowOnly => (vec![], Decimal::ZERO),
+            ScenarioMode::SellToRebalance => {
+                let (updated_values, proceeds, trades) = Self::run_sell_phase(
+                    &values,
+                    total_value,
+                    &categories,
+                    &sell_candidates,
+                    &profile.rebalance_goal,
+                    drift_band,
+                    profile.whole_shares_only,
+                );
+                values = updated_values;
+                (trades, proceeds)
+            }
+            ScenarioMode::Hybrid => {
+                // Check if cash-only can resolve all out-of-band required sleeves.
+                let all_in_band = Self::total_drift(
+                    &values,
+                    &categories,
+                    total_value,
+                    &profile.rebalance_goal,
+                    drift_band,
+                ) == Decimal::ZERO;
+                if all_in_band {
+                    (vec![], Decimal::ZERO)
+                } else {
+                    let (updated_values, proceeds, trades) = Self::run_sell_phase(
+                        &values,
+                        total_value,
+                        &categories,
+                        &sell_candidates,
+                        &profile.rebalance_goal,
+                        drift_band,
+                        profile.whole_shares_only,
+                    );
+                    values = updated_values;
+                    (trades, proceeds)
+                }
+            }
+        };
+
+        // ── Emit NoBuyCandidate for required underweight categories with no candidate coverage.
         // Track them so sleeve-level dollar trades can be added after the greedy.
         let mut no_candidate_categories: Vec<&CategoryState> = Vec::new();
         for cat in categories.iter().filter(|c| c.is_required && !c.is_cash) {
@@ -286,7 +581,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         });
 
         let mut shares_bought: Vec<Decimal> = vec![Decimal::ZERO; candidates.len()];
-        let mut cash = available_cash;
+        let mut cash = available_cash + sell_proceeds;
 
         // Greedy: each iteration buys 1 share of the candidate with the highest
         // (drift_before - drift_after) / price score. Fractional mode uses the
@@ -463,10 +758,11 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         }
 
         // Sleeve-level dollar trades for uncovered underweight categories.
-        // Draw from cash left after kept asset trades. Greedy selections below the
-        // min-trade threshold are dropped, so they must not starve manual sleeve trades.
-        let mut manual_cash =
-            available_cash - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
+        // Draw from cash left after kept asset trades (including sell proceeds).
+        // Greedy selections below min-trade threshold are dropped, so they must not
+        // starve manual sleeve trades.
+        let mut manual_cash = available_cash + sell_proceeds
+            - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
         for cat in &no_candidate_categories {
             if manual_cash <= Decimal::ZERO {
                 break;
@@ -496,34 +792,54 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             }
         }
 
-        // cash_used = sum of recommended trade amounts (post min_trade filter).
-        // Keeps cash_used consistent with what the user will actually execute.
-        let cash_used: Decimal = trades.iter().map(|t| t.estimated_amount).sum();
-        let cash_remaining = available_cash - cash_used;
+        // Prepend sell trades so the final list is: sells then buys.
+        let mut all_trades: Vec<SuggestedManualTrade> = sell_trades;
+        all_trades.append(&mut trades);
+        let trades = all_trades;
 
-        // After-drift: recompute from initial state + recommended trades only.
+        // cash_used = sum of buy trade amounts (post min_trade filter).
+        // cash_remaining = original cash + sell proceeds - cash deployed on buys.
+        let buy_cash_used: Decimal = trades
+            .iter()
+            .filter(|t| t.action == "buy")
+            .map(|t| t.estimated_amount)
+            .sum();
+        let cash_used = buy_cash_used;
+        let cash_remaining = (available_cash + sell_proceeds - cash_used).max(Decimal::ZERO);
+
+        // After-drift: recompute from initial state + all recommended trades.
         let mut after_values: HashMap<String, Decimal> = categories
             .iter()
             .map(|c| (c.category_id.clone(), c.current_value))
             .collect();
         for trade in &trades {
-            if let Some(asset_id) = &trade.asset_id {
+            let shares = trade.quantity.unwrap_or(Decimal::ZERO);
+            if trade.action == "sell" {
+                if let Some(asset_id) = &trade.asset_id {
+                    if let Some(sc) = sell_candidates.iter().find(|c| &c.asset_id == asset_id) {
+                        for (cat_id, expo) in &sc.exposure_per_share {
+                            let entry = after_values.entry(cat_id.clone()).or_default();
+                            *entry = (*entry - expo * shares).max(Decimal::ZERO);
+                        }
+                    }
+                }
+            } else if let Some(asset_id) = &trade.asset_id {
                 if let Some(candidate) = candidates.iter().find(|c| &c.asset_id == asset_id) {
-                    let shares = trade.quantity.unwrap_or(Decimal::ZERO);
                     for (cat_id, expo) in &candidate.exposure_per_share {
                         *after_values.entry(cat_id.clone()).or_default() += expo * shares;
                     }
                 }
             } else {
-                // Manual sleeve trade (no ticker): the deployed cash lands directly in
-                // the target category. Credit it so after-drift reflects the move.
+                // Manual sleeve trade: deployed cash lands in target category.
                 *after_values.entry(trade.category_id.clone()).or_default() +=
                     trade.estimated_amount;
             }
         }
+        // Update cash sleeve: reduce by net cash deployed (buys - sell proceeds).
+        let net_cash_change = cash_used - sell_proceeds;
         for cat in categories.iter().filter(|c| c.is_cash) {
             let entry = after_values.entry(cat.category_id.clone()).or_default();
-            *entry = (*entry - cash_used).max(Decimal::ZERO);
+            *entry = (*entry - net_cash_change).max(Decimal::ZERO);
         }
         let max_drift_after = Self::max_drift_bps(&after_values, &categories, total_value);
 

@@ -62,6 +62,20 @@ impl TryFrom<&str> for TriggerType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ScenarioMode {
+    CashFlowOnly,
+    SellToRebalance,
+    Hybrid,
+}
+
+impl Default for ScenarioMode {
+    fn default() -> Self {
+        Self::CashFlowOnly
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RebalanceGoal {
     NearestBand,
     ExactTarget,
@@ -102,6 +116,7 @@ pub struct AllocationTarget {
     pub rebalance_goal: RebalanceGoal,
     pub min_trade_amount: String,
     pub whole_shares_only: bool,
+    pub allow_sells: bool,
     pub created_at: String,
     pub updated_at: String,
     pub archived_at: Option<String>,
@@ -119,6 +134,7 @@ pub struct NewAllocationTarget {
     pub rebalance_goal: Option<RebalanceGoal>,
     pub min_trade_amount: Option<String>,
     pub whole_shares_only: Option<bool>,
+    pub allow_sells: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +255,8 @@ pub struct CalculateRebalancePlanInput {
     pub account_ids: Vec<String>,
     pub base_currency: String,
     pub aggregated_account_id: String,
+    #[serde(default)]
+    pub scenario_mode: ScenarioMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
