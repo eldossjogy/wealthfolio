@@ -138,14 +138,17 @@ export function useSaveActivities({
       // Build set of failed temp IDs so we keep them in local state
       const failedTempIds = new Set(result.errors?.map((err) => err.id) ?? []);
 
+      // All IDs deleted by backend (includes cascade-deleted counterparts)
+      const allDeletedIds = new Set(result.deleted.map((a) => a.id));
+
       // Update local state with persisted IDs, keep failed items
       setLocalTransactions((prev) =>
         prev
           .filter((transaction) => {
             // Keep failed items so user can fix them
             if (failedTempIds.has(transaction.id)) return true;
-            // Remove successfully deleted items
-            return !pendingDeleteIds.has(transaction.id);
+            // Remove explicitly deleted and cascade-deleted items
+            return !pendingDeleteIds.has(transaction.id) && !allDeletedIds.has(transaction.id);
           })
           .map((transaction) => {
             // Don't update failed items

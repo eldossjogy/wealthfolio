@@ -13,8 +13,8 @@ use wealthfolio_core::{
         Activity, ActivityBulkMutationRequest, ActivityBulkMutationResult, ActivityDetails,
         ActivityImport, ActivitySearchResponse, ActivitySearchResponseMeta, ActivityServiceTrait,
         ActivityUpdate, BrokerSyncProfileData, ImportAssetCandidate, ImportAssetPreviewItem,
-        ImportMappingData, ImportTemplateData, ImportTemplateScope, NewActivity,
-        SaveBrokerSyncProfileRulesRequest, Sort,
+        ImportMappingData, ImportTemplateData, ImportTemplateScope, InternalTransferPairRequest,
+        InternalTransferPairResponse, NewActivity, SaveBrokerSyncProfileRulesRequest, Sort,
     },
     assets::{Asset, AssetServiceTrait, ProviderProfile},
     errors::DatabaseError,
@@ -245,6 +245,20 @@ impl ActivityServiceTrait for MockActivityService {
 
     async fn delete_activity(&self, _activity_id: String) -> CoreResult<Activity> {
         unimplemented!("MockActivityService::delete_activity")
+    }
+
+    fn get_transfer_pair_for_activity(
+        &self,
+        _activity_id: String,
+    ) -> CoreResult<InternalTransferPairResponse> {
+        unimplemented!("MockActivityService::get_transfer_pair_for_activity")
+    }
+
+    async fn save_internal_transfer_pair(
+        &self,
+        _request: InternalTransferPairRequest,
+    ) -> CoreResult<InternalTransferPairResponse> {
+        unimplemented!("MockActivityService::save_internal_transfer_pair")
     }
 
     async fn link_transfer_activities(

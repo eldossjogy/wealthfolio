@@ -92,6 +92,22 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(Activity::from(activity_db))
     }
 
+    fn find_transfer_counterpart(
+        &self,
+        group_id: &str,
+        exclude_id: &str,
+    ) -> Result<Option<Activity>> {
+        let mut conn = get_connection(&self.pool)?;
+        let result = activities::table
+            .select(ActivityDB::as_select())
+            .filter(activities::source_group_id.eq(group_id))
+            .filter(activities::id.ne(exclude_id))
+            .first::<ActivityDB>(&mut conn)
+            .optional()
+            .map_err(StorageError::from)?;
+        Ok(result.map(Activity::from))
+    }
+
     fn get_trading_activities(&self) -> Result<Vec<Activity>> {
         let mut conn = get_connection(&self.pool)?;
 
@@ -431,6 +447,23 @@ impl ActivityRepositoryTrait for ActivityRepository {
                     .find(&activity_id)
                     .first::<ActivityDB>(tx.conn())
                     .map_err(StorageError::from)?;
+
+                // Atomically delete the transfer counterpart if this activity is linked
+                if let Some(ref group_id) = activity.source_group_id {
+                    let counterpart_ids: Vec<String> = activities::table
+                        .filter(activities::source_group_id.eq(group_id))
+                        .filter(activities::id.ne(&activity_id))
+                        .select(activities::id)
+                        .load::<String>(tx.conn())
+                        .map_err(StorageError::from)?;
+                    for cid in &counterpart_ids {
+                        diesel::delete(activities::table.filter(activities::id.eq(cid)))
+                            .execute(tx.conn())
+                            .map_err(StorageError::from)?;
+                        tx.delete::<ActivityDB>(cid.clone());
+                    }
+                }
+
                 diesel::delete(activities::table.filter(activities::id.eq(&activity_id)))
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
@@ -629,17 +662,54 @@ impl ActivityRepositoryTrait for ActivityRepository {
             .exec_tx(move |tx| -> Result<ActivityBulkMutationResult> {
                 let mut outcome = ActivityBulkMutationResult::default();
 
-                for delete_id in delete_ids {
+                let delete_id_set: std::collections::HashSet<&str> =
+                    delete_ids.iter().map(|s| s.as_str()).collect();
+                let mut already_deleted: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+
+                for delete_id in &delete_ids {
+                    if already_deleted.contains(delete_id) {
+                        continue;
+                    }
                     let activity_db = activities::table
                         .select(ActivityDB::as_select())
-                        .find(&delete_id)
+                        .find(delete_id)
                         .first::<ActivityDB>(tx.conn())
                         .map_err(StorageError::from)?;
-                    diesel::delete(activities::table.filter(activities::id.eq(&delete_id)))
+                    if let Some(ref group_id) = activity_db.source_group_id.clone() {
+                        let counterpart_ids: Vec<String> = activities::table
+                            .filter(activities::source_group_id.eq(group_id))
+                            .filter(activities::id.ne(delete_id))
+                            .select(activities::id)
+                            .load::<String>(tx.conn())
+                            .map_err(StorageError::from)?;
+                        for cid in counterpart_ids {
+                            if already_deleted.contains(&cid) {
+                                continue;
+                            }
+                            if delete_id_set.contains(cid.as_str()) {
+                                // Explicitly in delete list — main loop will handle it
+                                continue;
+                            }
+                            let cp_db = activities::table
+                                .select(ActivityDB::as_select())
+                                .find(&cid)
+                                .first::<ActivityDB>(tx.conn())
+                                .map_err(StorageError::from)?;
+                            diesel::delete(activities::table.filter(activities::id.eq(&cid)))
+                                .execute(tx.conn())
+                                .map_err(StorageError::from)?;
+                            tx.delete::<ActivityDB>(cid.clone());
+                            outcome.deleted.push(Activity::from(cp_db));
+                            already_deleted.insert(cid);
+                        }
+                    }
+                    diesel::delete(activities::table.filter(activities::id.eq(delete_id)))
                         .execute(tx.conn())
                         .map_err(StorageError::from)?;
                     tx.delete::<ActivityDB>(delete_id.clone());
                     outcome.deleted.push(Activity::from(activity_db));
+                    already_deleted.insert(delete_id.clone());
                 }
 
                 for update in updates {
@@ -808,6 +878,23 @@ impl ActivityRepositoryTrait for ActivityRepository {
 
         results.sort_by_key(|a| a.activity_date);
         Ok(results)
+    }
+
+    fn get_activities_by_source_group_id(&self, source_group_id: &str) -> Result<Vec<Activity>> {
+        let group_id = source_group_id.trim();
+        if group_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let activities_db = activities::table
+            .filter(activities::source_group_id.eq(group_id))
+            .select(ActivityDB::as_select())
+            .order(activities::activity_date.asc())
+            .load::<ActivityDB>(&mut conn)
+            .map_err(StorageError::from)?;
+
+        Ok(activities_db.into_iter().map(Activity::from).collect())
     }
 
     fn get_activities_by_account_ids_in_date_range(

@@ -974,6 +974,18 @@ mod tests {
                 .ok_or_else(|| Error::Unexpected("Activity not found".to_string()))
         }
 
+        fn find_transfer_counterpart(
+            &self,
+            group_id: &str,
+            exclude_id: &str,
+        ) -> Result<Option<Activity>> {
+            let activities = self.activities.lock().unwrap();
+            Ok(activities
+                .iter()
+                .find(|a| a.source_group_id.as_deref() == Some(group_id) && a.id != exclude_id)
+                .cloned())
+        }
+
         fn get_activities(&self) -> Result<Vec<Activity>> {
             Ok(self.activities.lock().unwrap().clone())
         }
@@ -1028,8 +1040,11 @@ mod tests {
                 .as_deref()
                 .and_then(|metadata| serde_json::from_str(metadata).ok());
             let activity_date = parse_test_activity_datetime(&new_activity.activity_date);
+            let generated_id = new_activity.id.unwrap_or_else(|| {
+                format!("test-id-{}", self.activities.lock().unwrap().len() + 1)
+            });
             let activity = Activity {
-                id: new_activity.id.unwrap_or_else(|| "test-id".to_string()),
+                id: generated_id,
                 account_id: new_activity.account_id,
                 asset_id,
                 activity_type: new_activity.activity_type,
@@ -1072,11 +1087,13 @@ mod tests {
             existing.account_id = activity_update.account_id;
             existing.asset_id = asset_id;
             existing.activity_type = activity_update.activity_type;
+            existing.activity_date = parse_test_activity_datetime(&activity_update.activity_date);
             existing.subtype = match activity_update.subtype {
                 Some(subtype) if subtype.trim().is_empty() => None,
                 Some(subtype) => Some(subtype),
                 None => existing.subtype.clone(),
             };
+            existing.activity_date = parse_test_activity_datetime(&activity_update.activity_date);
             existing.quantity = activity_update.quantity.unwrap_or(existing.quantity);
             existing.unit_price = activity_update.unit_price.unwrap_or(existing.unit_price);
             existing.amount = activity_update.amount.unwrap_or(existing.amount);
@@ -1089,8 +1106,13 @@ mod tests {
             Ok(existing.clone())
         }
 
-        async fn delete_activity(&self, _activity_id: String) -> Result<Activity> {
-            unimplemented!()
+        async fn delete_activity(&self, activity_id: String) -> Result<Activity> {
+            let mut activities = self.activities.lock().unwrap();
+            let index = activities
+                .iter()
+                .position(|activity| activity.id == activity_id)
+                .ok_or_else(|| Error::Unexpected("Activity not found".to_string()))?;
+            Ok(activities.remove(index))
         }
 
         async fn link_transfer_activities(
@@ -1160,8 +1182,13 @@ mod tests {
             &self,
             creates: Vec<NewActivity>,
             updates: Vec<ActivityUpdate>,
-            _delete_ids: Vec<String>,
+            delete_ids: Vec<String>,
         ) -> Result<ActivityBulkMutationResult> {
+            let mut deleted = Vec::new();
+            for delete_id in delete_ids {
+                deleted.push(self.delete_activity(delete_id).await?);
+            }
+
             let mut created = Vec::new();
             for new_activity in creates {
                 let activity = self.create_activity(new_activity).await?;
@@ -1175,7 +1202,7 @@ mod tests {
             Ok(ActivityBulkMutationResult {
                 created,
                 updated,
-                deleted: Vec::new(),
+                deleted,
                 created_mappings: Vec::new(),
                 errors: Vec::new(),
             })
@@ -7357,6 +7384,439 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_internal_transfer_pair_creates_cross_currency_legs() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-twd", "TWD"));
+        account_service.add_account(create_test_account("acc-usd", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .save_internal_transfer_pair(InternalTransferPairRequest {
+                transfer_out_id: None,
+                transfer_in_id: None,
+                source_group_id: None,
+                from_account_id: "acc-twd".to_string(),
+                to_account_id: "acc-usd".to_string(),
+                activity_date: "2026-06-03T20:20:00Z".to_string(),
+                source_amount: Some(dec!(1000)),
+                destination_amount: Some(dec!(31.20)),
+                source_currency: "TWD".to_string(),
+                destination_currency: "USD".to_string(),
+                fx_rate: Some(dec!(0.0312)),
+                notes: Some("Move cash".to_string()),
+                transfer_mode: Some("cash".to_string()),
+            })
+            .await
+            .expect("pair create should succeed");
+
+        assert_eq!(result.transfer_out.account_id, "acc-twd");
+        assert_eq!(result.transfer_out.currency, "TWD");
+        assert_eq!(result.transfer_out.amount, Some(dec!(1000)));
+        assert_eq!(result.transfer_in.account_id, "acc-usd");
+        assert_eq!(result.transfer_in.currency, "USD");
+        assert_eq!(result.transfer_in.amount, Some(dec!(31.20)));
+        assert_eq!(result.transfer_in.fx_rate, Some(dec!(0.0312)));
+        assert_eq!(
+            result.transfer_out.source_group_id,
+            result.transfer_in.source_group_id
+        );
+        assert_eq!(
+            result
+                .transfer_out
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("flow"))
+                .and_then(|flow| flow.get("is_external"))
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn save_internal_transfer_pair_same_currency_uses_source_amount() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-from", "USD"));
+        account_service.add_account(create_test_account("acc-to", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .save_internal_transfer_pair(InternalTransferPairRequest {
+                transfer_out_id: None,
+                transfer_in_id: None,
+                source_group_id: None,
+                from_account_id: "acc-from".to_string(),
+                to_account_id: "acc-to".to_string(),
+                activity_date: "2026-06-03T20:20:00Z".to_string(),
+                source_amount: Some(dec!(100)),
+                destination_amount: Some(dec!(90)),
+                source_currency: "USD".to_string(),
+                destination_currency: "USD".to_string(),
+                fx_rate: Some(dec!(0.9)),
+                notes: None,
+                transfer_mode: Some("cash".to_string()),
+            })
+            .await
+            .expect("pair create should succeed");
+
+        assert_eq!(result.transfer_out.amount, Some(dec!(100)));
+        assert_eq!(result.transfer_in.amount, Some(dec!(100)));
+        assert_eq!(result.transfer_in.fx_rate, None);
+    }
+
+    #[tokio::test]
+    async fn save_internal_transfer_pair_update_preserves_leg_currencies() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-twd", "TWD"));
+        account_service.add_account(create_test_account("acc-usd", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let created = activity_service
+            .save_internal_transfer_pair(InternalTransferPairRequest {
+                transfer_out_id: None,
+                transfer_in_id: None,
+                source_group_id: None,
+                from_account_id: "acc-twd".to_string(),
+                to_account_id: "acc-usd".to_string(),
+                activity_date: "2026-06-03T20:20:00Z".to_string(),
+                source_amount: Some(dec!(1000)),
+                destination_amount: Some(dec!(31.20)),
+                source_currency: "TWD".to_string(),
+                destination_currency: "USD".to_string(),
+                fx_rate: Some(dec!(0.0312)),
+                notes: None,
+                transfer_mode: Some("cash".to_string()),
+            })
+            .await
+            .expect("pair create should succeed");
+
+        let updated = activity_service
+            .save_internal_transfer_pair(InternalTransferPairRequest {
+                transfer_out_id: Some(created.transfer_out.id.clone()),
+                transfer_in_id: Some(created.transfer_in.id.clone()),
+                source_group_id: None,
+                from_account_id: "acc-twd".to_string(),
+                to_account_id: "acc-usd".to_string(),
+                activity_date: "2026-06-04T20:20:00Z".to_string(),
+                source_amount: Some(dec!(2000)),
+                destination_amount: Some(dec!(62.40)),
+                source_currency: "TWD".to_string(),
+                destination_currency: "USD".to_string(),
+                fx_rate: Some(dec!(0.0312)),
+                notes: Some("Updated".to_string()),
+                transfer_mode: Some("cash".to_string()),
+            })
+            .await
+            .expect("pair update should succeed");
+
+        assert_eq!(updated.transfer_out.currency, "TWD");
+        assert_eq!(updated.transfer_out.amount, Some(dec!(2000)));
+        assert_eq!(updated.transfer_in.currency, "USD");
+        assert_eq!(updated.transfer_in.amount, Some(dec!(62.40)));
+    }
+
+    #[tokio::test]
+    async fn delete_internal_transfer_pair_deletes_both_legs_and_emits_both_accounts() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+
+        let mut transfer_out = create_stored_activity("transfer-out", "acc-out", None);
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.source_group_id = Some("transfer-group".to_string());
+        transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+        transfer_out.currency = "USD".to_string();
+        let mut transfer_in = create_stored_activity("transfer-in", "acc-in", None);
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.source_group_id = Some("transfer-group".to_string());
+        transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+        transfer_in.currency = "CAD".to_string();
+        activity_repository.add_activity(transfer_out);
+        activity_repository.add_activity(transfer_in);
+
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        )
+        .with_event_sink(event_sink.clone());
+
+        let deleted = activity_service
+            .delete_activity("transfer-out".to_string())
+            .await
+            .expect("delete should cascade");
+
+        assert_eq!(deleted.id, "transfer-out");
+        assert!(activity_repository.get_activities().unwrap().is_empty());
+        let events = event_sink.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DomainEvent::ActivitiesChanged {
+                account_ids,
+                currencies,
+                ..
+            } => {
+                let mut account_ids = account_ids.clone();
+                account_ids.sort();
+                assert_eq!(account_ids, vec!["acc-in", "acc-out"]);
+                let mut currencies = currencies.clone();
+                currencies.sort();
+                assert_eq!(currencies, vec!["CAD", "USD"]);
+            }
+            event => panic!("expected ActivitiesChanged event, got {event:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_group_with_extra_non_transfer_row_does_not_cascade() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut transfer_out = create_stored_activity("transfer-out", "acc-out", None);
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.source_group_id = Some("provider-group".to_string());
+        transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+        let mut transfer_in = create_stored_activity("transfer-in", "acc-in", None);
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.source_group_id = Some("provider-group".to_string());
+        transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+        let mut dividend = create_stored_activity("dividend", "acc-in", None);
+        dividend.activity_type = "DIVIDEND".to_string();
+        dividend.source_group_id = Some("provider-group".to_string());
+        activity_repository.add_activity(transfer_out);
+        activity_repository.add_activity(transfer_in);
+        activity_repository.add_activity(dividend);
+
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        activity_service
+            .delete_activity("transfer-out".to_string())
+            .await
+            .expect("single delete should succeed");
+
+        let remaining: HashSet<String> = activity_repository
+            .get_activities()
+            .unwrap()
+            .into_iter()
+            .map(|activity| activity.id)
+            .collect();
+        assert_eq!(
+            remaining,
+            HashSet::from(["transfer-in".to_string(), "dividend".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn bulk_delete_expands_valid_transfer_pair() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        let mut transfer_out = create_stored_activity("transfer-out", "acc-out", None);
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.source_group_id = Some("transfer-group".to_string());
+        transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+        let mut transfer_in = create_stored_activity("transfer-in", "acc-in", None);
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.source_group_id = Some("transfer-group".to_string());
+        transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+        activity_repository.add_activity(transfer_out);
+        activity_repository.add_activity(transfer_in);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![],
+                delete_ids: vec!["transfer-in".to_string()],
+            })
+            .await
+            .expect("bulk delete should succeed");
+
+        let mut deleted_ids: Vec<String> = result
+            .deleted
+            .into_iter()
+            .map(|activity| activity.id)
+            .collect();
+        deleted_ids.sort();
+        assert_eq!(deleted_ids, vec!["transfer-in", "transfer-out"]);
+    }
+
+    #[tokio::test]
+    async fn bulk_cross_currency_pair_amount_update_without_fx_returns_error() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+
+        account_service.add_account(create_test_account("acc-usd", "USD"));
+        account_service.add_account(create_test_account("acc-eur", "EUR"));
+
+        let mut transfer_out = create_stored_activity("transfer-out", "acc-usd", None);
+        transfer_out.activity_type = "TRANSFER_OUT".to_string();
+        transfer_out.source_group_id = Some("transfer-group".to_string());
+        transfer_out.metadata = Some(json!({ "flow": { "is_external": false } }));
+        transfer_out.currency = "USD".to_string();
+        transfer_out.amount = Some(dec!(100));
+        let mut transfer_in = create_stored_activity("transfer-in", "acc-eur", None);
+        transfer_in.activity_type = "TRANSFER_IN".to_string();
+        transfer_in.source_group_id = Some("transfer-group".to_string());
+        transfer_in.metadata = Some(json!({ "flow": { "is_external": false } }));
+        transfer_in.currency = "EUR".to_string();
+        transfer_in.amount = Some(dec!(98));
+        transfer_in.fx_rate = None;
+        activity_repository.add_activity(transfer_out);
+        activity_repository.add_activity(transfer_in);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        );
+        let mut update = create_test_activity_update("transfer-out", "acc-usd", None, "USD");
+        update.activity_type = "TRANSFER_OUT".to_string();
+        update.amount = Some(Some(dec!(110)));
+
+        let result = activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![update],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk mutation should return structured errors");
+
+        assert!(result.updated.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0]
+            .message
+            .contains("Cross-currency transfer amount updates require a valid FX rate"));
+    }
+
+    #[tokio::test]
+    async fn bulk_update_event_uses_old_activity_date_when_moved_later() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+
+        account_service.add_account(create_test_account("acc-usd", "USD"));
+
+        let old_date = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let new_date = DateTime::parse_from_rfc3339("2026-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut activity = create_stored_activity("cash-activity", "acc-usd", None);
+        activity.activity_type = "DEPOSIT".to_string();
+        activity.activity_date = old_date;
+        activity.quantity = None;
+        activity.unit_price = None;
+        activity.amount = Some(dec!(100));
+        activity_repository.add_activity(activity);
+
+        let activity_service = ActivityService::new(
+            activity_repository,
+            account_service,
+            asset_service,
+            fx_service,
+            Arc::new(MockQuoteService),
+        )
+        .with_event_sink(event_sink.clone());
+
+        activity_service
+            .bulk_mutate_activities(ActivityBulkMutationRequest {
+                creates: vec![],
+                updates: vec![ActivityUpdate {
+                    id: "cash-activity".to_string(),
+                    account_id: "acc-usd".to_string(),
+                    asset: None,
+                    activity_type: "DEPOSIT".to_string(),
+                    subtype: None,
+                    activity_date: new_date.to_rfc3339(),
+                    quantity: Some(None),
+                    unit_price: Some(None),
+                    currency: "USD".to_string(),
+                    fee: Some(Some(dec!(0))),
+                    amount: Some(Some(dec!(125))),
+                    status: None,
+                    notes: None,
+                    fx_rate: None,
+                    metadata: None,
+                }],
+                delete_ids: vec![],
+            })
+            .await
+            .expect("bulk update should succeed");
+
+        let events = event_sink.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DomainEvent::ActivitiesChanged {
+                earliest_activity_at_utc,
+                ..
+            } => assert_eq!(*earliest_activity_at_utc, Some(old_date)),
+            event => panic!("expected ActivitiesChanged event, got {event:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_import_skips_existing_hard_duplicates_before_insert() {
         let account_service = Arc::new(MockAccountService::new());
         let asset_service = Arc::new(MockAssetService::new());
@@ -8754,5 +9214,247 @@ mod tests {
             Some("aapl-opt-uuid".to_string()),
             "OCC symbol should match existing option asset"
         );
+    }
+
+    // ── Transfer pair sync ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_update_activity_propagates_to_transfer_counterpart() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+        let quote_service = Arc::new(MockQuoteService);
+        account_service.add_account(create_test_account("acc-out", "USD"));
+
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        )
+        .with_event_sink(event_sink.clone());
+
+        let date_original = DateTime::parse_from_rfc3339("2024-01-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let date_updated = DateTime::parse_from_rfc3339("2024-02-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        activity_repository.activities.lock().unwrap().extend([
+            Activity {
+                id: "transfer-out".to_string(),
+                account_id: "acc-out".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_OUT".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date_original,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(500)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-1".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date_original,
+                updated_at: date_original,
+            },
+            Activity {
+                id: "transfer-in".to_string(),
+                account_id: "acc-in".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_IN".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date_original,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(500)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: None,
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-1".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date_original,
+                updated_at: date_original,
+            },
+        ]);
+
+        let update = crate::activities::ActivityUpdate {
+            id: "transfer-out".to_string(),
+            account_id: "acc-out".to_string(),
+            asset: None,
+            activity_type: "TRANSFER_OUT".to_string(),
+            subtype: None,
+            activity_date: date_updated.to_rfc3339(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            amount: Some(Some(dec!(750))),
+            status: Some(ActivityStatus::Posted),
+            notes: Some("moved funds".to_string()),
+            fx_rate: None,
+            metadata: None,
+        };
+
+        activity_service
+            .update_activity(update)
+            .await
+            .expect("update should succeed");
+
+        let stored = activity_repository.activities.lock().unwrap().clone();
+
+        let counterpart = stored
+            .iter()
+            .find(|a| a.id == "transfer-in")
+            .expect("transfer-in should still exist");
+
+        assert_eq!(counterpart.amount, Some(dec!(750)), "amount propagated");
+        assert_eq!(counterpart.activity_date, date_updated, "date propagated");
+        assert_eq!(
+            counterpart.notes,
+            Some("moved funds".to_string()),
+            "notes propagated"
+        );
+        assert_eq!(counterpart.account_id, "acc-in", "account_id not changed");
+        assert_eq!(
+            counterpart.activity_type, "TRANSFER_IN",
+            "activity_type not changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_activity_cascades_transfer_pair() {
+        let account_service = Arc::new(MockAccountService::new());
+        let asset_service = Arc::new(MockAssetService::new());
+        let fx_service = Arc::new(MockFxService::new());
+        let activity_repository = Arc::new(MockActivityRepository::new());
+        let event_sink = Arc::new(MockDomainEventSink::new());
+        let quote_service = Arc::new(MockQuoteService);
+        let activity_service = ActivityService::new(
+            activity_repository.clone(),
+            account_service,
+            asset_service,
+            fx_service,
+            quote_service,
+        )
+        .with_event_sink(event_sink.clone());
+
+        let date = DateTime::parse_from_rfc3339("2024-01-15T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        activity_repository.activities.lock().unwrap().extend([
+            Activity {
+                id: "transfer-out".to_string(),
+                account_id: "acc-out".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_OUT".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(100)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: Some(json!({ "flow": { "is_external": false } })),
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-cascade".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date,
+                updated_at: date,
+            },
+            Activity {
+                id: "transfer-in".to_string(),
+                account_id: "acc-in".to_string(),
+                asset_id: None,
+                activity_type: "TRANSFER_IN".to_string(),
+                activity_type_override: None,
+                source_type: None,
+                subtype: None,
+                status: ActivityStatus::Posted,
+                activity_date: date,
+                settlement_date: None,
+                quantity: None,
+                unit_price: None,
+                amount: Some(dec!(100)),
+                fee: Some(dec!(0)),
+                currency: "USD".to_string(),
+                fx_rate: None,
+                notes: None,
+                metadata: Some(json!({ "flow": { "is_external": false } })),
+                source_system: None,
+                source_record_id: None,
+                source_group_id: Some("grp-cascade".to_string()),
+                idempotency_key: None,
+                import_run_id: None,
+                is_user_modified: false,
+                needs_review: false,
+                created_at: date,
+                updated_at: date,
+            },
+        ]);
+
+        activity_service
+            .delete_activity("transfer-out".to_string())
+            .await
+            .expect("delete should succeed");
+
+        let stored = activity_repository.activities.lock().unwrap().clone();
+        assert!(
+            stored
+                .iter()
+                .all(|a| a.source_group_id.as_deref() != Some("grp-cascade")),
+            "both transfer legs should be deleted"
+        );
+        assert_eq!(stored.len(), 0, "no activities should remain");
+
+        // Both accounts must appear in the emitted event
+        let events = event_sink.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DomainEvent::ActivitiesChanged { account_ids, .. } => {
+                let mut ids = account_ids.clone();
+                ids.sort();
+                assert_eq!(ids, vec!["acc-in", "acc-out"]);
+            }
+            event => panic!("expected ActivitiesChanged, got {event:?}"),
+        }
     }
 }

@@ -12,6 +12,7 @@ import { ActivityType } from "@/lib/constants";
 import { isManualSearchResult, quoteModeFromSearchResult } from "@/lib/asset-utils";
 import { generateId } from "@/lib/id";
 import { LinkTransferModal } from "../link-transfer-modal";
+import { ActivityDeleteModal } from "../activity-delete-modal";
 import { useActivityMutations } from "../../hooks/use-activity-mutations";
 import { ActivityDataGridPagination } from "./activity-data-grid-pagination";
 import { ActivityDataGridToolbar } from "./activity-data-grid-toolbar";
@@ -170,10 +171,30 @@ export function ActivityDataGrid({
     [markDirtyBatch, setLocalTransactions],
   );
 
-  const handleDelete = useCallback(
+  const [pendingDeleteActivity, setPendingDeleteActivity] = useState<ActivityDetails | null>(null);
+
+  const executePairedDelete = useCallback(
     (activity: ActivityDetails) => {
       const source = toLocalTransaction(activity);
       markForDeletion(activity.id, !!source.isNew);
+      const counterpart = localTransactions.find(
+        (t) => t.sourceGroupId === activity.sourceGroupId && t.id !== activity.id,
+      );
+      if (counterpart) {
+        markForDeletion(counterpart.id, !!counterpart.isNew);
+      }
+    },
+    [markForDeletion, localTransactions],
+  );
+
+  const handleDelete = useCallback(
+    (activity: ActivityDetails) => {
+      if (activity.sourceGroupId) {
+        setPendingDeleteActivity(activity);
+      } else {
+        const source = toLocalTransaction(activity);
+        markForDeletion(activity.id, !!source.isNew);
+      }
     },
     [markForDeletion],
   );
@@ -774,6 +795,18 @@ export function ActivityDataGrid({
         warnings={transferDialogMode === "link" ? linkWarnings : []}
         onConfirm={transferDialogMode === "link" ? handleLinkConfirm : handleUnlinkConfirm}
         onCancel={() => setTransferDialogOpen(false)}
+      />
+
+      <ActivityDeleteModal
+        isOpen={!!pendingDeleteActivity}
+        linkedTransfer={true}
+        onConfirm={() => {
+          if (pendingDeleteActivity) {
+            executePairedDelete(pendingDeleteActivity);
+            setPendingDeleteActivity(null);
+          }
+        }}
+        onCancel={() => setPendingDeleteActivity(null)}
       />
     </div>
   );

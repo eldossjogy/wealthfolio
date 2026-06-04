@@ -9,6 +9,7 @@ const mutationMocks = vi.hoisted(() => ({
   addMutateAsync: vi.fn(),
   updateMutateAsync: vi.fn(),
   saveMutateAsync: vi.fn(),
+  savePairMutateAsync: vi.fn(),
 }));
 
 vi.mock("./use-activity-mutations", () => ({
@@ -31,6 +32,12 @@ vi.mock("./use-activity-mutations", () => ({
       error: null,
       isError: false,
     },
+    saveInternalTransferPairMutation: {
+      mutateAsync: mutationMocks.savePairMutateAsync,
+      isPending: false,
+      error: null,
+      isError: false,
+    },
   }),
 }));
 
@@ -45,6 +52,7 @@ describe("useActivityForm", () => {
     mutationMocks.addMutateAsync.mockResolvedValue({});
     mutationMocks.updateMutateAsync.mockResolvedValue({});
     mutationMocks.saveMutateAsync.mockResolvedValue({});
+    mutationMocks.savePairMutateAsync.mockResolvedValue({});
   });
 
   it("preserves user-selected currency for DEPOSIT", async () => {
@@ -147,5 +155,66 @@ describe("useActivityForm", () => {
         currency: "EUR",
       }),
     );
+  });
+
+  it("updates both existing legs when editing an internal securities transfer", async () => {
+    const { result } = renderHook(() =>
+      useActivityForm({
+        accounts,
+        selectedType: "TRANSFER",
+        activity: {
+          id: "transfer-out-id",
+          activityType: ActivityType.TRANSFER_OUT,
+          transferOutId: "transfer-out-id",
+          transferInId: "transfer-in-id",
+        },
+      }),
+    );
+
+    const formData = {
+      isExternal: false,
+      direction: "out",
+      accountId: "",
+      fromAccountId: "acc-usd",
+      toAccountId: "acc-cad",
+      activityDate: new Date("2026-02-01T10:00:00.000Z"),
+      transferMode: "securities",
+      amount: undefined,
+      sourceAmount: undefined,
+      destinationAmount: undefined,
+      sourceCurrency: "USD",
+      destinationCurrency: "CAD",
+      assetId: "AAPL",
+      quantity: 10,
+      unitPrice: 100,
+      comment: "move shares",
+      currency: "USD",
+      fxRate: 1.35,
+      subtype: null,
+      quoteMode: "MARKET",
+    } as ActivityFormValues;
+
+    await act(async () => {
+      await result.current.handleSubmit(formData);
+    });
+
+    expect(mutationMocks.saveMutateAsync).toHaveBeenCalledTimes(1);
+    expect(mutationMocks.saveMutateAsync).toHaveBeenCalledWith({
+      updates: [
+        expect.objectContaining({
+          id: "transfer-out-id",
+          accountId: "acc-usd",
+          activityType: ActivityType.TRANSFER_OUT,
+          currency: "USD",
+        }),
+        expect.objectContaining({
+          id: "transfer-in-id",
+          accountId: "acc-cad",
+          activityType: ActivityType.TRANSFER_IN,
+          currency: "CAD",
+          fxRate: 1.35,
+        }),
+      ],
+    });
   });
 });

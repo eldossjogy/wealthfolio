@@ -375,22 +375,47 @@ export const ACTIVITY_FORM_CONFIG: Record<
       const isExternal = flowMetadata?.is_external === true;
       // Derive direction from activity type
       const direction = activity?.activityType === ActivityType.TRANSFER_IN ? "in" : "out";
+      const editingTransferIn = activity?.activityType === ActivityType.TRANSFER_IN;
+      const sourceAmount = editingTransferIn
+        ? (absNum(activity?.counterpartAmount) ?? absNum(activity?.amount))
+        : absNum(activity?.amount);
+      const destinationAmount = editingTransferIn
+        ? absNum(activity?.amount)
+        : (absNum(activity?.counterpartAmount) ?? absNum(activity?.amount));
+      const sourceCurrency = editingTransferIn
+        ? (activity?.counterpartCurrency ?? activity?.currency)
+        : activity?.currency;
+      const destinationCurrency = editingTransferIn
+        ? activity?.currency
+        : (activity?.counterpartCurrency ?? activity?.currency);
       return {
         isExternal,
         direction,
         accountId: isExternal ? (activity?.accountId ?? "") : "",
-        fromAccountId: !isExternal ? (activity?.accountId ?? "") : "",
-        toAccountId: "",
+        fromAccountId: !isExternal
+          ? editingTransferIn
+            ? (activity?.counterpartAccountId ?? "")
+            : (activity?.accountId ?? "")
+          : "",
+        toAccountId: !isExternal
+          ? editingTransferIn
+            ? (activity?.accountId ?? "")
+            : (activity?.counterpartAccountId ?? "")
+          : "",
         activityDate: activity?.date ? new Date(activity.date) : new Date(),
         transferMode,
         amount: absNum(activity?.amount),
+        sourceAmount,
+        destinationAmount,
+        sourceCurrency,
+        destinationCurrency,
         assetId: transferIsSecurity ? (activity?.assetSymbol ?? activity?.assetId ?? null) : null,
         quantity: transferIsSecurity ? (absNum(activity?.quantity) ?? null) : null,
         unitPrice: transferIsSecurity ? (absNum(activity?.unitPrice) ?? null) : null,
         comment: activity?.comment ?? null,
         // Advanced options
         currency: activity?.currency,
-        fxRate: activity?.fxRate ?? undefined,
+        fxRate: absNum(activity?.fxRate ?? activity?.counterpartFxRate) ?? undefined,
         subtype: activity?.subtype ?? null,
         quoteMode:
           activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
@@ -404,6 +429,10 @@ export const ACTIVITY_FORM_CONFIG: Record<
         accountId,
         activityDate: d.activityDate,
         amount: d.amount ?? undefined,
+        sourceAmount: d.sourceAmount ?? d.amount ?? undefined,
+        destinationAmount: d.destinationAmount ?? d.sourceAmount ?? d.amount ?? undefined,
+        sourceCurrency: d.sourceCurrency,
+        destinationCurrency: d.destinationCurrency,
         assetId: d.assetId ?? undefined,
         ...selectedExistingAsset(d.assetId, d.existingAssetId, d.symbolInstrumentType),
         quantity: d.quantity ?? undefined,

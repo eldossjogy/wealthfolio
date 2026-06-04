@@ -10,7 +10,15 @@ import { Checkbox } from "@wealthfolio/ui/components/ui/checkbox";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Label } from "@wealthfolio/ui/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@wealthfolio/ui/components/ui/radio-group";
-import { useMemo } from "react";
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  MoneyInput,
+} from "@wealthfolio/ui";
+import { useEffect, useMemo } from "react";
 import { FormProvider, useForm, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import {
@@ -56,6 +64,22 @@ export const transferFormSchema = z
       .positive({ message: "Amount must be greater than 0." })
       .optional()
       .nullable(),
+    sourceAmount: z.coerce
+      .number({
+        invalid_type_error: "Sent amount must be a number.",
+      })
+      .positive({ message: "Sent amount must be greater than 0." })
+      .optional()
+      .nullable(),
+    destinationAmount: z.coerce
+      .number({
+        invalid_type_error: "Received amount must be a number.",
+      })
+      .positive({ message: "Received amount must be greater than 0." })
+      .optional()
+      .nullable(),
+    sourceCurrency: z.string().optional(),
+    destinationCurrency: z.string().optional(),
     // Fields for security transfers
     assetId: z.string().optional().nullable(),
     existingAssetId: z.string().nullable().optional(),
@@ -146,7 +170,7 @@ export const transferFormSchema = z
   .refine(
     (data) => {
       // Cash mode requires amount
-      if (data.transferMode === "cash") {
+      if (data.transferMode === "cash" && data.isExternal) {
         return data.amount != null && data.amount > 0;
       }
       return true;
@@ -154,6 +178,37 @@ export const transferFormSchema = z
     {
       message: "Please enter an amount.",
       path: ["amount"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.transferMode === "cash" && !data.isExternal) {
+        const sourceAmount = data.sourceAmount ?? data.amount;
+        return sourceAmount != null && sourceAmount > 0;
+      }
+      return true;
+    },
+    {
+      message: "Please enter an amount.",
+      path: ["sourceAmount"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (
+        data.transferMode === "cash" &&
+        !data.isExternal &&
+        data.sourceCurrency &&
+        data.destinationCurrency &&
+        data.sourceCurrency !== data.destinationCurrency
+      ) {
+        return data.destinationAmount != null && data.destinationAmount > 0;
+      }
+      return true;
+    },
+    {
+      message: "Please enter a received amount.",
+      path: ["destinationAmount"],
     },
   )
   .refine(
@@ -264,6 +319,10 @@ export function TransferForm({
       activityDate: new Date(),
       transferMode: initialTransferMode,
       amount: undefined,
+      sourceAmount: undefined,
+      destinationAmount: undefined,
+      sourceCurrency: initialCurrency,
+      destinationCurrency: undefined,
       assetId: null,
       quantity: null,
       unitPrice: null,
@@ -282,10 +341,15 @@ export function TransferForm({
   const direction = watch("direction");
   const accountId = watch("accountId");
   const fromAccountId = watch("fromAccountId");
+  const toAccountId = watch("toAccountId");
   const currency = watch("currency");
   const quoteMode = watch("quoteMode");
   const transferMode = watch("transferMode");
   const amount = watch("amount");
+  const sourceAmount = watch("sourceAmount");
+  const sourceCurrency = watch("sourceCurrency");
+  const destinationCurrency = watch("destinationCurrency");
+  const fxRate = watch("fxRate");
   const assetId = watch("assetId");
   const quantity = watch("quantity");
   const isManualAsset = quoteMode === QuoteMode.MANUAL;
@@ -297,6 +361,91 @@ export function TransferForm({
     [accounts, fromAccountId, accountId, isExternal],
   );
   const accountCurrency = selectedAccount?.currency;
+  const destinationAccount = useMemo(
+    () => accounts.find((a) => a.value === toAccountId),
+    [accounts, toAccountId],
+  );
+  const isInternalCashTransfer = !isExternal && isCashMode;
+  const effectiveSourceCurrency = sourceCurrency || accountCurrency || currency || baseCurrency;
+  const effectiveDestinationCurrency =
+    destinationCurrency || destinationAccount?.currency || effectiveSourceCurrency;
+  const isCrossCurrencyInternalCash =
+    isInternalCashTransfer &&
+    Boolean(effectiveSourceCurrency) &&
+    Boolean(effectiveDestinationCurrency) &&
+    effectiveSourceCurrency !== effectiveDestinationCurrency;
+
+  const roundTransferValue = (value: number, precision = 6) =>
+    Number(Number(value).toFixed(precision));
+
+  const handleSourceAmountChange = (value: number | null | undefined) => {
+    setValue("sourceAmount", value, { shouldDirty: true, shouldValidate: false });
+    setValue("amount", value, { shouldDirty: true, shouldValidate: false });
+    if (!value || value <= 0) return;
+    if (isCrossCurrencyInternalCash) {
+      const rate = Number(fxRate);
+      if (Number.isFinite(rate) && rate > 0) {
+        setValue("destinationAmount", roundTransferValue(value * rate), {
+          shouldDirty: true,
+          shouldValidate: false,
+        });
+      }
+    } else {
+      setValue("destinationAmount", value, { shouldDirty: true, shouldValidate: false });
+    }
+  };
+
+  const handleDestinationAmountChange = (value: number | null | undefined) => {
+    setValue("destinationAmount", value, { shouldDirty: true, shouldValidate: false });
+    const sent = Number(sourceAmount);
+    const received = Number(value);
+    if (sent > 0 && received > 0) {
+      setValue("fxRate", roundTransferValue(received / sent, 8), {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+    }
+  };
+
+  const handleFxRateChange = (value: number | null | undefined) => {
+    setValue("fxRate", value ?? undefined, { shouldDirty: true, shouldValidate: false });
+    const sent = Number(sourceAmount);
+    const rate = Number(value);
+    if (sent > 0 && rate > 0) {
+      setValue("destinationAmount", roundTransferValue(sent * rate), {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (!accountCurrency) return;
+    if (!isExternal) {
+      setValue("sourceCurrency", accountCurrency, { shouldDirty: false, shouldValidate: false });
+    }
+    if (!currency || (!isExternal && currency !== accountCurrency)) {
+      setValue("currency", accountCurrency, { shouldDirty: false, shouldValidate: false });
+    }
+  }, [accountCurrency, currency, isExternal, setValue]);
+
+  useEffect(() => {
+    if (!destinationAccount?.currency) return;
+    setValue("destinationCurrency", destinationAccount.currency, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+  }, [destinationAccount?.currency, setValue]);
+
+  useEffect(() => {
+    if (!isInternalCashTransfer || isCrossCurrencyInternalCash) return;
+    if (sourceAmount != null && sourceAmount > 0) {
+      setValue("destinationAmount", sourceAmount, {
+        shouldDirty: false,
+        shouldValidate: false,
+      });
+    }
+  }, [isCrossCurrencyInternalCash, isInternalCashTransfer, setValue, sourceAmount]);
 
   // Toggle items for transfer mode
   const transferModeItems = [
@@ -357,9 +506,10 @@ export function TransferForm({
         : "Transfer Out"
       : "Transfer";
 
-    if (isCashMode && amount && amount > 0) {
+    const displayAmount = isInternalCashTransfer ? sourceAmount : amount;
+    if (isCashMode && displayAmount && displayAmount > 0) {
       const displayCurrency = initialCurrency || accountCurrency || baseCurrency;
-      return `${actionPrefix} ${formatAmount(amount, displayCurrency, false)}`;
+      return `${actionPrefix} ${formatAmount(displayAmount, displayCurrency, false)}`;
     }
 
     if (!isCashMode && assetId && quantity && quantity > 0) {
@@ -502,7 +652,113 @@ export function TransferForm({
             )}
 
             {/* Cash mode: Amount */}
-            {isCashMode && <AmountInput name="amount" label="Amount" currency={currency} />}
+            {isCashMode &&
+              (isInternalCashTransfer ? (
+                <div className="space-y-3">
+                  {isCrossCurrencyInternalCash ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="sourceAmount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Sent ({effectiveSourceCurrency})</FormLabel>
+                            <FormControl>
+                              <MoneyInput
+                                ref={field.ref}
+                                name={field.name}
+                                value={field.value}
+                                onValueChange={handleSourceAmountChange}
+                                placeholder="0.00"
+                                aria-label="Sent amount"
+                                data-testid="sent-amount-input"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="destinationAmount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Received ({effectiveDestinationCurrency})</FormLabel>
+                            <FormControl>
+                              <MoneyInput
+                                ref={field.ref}
+                                name={field.name}
+                                value={field.value}
+                                onValueChange={handleDestinationAmountChange}
+                                placeholder="0.00"
+                                aria-label="Received amount"
+                                data-testid="received-amount-input"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    <FormField
+                      control={form.control}
+                      name="sourceAmount"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Amount</FormLabel>
+                          <FormControl>
+                            <MoneyInput
+                              ref={field.ref}
+                              name={field.name}
+                              value={field.value}
+                              onValueChange={handleSourceAmountChange}
+                              placeholder="0.00"
+                              aria-label="Amount"
+                              data-testid="input-amount"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {isCrossCurrencyInternalCash && (
+                    <FormField
+                      control={form.control}
+                      name="fxRate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            FX Rate
+                            <span className="text-muted-foreground ml-2 text-xs font-normal">
+                              1 {effectiveSourceCurrency} ={" "}
+                              {Number(field.value) > 0 ? field.value : "?"}{" "}
+                              {effectiveDestinationCurrency}
+                            </span>
+                          </FormLabel>
+                          <FormControl>
+                            <MoneyInput
+                              ref={field.ref}
+                              name={field.name}
+                              value={field.value}
+                              onValueChange={handleFxRateChange}
+                              placeholder="1.0000"
+                              maxDecimalPlaces={8}
+                              aria-label="FX Rate"
+                              data-testid="fx-rate-input"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              ) : (
+                <AmountInput name="amount" label="Amount" currency={currency} />
+              ))}
 
             {/* Advanced Options */}
             <AdvancedOptionsSection
@@ -513,6 +769,8 @@ export function TransferForm({
               assetCurrency={assetCurrency}
               accountCurrency={accountCurrency}
               baseCurrency={baseCurrency}
+              showCurrency={isExternal}
+              showFxRate={isExternal}
             />
 
             {/* Notes */}

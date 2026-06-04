@@ -412,6 +412,8 @@ pub fn run() {
             commands::activity::update_activity,
             commands::activity::save_activities,
             commands::activity::delete_activity,
+            commands::activity::get_transfer_pair_for_activity,
+            commands::activity::save_internal_transfer_pair,
             commands::activity::link_transfer_activities,
             commands::activity::unlink_transfer_activities,
             commands::activity::check_activities_import,

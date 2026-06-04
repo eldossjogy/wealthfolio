@@ -4,6 +4,7 @@ import {
   linkTransferActivities,
   logger,
   saveActivities,
+  saveInternalTransferPair,
   unlinkTransferActivities,
   updateActivity,
 } from "@/adapters";
@@ -15,6 +16,8 @@ import {
   ActivityCreate,
   ActivityDetails,
   ActivityUpdate,
+  InternalTransferPairRequest,
+  InternalTransferPairResponse,
 } from "@/lib/types";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -118,6 +121,10 @@ export function useActivityMutations(
         isExternal: _isExternal,
         direction: _direction,
         toAccountId: _toAccountId,
+        sourceAmount: _sourceAmount,
+        destinationAmount: _destinationAmount,
+        sourceCurrency: _sourceCurrency,
+        destinationCurrency: _destinationCurrency,
         ...rest
       } = data as NewActivityFormValues & {
         assetId?: string;
@@ -139,6 +146,10 @@ export function useActivityMutations(
         isExternal?: boolean;
         direction?: string;
         toAccountId?: string;
+        sourceAmount?: number;
+        destinationAmount?: number;
+        sourceCurrency?: string;
+        destinationCurrency?: string;
       };
       const quantity = "quantity" in rest ? rest.quantity : undefined;
       const unitPrice = "unitPrice" in rest ? rest.unitPrice : undefined;
@@ -192,6 +203,10 @@ export function useActivityMutations(
         isExternal: _isExternal2,
         direction: _direction2,
         toAccountId: _toAccountId2,
+        sourceAmount: _sourceAmount2,
+        destinationAmount: _destinationAmount2,
+        sourceCurrency: _sourceCurrency2,
+        destinationCurrency: _destinationCurrency2,
         ...rest
       } = data as NewActivityFormValues & {
         id: string;
@@ -215,6 +230,10 @@ export function useActivityMutations(
         isExternal?: boolean;
         direction?: string;
         toAccountId?: string;
+        sourceAmount?: number;
+        destinationAmount?: number;
+        sourceCurrency?: string;
+        destinationCurrency?: string;
       };
       const quantity = "quantity" in rest ? rest.quantity : undefined;
       const unitPrice = "unitPrice" in rest ? rest.unitPrice : undefined;
@@ -396,12 +415,29 @@ export function useActivityMutations(
     },
   });
 
+  const saveInternalTransferPairMutation = useMutation({
+    mutationFn: async (request: InternalTransferPairRequest) => {
+      return await saveInternalTransferPair(request);
+    },
+    onSuccess: (result: InternalTransferPairResponse) => {
+      queryClient.invalidateQueries();
+      if (onSuccess) onSuccess({ accountId: result.transferOut.accountId });
+    },
+    onError: (error: string) => {
+      logger.error(`Error saving internal transfer pair: ${String(error)}`);
+      toast.error("Failed to save transfer", {
+        description: String(error),
+      });
+    },
+  });
+
   return {
     addActivityMutation,
     updateActivityMutation,
     deleteActivityMutation,
     duplicateActivityMutation,
     saveActivitiesMutation,
+    saveInternalTransferPairMutation,
     linkTransferActivitiesMutation,
     unlinkTransferActivitiesMutation,
   };

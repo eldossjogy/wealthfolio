@@ -105,9 +105,14 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
   const { settings } = useSettingsContext();
   const isManualAsset = watch("quoteMode") === QuoteMode.MANUAL;
   const accountId = watch("accountId");
+  const toAccountId = watch("toAccountId" as any) as string | undefined;
   const currency = watch("currency");
   const quantity = watch("quantity");
   const unitPrice = watch("unitPrice");
+  const sourceAmount = watch("sourceAmount" as any) as number | null | undefined;
+  const fxRate = watch("fxRate" as any) as number | null | undefined;
+  const sourceCurrency = watch("sourceCurrency" as any) as string | undefined;
+  const destinationCurrency = watch("destinationCurrency" as any) as string | undefined;
 
   // Filter accounts by activity type (exclude HOLDINGS accounts for unsupported types)
   const filteredAccounts = useMemo(
@@ -173,8 +178,12 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
     TRADE_ACTIVITY_TYPES.includes(activityType) ||
     isAssetBackedIncome ||
     (isSecuritiesTransfer && isExternal && direction === "in");
-  const needsAmount = AMOUNT_FIELD_ACTIVITY_TYPES.includes(activityType) || isCashTransfer;
-  const needsFee = FEE_FIELD_ACTIVITY_TYPES.includes(activityType);
+  const needsInternalCashTransferAmounts = isCashTransfer && !isExternal;
+  const needsAmount =
+    AMOUNT_FIELD_ACTIVITY_TYPES.includes(activityType) ||
+    (isCashTransfer && !needsInternalCashTransferAmounts);
+  const needsFee =
+    FEE_FIELD_ACTIVITY_TYPES.includes(activityType) && !needsInternalCashTransferAmounts;
 
   const needsSplitRatio = activityType === ActivityType.SPLIT;
 
@@ -268,7 +277,16 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
   const toAccountOptions = filteredAccounts.filter((acc) => acc.value !== accountId);
 
   const selectedAccount = filteredAccounts.find((acc) => acc.value === accountId);
+  const destinationAccount = filteredAccounts.find((acc) => acc.value === toAccountId);
   const accountCurrency = selectedAccount?.currency;
+  const effectiveSourceCurrency = sourceCurrency || accountCurrency || currency;
+  const effectiveDestinationCurrency =
+    destinationCurrency || destinationAccount?.currency || effectiveSourceCurrency;
+  const isCrossCurrencyInternalCash =
+    needsInternalCashTransferAmounts &&
+    Boolean(effectiveSourceCurrency) &&
+    Boolean(effectiveDestinationCurrency) &&
+    effectiveSourceCurrency !== effectiveDestinationCurrency;
   const baseCurrency = settings?.baseCurrency;
   const displayAccountText = selectedAccount
     ? `${selectedAccount.label} (${selectedAccount.currency})`
@@ -290,7 +308,82 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
       shouldDirty: false,
       shouldValidate: true,
     });
-  }, [accountId, currency, filteredAccounts, getFieldState, setValue]);
+    if (!isExternal) {
+      setValue("sourceCurrency" as any, selected.currency, {
+        shouldDirty: false,
+        shouldValidate: false,
+      });
+    }
+  }, [accountId, currency, filteredAccounts, getFieldState, isExternal, setValue]);
+
+  useEffect(() => {
+    if (!destinationAccount?.currency) return;
+    setValue("destinationCurrency" as any, destinationAccount.currency, {
+      shouldDirty: false,
+      shouldValidate: false,
+    });
+  }, [destinationAccount?.currency, setValue]);
+
+  useEffect(() => {
+    if (!needsInternalCashTransferAmounts || isCrossCurrencyInternalCash) return;
+    if (sourceAmount != null && sourceAmount > 0) {
+      setValue("destinationAmount" as any, sourceAmount, {
+        shouldDirty: false,
+        shouldValidate: false,
+      });
+      setValue("amount" as any, sourceAmount, {
+        shouldDirty: false,
+        shouldValidate: false,
+      });
+    }
+  }, [isCrossCurrencyInternalCash, needsInternalCashTransferAmounts, setValue, sourceAmount]);
+
+  const roundTransferValue = (value: number, precision = 6) =>
+    Number(Number(value).toFixed(precision));
+
+  const handleSourceAmountChange = (value: number | null | undefined) => {
+    setValue("sourceAmount" as any, value, { shouldDirty: true, shouldValidate: false });
+    setValue("amount" as any, value, { shouldDirty: true, shouldValidate: false });
+    if (!value || value <= 0) return;
+    if (isCrossCurrencyInternalCash) {
+      const rate = Number(fxRate);
+      if (rate > 0) {
+        setValue("destinationAmount" as any, roundTransferValue(value * rate), {
+          shouldDirty: true,
+          shouldValidate: false,
+        });
+      }
+    } else {
+      setValue("destinationAmount" as any, value, {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+    }
+  };
+
+  const handleDestinationAmountChange = (value: number | null | undefined) => {
+    setValue("destinationAmount" as any, value, { shouldDirty: true, shouldValidate: false });
+    const sent = Number(sourceAmount);
+    const received = Number(value);
+    if (sent > 0 && received > 0) {
+      setValue("fxRate" as any, roundTransferValue(received / sent, 8), {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+    }
+  };
+
+  const handleFxRateChange = (value: number | null | undefined) => {
+    setValue("fxRate" as any, value ?? undefined, { shouldDirty: true, shouldValidate: false });
+    const sent = Number(sourceAmount);
+    const rate = Number(value);
+    if (sent > 0 && rate > 0) {
+      setValue("destinationAmount" as any, roundTransferValue(sent * rate), {
+        shouldDirty: true,
+        shouldValidate: false,
+      });
+    }
+  };
 
   useEffect(() => {
     if (!isAssetBackedIncome) return;
@@ -678,6 +771,99 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
             />
           )}
 
+          {needsInternalCashTransferAmounts && (
+            <div className="space-y-3">
+              {isCrossCurrencyInternalCash ? (
+                <>
+                  <FormField
+                    control={control}
+                    name={"sourceAmount" as any}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-base font-medium">
+                          Sent ({effectiveSourceCurrency})
+                        </FormLabel>
+                        <FormControl>
+                          <MoneyInput
+                            {...field}
+                            onValueChange={handleSourceAmountChange}
+                            aria-label="Sent amount"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={control}
+                    name={"destinationAmount" as any}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-base font-medium">
+                          Received ({effectiveDestinationCurrency})
+                        </FormLabel>
+                        <FormControl>
+                          <MoneyInput
+                            {...field}
+                            onValueChange={handleDestinationAmountChange}
+                            aria-label="Received amount"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              ) : (
+                <FormField
+                  control={control}
+                  name={"sourceAmount" as any}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base font-medium">Amount</FormLabel>
+                      <FormControl>
+                        <MoneyInput
+                          {...field}
+                          onValueChange={handleSourceAmountChange}
+                          aria-label="Amount"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {isCrossCurrencyInternalCash && (
+                <FormField
+                  control={control}
+                  name={"fxRate" as any}
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base font-medium">
+                        FX Rate
+                        <span className="text-muted-foreground ml-2 text-xs font-normal">
+                          1 {effectiveSourceCurrency} ={" "}
+                          {Number(field.value) > 0 ? field.value : "?"}{" "}
+                          {effectiveDestinationCurrency}
+                        </span>
+                      </FormLabel>
+                      <FormControl>
+                        <MoneyInput
+                          {...field}
+                          onValueChange={handleFxRateChange}
+                          maxDecimalPlaces={8}
+                          aria-label="FX Rate"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </div>
+          )}
+
           {/* Split Ratio */}
           {needsSplitRatio && (
             <FormField
@@ -741,6 +927,8 @@ export function MobileDetailsStep({ accounts, activityType, isEditing }: MobileD
             accountCurrency={accountCurrency}
             baseCurrency={baseCurrency}
             showSubtype={!isDividendActivity && !isInterestActivity}
+            showCurrency={!isTransfer || isExternal}
+            showFxRate={!isTransfer || isExternal}
           />
 
           {/* Comment */}
