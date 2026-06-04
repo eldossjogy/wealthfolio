@@ -90,16 +90,42 @@ function csvCell(value: string): string {
   return `"${escaped}"`;
 }
 
+function planCashTotals(plan: RebalancePlan) {
+  const buyTotal = plan.cashUsed;
+  const sellProceeds = plan.trades
+    .filter((t) => t.action === "sell")
+    .reduce((sum, trade) => sum + trade.estimatedAmount, 0);
+  return {
+    buyTotal,
+    sellProceeds,
+    newCashUsed: Math.max(buyTotal - sellProceeds, 0),
+    hasSells: sellProceeds > 0,
+  };
+}
+
 function exportCsv(plan: RebalancePlan, currency: string, profileName: string) {
   const generated = new Date().toISOString().slice(0, 10);
   const fractionDigits = currencyFractionDigits(currency);
+  const cashTotals = planCashTotals(plan);
+  const cashRows = cashTotals.hasSells
+    ? [
+        ["Buy total", cashTotals.buyTotal.toFixed(fractionDigits)],
+        ["Sell proceeds", cashTotals.sellProceeds.toFixed(fractionDigits)],
+        ["New cash used", cashTotals.newCashUsed.toFixed(fractionDigits)],
+        ["Cash remaining", plan.cashRemaining.toFixed(fractionDigits)],
+        ["Cash available", plan.availableCash.toFixed(fractionDigits)],
+      ]
+    : [
+        ["Cash deployed", plan.cashUsed.toFixed(fractionDigits)],
+        ["Cash remaining", plan.cashRemaining.toFixed(fractionDigits)],
+        ["Cash available", plan.availableCash.toFixed(fractionDigits)],
+      ];
 
   const meta = [
     ["Generated", generated],
     ["Profile", profileName],
     ["Currency", currency],
-    ["Cash deployed", plan.cashUsed.toFixed(fractionDigits)],
-    ["Cash available", plan.availableCash.toFixed(fractionDigits)],
+    ...cashRows,
     ["Max drift before", fmtBps(plan.maxDriftBpsBefore)],
     ["Max drift after", fmtBps(plan.maxDriftBpsAfter)],
   ]
@@ -145,9 +171,12 @@ function exportCsv(plan: RebalancePlan, currency: string, profileName: string) {
 }
 
 function copyToText(plan: RebalancePlan, currency: string) {
+  const cashTotals = planCashTotals(plan);
   const lines = [
     `Rebalance plan · ${new Date().toLocaleDateString()}`,
-    `Cash deployed: ${formatAmount(plan.cashUsed, currency)} of ${formatAmount(plan.availableCash, currency)}`,
+    cashTotals.hasSells
+      ? `New cash used: ${formatAmount(cashTotals.newCashUsed, currency)} (buy total ${formatAmount(cashTotals.buyTotal, currency)}, sell proceeds ${formatAmount(cashTotals.sellProceeds, currency)}, cash remaining ${formatAmount(plan.cashRemaining, currency)})`
+      : `Cash deployed: ${formatAmount(plan.cashUsed, currency)} of ${formatAmount(plan.availableCash, currency)}`,
     `Max drift: ${fmtBps(plan.maxDriftBpsBefore)} → ${fmtBps(plan.maxDriftBpsAfter)}`,
     "",
     "PROPOSED TRADES",
@@ -224,6 +253,7 @@ function ModeSwitch({
 // ── KPI strip ─────────────────────────────────────────────────────────────────
 
 function KpiStrip({ plan, currency }: { plan: RebalancePlan; currency: string }) {
+  const cashTotals = planCashTotals(plan);
   const buys = plan.trades.filter((t) => t.action === "buy").length;
   const sells = plan.trades.filter((t) => t.action === "sell").length;
   const tradeLabel =
@@ -237,14 +267,17 @@ function KpiStrip({ plan, currency }: { plan: RebalancePlan; currency: string })
       sub: tradeLabel,
     },
     {
-      label: "Cash deployed",
-      value: formatAmount(plan.cashUsed, currency),
-      sub: `of ${formatAmount(plan.availableCash, currency)} available`,
+      label: sells > 0 ? "New cash used" : "Cash deployed",
+      value: formatAmount(sells > 0 ? cashTotals.newCashUsed : plan.cashUsed, currency),
+      sub:
+        sells > 0
+          ? `${formatAmount(cashTotals.buyTotal, currency)} buys · ${formatAmount(cashTotals.sellProceeds, currency)} sells`
+          : `of ${formatAmount(plan.availableCash, currency)} available`,
     },
     {
-      label: "Unused cash",
+      label: "Cash remaining",
       value: formatAmount(plan.cashRemaining, currency),
-      sub: "below min trade / lot size",
+      sub: sells > 0 ? "cash + unused proceeds" : "below min trade / lot size",
       muted: true,
     },
     {
@@ -775,12 +808,9 @@ export function RebalanceTab({
                     {(() => {
                       const buys = plan.trades.filter((t) => t.action === "buy").length;
                       const sells = plan.trades.filter((t) => t.action === "sell").length;
-                      const sellProceeds = plan.trades
-                        .filter((t) => t.action === "sell")
-                        .reduce((s, t) => s + t.estimatedAmount, 0);
-                      const netDeployed = plan.cashUsed - sellProceeds;
+                      const cashTotals = planCashTotals(plan);
                       return sells > 0
-                        ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""} · ${formatAmount(netDeployed, currency)} new cash`
+                        ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""} · ${formatAmount(cashTotals.newCashUsed, currency)} new cash`
                         : `${buys} buy${buys !== 1 ? "s" : ""} · ${formatAmount(plan.cashUsed, currency)} deployed`;
                     })()}
                   </CardDescription>

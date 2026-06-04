@@ -215,11 +215,11 @@ impl DriftPriorityOptimizer {
         }
 
         let scale = dec!(10000);
-        let mut values = values.clone();
+        let initial_values = values.clone();
+        let mut values = initial_values.clone();
         let mut qty_remaining: Vec<Decimal> =
             sell_candidates.iter().map(|c| c.quantity_owned).collect();
         let mut shares_sold: Vec<Decimal> = vec![Decimal::ZERO; sell_candidates.len()];
-        let mut proceeds = Decimal::ZERO;
 
         loop {
             let drift_before =
@@ -386,55 +386,62 @@ impl DriftPriorityOptimizer {
                 let entry = values.entry(cat_id.clone()).or_default();
                 *entry = (*entry - expo * actual).max(Decimal::ZERO);
             }
-            proceeds += candidate.price * actual;
             qty_remaining[idx] -= actual;
             shares_sold[idx] += actual;
         }
 
-        // Build sell trades
-        let sell_trades: Vec<SuggestedManualTrade> = sell_candidates
-            .iter()
-            .zip(shares_sold.iter())
-            .filter(|(_, &shares)| shares > Decimal::ZERO)
-            .map(|(candidate, &shares)| {
-                let estimated_amount = shares * candidate.price;
-                let (primary_cat_id, primary_cat_name) = candidate
-                    .exposure_per_share
-                    .iter()
-                    .max_by(|(_, a), (_, b)| a.cmp(b))
-                    .map(|(cat_id, _)| {
-                        let name = categories
-                            .iter()
-                            .find(|c| &c.category_id == cat_id)
-                            .map(|c| c.category_name.clone())
-                            .unwrap_or_else(|| cat_id.clone());
-                        (cat_id.clone(), name)
-                    })
-                    .unwrap_or_else(|| ("unknown".to_string(), "Unknown".to_string()));
+        let mut kept_values = initial_values;
+        let mut proceeds = Decimal::ZERO;
+        let mut sell_trades: Vec<SuggestedManualTrade> = Vec::new();
 
-                SuggestedManualTrade {
-                    action: "sell".to_string(),
-                    category_id: primary_cat_id,
-                    category_name: primary_cat_name,
-                    asset_id: Some(candidate.asset_id.clone()),
-                    symbol: Some(candidate.symbol.clone()),
-                    name: candidate.name.clone(),
-                    quantity: Some(shares),
-                    estimated_price: Some(candidate.price),
-                    estimated_amount,
-                    reason: format!(
-                        "{} is overweight — selling reduces portfolio drift.",
-                        candidate.symbol
-                    ),
-                }
-            })
-            .filter(|t| min_trade_amount <= Decimal::ZERO || t.estimated_amount >= min_trade_amount)
-            .collect();
+        for (candidate, &shares) in sell_candidates.iter().zip(shares_sold.iter()) {
+            if shares <= Decimal::ZERO {
+                continue;
+            }
 
-        // Recompute proceeds from kept sell trades so dust sells don't fund buys.
-        let proceeds: Decimal = sell_trades.iter().map(|t| t.estimated_amount).sum();
+            let estimated_amount = shares * candidate.price;
+            if min_trade_amount > Decimal::ZERO && estimated_amount < min_trade_amount {
+                continue;
+            }
 
-        (values, proceeds, sell_trades)
+            for (cat_id, expo) in &candidate.exposure_per_share {
+                let entry = kept_values.entry(cat_id.clone()).or_default();
+                *entry = (*entry - expo * shares).max(Decimal::ZERO);
+            }
+            proceeds += estimated_amount;
+
+            let (primary_cat_id, primary_cat_name) = candidate
+                .exposure_per_share
+                .iter()
+                .max_by(|(_, a), (_, b)| a.cmp(b))
+                .map(|(cat_id, _)| {
+                    let name = categories
+                        .iter()
+                        .find(|c| &c.category_id == cat_id)
+                        .map(|c| c.category_name.clone())
+                        .unwrap_or_else(|| cat_id.clone());
+                    (cat_id.clone(), name)
+                })
+                .unwrap_or_else(|| ("unknown".to_string(), "Unknown".to_string()));
+
+            sell_trades.push(SuggestedManualTrade {
+                action: "sell".to_string(),
+                category_id: primary_cat_id,
+                category_name: primary_cat_name,
+                asset_id: Some(candidate.asset_id.clone()),
+                symbol: Some(candidate.symbol.clone()),
+                name: candidate.name.clone(),
+                quantity: Some(shares),
+                estimated_price: Some(candidate.price),
+                estimated_amount,
+                reason: format!(
+                    "{} is overweight — selling reduces portfolio drift.",
+                    candidate.symbol
+                ),
+            });
+        }
+
+        (kept_values, proceeds, sell_trades)
     }
 
     /// Greedy buy loop. Mutates `values` and returns shares bought per candidate index.
@@ -972,5 +979,64 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
             warnings,
             after_bps_by_category,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filtered_sell_trade_does_not_mutate_returned_values() {
+        let values = HashMap::from([
+            ("equity".to_string(), dec!(3000)),
+            ("bond".to_string(), dec!(7000)),
+        ]);
+        let categories = vec![
+            CategoryState {
+                category_id: "equity".to_string(),
+                category_name: "Equity".to_string(),
+                target_bps: 7000,
+                current_value: dec!(3000),
+                is_cash: false,
+                is_required: true,
+            },
+            CategoryState {
+                category_id: "bond".to_string(),
+                category_name: "Bond".to_string(),
+                target_bps: 3000,
+                current_value: dec!(7000),
+                is_cash: false,
+                is_required: true,
+            },
+        ];
+        let sell_candidates = vec![SellCandidate {
+            holding_id: "h-bond".to_string(),
+            asset_id: "a-bond".to_string(),
+            symbol: "BND".to_string(),
+            name: Some("BND".to_string()),
+            price: dec!(100),
+            quantity_owned: dec!(1),
+            exposure_per_share: HashMap::from([("bond".to_string(), dec!(100))]),
+        }];
+
+        let (updated_values, proceeds, trades) = DriftPriorityOptimizer::run_sell_phase(
+            &values,
+            dec!(10000),
+            &categories,
+            &sell_candidates,
+            &RebalanceGoal::ExactTarget,
+            dec!(500),
+            false,
+            dec!(500),
+        );
+
+        assert!(trades.is_empty(), "sub-minimum sell should be filtered");
+        assert_eq!(proceeds, Decimal::ZERO);
+        assert_eq!(
+            updated_values.get("bond").copied(),
+            Some(dec!(7000)),
+            "filtered sells must not alter the state used by the buy phase"
+        );
     }
 }

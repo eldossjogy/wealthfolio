@@ -358,6 +358,7 @@ function TargetEditor({
     resetTargetName,
     resetTargetTaxonomyId,
     onUnsavedChange,
+    target?.allowSells,
   ]);
 
   useEffect(() => {
