@@ -81,6 +81,8 @@ pub fn should_sync_outbox_for_snapshot_source(source: SnapshotSource) -> bool {
 /// Centralized metadata for mapping DB models to sync outbox entities.
 pub trait SyncOutboxModel: Serialize {
     const ENTITY: SyncEntity;
+    /// Borrowed single-column row identifier. Generic outbox writers use
+    /// `sync_entity_id_owned()` so composite-key models can override the sync ID.
     fn sync_entity_id(&self) -> &str;
     /// Returns the entity ID as an owned String. Override for composite PKs.
     fn sync_entity_id_owned(&self) -> String {
@@ -103,7 +105,7 @@ pub fn outbox_request_for_model<T: SyncOutboxModel>(
 ) -> Result<OutboxWriteRequest> {
     Ok(OutboxWriteRequest::new(
         T::ENTITY,
-        model.sync_entity_id().to_string(),
+        model.sync_entity_id_owned(),
         op,
         serde_json::to_value(model)?,
     ))
