@@ -222,10 +222,14 @@ fn resolve_rebalance_input(
         &base_currency,
     )
     .map_err(|e| e.to_string())?;
+    // Scope cash/holdings to the same accounts the holdings view uses (excludes
+    // non-Holdings accounts like credit cards), so tracked cash matches what the
+    // frontend reads from `get_holdings`.
+    let account_ids = holdings_account_ids(state, &resolved.account_ids)?;
     Ok(CalculateRebalancePlanInput {
         target_id,
         available_cash,
-        account_ids: resolved.account_ids,
+        account_ids,
         base_currency,
         aggregated_account_id: resolved.scope_id,
         scenario_mode,
