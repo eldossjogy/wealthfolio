@@ -12,7 +12,7 @@ use wealthfolio_core::{
     portfolio::allocation_targets::{
         AllocationTarget, AllocationTargetWeight, CalculateRebalancePlanInput, DriftReport,
         NewAllocationTarget, NewAllocationTargetWeight, RebalancePlan, SaveAllocationTargetResult,
-        ScopeType,
+        ScenarioMode, ScopeType,
     },
     portfolios::AccountScope,
 };
@@ -207,6 +207,8 @@ async fn get_drift_for_target(
 struct CalculatePlanBody {
     target_id: String,
     available_cash: Decimal,
+    #[serde(default)]
+    scenario_mode: ScenarioMode,
     filter: AccountScope,
 }
 
@@ -214,6 +216,7 @@ fn resolve_rebalance_input(
     state: &Arc<AppState>,
     target_id: String,
     available_cash: Decimal,
+    scenario_mode: ScenarioMode,
     filter: &AccountScope,
 ) -> ApiResult<CalculateRebalancePlanInput> {
     let base_currency = state.base_currency.read().unwrap().clone();
@@ -227,6 +230,7 @@ fn resolve_rebalance_input(
         account_ids: resolved.account_ids,
         base_currency,
         aggregated_account_id: resolved.scope_id,
+        scenario_mode,
     })
 }
 
@@ -234,7 +238,13 @@ async fn calculate_plan(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CalculatePlanBody>,
 ) -> ApiResult<Json<RebalancePlan>> {
-    let input = resolve_rebalance_input(&state, body.target_id, body.available_cash, &body.filter)?;
+    let input = resolve_rebalance_input(
+        &state,
+        body.target_id,
+        body.available_cash,
+        body.scenario_mode,
+        &body.filter,
+    )?;
     let plan = state.rebalance_service.calculate_plan(input).await?;
     Ok(Json(plan))
 }

@@ -398,9 +398,9 @@ export const COMMANDS: CommandMap = {
 export const logger: Logger = {
   error: (...args: unknown[]) => console.error(...args),
   warn: (...args: unknown[]) => console.warn(...args),
-  info: (...args: unknown[]) => console.info(...args),
-  debug: (...args: unknown[]) => console.debug(...args),
-  trace: (...args: unknown[]) => console.trace(...args),
+  info: (...args: unknown[]) => console.warn(...args),
+  debug: (...args: unknown[]) => console.warn(...args),
+  trace: (...args: unknown[]) => console.warn(...args),
 };
 
 /**
@@ -1862,12 +1862,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       break;
     }
     case "calculate_rebalance_plan": {
-      const { targetId, availableCash, filter } = payload as {
+      const { targetId, availableCash, filter, scenarioMode } = payload as {
         targetId: string;
         availableCash: number;
         filter: unknown;
+        scenarioMode: string;
       };
-      body = JSON.stringify({ targetId, availableCash, filter });
+      body = JSON.stringify({ targetId, availableCash, filter, scenarioMode });
       break;
     }
     // AI Providers
@@ -1985,8 +1986,15 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   if (!res.ok) {
     let msg = res.statusText;
     try {
-      const err = await res.json();
-      msg = (err?.message ?? msg) as string;
+      const err = (await res.json()) as unknown;
+      if (
+        typeof err === "object" &&
+        err !== null &&
+        "message" in err &&
+        typeof err.message === "string"
+      ) {
+        msg = err.message;
+      }
     } catch (_e) {
       // ignore JSON parse error from non-JSON error bodies
       void 0;

@@ -208,6 +208,10 @@ impl AllocationTargetService {
                 .whole_shares_only
                 .or_else(|| existing.as_ref().map(|target| target.whole_shares_only))
                 .unwrap_or(false),
+            allow_sells: input
+                .allow_sells
+                .or_else(|| existing.as_ref().map(|target| target.allow_sells))
+                .unwrap_or(false),
             created_at: existing
                 .as_ref()
                 .map(|target| target.created_at.clone())
@@ -270,6 +274,7 @@ impl AllocationTargetServiceTrait for AllocationTargetService {
             rebalance_goal: input.rebalance_goal.unwrap_or(RebalanceGoal::NearestBand),
             min_trade_amount: input.min_trade_amount.unwrap_or_else(|| "0".to_string()),
             whole_shares_only: input.whole_shares_only.unwrap_or(false),
+            allow_sells: input.allow_sells.unwrap_or(false),
             created_at: now.clone(),
             updated_at: now,
             archived_at: None,
@@ -311,6 +316,7 @@ impl AllocationTargetServiceTrait for AllocationTargetService {
             whole_shares_only: input
                 .whole_shares_only
                 .unwrap_or(existing.whole_shares_only),
+            allow_sells: input.allow_sells.unwrap_or(existing.allow_sells),
             created_at: existing.created_at,
             updated_at: Self::now(),
             archived_at: existing.archived_at,
@@ -457,6 +463,7 @@ mod tests {
             rebalance_goal: RebalanceGoal::NearestBand,
             min_trade_amount: "0".to_string(),
             whole_shares_only: false,
+            allow_sells: false,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             archived_at: None,
@@ -474,6 +481,7 @@ mod tests {
             rebalance_goal: Some(RebalanceGoal::NearestBand),
             min_trade_amount: Some("0".to_string()),
             whole_shares_only: Some(false),
+            allow_sells: None,
         }
     }
 

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { calculateRebalancePlan } from "@/adapters";
-import type { AccountScope } from "@/lib/types";
+import type { AccountScope, ScenarioMode } from "@/lib/types";
 
 export function useCalculateRebalancePlan() {
   return useMutation({
@@ -8,10 +8,12 @@ export function useCalculateRebalancePlan() {
       targetId,
       availableCash,
       filter,
+      scenarioMode,
     }: {
       targetId: string;
       availableCash: number;
       filter: AccountScope;
-    }) => calculateRebalancePlan(targetId, availableCash, filter),
+      scenarioMode?: ScenarioMode;
+    }) => calculateRebalancePlan(targetId, availableCash, filter, scenarioMode),
   });
 }

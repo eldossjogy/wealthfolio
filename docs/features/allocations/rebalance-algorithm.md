@@ -7,15 +7,19 @@ curious users
 
 ## 1. What problem are we solving?
 
-A user has a target allocation (e.g. 60 % equities, 30 % bonds, 10 % cash) and a
-pool of available cash to deploy. Given the current portfolio, which trades
-bring the portfolio as close to target as possible using only that cash?
+A user has a target allocation (e.g. 60 % equities, 30 % bonds, 10 % cash) and
+optionally a pool of available cash or existing holdings to rebalance against.
+Given the current portfolio, which trades bring the portfolio as close to target
+as possible?
 
 Constraints:
 
-- **Cash-only** — no forced sells (M2). Sell-mode is M3.
+- **Three scenario modes** — `cash_flow_only` (buys only), `sell_to_rebalance`
+  (sells overweight then buys underweight), and `hybrid` (sells only when cash
+  alone cannot bring every sleeve within band). The `allow_sells` flag on the
+  target profile gates the sell scenarios.
 - **Exposure-aware** — an asset may span multiple taxonomy categories (e.g. a
-  global ETF classified 60 % US equity / 40 % international). One buy must
+  global ETF classified 60 % US equity / 40 % international). One trade must
   update all affected category exposures simultaneously.
 - **Whole-share mode** — when enabled, only round-lot quantities are suggested.
 - **Minimum trade size** — asset trades below `min_trade_amount` are dropped
@@ -44,35 +48,54 @@ behind a feature flag without changing `RebalanceService`.
 ## 3. Algorithm overview
 
 ```
-Input: available_cash, target_profile, current_holdings, drift_report
+Input: scenario_mode, available_cash, target_profile, current_holdings, drift_report
 
-Build exposure vectors
+Build exposure vectors (buy candidates)
   For each non-cash holding with taxonomy assignments:
     exposure_per_share[category] = contribution.value / quantity
-    (multi-category ETF → multiple entries summing to ≤ price)
-    Skip holding if all categories are __UNKNOWN__ (warn UnclassifiedAsset)
-    Include with partial exposure if some categories are __UNKNOWN__ (warn PartialClassification)
+    Skip if all categories are __UNKNOWN__ (warn UnclassifiedAsset)
+    Include with partial exposure if some are __UNKNOWN__ (warn PartialClassification)
 
-Greedy loop
+Sell phase  (SellToRebalance only — runs before buy phase)
+  while overweight drift > 0:
+    for each sell candidate (holding with qty_owned > 0, classified):
+      simulate sell quantity → values[c] -= exposure[c] × qty
+      score = (drift_before − drift_after) / sell_proceeds
+    pick candidate with highest score > 0
+    apply sell: update values[c], proceeds += price × qty, qty_remaining[idx] -= qty
+  sell_proceeds become the buy phase cash pool (available_cash untouched)
+
+Buy phase
+  CashFlowOnly / SellToRebalance: cash = available_cash  |  sell_proceeds
   while cash > 0:
     drift_before = Σ |current_bps[c] − target_bps[c]|  for required non-cash categories
     for each candidate asset:
       if whole-share mode and cash < price: skip
-      quantity = 1 share in whole-share mode
-      quantity = fractional cash/price capped at the next target/band bend in fractional mode
-      simulate buy quantity → new_bps[c] = (current_value[c] + exposure_per_share[c] × quantity) / total_value
+      quantity = 1 share (whole-share) or fractional cap at next band bend (fractional)
+      simulate buy → new_bps[c] = (current_value[c] + exposure[c] × qty) / total_value
       drift_after = Σ |new_bps[c] − target_bps[c]|
       score = (drift_before − drift_after) / amount
-    pick candidate with highest score > 0
-    tie-break: price ASC (deterministic; lower-price assets preferred)
+    pick candidate with highest score > 0  (tie-break: price ASC)
     if no candidate improves drift: stop
-    apply buy: update current_value[c] for each category, cash -= amount
+    apply buy: update values[c], cash -= amount
+
+Hybrid pass-2 (after cash buys, if still overweight outside goal threshold)
+  Check: any required category bps > threshold?
+    ExactTarget → threshold = target_bps
+    NearestBand → threshold = target_bps + drift_band
+  If yes: run sell phase on post-buy values → sell_proceeds_2
+    then run buy phase again with sell_proceeds_2
+  Note: total_value is fixed. Cash buys are a cash↔asset swap and do not
+  reduce an untouched overweight category's bps. Hybrid differs from
+  SellToRebalance by ordering (buy first, sell residual), not by cash dilution.
 
 Post-processing
-  Aggregate shares by asset → SuggestedManualTrade (1 per asset)
-  Drop asset trades where estimated_amount < min_trade_amount
-  cash_used = sum of kept trade amounts
-  after_bps_by_category = recompute from initial values + kept trades only
+  Sell trades + buy trades → SuggestedManualTrade[] (1 per asset per action)
+  Drop sell trades where estimated_amount < min_trade_amount (recompute proceeds from kept)
+  Drop buy trades where estimated_amount < min_trade_amount
+  cash_used = sum of kept buy trade amounts
+  cash_remaining = available_cash + sell_proceeds − cash_used
+  after_bps_by_category = recompute from initial values + all kept trades
 
 Output: trades[], warnings[], cash_used, cash_remaining, after_bps_by_category
 ```
@@ -206,7 +229,7 @@ future UI pass can add a non-blocking "add X for one more share" hint.
 
 | Idea                                                | Complexity | Status                                |
 | --------------------------------------------------- | ---------- | ------------------------------------- |
-| Sell-to-rebalance (`allow_sells`)                   | Medium     | M3                                    |
+| Sell-to-rebalance (`allow_sells`)                   | Medium     | ✅ M3                                 |
 | `HoldingTarget` — per-ticker allocations            | High       | V2 data model (SOTA Phase 2)          |
 | Tax-lot awareness                                   | High       | Out of V1 scope                       |
 | `TaxAwareOptimizer` (greedy + tax penalty in score) | Medium     | M3/M4                                 |
