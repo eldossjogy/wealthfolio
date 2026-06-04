@@ -47,9 +47,16 @@ const dashboardPerformanceMessages = (
   dataQuality: PerformanceDataQuality | undefined,
 ): string[] => {
   const messages = dataQuality?.warnings ?? [];
-  return messages.filter(
-    (message) => !message.toLowerCase().startsWith("volatility is annualized"),
-  );
+  return messages.filter((message) => {
+    const m = message.toLowerCase();
+    // Hide annualized-volatility noise, the "excluded accounts" note, and the
+    // technical transfer-group warning (the Health Center owns transfer integrity).
+    return (
+      !m.startsWith("volatility is annualized") &&
+      !m.startsWith("transfer group") &&
+      !m.includes("were excluded")
+    );
+  });
 };
 
 const AccountSummarySkeleton = () => (

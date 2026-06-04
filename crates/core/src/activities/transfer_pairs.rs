@@ -114,6 +114,10 @@ impl TransferPairResolution {
         &self.pairs
     }
 
+    pub fn invalid_groups(&self) -> &[InvalidTransferGroup] {
+        &self.invalid_groups
+    }
+
     pub fn pair_for_activity(&self, activity_id: &str) -> Option<&TransferPair> {
         self.pair_by_activity_id
             .get(activity_id)

@@ -61,6 +61,7 @@ async fn run_health_checks_internal(
             state.asset_service.clone(),
             state.taxonomy_service.clone(),
             state.valuation_service.clone(),
+            state.activity_service.clone(),
             Some(configured_timezone.as_str()),
             client_timezone,
         )

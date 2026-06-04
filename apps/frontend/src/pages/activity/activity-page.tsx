@@ -94,6 +94,11 @@ const ActivityPage = () => {
 
   const accountScope = activityUrlFilters.accountScope ?? persistedAccountScope;
   const statusFilter = activityUrlFilters.statusFilter ?? persistedStatusFilter;
+  // Health Center deeplinks can scope the list to specific activity types / a date
+  // window (e.g. transfers around an incomplete-transfer issue). URL wins over persisted.
+  const effectiveActivityTypes = activityUrlFilters.activityTypes ?? selectedActivityTypes;
+  const urlDateFrom = activityUrlFilters.dateFrom;
+  const urlDateTo = activityUrlFilters.dateTo;
 
   const clearBrokerReviewUrlFilters = useCallback(() => {
     setSearchParams(
@@ -242,9 +247,11 @@ const ActivityPage = () => {
     mode: "infinite",
     filters: {
       accountIds: effectiveInvestmentAccountIds,
-      activityTypes: selectedActivityTypes,
+      activityTypes: effectiveActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
+      dateFrom: urlDateFrom,
+      dateTo: urlDateTo,
     },
     searchQuery,
     sorting,
@@ -255,9 +262,11 @@ const ActivityPage = () => {
     mode: "paginated",
     filters: {
       accountIds: effectiveInvestmentAccountIds,
-      activityTypes: selectedActivityTypes,
+      activityTypes: effectiveActivityTypes,
       instrumentTypes: selectedInstrumentTypes,
       status: statusFilter,
+      dateFrom: urlDateFrom,
+      dateTo: urlDateTo,
     },
     searchQuery,
     sorting,

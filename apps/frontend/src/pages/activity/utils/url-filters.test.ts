@@ -16,9 +16,33 @@ describe("resolveActivityUrlFilters", () => {
     expect(resolveActivityUrlFilters(new URLSearchParams("tab=spending"))).toEqual({});
   });
 
+  it("maps transfer-integrity deeplinks to activity types and a date window", () => {
+    expect(
+      resolveActivityUrlFilters(
+        new URLSearchParams("types=TRANSFER_IN,TRANSFER_OUT&from=2026-06-01&to=2026-06-04"),
+      ),
+    ).toEqual({
+      activityTypes: ["TRANSFER_IN", "TRANSFER_OUT"],
+      dateFrom: "2026-06-01",
+      dateTo: "2026-06-04",
+    });
+  });
+
+  it("ignores an empty types param", () => {
+    expect(resolveActivityUrlFilters(new URLSearchParams("types="))).toEqual({});
+  });
+
   it("clears broker review filter params without dropping unrelated params", () => {
     const cleared = clearActivityUrlFilters(
       new URLSearchParams("tab=investments&account=acct-1&needsReview=true"),
+    );
+
+    expect(cleared.toString()).toBe("tab=investments");
+  });
+
+  it("clears transfer-integrity deeplink params", () => {
+    const cleared = clearActivityUrlFilters(
+      new URLSearchParams("tab=investments&types=TRANSFER_IN&from=2026-06-01&to=2026-06-04"),
     );
 
     expect(cleared.toString()).toBe("tab=investments");

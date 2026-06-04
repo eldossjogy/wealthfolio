@@ -18,7 +18,6 @@ import {
   IntervalSelector,
   usePersistentState,
 } from "@wealthfolio/ui";
-import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
 import { format } from "date-fns";
 import { useMemo, useState } from "react";
@@ -96,8 +95,18 @@ export function DashboardContent() {
 
   const gainLossAmount = performancePeriodPnl(portfolioPerformance);
   const simpleReturn = performanceHeadlineReturn(portfolioPerformance);
+  // Header notices explain the displayed return (e.g. why TWR is unavailable for this scope).
+  // Data-integrity warnings (invalid transfer groups) are surfaced in the Health Center instead,
+  // and the "excluded accounts" note is intentionally hidden from the headline.
   const performanceMessages = (portfolioPerformance?.dataQuality.warnings ?? []).filter(
-    (message) => !message.toLowerCase().startsWith("volatility is annualized"),
+    (message) => {
+      const m = message.toLowerCase();
+      return (
+        !m.startsWith("volatility is annualized") &&
+        !m.startsWith("transfer group") &&
+        !m.includes("were excluded")
+      );
+    },
   );
 
   const currentValuation = useMemo(() => {
@@ -177,11 +186,6 @@ export function DashboardContent() {
                         value={simpleReturn}
                         animated={true}
                       />
-                    )}
-                    {performanceMessages.length > 0 && (
-                      <span className="inline-flex cursor-help items-center" aria-hidden>
-                        <Icons.AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                      </span>
                     )}
                   </>
                 )}

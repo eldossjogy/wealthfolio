@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::accounts::{account_types, is_liability_account_type, AccountServiceTrait};
+use crate::activities::{ActivityServiceTrait, TransferPairResolution};
 use crate::assets::AssetServiceTrait;
 use crate::errors::Result;
 use crate::portfolio::holdings::HoldingsServiceTrait;
@@ -20,8 +21,9 @@ use crate::taxonomies::TaxonomyServiceTrait;
 
 use super::checks::{
     AccountConfigurationCheck, AssetHoldingInfo, ClassificationCheck, ConsistencyIssueInfo,
-    DataConsistencyCheck, FxIntegrityCheck, FxPairInfo, LegacyMigrationInfo, PriceStalenessCheck,
-    QuoteSyncCheck, QuoteSyncErrorInfo, UnclassifiedAssetInfo, UnconfiguredAccountInfo,
+    DataConsistencyCheck, FxIntegrityCheck, FxPairInfo, InvalidTransferGroupInfo,
+    LegacyMigrationInfo, PriceStalenessCheck, QuoteSyncCheck, QuoteSyncErrorInfo,
+    TransferIntegrityCheck, TransferLegDetail, UnclassifiedAssetInfo, UnconfiguredAccountInfo,
 };
 use super::errors::HealthError;
 use super::model::{FixAction, HealthConfig, HealthIssue, HealthStatus, IssueDismissal};
@@ -51,6 +53,7 @@ pub struct HealthService {
     classification_check: ClassificationCheck,
     consistency_check: DataConsistencyCheck,
     account_config_check: AccountConfigurationCheck,
+    transfer_integrity_check: TransferIntegrityCheck,
 }
 
 impl HealthService {
@@ -66,6 +69,7 @@ impl HealthService {
             classification_check: ClassificationCheck::new(),
             consistency_check: DataConsistencyCheck::new(),
             account_config_check: AccountConfigurationCheck::new(),
+            transfer_integrity_check: TransferIntegrityCheck::new(),
         }
     }
 
@@ -84,6 +88,7 @@ impl HealthService {
             classification_check: ClassificationCheck::new(),
             consistency_check: DataConsistencyCheck::new(),
             account_config_check: AccountConfigurationCheck::new(),
+            transfer_integrity_check: TransferIntegrityCheck::new(),
         }
     }
 
@@ -106,6 +111,7 @@ impl HealthService {
         unconfigured_accounts: &[UnconfiguredAccountInfo],
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
+        invalid_transfer_groups: &[InvalidTransferGroupInfo],
     ) -> Result<HealthStatus> {
         let config = self.config.read().await.clone();
         let ctx = HealthContext::new(config, base_currency, total_portfolio_value);
@@ -190,6 +196,20 @@ impl HealthService {
         );
         all_issues.extend(account_config_issues);
 
+        // Run transfer integrity check (invalid / incomplete transfer groups)
+        debug!(
+            "Running transfer integrity check on {} invalid groups",
+            invalid_transfer_groups.len()
+        );
+        let transfer_issues = self
+            .transfer_integrity_check
+            .analyze(invalid_transfer_groups, &ctx);
+        debug!(
+            "Transfer integrity check found {} issues",
+            transfer_issues.len()
+        );
+        all_issues.extend(transfer_issues);
+
         // Filter out dismissed issues (unless data has changed)
         let filtered_issues = self.filter_dismissed_issues(all_issues).await?;
 
@@ -225,6 +245,7 @@ impl HealthService {
         asset_service: Arc<dyn AssetServiceTrait>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         valuation_service: Arc<dyn ValuationServiceTrait>,
+        activity_service: Arc<dyn ActivityServiceTrait>,
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
     ) -> Result<HealthStatus> {
@@ -448,6 +469,11 @@ impl HealthService {
             })
             .collect();
 
+        // Detect invalid / incomplete transfer groups across all activities so the
+        // Health Center can surface them (they otherwise distort returns silently).
+        let invalid_transfer_groups =
+            gather_invalid_transfer_groups(activity_service.as_ref(), &account_name_map);
+
         // Run checks with gathered data
         self.run_checks_with_data(
             base_currency,
@@ -462,6 +488,7 @@ impl HealthService {
             &unconfigured_accounts,
             configured_timezone,
             client_timezone,
+            &invalid_transfer_groups,
         )
         .await
     }
@@ -496,6 +523,59 @@ impl HealthService {
     }
 }
 
+/// Loads all activities and resolves transfer groups, returning the ones that
+/// don't form a valid pair (e.g. a transfer with a single recorded leg).
+fn gather_invalid_transfer_groups(
+    activity_service: &dyn ActivityServiceTrait,
+    account_names: &HashMap<String, String>,
+) -> Vec<InvalidTransferGroupInfo> {
+    let activities = match activity_service.get_activities() {
+        Ok(activities) => activities,
+        Err(e) => {
+            warn!(
+                "Failed to load activities for transfer integrity check: {}",
+                e
+            );
+            return Vec::new();
+        }
+    };
+
+    let resolution = TransferPairResolution::from_activities(&activities);
+    if resolution.invalid_groups().is_empty() {
+        return Vec::new();
+    }
+
+    let by_id: HashMap<&str, &crate::activities::Activity> =
+        activities.iter().map(|a| (a.id.as_str(), a)).collect();
+
+    resolution
+        .invalid_groups()
+        .iter()
+        .map(|group| {
+            let legs = group
+                .activity_ids
+                .iter()
+                .filter_map(|id| by_id.get(id.as_str()).copied())
+                .map(|act| TransferLegDetail {
+                    account_id: act.account_id.clone(),
+                    account_name: account_names
+                        .get(&act.account_id)
+                        .cloned()
+                        .unwrap_or_else(|| "Account".to_string()),
+                    activity_type: act.effective_type().to_string(),
+                    amount: act.amount,
+                    currency: act.currency.clone(),
+                    date: act.activity_date.date_naive(),
+                })
+                .collect();
+            InvalidTransferGroupInfo {
+                group_id: group.group_id.clone(),
+                legs,
+            }
+        })
+        .collect()
+}
+
 #[async_trait]
 impl HealthServiceTrait for HealthService {
     async fn run_checks(&self, _base_currency: &str) -> Result<HealthStatus> {
@@ -522,6 +602,7 @@ impl HealthServiceTrait for HealthService {
         unconfigured_accounts: &[UnconfiguredAccountInfo],
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
+        invalid_transfer_groups: &[InvalidTransferGroupInfo],
     ) -> Result<HealthStatus> {
         // Call the inherent method
         HealthService::run_checks_with_data(
@@ -538,6 +619,7 @@ impl HealthServiceTrait for HealthService {
             unconfigured_accounts,
             configured_timezone,
             client_timezone,
+            invalid_transfer_groups,
         )
         .await
     }
@@ -664,6 +746,7 @@ impl HealthServiceTrait for HealthService {
         asset_service: Arc<dyn AssetServiceTrait>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         valuation_service: Arc<dyn ValuationServiceTrait>,
+        activity_service: Arc<dyn ActivityServiceTrait>,
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
     ) -> Result<HealthStatus> {
@@ -676,6 +759,7 @@ impl HealthServiceTrait for HealthService {
             asset_service,
             taxonomy_service,
             valuation_service,
+            activity_service,
             configured_timezone,
             client_timezone,
         )
@@ -750,6 +834,7 @@ mod tests {
                 &[],
                 Some("UTC"),
                 None,
+                &[],
             )
             .await
             .unwrap();
@@ -827,6 +912,7 @@ mod tests {
                 &[],
                 Some("UTC"),
                 None,
+                &[],
             )
             .await
             .unwrap();
@@ -865,6 +951,7 @@ mod tests {
                 &[],
                 Some("UTC"),
                 None,
+                &[],
             )
             .await
             .unwrap();
@@ -893,6 +980,7 @@ mod tests {
                 &[],
                 Some("UTC"),
                 None,
+                &[],
             )
             .await
             .unwrap();
