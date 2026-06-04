@@ -919,11 +919,7 @@ function spendingActivityHref(id: string): string {
     : `/activities?tab=spending&category=${id}`;
 }
 
-function WhereItWentEmptyState({
-  hasNoIncludedAccounts,
-}: {
-  hasNoIncludedAccounts: boolean;
-}) {
+function WhereItWentEmptyState({ hasNoIncludedAccounts }: { hasNoIncludedAccounts: boolean }) {
   return (
     <div className="py-6 text-center">
       {hasNoIncludedAccounts ? (

@@ -33,21 +33,18 @@ export function AccountsCard() {
   // Initial load groups tracked accounts first; later toggle changes should not move rows.
   const sortAccountIds = initialAccountIdsRef.current ?? accountIds;
 
-  const spendingAccounts = useMemo<Account[]>(
-    () => {
-      const initiallyTracked = new Set(sortAccountIds);
-      return (accounts ?? [])
-        .filter((a) => isSpendingAccountType(a.accountType))
-        .sort((a, b) => {
-          const aTracked = initiallyTracked.has(a.id) ? 0 : 1;
-          const bTracked = initiallyTracked.has(b.id) ? 0 : 1;
-          if (aTracked !== bTracked) return aTracked - bTracked;
-          if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
-    },
-    [accounts, sortAccountIds],
-  );
+  const spendingAccounts = useMemo<Account[]>(() => {
+    const initiallyTracked = new Set(sortAccountIds);
+    return (accounts ?? [])
+      .filter((a) => isSpendingAccountType(a.accountType))
+      .sort((a, b) => {
+        const aTracked = initiallyTracked.has(a.id) ? 0 : 1;
+        const bTracked = initiallyTracked.has(b.id) ? 0 : 1;
+        if (aTracked !== bTracked) return aTracked - bTracked;
+        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [accounts, sortAccountIds]);
 
   const includedAccounts = useMemo(
     () => spendingAccounts.filter((a) => accountIds.includes(a.id)),

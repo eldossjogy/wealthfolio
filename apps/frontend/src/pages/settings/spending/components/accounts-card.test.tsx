@@ -22,13 +22,9 @@ vi.mock("@wealthfolio/ui", () => ({
     CreditCard: () => <span />,
     Wallet: () => <span />,
   },
-  Switch: ({
-    checked,
-    "aria-label": ariaLabel,
-  }: {
-    checked: boolean;
-    "aria-label"?: string;
-  }) => <button type="button" role="switch" aria-checked={checked} aria-label={ariaLabel} />,
+  Switch: ({ checked, "aria-label": ariaLabel }: { checked: boolean; "aria-label"?: string }) => (
+    <button type="button" role="switch" aria-checked={checked} aria-label={ariaLabel} />
+  ),
 }));
 
 vi.mock("@/features/spending/hooks/use-spending-settings", () => ({
