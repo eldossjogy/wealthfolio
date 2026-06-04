@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::db::{get_connection, DbPool, WriteHandle};
 use crate::errors::StorageError;
 use crate::schema::{spending_categorization_rules, spending_preset_rule_deletions};
-use crate::spending::deterministic_ids::preset_categorization_rule_id;
+use crate::spending::deterministic_ids::{preset_categorization_rule_id, preset_rule_deletion_id};
 use crate::sync::OutboxWriteRequest;
 use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 use wealthfolio_spending::categorization_rules::{
@@ -65,8 +65,10 @@ pub struct NewCategorizationRuleDB {
     pub updated_at: String,
 }
 
-#[derive(Insertable, Debug, Clone)]
+#[derive(Queryable, Selectable, Insertable, Serialize, Deserialize, Debug, Clone)]
 #[diesel(table_name = crate::schema::spending_preset_rule_deletions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[serde(rename_all = "camelCase")]
 struct PresetRuleDeletionDB {
     preset_id: String,
     preset_rule_key: String,
@@ -81,13 +83,27 @@ impl crate::sync::SyncOutboxModel for CategorizationRuleDB {
     }
 }
 
+impl crate::sync::SyncOutboxModel for PresetRuleDeletionDB {
+    const ENTITY: SyncEntity = SyncEntity::SpendingPresetRuleDeletion;
+
+    // `rule_id` is the deleted categorization rule row. The sync entity ID is
+    // the deterministic composite key returned by `sync_entity_id_owned()`.
+    fn sync_entity_id(&self) -> &str {
+        &self.rule_id
+    }
+
+    fn sync_entity_id_owned(&self) -> String {
+        preset_rule_deletion_id(&self.preset_id, &self.preset_rule_key)
+    }
+}
+
 fn upsert_preset_rule_deletion(
     conn: &mut diesel::sqlite::SqliteConnection,
     preset_id: &str,
     preset_rule_key: &str,
     rule_id: &str,
     deleted_at: &str,
-) -> std::result::Result<(), StorageError> {
+) -> std::result::Result<PresetRuleDeletionDB, StorageError> {
     let row = PresetRuleDeletionDB {
         preset_id: preset_id.to_string(),
         preset_rule_key: preset_rule_key.to_string(),
@@ -108,7 +124,7 @@ fn upsert_preset_rule_deletion(
         ))
         .execute(conn)
         .map_err(StorageError::from)?;
-    Ok(())
+    Ok(row)
 }
 
 fn parse_dt(s: &str) -> NaiveDateTime {
@@ -472,13 +488,14 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         existing.preset_rule_key.as_deref(),
                     ) {
                         let now = chrono::Utc::now().to_rfc3339();
-                        upsert_preset_rule_deletion(
+                        let deletion = upsert_preset_rule_deletion(
                             tx.conn(),
                             preset_id,
                             rule_key,
                             &existing.id,
                             &now,
                         )?;
+                        tx.update(&deletion)?;
                     }
                     diesel::delete(spending_categorization_rules::table.find(&id))
                         .execute(tx.conn())
@@ -514,12 +531,25 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                 let mut kept = 0usize;
                 let now = chrono::Utc::now().to_rfc3339();
 
+                let deletion_rows = spending_preset_rule_deletions::table
+                    .filter(spending_preset_rule_deletions::preset_id.eq(&preset_id))
+                    .load::<PresetRuleDeletionDB>(tx.conn())
+                    .map_err(StorageError::from)?;
+
                 diesel::delete(
                     spending_preset_rule_deletions::table
                         .filter(spending_preset_rule_deletions::preset_id.eq(&preset_id)),
                 )
                 .execute(tx.conn())
                 .map_err(StorageError::from)?;
+                for deletion in deletion_rows {
+                    tx.queue_outbox(OutboxWriteRequest::new(
+                        SyncEntity::SpendingPresetRuleDeletion,
+                        preset_rule_deletion_id(&deletion.preset_id, &deletion.preset_rule_key),
+                        SyncOperation::Delete,
+                        serde_json::to_value(&deletion)?,
+                    ));
+                }
 
                 for row in rows {
                     if row.preset_modified != 0 {
@@ -566,5 +596,111 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
             })
             .await
             .map_err(|e| anyhow::anyhow!(e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{create_pool, get_connection, init, run_migrations, write_actor::spawn_writer};
+    use crate::schema::{spending_preset_rule_deletions, sync_outbox};
+    use tempfile::tempdir;
+
+    fn setup_repo() -> CategorizationRulesRepository {
+        let app_data = tempdir()
+            .expect("tempdir")
+            .keep()
+            .to_string_lossy()
+            .to_string();
+        let db_path = init(&app_data).expect("init db");
+        run_migrations(&db_path).expect("migrate db");
+        let pool = create_pool(&db_path).expect("create pool");
+        let writer = spawn_writer(pool.as_ref().clone()).expect("writer");
+        CategorizationRulesRepository::new(pool, writer)
+    }
+
+    fn preset_rule() -> NewCategorizationRule {
+        NewCategorizationRule {
+            id: Some("rule-ca-groceries".to_string()),
+            name: "Groceries".to_string(),
+            pattern: "grocery".to_string(),
+            match_type: RuleMatchType::Contains,
+            taxonomy_id: None,
+            category_id: None,
+            activity_type: None,
+            priority: 0,
+            is_global: true,
+            account_id: None,
+            preset_id: Some("ca".to_string()),
+            preset_rule_key: Some("groceries".to_string()),
+            preset_version: Some("1".to_string()),
+        }
+    }
+
+    fn outbox_rows(repo: &CategorizationRulesRepository) -> Vec<(String, String, String)> {
+        let conn = &mut get_connection(&repo.pool).expect("conn");
+        sync_outbox::table
+            .select((sync_outbox::entity, sync_outbox::entity_id, sync_outbox::op))
+            .order(sync_outbox::created_at.asc())
+            .load::<(String, String, String)>(conn)
+            .expect("load outbox")
+    }
+
+    #[tokio::test]
+    async fn preset_rule_deletion_lifecycle_writes_sync_outbox() {
+        let repo = setup_repo();
+        repo.create(preset_rule()).await.expect("create rule");
+        repo.delete("rule-ca-groceries").await.expect("delete rule");
+
+        let rows = outbox_rows(&repo);
+        assert!(rows.iter().any(|(entity, _entity_id, op)| {
+            entity == "spending_preset_rule_deletion" && op == "update"
+        }));
+        assert!(rows.iter().any(|(entity, _entity_id, op)| {
+            entity == "spending_categorization_rule" && op == "delete"
+        }));
+
+        let tombstone_count: i64 = {
+            let conn = &mut get_connection(&repo.pool).expect("conn");
+            spending_preset_rule_deletions::table
+                .count()
+                .get_result(conn)
+                .expect("count tombstones")
+        };
+        assert_eq!(tombstone_count, 1);
+
+        repo.remove_preset("ca").await.expect("remove preset");
+        let rows = outbox_rows(&repo);
+        assert!(rows.iter().any(|(entity, _entity_id, op)| {
+            entity == "spending_preset_rule_deletion" && op == "delete"
+        }));
+
+        let tombstone_count: i64 = {
+            let conn = &mut get_connection(&repo.pool).expect("conn");
+            spending_preset_rule_deletions::table
+                .count()
+                .get_result(conn)
+                .expect("count tombstones")
+        };
+        assert_eq!(tombstone_count, 0);
+    }
+
+    #[test]
+    fn preset_rule_deletion_outbox_helper_uses_composite_entity_id() {
+        let deletion = PresetRuleDeletionDB {
+            preset_id: "ca".to_string(),
+            preset_rule_key: "groceries".to_string(),
+            rule_id: "rule-ca-groceries".to_string(),
+            deleted_at: "2026-02-15T00:00:00Z".to_string(),
+        };
+
+        let request = crate::sync::outbox_request_for_model(&deletion, SyncOperation::Update)
+            .expect("outbox");
+
+        assert_eq!(
+            request.entity_id,
+            preset_rule_deletion_id("ca", "groceries")
+        );
+        assert_ne!(request.entity_id, deletion.rule_id);
     }
 }

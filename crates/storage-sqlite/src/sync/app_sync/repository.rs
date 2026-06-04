@@ -21,6 +21,7 @@ use crate::schema::{
     spending_preset_rule_deletions, sync_applied_events, sync_cursor, sync_device_config,
     sync_engine_state, sync_entity_metadata, sync_outbox, sync_table_state,
 };
+use crate::spending::deterministic_ids::preset_rule_deletion_id;
 
 use super::model::{
     SyncAppliedEventDB, SyncCursorDB, SyncDeviceConfigDB, SyncEngineStateDB, SyncEntityMetadataDB,
@@ -181,12 +182,15 @@ const OVERWRITE_RISK_UNFILTERED_TABLES: &[&str] = &[
     "activity_taxonomy_assignments",
     "spending_activity_events",
     "spending_categorization_rules",
+    "spending_preset_rule_deletions",
     "spending_events",
     "budget_targets",
     "budget_rollover_settings",
     "import_account_templates",
     "asset_taxonomy_assignments",
     "goals_allocation",
+    "allocation_targets",
+    "allocation_target_weights",
 ];
 
 const OVERWRITE_RISK_FILTERED_TABLES: &[SyncTableFilterSpec] = &[
@@ -647,6 +651,8 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::ImportRun => Some(("import_runs", "id")),
         SyncEntity::Portfolio => Some(("portfolios", "id")),
         SyncEntity::PortfolioAccount => Some(("portfolio_accounts", "id")),
+        SyncEntity::AllocationTarget => Some(("allocation_targets", "id")),
+        SyncEntity::AllocationTargetWeight => Some(("allocation_target_weights", "id")),
         SyncEntity::SpendingSetting => Some(("app_settings", "setting_key")),
         // CustomTaxonomy uses bundle replay — handled by custom branch in apply_remote_event_lww_tx
         SyncEntity::CustomTaxonomy => None,
@@ -654,6 +660,8 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::ActivityTaxonomyAssignment => Some(("activity_taxonomy_assignments", "id")),
         SyncEntity::SpendingActivityEvent => Some(("spending_activity_events", "activity_id")),
         SyncEntity::SpendingCategorizationRule => Some(("spending_categorization_rules", "id")),
+        // Composite primary key; handled by custom branch in apply_remote_event_lww_tx.
+        SyncEntity::SpendingPresetRuleDeletion => None,
         SyncEntity::SpendingEvent => Some(("spending_events", "id")),
         SyncEntity::SpendingEventType => Some(("spending_event_types", "id")),
         SyncEntity::BudgetGroup => Some(("budget_groups", "id")),
@@ -1096,6 +1104,17 @@ fn preset_rule_identity_from_payload(payload_json: &serde_json::Value) -> Option
     Some((preset_id.to_string(), rule_key.to_string()))
 }
 
+fn preset_rule_payload_str<'a>(
+    payload_json: &'a serde_json::Value,
+    snake_case: &str,
+    camel_case: &str,
+) -> Option<&'a str> {
+    payload_json
+        .get(snake_case)
+        .or_else(|| payload_json.get(camel_case))
+        .and_then(serde_json::Value::as_str)
+}
+
 fn upsert_preset_rule_deletion_tx(
     conn: &mut SqliteConnection,
     preset_id: &str,
@@ -1137,6 +1156,53 @@ fn tombstone_remote_preset_rule_delete(
         return Ok(());
     };
     upsert_preset_rule_deletion_tx(conn, &preset_id, &rule_key, rule_id, deleted_at)
+}
+
+fn apply_spending_preset_rule_deletion_event(
+    conn: &mut SqliteConnection,
+    entity_id: &str,
+    op: SyncOperation,
+    payload_json: &serde_json::Value,
+    client_timestamp: &str,
+) -> Result<()> {
+    let Some((preset_id, rule_key)) = preset_rule_identity_from_payload(payload_json) else {
+        return Err(Error::Database(DatabaseError::Internal(
+            "spending_preset_rule_deletion payload must include preset_id/preset_rule_key"
+                .to_string(),
+        )));
+    };
+    let expected_entity_id = preset_rule_deletion_id(&preset_id, &rule_key);
+    if expected_entity_id != entity_id {
+        return Err(Error::Database(DatabaseError::Internal(format!(
+            "spending_preset_rule_deletion entity_id '{}' does not match payload key '{}'",
+            entity_id, expected_entity_id
+        ))));
+    }
+
+    match op {
+        SyncOperation::Delete => {
+            diesel::delete(
+                spending_preset_rule_deletions::table
+                    .filter(spending_preset_rule_deletions::preset_id.eq(&preset_id))
+                    .filter(spending_preset_rule_deletions::preset_rule_key.eq(&rule_key)),
+            )
+            .execute(conn)
+            .map_err(StorageError::from)?;
+        }
+        SyncOperation::Create | SyncOperation::Update => {
+            let rule_id =
+                preset_rule_payload_str(payload_json, "rule_id", "ruleId").ok_or_else(|| {
+                    Error::Database(DatabaseError::Internal(
+                        "spending_preset_rule_deletion payload must include rule_id".to_string(),
+                    ))
+                })?;
+            let deleted_at = preset_rule_payload_str(payload_json, "deleted_at", "deletedAt")
+                .unwrap_or(client_timestamp);
+            upsert_preset_rule_deletion_tx(conn, &preset_id, &rule_key, rule_id, deleted_at)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Convert a serializable DB model to a JSON object with snake_case keys
@@ -1389,6 +1455,15 @@ fn apply_remote_event_lww_tx(
                 entity_id_value
             );
             applied_entity_change = false;
+        } else if entity == SyncEntity::SpendingPresetRuleDeletion {
+            apply_spending_preset_rule_deletion_event(
+                conn,
+                &entity_id_value,
+                op,
+                &payload_json,
+                &client_timestamp_value,
+            )?;
+            mark_table_incremental_applied_tx(conn, "spending_preset_rule_deletions")?;
         } else if let Some((table_name, pk_name)) = entity_storage_mapping(&entity) {
             match op {
                 SyncOperation::Delete => {
@@ -2733,8 +2808,8 @@ mod tests {
     use crate::goals::GoalRepository;
     use crate::schema::{
         accounts, app_settings, assets, goals, goals_allocation, import_account_templates,
-        import_templates, platforms, sync_applied_events, sync_device_config, sync_entity_metadata,
-        sync_outbox, taxonomies, taxonomy_categories,
+        import_templates, platforms, spending_preset_rule_deletions, sync_applied_events,
+        sync_device_config, sync_entity_metadata, sync_outbox, taxonomies, taxonomy_categories,
     };
     use wealthfolio_core::accounts::account_types;
     use wealthfolio_core::goals::{GoalRepositoryTrait, GoalSummaryUpdate};
@@ -2766,6 +2841,33 @@ mod tests {
         assert!(filter.contains("spending_categories"));
         assert!(filter.contains("income_sources"));
         assert!(filter.contains("id NOT LIKE 'cat_%'"));
+    }
+
+    #[tokio::test]
+    async fn local_sync_summary_counts_spending_preset_rule_deletions() {
+        let (pool, writer) = setup_db();
+        let mut conn = get_connection(&pool).expect("conn");
+
+        diesel::insert_into(spending_preset_rule_deletions::table)
+            .values((
+                spending_preset_rule_deletions::preset_id.eq("preset-ca"),
+                spending_preset_rule_deletions::preset_rule_key.eq("rule-groceries"),
+                spending_preset_rule_deletions::rule_id.eq("rule-1"),
+                spending_preset_rule_deletions::deleted_at.eq("2026-01-01T00:00:00Z"),
+            ))
+            .execute(&mut conn)
+            .expect("insert preset deletion");
+        drop(conn);
+
+        let repo = AppSyncRepository::new(pool, writer);
+        let summary = repo.get_local_sync_data_summary().expect("summary");
+        let row = summary
+            .non_empty_tables
+            .iter()
+            .find(|row| row.table == "spending_preset_rule_deletions")
+            .expect("preset deletion table should be included in sync summary");
+
+        assert_eq!(row.rows, 1);
     }
 
     #[test]
@@ -4549,6 +4651,8 @@ mod tests {
             SyncEntity::ContributionLimit,
             SyncEntity::Platform,
             SyncEntity::Snapshot,
+            SyncEntity::AllocationTarget,
+            SyncEntity::AllocationTargetWeight,
         ];
 
         for entity in entities {
@@ -5470,6 +5574,101 @@ mod tests {
             .get_result(&mut conn)
             .expect("theme setting count");
         assert_eq!(theme_count, 0);
+    }
+
+    #[tokio::test]
+    async fn replay_spending_preset_rule_deletion_applies_and_deletes() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let entity_id = preset_rule_deletion_id("ca", "groceries");
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                entity_id.clone(),
+                SyncOperation::Update,
+                "evt-preset-rule-deletion-upsert".to_string(),
+                "2026-02-15T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries",
+                    "ruleId": "rule-ca-groceries",
+                    "deletedAt": "2026-02-15T00:00:00Z"
+                }),
+            )
+            .await
+            .expect("apply preset rule deletion");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let tombstone_count: i64 = spending_preset_rule_deletions::table
+            .filter(spending_preset_rule_deletions::preset_id.eq("ca"))
+            .filter(spending_preset_rule_deletions::preset_rule_key.eq("groceries"))
+            .count()
+            .get_result(&mut conn)
+            .expect("count preset deletion");
+        assert_eq!(tombstone_count, 1);
+        drop(conn);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                entity_id,
+                SyncOperation::Delete,
+                "evt-preset-rule-deletion-delete".to_string(),
+                "2026-02-15T00:00:01Z".to_string(),
+                2,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries"
+                }),
+            )
+            .await
+            .expect("delete preset rule deletion");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let tombstone_count: i64 = spending_preset_rule_deletions::table
+            .filter(spending_preset_rule_deletions::preset_id.eq("ca"))
+            .filter(spending_preset_rule_deletions::preset_rule_key.eq("groceries"))
+            .count()
+            .get_result(&mut conn)
+            .expect("count preset deletion");
+        assert_eq!(tombstone_count, 0);
+    }
+
+    #[tokio::test]
+    async fn replay_spending_preset_rule_deletion_rejects_mismatched_entity_id() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+
+        let err = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                "wrong-entity-id".to_string(),
+                SyncOperation::Update,
+                "evt-preset-rule-deletion-mismatch".to_string(),
+                "2026-02-15T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries",
+                    "ruleId": "rule-ca-groceries",
+                    "deletedAt": "2026-02-15T00:00:00Z"
+                }),
+            )
+            .await
+            .expect_err("mismatched entity id should fail replay");
+
+        assert!(err.to_string().contains("does not match payload key"));
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let tombstone_count: i64 = spending_preset_rule_deletions::table
+            .count()
+            .get_result(&mut conn)
+            .expect("count preset deletion");
+        assert_eq!(tombstone_count, 0);
     }
 
     #[tokio::test]

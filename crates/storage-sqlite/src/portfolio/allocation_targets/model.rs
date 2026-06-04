@@ -1,9 +1,10 @@
 use diesel::prelude::*;
+use serde::{Deserialize, Serialize};
 use wealthfolio_core::portfolio::allocation_targets::{
     AllocationTarget, AllocationTargetWeight, RebalanceGoal, ScopeType, TriggerType,
 };
 
-#[derive(Debug, Clone, Queryable, Insertable, AsChangeset)]
+#[derive(Debug, Clone, Queryable, Insertable, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::allocation_targets)]
 pub struct AllocationTargetDB {
     pub id: String,
@@ -62,7 +63,7 @@ impl TryFrom<AllocationTargetDB> for AllocationTarget {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, AsChangeset)]
+#[derive(Debug, Clone, Queryable, Insertable, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = crate::schema::allocation_target_weights)]
 pub struct AllocationTargetWeightDB {
     pub id: String,

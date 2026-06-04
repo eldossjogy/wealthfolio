@@ -100,6 +100,14 @@ pub fn default_adapter_descriptors() -> Vec<EntityAdapterDescriptor> {
             table_name: "portfolio_accounts",
         },
         EntityAdapterDescriptor {
+            entity: SyncEntity::AllocationTarget,
+            table_name: "allocation_targets",
+        },
+        EntityAdapterDescriptor {
+            entity: SyncEntity::AllocationTargetWeight,
+            table_name: "allocation_target_weights",
+        },
+        EntityAdapterDescriptor {
             entity: SyncEntity::SpendingSetting,
             table_name: "app_settings",
         },
@@ -114,6 +122,10 @@ pub fn default_adapter_descriptors() -> Vec<EntityAdapterDescriptor> {
         EntityAdapterDescriptor {
             entity: SyncEntity::SpendingCategorizationRule,
             table_name: "spending_categorization_rules",
+        },
+        EntityAdapterDescriptor {
+            entity: SyncEntity::SpendingPresetRuleDeletion,
+            table_name: "spending_preset_rule_deletions",
         },
         EntityAdapterDescriptor {
             entity: SyncEntity::SpendingEvent,

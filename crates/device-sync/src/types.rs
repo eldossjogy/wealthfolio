@@ -588,10 +588,13 @@ pub fn sync_entity_from_remote(entity: &str) -> Option<SyncEntity> {
         "import_run" => Some(SyncEntity::ImportRun),
         "portfolio" => Some(SyncEntity::Portfolio),
         "portfolio_account" => Some(SyncEntity::PortfolioAccount),
+        "allocation_target" => Some(SyncEntity::AllocationTarget),
+        "allocation_target_weight" => Some(SyncEntity::AllocationTargetWeight),
         "spending_setting" => Some(SyncEntity::SpendingSetting),
         "activity_taxonomy_assignment" => Some(SyncEntity::ActivityTaxonomyAssignment),
         "spending_activity_event" => Some(SyncEntity::SpendingActivityEvent),
         "spending_categorization_rule" => Some(SyncEntity::SpendingCategorizationRule),
+        "spending_preset_rule_deletion" => Some(SyncEntity::SpendingPresetRuleDeletion),
         "spending_event" => Some(SyncEntity::SpendingEvent),
         "spending_event_type" => Some(SyncEntity::SpendingEventType),
         "budget_group" => Some(SyncEntity::BudgetGroup),
@@ -756,6 +759,18 @@ mod tests {
         assert_eq!(
             sync_entity_from_remote("budget_rollover_setting"),
             Some(SyncEntity::BudgetRolloverSetting)
+        );
+        assert_eq!(
+            sync_entity_from_remote("allocation_target"),
+            Some(SyncEntity::AllocationTarget)
+        );
+        assert_eq!(
+            sync_entity_from_remote("allocation_target_weight"),
+            Some(SyncEntity::AllocationTargetWeight)
+        );
+        assert_eq!(
+            sync_entity_from_remote("spending_preset_rule_deletion"),
+            Some(SyncEntity::SpendingPresetRuleDeletion)
         );
     }
 }

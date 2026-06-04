@@ -64,6 +64,13 @@ pub(super) fn preset_categorization_rule_id(preset_id: &str, preset_rule_key: &s
     )
 }
 
+pub(crate) fn preset_rule_deletion_id(preset_id: &str, preset_rule_key: &str) -> String {
+    stable_id(
+        "spending_preset_rule_deletion",
+        &[preset_id, preset_rule_key],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
