@@ -8,7 +8,7 @@ import {
   useAssistantState,
 } from "@assistant-ui/react";
 
-import type { FC, ReactNode } from "react";
+import { Component, type ErrorInfo, type FC, type ReactNode } from "react";
 
 import { Button } from "@wealthfolio/ui/components/ui/button";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
@@ -226,6 +226,41 @@ interface MessagePartWithResult {
   result?: unknown;
 }
 
+interface ToolRenderErrorBoundaryState {
+  error: Error | null;
+}
+
+class ToolRenderErrorBoundary extends Component<
+  { children: ReactNode },
+  ToolRenderErrorBoundaryState
+> {
+  override state: ToolRenderErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ToolRenderErrorBoundaryState {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Tool UI render failed", {
+      error,
+      componentStack: errorInfo.componentStack,
+    });
+  }
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="border-destructive/30 bg-destructive/5 text-destructive flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
+          <Icons.AlertCircle className="h-4 w-4 shrink-0" />
+          <span>Tool display failed. The chat is still available.</span>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 interface TypingIndicatorProps {
   position: "initial" | "continuation";
 }
@@ -270,7 +305,11 @@ const AssistantMessage: FC = () => {
             Text: MarkdownText,
             Reasoning: Reasoning,
             ReasoningGroup: ReasoningGroup,
-            ToolGroup: ({ children }) => <div className="mb-6 space-y-4">{children}</div>,
+            ToolGroup: ({ children }) => (
+              <ToolRenderErrorBoundary>
+                <div className="mb-6 space-y-4">{children}</div>
+              </ToolRenderErrorBoundary>
+            ),
             tools: {
               Fallback: ToolFallback,
             },
