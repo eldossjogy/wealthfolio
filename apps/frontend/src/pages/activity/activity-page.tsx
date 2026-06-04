@@ -1,4 +1,4 @@
-import { getAccounts } from "@/adapters";
+import { getAccounts, getTransferPairForActivity } from "@/adapters";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import { usePortfolios } from "@/hooks/use-portfolios";
 import { useIsMobileViewport } from "@/hooks/use-platform";
@@ -241,22 +241,52 @@ const ActivityPage = () => {
     : infiniteSearch.totalRowCount;
 
   const handleEdit = useCallback(
-    (activity?: ActivityDetails, activityType?: ActivityType) => {
-      if (activity?.sourceGroupId) {
-        const allLoaded = [...tableActivities, ...datagridActivities];
-        const counterpart = allLoaded.find(
-          (a) => a.sourceGroupId === activity.sourceGroupId && a.id !== activity.id,
-        );
-        if (counterpart) {
-          setSelectedActivity({ ...activity, counterpartAccountId: counterpart.accountId });
+    async (activity?: ActivityDetails, activityType?: ActivityType) => {
+      if (
+        activity?.id &&
+        (activity.activityType === ActivityType.TRANSFER_IN ||
+          activity.activityType === ActivityType.TRANSFER_OUT) &&
+        activity.sourceGroupId &&
+        ((activity.metadata?.flow as { is_external?: boolean } | undefined)?.is_external ??
+          false) !== true
+      ) {
+        try {
+          const pair = await getTransferPairForActivity(activity.id);
+          const counterpart =
+            activity.activityType === ActivityType.TRANSFER_IN ? pair.transferOut : pair.transferIn;
+          setSelectedActivity({
+            ...activity,
+            transferOutId: pair.transferOut.id,
+            transferInId: pair.transferIn.id,
+            counterpartActivityId: counterpart.id,
+            counterpartAccountId: counterpart.accountId,
+            counterpartAmount: counterpart.amount ?? null,
+            counterpartCurrency: counterpart.currency,
+            counterpartFxRate: pair.transferIn.fxRate ?? null,
+          });
+          setShowForm(true);
+          return;
+        } catch {
+          // Fall back to single-leg editing for invalid groups that are not valid internal pairs.
+          setSelectedActivity({
+            ...activity,
+            metadata: {
+              ...activity.metadata,
+              flow: {
+                ...((activity.metadata?.flow as Record<string, unknown> | undefined) ?? {}),
+                is_external: true,
+              },
+            },
+          });
           setShowForm(true);
           return;
         }
       }
+
       setSelectedActivity(activity ?? { activityType });
       setShowForm(true);
     },
-    [tableActivities, datagridActivities],
+    [],
   );
 
   const handleDelete = useCallback((activity: ActivityDetails) => {

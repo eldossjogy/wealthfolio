@@ -2,7 +2,7 @@ import { logger } from "@/adapters";
 import { buildAssetResolutionInput } from "@/lib/asset-resolution-input";
 import { ActivityType } from "@/lib/constants";
 import { generateId } from "@/lib/id";
-import type { ActivityCreate, ActivityDetails } from "@/lib/types";
+import type { ActivityCreate, ActivityDetails, ActivityUpdate } from "@/lib/types";
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import type { AccountSelectOption } from "../components/forms/fields";
@@ -62,18 +62,29 @@ export function useActivityForm({
   selectedType,
   onSuccess,
 }: UseActivityFormParams): UseActivityFormReturn {
-  const { addActivityMutation, updateActivityMutation, saveActivitiesMutation } =
-    useActivityMutations(onSuccess);
+  const {
+    addActivityMutation,
+    updateActivityMutation,
+    saveActivitiesMutation,
+    saveInternalTransferPairMutation,
+  } = useActivityMutations(onSuccess);
 
   const isEditing = !!activity?.id;
   const isLoading =
     addActivityMutation.isPending ||
     updateActivityMutation.isPending ||
-    saveActivitiesMutation.isPending;
+    saveActivitiesMutation.isPending ||
+    saveInternalTransferPairMutation.isPending;
   const error =
-    addActivityMutation.error ?? updateActivityMutation.error ?? saveActivitiesMutation.error;
+    addActivityMutation.error ??
+    updateActivityMutation.error ??
+    saveActivitiesMutation.error ??
+    saveInternalTransferPairMutation.error;
   const isError =
-    addActivityMutation.isError || updateActivityMutation.isError || saveActivitiesMutation.isError;
+    addActivityMutation.isError ||
+    updateActivityMutation.isError ||
+    saveActivitiesMutation.isError ||
+    saveInternalTransferPairMutation.isError;
 
   // Get config for selected type (undefined if no type selected)
   const config = selectedType ? ACTIVITY_FORM_CONFIG[selectedType] : undefined;
@@ -96,37 +107,58 @@ export function useActivityForm({
 
           // Internal transfer: update or create both legs
           if (!transferData.isExternal && transferData.fromAccountId && transferData.toAccountId) {
-            if (isEditing && activity?.id) {
-              // Update primary leg only — backend propagates date/amount/currency/notes to counterpart
-              const formPayload = config.toPayload(formData);
-              const direction = activity.activityType === ActivityType.TRANSFER_IN ? "in" : "out";
-              const accountId =
-                direction === "in" ? transferData.toAccountId : transferData.fromAccountId;
-              const account = accounts.find((a) => a.value === accountId);
-              const submitData: NewActivityFormValues = {
-                ...formPayload,
-                accountId,
-                activityType: (direction === "in"
-                  ? ActivityType.TRANSFER_IN
-                  : ActivityType.TRANSFER_OUT) as NewActivityFormValues["activityType"],
-              } as NewActivityFormValues;
-              if (!submitData.currency?.trim() && account?.currency) {
-                submitData.currency = account.currency;
+            const fromAccount = accounts.find((a) => a.value === transferData.fromAccountId);
+            const toAccount = accounts.find((a) => a.value === transferData.toAccountId);
+
+            if (transferData.transferMode === "cash") {
+              const sourceAmount = transferData.sourceAmount ?? transferData.amount;
+              const sourceCurrency = transferData.sourceCurrency ?? fromAccount?.currency;
+              const destinationCurrency =
+                transferData.destinationCurrency ?? toAccount?.currency ?? sourceCurrency;
+              const destinationAmount =
+                sourceCurrency === destinationCurrency
+                  ? sourceAmount
+                  : (transferData.destinationAmount ??
+                    (sourceAmount && transferData.fxRate
+                      ? sourceAmount * transferData.fxRate
+                      : undefined));
+
+              if (!sourceAmount || !destinationAmount || !sourceCurrency || !destinationCurrency) {
+                throw new Error("Transfer amount and currencies are required.");
               }
-              await updateActivityMutation.mutateAsync({
-                id: activity.id,
-                currentAssetId: activity.assetId,
-                ...submitData,
-              } as NewActivityFormValues & { id: string; currentAssetId?: string });
+
+              const transferOutId =
+                activity?.transferOutId ??
+                (activity?.activityType === ActivityType.TRANSFER_OUT
+                  ? activity.id
+                  : activity?.counterpartActivityId);
+              const transferInId =
+                activity?.transferInId ??
+                (activity?.activityType === ActivityType.TRANSFER_IN
+                  ? activity.id
+                  : activity?.counterpartActivityId);
+
+              await saveInternalTransferPairMutation.mutateAsync({
+                transferOutId: isEditing ? transferOutId : undefined,
+                transferInId: isEditing ? transferInId : undefined,
+                fromAccountId: transferData.fromAccountId,
+                toAccountId: transferData.toAccountId,
+                activityDate: transferData.activityDate,
+                sourceAmount,
+                destinationAmount,
+                sourceCurrency,
+                destinationCurrency,
+                fxRate:
+                  sourceCurrency === destinationCurrency
+                    ? undefined
+                    : (transferData.fxRate ?? null),
+                notes: transferData.comment ?? null,
+                transferMode: "cash",
+              });
               return;
             }
 
             const formPayload = config.toPayload(formData);
-            const sourceGroupId = generateSourceGroupId();
-
-            // Get currencies for both accounts
-            const fromAccount = accounts.find((a) => a.value === transferData.fromAccountId);
-            const toAccount = accounts.find((a) => a.value === transferData.toAccountId);
 
             // Extract symbol-related and fxRate fields from payload
             const {
@@ -171,6 +203,49 @@ export function useActivityForm({
                   providerSymbol: assetMetadata?.providerSymbol,
                 })
               : undefined;
+
+            if (isEditing) {
+              const transferOutId =
+                activity?.transferOutId ??
+                (activity?.activityType === ActivityType.TRANSFER_OUT
+                  ? activity.id
+                  : activity?.counterpartActivityId);
+              const transferInId =
+                activity?.transferInId ??
+                (activity?.activityType === ActivityType.TRANSFER_IN
+                  ? activity.id
+                  : activity?.counterpartActivityId);
+
+              if (!transferOutId || !transferInId) {
+                throw new Error("Editing an internal securities transfer requires both legs.");
+              }
+
+              const transferOutActivity: ActivityUpdate = {
+                ...sharedFields,
+                id: transferOutId,
+                accountId: transferData.fromAccountId,
+                activityType: ActivityType.TRANSFER_OUT,
+                currency: fromAccount?.currency,
+                asset: assetInput,
+              } as ActivityUpdate;
+
+              const transferInActivity: ActivityUpdate = {
+                ...sharedFields,
+                id: transferInId,
+                accountId: transferData.toAccountId,
+                activityType: ActivityType.TRANSFER_IN,
+                currency: toAccount?.currency,
+                asset: assetInput,
+                fxRate,
+              } as ActivityUpdate;
+
+              await saveActivitiesMutation.mutateAsync({
+                updates: [transferOutActivity, transferInActivity],
+              });
+              return;
+            }
+
+            const sourceGroupId = generateSourceGroupId();
 
             // Create TRANSFER_OUT on source account (no fxRate - activity currency = account currency)
             const transferOutActivity: ActivityCreate = {
@@ -267,6 +342,7 @@ export function useActivityForm({
       addActivityMutation,
       updateActivityMutation,
       saveActivitiesMutation,
+      saveInternalTransferPairMutation,
     ],
   );
 

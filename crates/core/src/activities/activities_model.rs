@@ -617,6 +617,49 @@ pub struct ActivityBulkMutationResult {
     pub errors: Vec<ActivityBulkMutationError>,
 }
 
+/// Pair-aware request for creating or updating an internal cash transfer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalTransferPairRequest {
+    #[serde(default)]
+    pub transfer_out_id: Option<String>,
+    #[serde(default)]
+    pub transfer_in_id: Option<String>,
+    #[serde(default)]
+    pub source_group_id: Option<String>,
+    pub from_account_id: String,
+    pub to_account_id: String,
+    pub activity_date: String,
+    #[serde(
+        default,
+        deserialize_with = "decimal_input_format::deserialize_option_decimal"
+    )]
+    pub source_amount: Option<Decimal>,
+    #[serde(
+        default,
+        deserialize_with = "decimal_input_format::deserialize_option_decimal"
+    )]
+    pub destination_amount: Option<Decimal>,
+    pub source_currency: String,
+    pub destination_currency: String,
+    #[serde(
+        default,
+        deserialize_with = "decimal_input_format::deserialize_option_decimal"
+    )]
+    pub fx_rate: Option<Decimal>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub transfer_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalTransferPairResponse {
+    pub transfer_out: Activity,
+    pub transfer_in: Activity,
+}
+
 /// Structured error reported for a single bulk mutation entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

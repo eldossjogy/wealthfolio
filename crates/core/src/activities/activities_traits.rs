@@ -27,6 +27,16 @@ pub trait ActivityRepositoryTrait: Send + Sync {
         activities.retain(|activity| requested.contains(activity.id.as_str()));
         Ok(activities)
     }
+    fn get_activities_by_source_group_id(&self, source_group_id: &str) -> Result<Vec<Activity>> {
+        let group_id = source_group_id.trim();
+        if group_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut activities = self.get_activities()?;
+        activities.retain(|activity| activity.source_group_id.as_deref() == Some(group_id));
+        Ok(activities)
+    }
     fn get_activities_by_account_id(&self, account_id: &str) -> Result<Vec<Activity>>;
     fn get_activities_by_account_ids(&self, account_ids: &[String]) -> Result<Vec<Activity>>;
     fn get_activities_by_account_ids_in_date_range(
@@ -221,6 +231,14 @@ pub trait ActivityServiceTrait: Send + Sync {
     async fn create_activity(&self, activity: NewActivity) -> Result<Activity>;
     async fn update_activity(&self, activity: ActivityUpdate) -> Result<Activity>;
     async fn delete_activity(&self, activity_id: String) -> Result<Activity>;
+    fn get_transfer_pair_for_activity(
+        &self,
+        activity_id: String,
+    ) -> Result<InternalTransferPairResponse>;
+    async fn save_internal_transfer_pair(
+        &self,
+        request: InternalTransferPairRequest,
+    ) -> Result<InternalTransferPairResponse>;
     async fn link_transfer_activities(
         &self,
         activity_a_id: String,

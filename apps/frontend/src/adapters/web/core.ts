@@ -105,6 +105,8 @@ export const COMMANDS: CommandMap = {
   update_activity: { method: "PUT", path: "/activities" },
   save_activities: { method: "POST", path: "/activities/bulk" },
   delete_activity: { method: "DELETE", path: "/activities" },
+  get_transfer_pair_for_activity: { method: "GET", path: "/activities" },
+  save_internal_transfer_pair: { method: "POST", path: "/activities/transfer-pair" },
   link_transfer_activities: { method: "POST", path: "/activities/link" },
   unlink_transfer_activities: { method: "POST", path: "/activities/unlink" },
   // Activity import
@@ -780,6 +782,16 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "delete_activity": {
       const { activityId } = payload as { activityId: string };
       url += `/${encodeURIComponent(activityId)}`;
+      break;
+    }
+    case "get_transfer_pair_for_activity": {
+      const { activityId } = payload as { activityId: string };
+      url += `/${encodeURIComponent(activityId)}/transfer-pair`;
+      break;
+    }
+    case "save_internal_transfer_pair": {
+      const { request } = payload as { request: Record<string, unknown> };
+      body = JSON.stringify(request);
       break;
     }
     case "link_transfer_activities": {

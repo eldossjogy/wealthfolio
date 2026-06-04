@@ -880,6 +880,23 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(results)
     }
 
+    fn get_activities_by_source_group_id(&self, source_group_id: &str) -> Result<Vec<Activity>> {
+        let group_id = source_group_id.trim();
+        if group_id.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut conn = get_connection(&self.pool)?;
+        let activities_db = activities::table
+            .filter(activities::source_group_id.eq(group_id))
+            .select(ActivityDB::as_select())
+            .order(activities::activity_date.asc())
+            .load::<ActivityDB>(&mut conn)
+            .map_err(StorageError::from)?;
+
+        Ok(activities_db.into_iter().map(Activity::from).collect())
+    }
+
     fn get_activities_by_account_ids_in_date_range(
         &self,
         account_ids: &[String],

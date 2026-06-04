@@ -10,8 +10,8 @@ use axum::{
 use wealthfolio_core::activities::{
     import_type, Activity, ActivityBulkMutationRequest, ActivityBulkMutationResult, ActivityImport,
     ActivitySearchResponse, ActivityUpdate, ImportActivitiesResult, ImportAssetCandidate,
-    ImportAssetPreviewItem, ImportMappingData, ImportTemplateData, NewActivity, ParseConfig,
-    ParsedCsvResult,
+    ImportAssetPreviewItem, ImportMappingData, ImportTemplateData, InternalTransferPairRequest,
+    InternalTransferPairResponse, NewActivity, ParseConfig, ParsedCsvResult,
 };
 
 use super::shared::parse_date_optional;
@@ -135,6 +135,25 @@ async fn delete_activity(
     let deleted = state.activity_service.delete_activity(id).await?;
     // Domain events handle portfolio recalculation
     Ok(Json(deleted))
+}
+
+async fn get_transfer_pair_for_activity(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<InternalTransferPairResponse>> {
+    let pair = state.activity_service.get_transfer_pair_for_activity(id)?;
+    Ok(Json(pair))
+}
+
+async fn save_internal_transfer_pair(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<InternalTransferPairRequest>,
+) -> ApiResult<Json<InternalTransferPairResponse>> {
+    let pair = state
+        .activity_service
+        .save_internal_transfer_pair(request)
+        .await?;
+    Ok(Json(pair))
 }
 
 #[derive(serde::Deserialize)]
@@ -391,6 +410,14 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/activities", post(create_activity).put(update_activity))
         .route("/activities/bulk", post(save_activities))
         .route("/activities/{id}", delete(delete_activity))
+        .route(
+            "/activities/{id}/transfer-pair",
+            get(get_transfer_pair_for_activity),
+        )
+        .route(
+            "/activities/transfer-pair",
+            post(save_internal_transfer_pair),
+        )
         .route("/activities/link", post(link_transfer_activities))
         .route("/activities/unlink", post(unlink_transfer_activities))
         .route("/activities/import/check", post(check_activities_import))

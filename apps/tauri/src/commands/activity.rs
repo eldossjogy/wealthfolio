@@ -7,8 +7,8 @@ use tauri::State;
 use wealthfolio_core::activities::{
     Activity, ActivityBulkMutationRequest, ActivityBulkMutationResult, ActivityImport,
     ActivitySearchResponse, ActivityUpdate, ImportActivitiesResult, ImportAssetCandidate,
-    ImportAssetPreviewItem, ImportMappingData, ImportTemplateData, NewActivity, ParseConfig,
-    ParsedCsvResult, Sort,
+    ImportAssetPreviewItem, ImportMappingData, ImportTemplateData, InternalTransferPairRequest,
+    InternalTransferPairResponse, NewActivity, ParseConfig, ParsedCsvResult, Sort,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -90,6 +90,31 @@ pub async fn delete_activity(
     state
         .activity_service()
         .delete_activity(activity_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_transfer_pair_for_activity(
+    activity_id: String,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<InternalTransferPairResponse, String> {
+    debug!("Getting transfer pair...");
+    state
+        .activity_service()
+        .get_transfer_pair_for_activity(activity_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_internal_transfer_pair(
+    request: InternalTransferPairRequest,
+    state: State<'_, Arc<ServiceContext>>,
+) -> Result<InternalTransferPairResponse, String> {
+    debug!("Saving internal transfer pair...");
+    state
+        .activity_service()
+        .save_internal_transfer_pair(request)
         .await
         .map_err(|e| e.to_string())
 }
