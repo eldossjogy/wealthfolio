@@ -351,17 +351,16 @@ function buildLiveNarrative({
   return (
     <div className="flex flex-col gap-1.5">
       <div
-        className={cn(
-          "font-serif text-lg font-medium leading-tight tracking-tight md:text-xl",
-          colorClass,
-        )}
+        className={cn("text-lg font-medium leading-tight tracking-tight md:text-xl", colorClass)}
       >
-        {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(diffFromPace), currency)}{" "}
-        {direction} pace
+        <span className="tabular-nums">
+          {isBalanceHidden ? "••••" : formatCompactAmount(Math.abs(diffFromPace), currency)}
+        </span>{" "}
+        <span className="font-serif">{direction} pace</span>
       </div>
       <div className="text-foreground/90 text-sm">
         Projected{" "}
-        <span className={cn("font-serif font-medium", projColorClass)}>
+        <span className={cn("font-medium tabular-nums", projColorClass)}>
           {isBalanceHidden ? "••••" : formatCompactAmount(projection, currency)}
         </span>{" "}
         by {closeLabel}
@@ -471,7 +470,7 @@ const SpentThisPeriodCard: FC<SpentThisPeriodCardProps> = ({
     <div className={CARD_CLASS}>
       <div className={LABEL_CLASS}>{periodLabel}</div>
       <div className="mt-2 flex items-baseline justify-between gap-2">
-        <div className="text-foreground text-xl font-semibold tabular-nums tracking-tight md:text-2xl">
+        <div className="text-foreground text-lg font-semibold tabular-nums tracking-tight md:text-xl">
           <PrivacyAmount value={spent} currency={currency} />
         </div>
         {deltaPct != null && (
@@ -636,7 +635,7 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
       <div className="mt-2 flex items-baseline justify-between gap-2">
         <div
           className={cn(
-            "text-xl font-semibold tabular-nums tracking-tight md:text-2xl",
+            "text-lg font-semibold tabular-nums tracking-tight md:text-xl",
             netToneClass,
           )}
         >
