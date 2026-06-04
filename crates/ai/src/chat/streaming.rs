@@ -24,7 +24,7 @@ use rig::{
     tool::ToolDyn,
     OneOrMany,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc;
 
 use crate::env::AiEnvironment;
@@ -345,6 +345,15 @@ pub(super) async fn spawn_chat_stream<E: AiEnvironment + 'static>(
             }
             if is_allowed("create_categorization_rule") {
                 allowed_tools.push(Box::new(tool_set.create_categorization_rule));
+            }
+            if is_allowed("list_asset_taxonomies") {
+                allowed_tools.push(Box::new(tool_set.list_asset_taxonomies));
+            }
+            if is_allowed("get_asset_taxonomy_assignments") {
+                allowed_tools.push(Box::new(tool_set.get_asset_taxonomy_assignments));
+            }
+            if is_allowed("prepare_asset_classification") {
+                allowed_tools.push(Box::new(tool_set.prepare_asset_classification));
             }
 
             let mut builder = $client
@@ -778,6 +787,7 @@ async fn stream_agent_response<M: CompletionModel + 'static, E: AiEnvironment + 
     let mut content_parts: Vec<ChatMessagePart> = vec![];
     let mut accumulated_text = String::new();
     let mut accumulated_reasoning = String::new();
+    let mut tool_names_by_id: HashMap<String, String> = HashMap::new();
 
     // Parser for <think> tags (fallback for models that don't use native thinking API)
     let mut think_parser = ThinkTagParser::default();
@@ -903,6 +913,7 @@ async fn stream_agent_response<M: CompletionModel + 'static, E: AiEnvironment + 
                 let args: serde_json::Value =
                     serde_json::from_str(&function.arguments.to_string()).unwrap_or_default();
                 let persisted_args = redact_tool_arguments_for_persistence(&function.name, &args);
+                tool_names_by_id.insert(id.clone(), function.name.clone());
 
                 content_parts.push(ChatMessagePart::ToolCall {
                     tool_call_id: id.clone(),
@@ -959,6 +970,11 @@ async fn stream_agent_response<M: CompletionModel + 'static, E: AiEnvironment + 
                 // Parse result as JSON for structured data
                 let data: serde_json::Value =
                     serde_json::from_str(&result_text).unwrap_or(serde_json::json!(result_text));
+                let tool_name = tool_names_by_id
+                    .get(&tool_result.id)
+                    .map(std::string::String::as_str);
+                let should_pause_for_asset_selection =
+                    tool_result_requires_asset_selection(tool_name, &data);
 
                 content_parts.push(ChatMessagePart::ToolResult {
                     tool_call_id: tool_result.id.clone(),
@@ -982,6 +998,10 @@ async fn stream_agent_response<M: CompletionModel + 'static, E: AiEnvironment + 
                 ))
                 .await
                 .map_err(|e| AiError::Internal(e.to_string()))?;
+
+                if should_pause_for_asset_selection {
+                    break;
+                }
             }
 
             // Final response - use if no meaningful text was accumulated (some providers like Gemini
@@ -1102,6 +1122,12 @@ async fn stream_agent_response<M: CompletionModel + 'static, E: AiEnvironment + 
     Ok(())
 }
 
+fn tool_result_requires_asset_selection(tool_name: Option<&str>, data: &serde_json::Value) -> bool {
+    tool_name == Some("prepare_asset_classification")
+        && data.get("draftStatus").and_then(serde_json::Value::as_str)
+            == Some("needsAssetSelection")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,5 +1154,25 @@ mod tests {
         let flushed = parser.flush();
         assert_eq!(flushed.len(), 1);
         assert!(matches!(&flushed[0], ParsedThinkSegment::Text(text) if text == "world"));
+    }
+
+    #[test]
+    fn asset_classification_selection_result_pauses_stream() {
+        assert!(tool_result_requires_asset_selection(
+            Some("prepare_asset_classification"),
+            &serde_json::json!({
+                "draftStatus": "needsAssetSelection",
+                "assetCandidates": [{ "assetId": "asset-vt-xnas" }]
+            }),
+        ));
+
+        assert!(!tool_result_requires_asset_selection(
+            Some("prepare_asset_classification"),
+            &serde_json::json!({ "draftStatus": "draft" }),
+        ));
+        assert!(!tool_result_requires_asset_selection(
+            Some("other_tool"),
+            &serde_json::json!({ "draftStatus": "needsAssetSelection" }),
+        ));
     }
 }

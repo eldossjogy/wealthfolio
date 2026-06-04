@@ -734,6 +734,133 @@ export interface ProposeCategoriesOutput {
 }
 
 // ============================================================================
+// Asset Classification tools
+// ============================================================================
+
+export interface ListAssetTaxonomiesArgs {
+  taxonomyId?: string;
+  taxonomyName?: string;
+  includeCategories?: boolean;
+  categoryDepth?: "root" | "all";
+}
+
+export interface AssetTaxonomyCategoryOption {
+  categoryId: string;
+  taxonomyId: string;
+  parentId?: string | null;
+  name: string;
+  key: string;
+  color: string;
+  sortOrder: number;
+}
+
+export interface AssetTaxonomyOption {
+  taxonomyId: string;
+  name: string;
+  description?: string | null;
+  color: string;
+  isSingleSelect: boolean;
+  sortOrder: number;
+  categoryCount?: number;
+  categories?: AssetTaxonomyCategoryOption[];
+}
+
+export interface ListAssetTaxonomiesOutput {
+  taxonomies: AssetTaxonomyOption[];
+}
+
+export interface GetAssetTaxonomyAssignmentsArgs {
+  assetQuery: string;
+  taxonomyId?: string;
+}
+
+export interface AssetClassificationResolvedAsset {
+  assetId: string;
+  label: string;
+  displayCode?: string | null;
+  symbol?: string | null;
+  name?: string | null;
+  exchangeMic?: string | null;
+  currency: string;
+  matchedBy: string;
+}
+
+export interface AssetTaxonomyAssignmentResult {
+  assignmentId: string;
+  taxonomyId: string;
+  taxonomyName: string;
+  categoryId: string;
+  categoryName: string;
+  categoryKey: string;
+  weightBasisPoints: number;
+  source: string;
+}
+
+export interface GetAssetTaxonomyAssignmentsOutput {
+  assetQuery: string;
+  resolvedAsset: AssetClassificationResolvedAsset;
+  assignments: AssetTaxonomyAssignmentResult[];
+}
+
+export interface PrepareAssetClassificationArgs {
+  assetQuery: string;
+  taxonomyId: string;
+  assignments: {
+    categoryId: string;
+    weightBasisPoints: number;
+    sourceLabel: string;
+  }[];
+}
+
+export interface PreparedAssetTaxonomy {
+  taxonomyId: string;
+  name: string;
+  isSingleSelect: boolean;
+}
+
+export interface AssetClassificationAssignmentPreview {
+  assignmentId?: string | null;
+  categoryId: string;
+  categoryName: string;
+  categoryKey: string;
+  categoryColor?: string | null;
+  weightBasisPoints: number;
+  source: string;
+  sourceLabel?: string | null;
+}
+
+export interface AssetClassificationChanges {
+  addCount: number;
+  updateCount: number;
+  removeCount: number;
+  unchangedCount: number;
+}
+
+export interface AssetClassificationCandidateCurrentAssignments {
+  assetId: string;
+  currentAssignments: AssetClassificationAssignmentPreview[];
+  changes: AssetClassificationChanges;
+}
+
+export interface PrepareAssetClassificationOutput {
+  assetQuery: string;
+  resolvedAsset?: AssetClassificationResolvedAsset | null;
+  taxonomy: PreparedAssetTaxonomy;
+  currentAssignments: AssetClassificationAssignmentPreview[];
+  proposedAssignments: AssetClassificationAssignmentPreview[];
+  changes: AssetClassificationChanges;
+  unallocatedBasisPoints: number;
+  draftStatus?: "draft" | "applied" | "needsAssetSelection" | "assetSelected";
+  assetCandidates?: AssetClassificationResolvedAsset[];
+  candidateCurrentAssignments?: AssetClassificationCandidateCurrentAssignments[];
+  selectedAssetId?: string;
+  selectedAsset?: AssetClassificationResolvedAsset | null;
+  selectedAt?: string;
+  appliedAt?: string;
+  appliedChanges?: AssetClassificationChanges;
+}
+
+// ============================================================================
 // Create Categorization Rule tool
 // ============================================================================
 

@@ -16,7 +16,10 @@ use wealthfolio_core::{
         ImportMappingData, ImportTemplateData, ImportTemplateScope, InternalTransferPairRequest,
         InternalTransferPairResponse, NewActivity, SaveBrokerSyncProfileRulesRequest, Sort,
     },
-    assets::{Asset, AssetServiceTrait, ProviderProfile},
+    assets::{
+        Asset, AssetMetadata, AssetResolutionInput, AssetResolutionOutput, AssetServiceTrait,
+        AssetSpec, EnsureAssetsResult, NewAsset, ProviderProfile, UpdateAssetProfile,
+    },
     errors::DatabaseError,
     goals::{
         AccountValuationMap, Goal, GoalFundingRule, GoalFundingRuleInput, GoalPlan,
@@ -48,7 +51,10 @@ use wealthfolio_core::{
     },
     secrets::SecretStore,
     settings::{Settings, SettingsServiceTrait, SettingsUpdate},
-    taxonomies::TaxonomyServiceTrait,
+    taxonomies::{
+        AssetTaxonomyAssignment, Category, NewAssetTaxonomyAssignment, NewCategory, NewTaxonomy,
+        Taxonomy, TaxonomyServiceTrait, TaxonomyWithCategories,
+    },
     valuation::{
         DailyAccountValuation, NegativeBalanceInfo, ValuationRecalcMode, ValuationServiceTrait,
     },
@@ -160,6 +166,218 @@ impl AccountServiceTrait for MockAccountService {
 
     async fn delete_account(&self, _id: &str) -> CoreResult<()> {
         unimplemented!("MockAccountService::delete_account")
+    }
+}
+
+/// Mock asset service for testing.
+#[derive(Default)]
+pub struct MockAssetService {
+    pub assets: Vec<Asset>,
+}
+
+#[async_trait]
+impl AssetServiceTrait for MockAssetService {
+    fn get_assets(&self) -> CoreResult<Vec<Asset>> {
+        Ok(self.assets.clone())
+    }
+
+    fn get_asset_by_id(&self, asset_id: &str) -> CoreResult<Asset> {
+        self.assets
+            .iter()
+            .find(|asset| asset.id == asset_id)
+            .cloned()
+            .ok_or_else(|| CoreError::Database(DatabaseError::NotFound(asset_id.to_string())))
+    }
+
+    async fn delete_asset(&self, _asset_id: &str) -> CoreResult<()> {
+        unimplemented!("MockAssetService::delete_asset")
+    }
+
+    async fn update_asset_profile(
+        &self,
+        _asset_id: &str,
+        _payload: UpdateAssetProfile,
+    ) -> CoreResult<Asset> {
+        unimplemented!("MockAssetService::update_asset_profile")
+    }
+
+    async fn create_asset(&self, _new_asset: NewAsset) -> CoreResult<Asset> {
+        unimplemented!("MockAssetService::create_asset")
+    }
+
+    async fn get_or_create_minimal_asset(
+        &self,
+        _asset_id: &str,
+        _context_currency: Option<String>,
+        _metadata: Option<AssetMetadata>,
+        _quote_mode: Option<String>,
+    ) -> CoreResult<Asset> {
+        unimplemented!("MockAssetService::get_or_create_minimal_asset")
+    }
+
+    async fn update_quote_mode(&self, _asset_id: &str, _quote_mode: &str) -> CoreResult<Asset> {
+        unimplemented!("MockAssetService::update_quote_mode")
+    }
+
+    async fn get_assets_by_asset_ids(&self, asset_ids: &[String]) -> CoreResult<Vec<Asset>> {
+        Ok(self
+            .assets
+            .iter()
+            .filter(|asset| asset_ids.iter().any(|id| id == &asset.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn enrich_asset_profile(&self, _asset_id: &str) -> CoreResult<Asset> {
+        unimplemented!("MockAssetService::enrich_asset_profile")
+    }
+
+    async fn enrich_assets(&self, _asset_ids: Vec<String>) -> CoreResult<(usize, usize, usize)> {
+        unimplemented!("MockAssetService::enrich_assets")
+    }
+
+    async fn cleanup_legacy_metadata(&self, _asset_id: &str) -> CoreResult<()> {
+        unimplemented!("MockAssetService::cleanup_legacy_metadata")
+    }
+
+    async fn merge_unknown_asset(
+        &self,
+        _resolved_asset_id: &str,
+        _unknown_asset_id: &str,
+        _activity_repository: &dyn wealthfolio_core::activities::ActivityRepositoryTrait,
+    ) -> CoreResult<u32> {
+        unimplemented!("MockAssetService::merge_unknown_asset")
+    }
+
+    async fn ensure_assets(
+        &self,
+        _specs: Vec<AssetSpec>,
+        _activity_repository: &dyn wealthfolio_core::activities::ActivityRepositoryTrait,
+    ) -> CoreResult<EnsureAssetsResult> {
+        unimplemented!("MockAssetService::ensure_assets")
+    }
+
+    async fn resolve_import_asset_inputs(
+        &self,
+        _inputs: Vec<AssetResolutionInput>,
+    ) -> CoreResult<Vec<AssetResolutionOutput>> {
+        unimplemented!("MockAssetService::resolve_import_asset_inputs")
+    }
+}
+
+/// Mock taxonomy service for testing.
+#[derive(Default)]
+pub struct MockTaxonomyService {
+    pub taxonomies: Vec<TaxonomyWithCategories>,
+    pub assignments: Vec<AssetTaxonomyAssignment>,
+}
+
+#[async_trait]
+impl TaxonomyServiceTrait for MockTaxonomyService {
+    fn get_taxonomies(&self) -> CoreResult<Vec<Taxonomy>> {
+        Ok(self
+            .taxonomies
+            .iter()
+            .map(|entry| entry.taxonomy.clone())
+            .collect())
+    }
+
+    fn get_taxonomy(&self, id: &str) -> CoreResult<Option<TaxonomyWithCategories>> {
+        Ok(self
+            .taxonomies
+            .iter()
+            .find(|entry| entry.taxonomy.id == id)
+            .cloned())
+    }
+
+    fn get_taxonomies_with_categories(&self) -> CoreResult<Vec<TaxonomyWithCategories>> {
+        Ok(self.taxonomies.clone())
+    }
+
+    async fn create_taxonomy(&self, _taxonomy: NewTaxonomy) -> CoreResult<Taxonomy> {
+        unimplemented!("MockTaxonomyService::create_taxonomy")
+    }
+
+    async fn update_taxonomy(&self, _taxonomy: Taxonomy) -> CoreResult<Taxonomy> {
+        unimplemented!("MockTaxonomyService::update_taxonomy")
+    }
+
+    async fn delete_taxonomy(&self, _id: &str) -> CoreResult<usize> {
+        unimplemented!("MockTaxonomyService::delete_taxonomy")
+    }
+
+    async fn create_category(&self, _category: NewCategory) -> CoreResult<Category> {
+        unimplemented!("MockTaxonomyService::create_category")
+    }
+
+    async fn update_category(&self, _category: Category) -> CoreResult<Category> {
+        unimplemented!("MockTaxonomyService::update_category")
+    }
+
+    async fn delete_category(&self, _taxonomy_id: &str, _category_id: &str) -> CoreResult<usize> {
+        unimplemented!("MockTaxonomyService::delete_category")
+    }
+
+    async fn move_category(
+        &self,
+        _taxonomy_id: &str,
+        _category_id: &str,
+        _new_parent_id: Option<String>,
+        _position: i32,
+    ) -> CoreResult<Category> {
+        unimplemented!("MockTaxonomyService::move_category")
+    }
+
+    async fn import_taxonomy_json(&self, _json_str: &str) -> CoreResult<Taxonomy> {
+        unimplemented!("MockTaxonomyService::import_taxonomy_json")
+    }
+
+    fn export_taxonomy_json(&self, _id: &str) -> CoreResult<String> {
+        unimplemented!("MockTaxonomyService::export_taxonomy_json")
+    }
+
+    fn get_asset_assignments(&self, asset_id: &str) -> CoreResult<Vec<AssetTaxonomyAssignment>> {
+        Ok(self
+            .assignments
+            .iter()
+            .filter(|assignment| assignment.asset_id == asset_id)
+            .cloned()
+            .collect())
+    }
+
+    fn get_category_assignments(
+        &self,
+        taxonomy_id: &str,
+        category_id: &str,
+    ) -> CoreResult<Vec<AssetTaxonomyAssignment>> {
+        Ok(self
+            .assignments
+            .iter()
+            .filter(|assignment| {
+                assignment.taxonomy_id == taxonomy_id && assignment.category_id == category_id
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn assign_asset_to_category(
+        &self,
+        _assignment: NewAssetTaxonomyAssignment,
+    ) -> CoreResult<AssetTaxonomyAssignment> {
+        unimplemented!("MockTaxonomyService::assign_asset_to_category")
+    }
+
+    async fn replace_asset_taxonomy_assignments(
+        &self,
+        _asset_id: &str,
+        _taxonomy_id: &str,
+        _assignments: Vec<NewAssetTaxonomyAssignment>,
+    ) -> CoreResult<Vec<AssetTaxonomyAssignment>> {
+        unimplemented!("MockTaxonomyService::replace_asset_taxonomy_assignments")
+    }
+
+    async fn remove_asset_assignment(&self, _id: &str) -> CoreResult<usize> {
+        unimplemented!("MockTaxonomyService::remove_asset_assignment")
     }
 }
 
@@ -1282,10 +1500,12 @@ pub struct MockEnvironment {
     pub secret_store: Arc<dyn SecretStore>,
     pub chat_repository: Arc<dyn ChatRepositoryTrait>,
     pub quote_service: Arc<dyn QuoteServiceTrait>,
+    pub asset_service: Arc<dyn AssetServiceTrait>,
     pub allocation_service: Arc<dyn AllocationServiceTrait>,
     pub performance_service: Arc<dyn PerformanceServiceTrait>,
     pub income_service: Arc<dyn IncomeServiceTrait>,
     pub health_service: Arc<dyn HealthServiceTrait>,
+    pub taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
 }
 
 impl Default for MockEnvironment {
@@ -1307,10 +1527,12 @@ impl MockEnvironment {
             secret_store: Arc::new(MockSecretStore::default()),
             chat_repository: Arc::new(MockChatRepository::default()),
             quote_service: Arc::new(MockQuoteService::default()),
+            asset_service: Arc::new(MockAssetService::default()),
             allocation_service: Arc::new(MockAllocationService),
             performance_service: Arc::new(MockPerformanceService),
             income_service: Arc::new(MockIncomeService),
             health_service: Arc::new(MockHealthService::default()),
+            taxonomy_service: Arc::new(MockTaxonomyService::default()),
         }
     }
 
@@ -1362,6 +1584,10 @@ impl AiEnvironment for MockEnvironment {
         self.quote_service.clone()
     }
 
+    fn asset_service(&self) -> Arc<dyn AssetServiceTrait> {
+        self.asset_service.clone()
+    }
+
     fn allocation_service(&self) -> Arc<dyn AllocationServiceTrait> {
         self.allocation_service.clone()
     }
@@ -1378,8 +1604,8 @@ impl AiEnvironment for MockEnvironment {
         self.health_service.clone()
     }
 
-    fn taxonomy_service(&self) -> Arc<dyn wealthfolio_core::taxonomies::TaxonomyServiceTrait> {
-        unimplemented!("taxonomy_service not used in AI mock environment")
+    fn taxonomy_service(&self) -> Arc<dyn TaxonomyServiceTrait> {
+        self.taxonomy_service.clone()
     }
 
     fn cash_activity_service(

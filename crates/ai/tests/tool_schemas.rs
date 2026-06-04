@@ -19,10 +19,11 @@ use rig::tool::Tool;
 use std::sync::Arc;
 use wealthfolio_ai::env::test_env::MockEnvironment;
 use wealthfolio_ai::tools::{
-    CreateCategorizationRuleTool, GetAccountsTool, GetAssetAllocationTool, GetCashBalancesTool,
-    GetGoalsTool, GetHealthStatusTool, GetHoldingsTool, GetIncomeTool, GetPerformanceTool,
-    GetValuationHistoryTool, ImportCsvTool, ListCategorizationContextTool, ProposeCategoriesTool,
-    RecordActivitiesTool, RecordActivityTool, SearchActivitiesTool,
+    CreateCategorizationRuleTool, GetAccountsTool, GetAssetAllocationTool,
+    GetAssetTaxonomyAssignmentsTool, GetCashBalancesTool, GetGoalsTool, GetHealthStatusTool,
+    GetHoldingsTool, GetIncomeTool, GetPerformanceTool, GetValuationHistoryTool, ImportCsvTool,
+    ListAssetTaxonomiesTool, ListCategorizationContextTool, PrepareAssetClassificationTool,
+    ProposeCategoriesTool, RecordActivitiesTool, RecordActivityTool, SearchActivitiesTool,
 };
 
 fn env() -> Arc<MockEnvironment> {
@@ -86,6 +87,18 @@ schema_test!(
 schema_test!(
     snapshot_create_categorization_rule,
     CreateCategorizationRuleTool::new(env())
+);
+schema_test!(
+    snapshot_list_asset_taxonomies,
+    ListAssetTaxonomiesTool::new(env())
+);
+schema_test!(
+    snapshot_get_asset_taxonomy_assignments,
+    GetAssetTaxonomyAssignmentsTool::new(env())
+);
+schema_test!(
+    snapshot_prepare_asset_classification,
+    PrepareAssetClassificationTool::new(env())
 );
 schema_test!(snapshot_get_accounts, GetAccountsTool::new(env()));
 schema_test!(

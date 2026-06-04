@@ -1068,6 +1068,14 @@ mod tests {
         ) -> Result<AssetTaxonomyAssignment> {
             unimplemented!()
         }
+        async fn replace_asset_taxonomy_assignments(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<NewAssetTaxonomyAssignment>,
+        ) -> Result<Vec<AssetTaxonomyAssignment>> {
+            unimplemented!()
+        }
         async fn remove_asset_assignment(&self, _: &str) -> Result<usize> {
             unimplemented!()
         }
@@ -1143,6 +1151,14 @@ mod tests {
             &self,
             _: NewAssetTaxonomyAssignment,
         ) -> Result<AssetTaxonomyAssignment> {
+            unimplemented!()
+        }
+        async fn replace_asset_taxonomy_assignments(
+            &self,
+            _: &str,
+            _: &str,
+            _: Vec<NewAssetTaxonomyAssignment>,
+        ) -> Result<Vec<AssetTaxonomyAssignment>> {
             unimplemented!()
         }
         async fn remove_asset_assignment(&self, _: &str) -> Result<usize> {

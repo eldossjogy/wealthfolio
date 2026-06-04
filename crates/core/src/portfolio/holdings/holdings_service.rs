@@ -1406,6 +1406,15 @@ mod tests {
             unimplemented!("unused in holdings service tests")
         }
 
+        async fn replace_asset_taxonomy_assignments(
+            &self,
+            _asset_id: &str,
+            _taxonomy_id: &str,
+            _assignments: Vec<NewAssetTaxonomyAssignment>,
+        ) -> Result<Vec<AssetTaxonomyAssignment>> {
+            unimplemented!("unused in holdings service tests")
+        }
+
         async fn remove_asset_assignment(&self, _id: &str) -> Result<usize> {
             unimplemented!("unused in holdings service tests")
         }

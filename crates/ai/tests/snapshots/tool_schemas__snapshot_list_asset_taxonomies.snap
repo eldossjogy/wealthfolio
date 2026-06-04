@@ -1,0 +1,28 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "list_asset_taxonomies",
+  "parameters": {
+    "properties": {
+      "categoryDepth": {
+        "enum": [
+          "root",
+          "all"
+        ],
+        "type": "string"
+      },
+      "includeCategories": {
+        "type": "boolean"
+      },
+      "taxonomyId": {
+        "type": "string"
+      },
+      "taxonomyName": {
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

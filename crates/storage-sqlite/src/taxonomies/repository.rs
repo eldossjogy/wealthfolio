@@ -458,6 +458,55 @@ impl TaxonomyRepositoryTrait for TaxonomyRepository {
             .await
     }
 
+    async fn replace_asset_assignments(
+        &self,
+        asset_id: &str,
+        taxonomy_id: &str,
+        assignments: Vec<NewAssetTaxonomyAssignment>,
+    ) -> Result<Vec<AssetTaxonomyAssignment>> {
+        let asset_id = asset_id.to_string();
+        let taxonomy_id = taxonomy_id.to_string();
+        self.writer
+            .exec_tx(move |tx| -> Result<Vec<AssetTaxonomyAssignment>> {
+                let existing_ids = asset_taxonomy_assignments::table
+                    .filter(asset_taxonomy_assignments::asset_id.eq(&asset_id))
+                    .filter(asset_taxonomy_assignments::taxonomy_id.eq(&taxonomy_id))
+                    .select(asset_taxonomy_assignments::id)
+                    .load::<String>(tx.conn())
+                    .map_err(StorageError::from)?;
+
+                diesel::delete(
+                    asset_taxonomy_assignments::table
+                        .filter(asset_taxonomy_assignments::asset_id.eq(&asset_id))
+                        .filter(asset_taxonomy_assignments::taxonomy_id.eq(&taxonomy_id)),
+                )
+                .execute(tx.conn())
+                .map_err(StorageError::from)?;
+
+                for assignment_id in existing_ids {
+                    tx.delete::<AssetTaxonomyAssignmentDB>(assignment_id);
+                }
+
+                let mut replaced = Vec::with_capacity(assignments.len());
+                for assignment in assignments {
+                    let mut db: NewAssetTaxonomyAssignmentDB = assignment.into();
+                    db.id = Some(db.id.unwrap_or_else(|| Uuid::new_v4().to_string()));
+
+                    let result = diesel::insert_into(asset_taxonomy_assignments::table)
+                        .values(&db)
+                        .returning(AssetTaxonomyAssignmentDB::as_returning())
+                        .get_result(tx.conn())
+                        .map_err(StorageError::from)?;
+
+                    tx.update(&result)?;
+                    replaced.push(AssetTaxonomyAssignment::from(result));
+                }
+
+                Ok(replaced)
+            })
+            .await
+    }
+
     async fn delete_assignment(&self, id: &str) -> Result<usize> {
         let id = id.to_string();
         self.writer

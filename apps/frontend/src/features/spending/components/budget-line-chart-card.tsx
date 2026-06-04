@@ -168,10 +168,9 @@ export function BudgetLineChartCard({
         <p className="text-muted-foreground text-sm">No monthly target set yet.</p>
         <Link
           to="/settings/spending/setup"
-          className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
+          className="text-foreground mt-2 inline-flex text-xs underline-offset-4 hover:underline"
         >
-          Set a budget
-          <Icons.ChevronRight className="h-3 w-3" />
+          Set a budget →
         </Link>
       </DashboardCard>
     );

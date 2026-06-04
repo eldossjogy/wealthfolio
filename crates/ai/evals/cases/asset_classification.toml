@@ -1,0 +1,102 @@
+name = "asset_classification"
+description = "Asset taxonomy lookup and classification draft behavior"
+
+[[case]]
+id = "asset_classification_vt_sector_draft"
+description = "Sector update from user percentages should list taxonomies, load categories, then prepare a draft"
+prompt = "Update VT sector classification: Information Technology 28.09%, Consumer Discretionary 13.94%, Health Care 1.92%, Unknown 23.56%. Ignore Unknown."
+fixture = "asset_classification_vt"
+severity = "P1"
+tags = ["asset-classification", "draft"]
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+[case.expected_tools.args]
+includeCategories = { exact = true }
+categoryDepth = "root"
+
+[[case.expected_tools]]
+name = "prepare_asset_classification"
+[case.expected_tools.args]
+assetQuery = { contains = "VT" }
+taxonomyId = "gics-industries"
+assignments = "not_empty"
+
+[case.forbidden_tools]
+get_asset_taxonomy_assignments = "prepare_asset_classification already returns current assignments for draft flows"
+
+[case.max_tool_calls]
+prepare_asset_classification = 1
+
+[[case]]
+id = "asset_classification_read_current_uses_read_tool"
+description = "Read-only current classification request should use get_asset_taxonomy_assignments"
+prompt = "Show me the current Industries (GICS) classification for VT XNAS."
+fixture = "asset_classification_vt"
+severity = "P1"
+tags = ["asset-classification", "read-only"]
+
+[[case.expected_tools]]
+name = "get_asset_taxonomy_assignments"
+[case.expected_tools.args]
+assetQuery = { contains = "VT" }
+
+[case.forbidden_tools]
+prepare_asset_classification = "read-only classification questions should not render a draft widget"
+
+[[case]]
+id = "asset_classification_does_not_guess_unknown_category"
+description = "Unknown screenshot buckets should be omitted, not converted into placeholder category IDs"
+prompt = "Draft VT sectors using Industries (GICS): Unknown 23.56%, Information Technology 28.09%, Health Care 1.92%. Leave Unknown unallocated."
+fixture = "asset_classification_vt"
+severity = "P1"
+tags = ["asset-classification", "unknown"]
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+
+[[case.expected_tools]]
+name = "prepare_asset_classification"
+[case.expected_tools.args]
+assetQuery = { contains = "VT" }
+taxonomyId = "gics-industries"
+assignments = "not_empty"
+
+[case.forbidden_tools]
+get_asset_taxonomy_assignments = "draft flow should not separately read current assignments"
+
+[case.max_tool_calls]
+prepare_asset_classification = 1
+
+[[case]]
+id = "asset_classification_countries_leaves_other_unallocated"
+description = "Country screenshot Other bucket should remain unallocated, not become a plausible country"
+prompt = "Draft VT Countries from this country allocation: United States 67.33%, Japan 5.63%, United Kingdom 3.36%, Canada 3.18%, France 2.35%, Germany 2.25%, Switzerland 2.24%, Australia 1.64%, Netherlands 1.48%, Ireland 1.19%, Other 9.35%. Leave Other unallocated."
+fixture = "asset_classification_vt"
+severity = "P1"
+tags = ["asset-classification", "countries", "other"]
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+
+[[case.expected_tools]]
+name = "list_asset_taxonomies"
+[case.expected_tools.args]
+includeCategories = { exact = true }
+categoryDepth = "all"
+
+[[case.expected_tools]]
+name = "prepare_asset_classification"
+[case.expected_tools.args]
+assetQuery = { contains = "VT" }
+taxonomyId = "countries"
+assignments = "not_empty"
+
+[case.forbidden_tools]
+get_asset_taxonomy_assignments = "draft flow should not separately read current assignments"
+
+[case.max_tool_calls]
+prepare_asset_classification = 1

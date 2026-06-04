@@ -191,7 +191,7 @@ export function CategoryHierarchyTable({
               Total spent
             </span>
             <span className="text-foreground text-xl font-semibold tabular-nums tracking-tight">
-              −<PrivacyAmount value={totals.spent} currency={currency} />
+              <PrivacyAmount value={totals.spent} currency={currency} />
             </span>
           </div>
           {totals.budgeted > 0 && (
@@ -265,7 +265,7 @@ export function CategoryHierarchyTable({
             <td className="px-3 py-2.5">Total</td>
             <td className="px-3 py-2.5 text-right text-xs tabular-nums">
               <span className="text-foreground font-medium">
-                −<PrivacyAmount value={totals.spent} currency={currency} />
+                <PrivacyAmount value={totals.spent} currency={currency} />
               </span>
               {totals.budgeted > 0 && (
                 <span className="text-muted-foreground/70 ml-1">
@@ -384,7 +384,7 @@ const GroupRow = memo(function GroupRow({
           </div>
         </td>
         <td className="text-foreground px-3 py-2.5 text-right text-xs font-semibold tabular-nums">
-          −<PrivacyAmount value={group.spent} currency={currency} />
+          <PrivacyAmount value={group.spent} currency={currency} />
           {group.budgeted > 0 && (
             <span className="text-muted-foreground/70 ml-1 font-normal">
               / <PrivacyAmount value={group.budgeted} currency={currency} />
@@ -490,7 +490,7 @@ const ParentRow = memo(function ParentRow({
         </td>
         <td className="text-foreground/90 px-3 py-2.5 text-right text-xs tabular-nums">
           <span className="text-foreground font-medium">
-            −<PrivacyAmount value={node.spent} currency={currency} />
+            <PrivacyAmount value={node.spent} currency={currency} />
           </span>
           {node.budgeted > 0 && (
             <span className="text-muted-foreground/70 ml-1">
@@ -566,7 +566,7 @@ const ChildRow = memo(function ChildRow({
         </div>
       </td>
       <td className="text-muted-foreground/90 px-3 py-1.5 text-right text-xs tabular-nums">
-        −<PrivacyAmount value={node.spent} currency={currency} />
+        <PrivacyAmount value={node.spent} currency={currency} />
       </td>
       <td className="px-3 py-1.5"></td>
       <td
@@ -639,7 +639,7 @@ const MobileGroupRow = memo(function MobileGroupRow({
           {group.name}
         </span>
         <span className="text-foreground/90 shrink-0 text-sm font-medium tabular-nums">
-          −<PrivacyAmount value={group.spent} currency={currency} />
+          <PrivacyAmount value={group.spent} currency={currency} />
         </span>
         <DeltaPill delta={delta} priorSpent={group.priorSpent} />
       </li>
@@ -674,7 +674,7 @@ const MobileGroupRow = memo(function MobileGroupRow({
         </div>
         <div className="mt-1.5 flex items-baseline justify-between gap-3 pl-4">
           <span className="text-foreground text-[15px] font-semibold tabular-nums tracking-tight">
-            −<PrivacyAmount value={group.spent} currency={currency} />
+            <PrivacyAmount value={group.spent} currency={currency} />
           </span>
           {hasBudget && (
             <span className="text-muted-foreground/60 shrink-0 text-[11px] tabular-nums">
@@ -767,7 +767,7 @@ const MobileCategoryRow = memo(function MobileCategoryRow({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-0.5">
           <span className="text-foreground text-sm font-semibold tabular-nums">
-            −<PrivacyAmount value={node.spent} currency={currency} />
+            <PrivacyAmount value={node.spent} currency={currency} />
           </span>
           <DeltaPill delta={delta} priorSpent={node.priorSpent} />
         </div>
@@ -838,7 +838,7 @@ function MobileSubcategoryRow({
       <span className="text-muted-foreground/90 flex-1 truncate">{node.name}</span>
       <DeltaPill delta={delta} priorSpent={node.priorSpent} />
       <span className="text-muted-foreground/90 shrink-0 text-xs tabular-nums">
-        −<PrivacyAmount value={node.spent} currency={currency} />
+        <PrivacyAmount value={node.spent} currency={currency} />
       </span>
     </li>
   );

@@ -17,6 +17,7 @@
 pub mod accounts;
 pub mod activities;
 pub mod allocation;
+pub mod asset_classification;
 pub mod cash_balances;
 pub mod constants;
 pub mod create_categorization_rule;
@@ -39,6 +40,9 @@ pub use constants::*;
 pub use accounts::GetAccountsTool;
 pub use activities::SearchActivitiesTool;
 pub use allocation::GetAssetAllocationTool;
+pub use asset_classification::{
+    GetAssetTaxonomyAssignmentsTool, ListAssetTaxonomiesTool, PrepareAssetClassificationTool,
+};
 pub use cash_balances::GetCashBalancesTool;
 pub use create_categorization_rule::CreateCategorizationRuleTool;
 pub use goals::GetGoalsTool;
@@ -78,6 +82,9 @@ pub struct ToolSet<E: AiEnvironment> {
     pub propose_categories: ProposeCategoriesTool<E>,
     pub list_categorization_context: ListCategorizationContextTool<E>,
     pub create_categorization_rule: CreateCategorizationRuleTool<E>,
+    pub list_asset_taxonomies: ListAssetTaxonomiesTool<E>,
+    pub get_asset_taxonomy_assignments: GetAssetTaxonomyAssignmentsTool<E>,
+    pub prepare_asset_classification: PrepareAssetClassificationTool<E>,
 }
 
 impl<E: AiEnvironment> ToolSet<E> {
@@ -99,7 +106,10 @@ impl<E: AiEnvironment> ToolSet<E> {
             health_status: GetHealthStatusTool::new(env.clone()),
             propose_categories: ProposeCategoriesTool::new(env.clone()),
             list_categorization_context: ListCategorizationContextTool::new(env.clone()),
-            create_categorization_rule: CreateCategorizationRuleTool::new(env),
+            create_categorization_rule: CreateCategorizationRuleTool::new(env.clone()),
+            list_asset_taxonomies: ListAssetTaxonomiesTool::new(env.clone()),
+            get_asset_taxonomy_assignments: GetAssetTaxonomyAssignmentsTool::new(env.clone()),
+            prepare_asset_classification: PrepareAssetClassificationTool::new(env),
         }
     }
 }
@@ -145,6 +155,9 @@ mod tests {
             <ProposeCategoriesTool<MockEnvironment> as Tool>::NAME,
             <ListCategorizationContextTool<MockEnvironment> as Tool>::NAME,
             <CreateCategorizationRuleTool<MockEnvironment> as Tool>::NAME,
+            <ListAssetTaxonomiesTool<MockEnvironment> as Tool>::NAME,
+            <GetAssetTaxonomyAssignmentsTool<MockEnvironment> as Tool>::NAME,
+            <PrepareAssetClassificationTool<MockEnvironment> as Tool>::NAME,
         ];
         for name in &registered_names {
             assert!(

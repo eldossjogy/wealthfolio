@@ -8,6 +8,11 @@
 import { AccountsToolUI } from "./accounts-tool-ui";
 import { ActivitiesToolUI } from "./activities-tool-ui";
 import { AllocationToolUI } from "./allocation-tool-ui";
+import { AssetClassificationToolUI } from "./asset-classification-tool-ui";
+import {
+  GetAssetTaxonomyAssignmentsToolUI,
+  ListAssetTaxonomiesToolUI,
+} from "./asset-taxonomy-read-tool-uis";
 import { CategorizationProposalsToolUI } from "./categorization-proposals-tool-ui";
 import { CreateCategorizationRuleToolUI } from "./create-categorization-rule-tool-ui";
 import { GoalsToolUI } from "./goals-tool-ui";
@@ -27,6 +32,8 @@ import { ValuationToolUI } from "./valuation-tool-ui";
 export const toolUIs = {
   get_accounts: AccountsToolUI,
   get_asset_allocation: AllocationToolUI,
+  get_asset_taxonomy_assignments: GetAssetTaxonomyAssignmentsToolUI,
+  prepare_asset_classification: AssetClassificationToolUI,
   get_goals: GoalsToolUI,
   get_holdings: HoldingsToolUI,
   get_income: IncomeToolUI,
@@ -34,6 +41,7 @@ export const toolUIs = {
   get_valuation_history: ValuationToolUI,
   import_csv: ImportCsvToolUI,
   create_categorization_rule: CreateCategorizationRuleToolUI,
+  list_asset_taxonomies: ListAssetTaxonomiesToolUI,
   list_categorization_context: ListCategorizationContextToolUI,
   propose_transaction_categories: CategorizationProposalsToolUI,
   record_activity: RecordActivityToolUI,
@@ -48,12 +56,15 @@ export {
   AccountsToolUI,
   ActivitiesToolUI,
   AllocationToolUI,
+  AssetClassificationToolUI,
   CategorizationProposalsToolUI,
   CreateCategorizationRuleToolUI,
+  GetAssetTaxonomyAssignmentsToolUI,
   GoalsToolUI,
   HoldingsToolUI,
   ImportCsvToolUI,
   IncomeToolUI,
+  ListAssetTaxonomiesToolUI,
   ListCategorizationContextToolUI,
   PerformanceToolUI,
   RecordActivityToolUI,

@@ -37,6 +37,15 @@ fn mentions_displaymode_compact_pattern() {
 }
 
 #[test]
+fn allows_reusing_previous_prerequisite_results() {
+    let lower = SYSTEM_PROMPT.to_lowercase();
+    assert!(
+        lower.contains("already available") || lower.contains("reuse"),
+        "system prompt should allow avoiding duplicate prerequisite tool calls",
+    );
+}
+
+#[test]
 fn does_not_repeat_full_tool_listing() {
     // We slimmed this in the cleanup pass — re-introducing duplicate tool
     // listings would re-introduce the per-tool drift problem. Tool descriptions
@@ -67,4 +76,35 @@ fn keeps_image_pdf_attachment_rules() {
         lower.contains("attachment") && lower.contains("record_activities"),
         "system prompt should retain image/PDF extraction → record_activities flow",
     );
+}
+
+#[test]
+fn asset_classification_ambiguity_requires_user_choice() {
+    let lower = SYSTEM_PROMPT.to_lowercase();
+    assert!(lower.contains("asset classification ambiguity"));
+    assert!(lower.contains("ambiguous"));
+    assert!(
+        lower.contains("do not pick a candidate yourself"),
+        "system prompt should prevent auto-selecting an ambiguous asset candidate",
+    );
+    assert!(SYSTEM_PROMPT.contains("needsAssetSelection"));
+    assert!(SYSTEM_PROMPT.contains("list_asset_taxonomies"));
+    assert!(SYSTEM_PROMPT.contains("includeCategories"));
+    assert!(SYSTEM_PROMPT.contains("categoryDepth"));
+    assert!(SYSTEM_PROMPT.contains("Unknown"));
+    assert!(SYSTEM_PROMPT.contains("sourceLabel"));
+    assert!(SYSTEM_PROMPT.contains("__placeholder__"));
+    assert!(lower.contains("root category ids"));
+    assert!(lower.contains("never mix category ids"));
+    assert!(lower.contains("omit unmapped buckets"));
+    assert!(lower.contains("country"));
+    assert!(lower.contains("leaf country category ids"));
+    assert!(lower.contains("aggregate countries to root region categories only"));
+    assert!(lower.contains("top-level/root region buckets"));
+    assert!(lower.contains("do not repeat the candidate list"));
+    assert!(lower.contains("do not rerun the tool"));
+    assert!(lower.contains("never guess category ids"));
+    assert!(lower.contains("read-only"));
+    assert!(SYSTEM_PROMPT.contains("get_asset_taxonomy_assignments"));
+    assert!(lower.contains("do not call `list_asset_taxonomies` or `prepare_asset_classification`"));
 }

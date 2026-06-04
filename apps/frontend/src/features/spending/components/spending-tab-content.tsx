@@ -31,8 +31,10 @@ import {
 } from "@wealthfolio/ui";
 
 import { useBudget } from "../hooks/use-budget";
+import { useCategorizationRules } from "../hooks/use-categorization-rules";
 import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-activities";
 import { useSpendingReport } from "../hooks/use-spending-report";
+import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { topCategoryId } from "../lib/category-rollup";
 import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
 import {
@@ -157,6 +159,8 @@ export default function SpendingTabContent() {
   const baseCurrency = settings?.baseCurrency ?? "USD";
   const appTimezone = settings?.timezone ?? undefined;
   const navigate = useNavigate();
+  const { accountIds: spendingAccountIds, isLoading: spendingSettingsLoading } =
+    useSpendingSettings();
 
   const [searchParams, setSearchParams] = useSearchParams();
   // URL-driven so `/dashboard?tab=spending&spendingInterval=3M` is shareable
@@ -227,6 +231,8 @@ export default function SpendingTabContent() {
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
   const { data: budget, isError: budgetErrored } = useBudget();
   const { accounts = [] } = useAccounts({ filterActive: false });
+  const { data: categorizationRules = [], isLoading: categorizationRulesLoading } =
+    useCategorizationRules();
   const { data: uncategorizedCount = 0 } = useUncategorizedCount(
     reportReq.startDate,
     reportReq.endDate,
@@ -235,6 +241,7 @@ export default function SpendingTabContent() {
   // failures degrade more silently than report (their absence shows up as
   // a flat treemap or hidden chips), but the user deserves a signal.
   const dataErrored = reportErrored || activitiesErrored || budgetErrored;
+  const hasNoIncludedAccounts = !spendingSettingsLoading && spendingAccountIds.length === 0;
 
   const monthReportReq = useMemo(() => {
     const today = getZonedDateParts(new Date(), appTimezone);
@@ -506,7 +513,7 @@ export default function SpendingTabContent() {
   }, [report, priorReport, categoriesMeta]);
 
   const insights = useMemo(() => {
-    const items: { icon: string; title: React.ReactNode; sub: string }[] = [];
+    const items: { icon: string; title: React.ReactNode; sub: React.ReactNode }[] = [];
     if (priorSpending > 0 && deltaPct > 0.2) {
       items.push({
         icon: "!",
@@ -523,6 +530,8 @@ export default function SpendingTabContent() {
     }
     const uncategorized = categoryRows.find((c) => c.id === "__uncategorized__");
     if (uncategorized && uncategorized.txCount > 0) {
+      const hasNoCategorizationRules =
+        !categorizationRulesLoading && categorizationRules.length === 0;
       items.push({
         icon: "+",
         title: (
@@ -534,9 +543,35 @@ export default function SpendingTabContent() {
         ),
         sub: "Categorize them to improve breakdowns",
       });
+      if (hasNoCategorizationRules) {
+        items.push({
+          icon: "!",
+          title: (
+            <>
+              No categorization rules set.{" "}
+              <Link
+                to="/settings/spending/rules"
+                className="font-semibold underline-offset-4 hover:underline"
+              >
+                Create rules →
+              </Link>
+            </>
+          ),
+          sub: "Automate matching for recurring merchants",
+        });
+      }
     }
     return items;
-  }, [deltaPct, delta, priorSpending, categoryRows, currency, isBalanceHidden]);
+  }, [
+    deltaPct,
+    delta,
+    priorSpending,
+    categoryRows,
+    currency,
+    isBalanceHidden,
+    categorizationRules,
+    categorizationRulesLoading,
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -733,6 +768,7 @@ export default function SpendingTabContent() {
                     total={totalSpending}
                     currency={currency}
                     themeColor={theme.deep}
+                    hasNoIncludedAccounts={hasNoIncludedAccounts}
                   />
                 ) : (
                   <CategoryRankedBar
@@ -741,6 +777,7 @@ export default function SpendingTabContent() {
                     currency={currency}
                     themeColor={theme.deep}
                     groupRows={budget?.computed.groupRows ?? []}
+                    hasNoIncludedAccounts={hasNoIncludedAccounts}
                   />
                 )}
               </DashboardCard>
@@ -882,6 +919,26 @@ function spendingActivityHref(id: string): string {
     : `/activities?tab=spending&category=${id}`;
 }
 
+function WhereItWentEmptyState({ hasNoIncludedAccounts }: { hasNoIncludedAccounts: boolean }) {
+  return (
+    <div className="py-6 text-center">
+      {hasNoIncludedAccounts ? (
+        <div className="space-y-2">
+          <p className="text-muted-foreground text-sm">No spending accounts selected.</p>
+          <Link
+            to="/settings/spending"
+            className="text-foreground inline-flex text-xs underline-offset-4 hover:underline"
+          >
+            Open spending settings →
+          </Link>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
+      )}
+    </div>
+  );
+}
+
 interface CategoryTreemapNodeProps {
   depth?: number;
   x?: number;
@@ -906,20 +963,18 @@ function CategoryTreemapMono({
   total,
   currency,
   themeColor,
+  hasNoIncludedAccounts,
 }: {
   rows: CategoryRow[];
   total: number;
   currency: string;
   themeColor: string;
+  hasNoIncludedAccounts: boolean;
 }) {
   const navigate = useNavigate();
 
   if (rows.length === 0 || total <= 0) {
-    return (
-      <div className="py-6 text-center">
-        <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
-      </div>
-    );
+    return <WhereItWentEmptyState hasNoIncludedAccounts={hasNoIncludedAccounts} />;
   }
 
   const top = rows.slice(0, 8);
@@ -1127,11 +1182,13 @@ function CategoryRankedBar({
   currency,
   themeColor,
   groupRows = [],
+  hasNoIncludedAccounts,
 }: {
   rows: CategoryRow[];
   total: number;
   currency: string;
   themeColor: string;
+  hasNoIncludedAccounts: boolean;
   /**
    * Budget groups (Needs / Wants / …). When any category here is assigned to a
    * group, the list switches to a grouped layout with collapsible group rows.
@@ -1172,11 +1229,7 @@ function CategoryRankedBar({
   }, [rows, total, groupRows]);
 
   if (rows.length === 0 || total <= 0) {
-    return (
-      <div className="py-6 text-center">
-        <p className="text-muted-foreground text-sm">No categorized spending in this period.</p>
-      </div>
-    );
+    return <WhereItWentEmptyState hasNoIncludedAccounts={hasNoIncludedAccounts} />;
   }
 
   const { categoryGroup, hasAnyGroup, uncategorizedAmount, top, restAmount, barSegments } = derived;

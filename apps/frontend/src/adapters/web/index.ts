@@ -144,6 +144,7 @@ export {
   importTaxonomyJson,
   migrateLegacyClassifications,
   moveCategory,
+  replaceAssetTaxonomyAssignments,
   removeAssetTaxonomyAssignment,
   updateCategory,
   updateTaxonomy,

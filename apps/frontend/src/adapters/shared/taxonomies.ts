@@ -79,6 +79,18 @@ export const assignAssetToCategory = async (
   return invoke<AssetTaxonomyAssignment>("assign_asset_to_category", { assignment });
 };
 
+export const replaceAssetTaxonomyAssignments = async (
+  assetId: string,
+  taxonomyId: string,
+  assignments: NewAssetTaxonomyAssignment[],
+): Promise<AssetTaxonomyAssignment[]> => {
+  return invoke<AssetTaxonomyAssignment[]>("replace_asset_taxonomy_assignments", {
+    assetId,
+    taxonomyId,
+    assignments,
+  });
+};
+
 export const removeAssetTaxonomyAssignment = async (id: string): Promise<number> => {
   return invoke<number>("remove_asset_taxonomy_assignment", { id });
 };

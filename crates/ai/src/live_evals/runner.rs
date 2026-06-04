@@ -15,11 +15,16 @@
 
 use std::sync::Arc;
 
+use chrono::NaiveDateTime;
 use futures::StreamExt;
 use serde_json::Value;
+use wealthfolio_core::{
+    assets::{Asset, AssetKind, InstrumentType, QuoteMode},
+    taxonomies::{AssetTaxonomyAssignment, Category, Taxonomy, TaxonomyWithCategories},
+};
 
 use crate::chat::{ChatConfig, ChatService};
-use crate::env::test_env::MockEnvironment;
+use crate::env::test_env::{MockAssetService, MockEnvironment, MockTaxonomyService};
 use crate::error::AiError;
 use crate::live_evals::schema::{ArgAssertion, ArgPredicate, Case, ResponseRubric, Severity};
 use crate::live_evals::trace::ToolTrace;
@@ -142,7 +147,7 @@ fn is_transient_failure(result: &CaseResult) -> bool {
 }
 
 async fn run_case_once(case: &Case, cfg: &RunnerConfig) -> CaseResult {
-    let env = Arc::new(MockEnvironment::new());
+    let env = Arc::new(build_mock_environment(case));
     let service = ChatService::new(env, ChatConfig::default());
 
     let thread = match service.create_thread().await {
@@ -199,6 +204,186 @@ async fn run_case_once(case: &Case, cfg: &RunnerConfig) -> CaseResult {
         passed,
         failures,
         trace,
+    }
+}
+
+fn build_mock_environment(case: &Case) -> MockEnvironment {
+    let mut env = MockEnvironment::new();
+
+    if case.fixture.as_deref() == Some("asset_classification_vt") {
+        seed_asset_classification_vt_fixture(&mut env);
+    }
+
+    env
+}
+
+fn seed_asset_classification_vt_fixture(env: &mut MockEnvironment) {
+    let taxonomy_id = "gics-industries";
+    let countries_taxonomy_id = "countries";
+    env.asset_service = Arc::new(MockAssetService {
+        assets: vec![
+            eval_asset(
+                "asset-vt-xnas",
+                "VT",
+                "VT",
+                Some("XNAS"),
+                "Vanguard Total World Stock Index Fund ETF Shares",
+            ),
+            eval_asset(
+                "asset-vt-arcx",
+                "VT",
+                "VT",
+                Some("ARCX"),
+                "Vanguard Total World Stock Index Fund ETF Shares",
+            ),
+        ],
+    });
+    env.taxonomy_service = Arc::new(MockTaxonomyService {
+        taxonomies: vec![
+            TaxonomyWithCategories {
+                taxonomy: eval_taxonomy(taxonomy_id, "Industries (GICS)"),
+                categories: vec![
+                    eval_category(taxonomy_id, "10", None, "Energy", 10),
+                    eval_category(taxonomy_id, "15", None, "Materials", 15),
+                    eval_category(taxonomy_id, "20", None, "Industrials", 20),
+                    eval_category(taxonomy_id, "25", None, "Consumer Discretionary", 25),
+                    eval_category(taxonomy_id, "30", None, "Consumer Staples", 30),
+                    eval_category(taxonomy_id, "35", None, "Health Care", 35),
+                    eval_category(taxonomy_id, "40", None, "Financials", 40),
+                    eval_category(taxonomy_id, "45", None, "Information Technology", 45),
+                    eval_category(taxonomy_id, "50", None, "Communication Services", 50),
+                    eval_category(taxonomy_id, "55", None, "Utilities", 55),
+                    eval_category(taxonomy_id, "60", None, "Real Estate", 60),
+                    eval_category(taxonomy_id, "4510", Some("45"), "Software & Services", 4510),
+                ],
+            },
+            TaxonomyWithCategories {
+                taxonomy: eval_taxonomy(countries_taxonomy_id, "Countries"),
+                categories: vec![
+                    eval_category(countries_taxonomy_id, "us", None, "United States", 10),
+                    eval_category(countries_taxonomy_id, "jp", None, "Japan", 20),
+                    eval_category(countries_taxonomy_id, "gb", None, "United Kingdom", 30),
+                    eval_category(countries_taxonomy_id, "ca", None, "Canada", 40),
+                    eval_category(countries_taxonomy_id, "fr", None, "France", 50),
+                    eval_category(countries_taxonomy_id, "de", None, "Germany", 60),
+                    eval_category(countries_taxonomy_id, "ch", None, "Switzerland", 70),
+                    eval_category(countries_taxonomy_id, "au", None, "Australia", 80),
+                    eval_category(countries_taxonomy_id, "nl", None, "Netherlands", 90),
+                    eval_category(countries_taxonomy_id, "ie", None, "Ireland", 100),
+                    eval_category(countries_taxonomy_id, "be", None, "Belgium", 110),
+                ],
+            },
+        ],
+        assignments: vec![
+            eval_assignment(
+                "assignment-vt-xnas-45",
+                "asset-vt-xnas",
+                taxonomy_id,
+                "45",
+                2560,
+            ),
+            eval_assignment(
+                "assignment-vt-xnas-25",
+                "asset-vt-xnas",
+                taxonomy_id,
+                "25",
+                968,
+            ),
+            eval_assignment(
+                "assignment-vt-xnas-35",
+                "asset-vt-xnas",
+                taxonomy_id,
+                "35",
+                895,
+            ),
+            eval_assignment(
+                "assignment-vt-arcx-45",
+                "asset-vt-arcx",
+                taxonomy_id,
+                "45",
+                10000,
+            ),
+        ],
+    });
+}
+
+fn eval_asset(
+    id: &str,
+    display_code: &str,
+    symbol: &str,
+    exchange_mic: Option<&str>,
+    name: &str,
+) -> Asset {
+    Asset {
+        id: id.to_string(),
+        kind: AssetKind::Investment,
+        name: Some(name.to_string()),
+        display_code: Some(display_code.to_string()),
+        is_active: true,
+        quote_mode: QuoteMode::Market,
+        quote_ccy: "USD".to_string(),
+        instrument_type: Some(InstrumentType::Equity),
+        instrument_symbol: Some(symbol.to_string()),
+        instrument_exchange_mic: exchange_mic.map(str::to_string),
+        created_at: NaiveDateTime::default(),
+        updated_at: NaiveDateTime::default(),
+        ..Default::default()
+    }
+}
+
+fn eval_taxonomy(id: &str, name: &str) -> Taxonomy {
+    Taxonomy {
+        id: id.to_string(),
+        name: name.to_string(),
+        color: "#2563eb".to_string(),
+        description: None,
+        is_system: true,
+        is_single_select: false,
+        sort_order: 1,
+        created_at: NaiveDateTime::default(),
+        updated_at: NaiveDateTime::default(),
+        scope: "asset".to_string(),
+    }
+}
+
+fn eval_category(
+    taxonomy_id: &str,
+    id: &str,
+    parent_id: Option<&str>,
+    name: &str,
+    sort_order: i32,
+) -> Category {
+    Category {
+        id: id.to_string(),
+        taxonomy_id: taxonomy_id.to_string(),
+        parent_id: parent_id.map(str::to_string),
+        name: name.to_string(),
+        key: name.to_lowercase().replace(' ', "_"),
+        color: "#64748b".to_string(),
+        description: None,
+        sort_order,
+        created_at: NaiveDateTime::default(),
+        updated_at: NaiveDateTime::default(),
+        icon: None,
+    }
+}
+
+fn eval_assignment(
+    id: &str,
+    asset_id: &str,
+    taxonomy_id: &str,
+    category_id: &str,
+    weight: i32,
+) -> AssetTaxonomyAssignment {
+    AssetTaxonomyAssignment {
+        id: id.to_string(),
+        asset_id: asset_id.to_string(),
+        taxonomy_id: taxonomy_id.to_string(),
+        category_id: category_id.to_string(),
+        weight,
+        source: "manual".to_string(),
+        created_at: NaiveDateTime::default(),
+        updated_at: NaiveDateTime::default(),
     }
 }
 

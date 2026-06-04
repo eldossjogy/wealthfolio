@@ -100,6 +100,15 @@ const DATA_ACCESS_OPTIONS = [
     description: "Portfolio allocation breakdown",
   },
   {
+    toolIds: [
+      "list_asset_taxonomies",
+      "get_asset_taxonomy_assignments",
+      "prepare_asset_classification",
+    ],
+    label: "Classifications",
+    description: "Asset taxonomies and classification drafts",
+  },
+  {
     toolIds: ["get_valuation_history"],
     label: "History",
     description: "Portfolio value over time",
