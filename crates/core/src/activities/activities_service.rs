@@ -90,6 +90,14 @@ struct ResolvedSymbolInfo {
     exchange_mic: Option<String>,
 }
 
+struct InternalPairValues {
+    source_amount: Decimal,
+    destination_amount: Decimal,
+    source_currency: String,
+    destination_currency: String,
+    fx_rate: Option<Decimal>,
+}
+
 /// Service for managing activities
 pub struct ActivityService {
     activity_repository: Arc<dyn ActivityRepositoryTrait>,
@@ -699,7 +707,7 @@ impl ActivityService {
     fn validate_internal_pair_request(
         &self,
         request: &InternalTransferPairRequest,
-    ) -> Result<(Decimal, Decimal, String, String, Option<Decimal>)> {
+    ) -> Result<InternalPairValues> {
         if request.from_account_id.trim().is_empty() {
             return Err(Self::invalid_activity_data("Source account is required"));
         }
@@ -779,22 +787,18 @@ impl ActivityService {
             }
         };
 
-        Ok((
+        Ok(InternalPairValues {
             source_amount,
             destination_amount,
-            from_account.currency,
-            to_account.currency,
+            source_currency: from_account.currency,
+            destination_currency: to_account.currency,
             fx_rate,
-        ))
+        })
     }
 
     fn build_internal_pair_create_request(
         request: &InternalTransferPairRequest,
-        source_amount: Decimal,
-        destination_amount: Decimal,
-        source_currency: String,
-        destination_currency: String,
-        fx_rate: Option<Decimal>,
+        values: &InternalPairValues,
     ) -> Vec<NewActivity> {
         let group_id = request
             .source_group_id
@@ -815,9 +819,9 @@ impl ActivityService {
                 activity_date: request.activity_date.clone(),
                 quantity: None,
                 unit_price: None,
-                currency: source_currency,
+                currency: values.source_currency.clone(),
                 fee: None,
-                amount: Some(source_amount),
+                amount: Some(values.source_amount),
                 status: None,
                 notes: request.notes.clone(),
                 fx_rate: None,
@@ -837,12 +841,12 @@ impl ActivityService {
                 activity_date: request.activity_date.clone(),
                 quantity: None,
                 unit_price: None,
-                currency: destination_currency,
+                currency: values.destination_currency.clone(),
                 fee: None,
-                amount: Some(destination_amount),
+                amount: Some(values.destination_amount),
                 status: None,
                 notes: request.notes.clone(),
-                fx_rate,
+                fx_rate: values.fx_rate,
                 metadata,
                 needs_review: None,
                 source_system: Some("MANUAL".to_string()),
@@ -857,11 +861,7 @@ impl ActivityService {
         request: &InternalTransferPairRequest,
         transfer_out_id: String,
         transfer_in_id: String,
-        source_amount: Decimal,
-        destination_amount: Decimal,
-        source_currency: String,
-        destination_currency: String,
-        fx_rate: Option<Decimal>,
+        values: &InternalPairValues,
     ) -> Vec<ActivityUpdate> {
         let metadata = Self::internal_transfer_metadata();
         vec![
@@ -874,9 +874,9 @@ impl ActivityService {
                 activity_date: request.activity_date.clone(),
                 quantity: Some(None),
                 unit_price: Some(None),
-                currency: source_currency,
+                currency: values.source_currency.clone(),
                 fee: Some(None),
-                amount: Some(Some(source_amount)),
+                amount: Some(Some(values.source_amount)),
                 status: None,
                 notes: request.notes.clone(),
                 fx_rate: Some(None),
@@ -891,12 +891,12 @@ impl ActivityService {
                 activity_date: request.activity_date.clone(),
                 quantity: Some(None),
                 unit_price: Some(None),
-                currency: destination_currency,
+                currency: values.destination_currency.clone(),
                 fee: Some(None),
-                amount: Some(Some(destination_amount)),
+                amount: Some(Some(values.destination_amount)),
                 status: None,
                 notes: request.notes.clone(),
-                fx_rate: Some(fx_rate),
+                fx_rate: Some(values.fx_rate),
                 metadata,
             },
         ]
@@ -3653,8 +3653,7 @@ impl ActivityServiceTrait for ActivityService {
         &self,
         request: InternalTransferPairRequest,
     ) -> Result<InternalTransferPairResponse> {
-        let (source_amount, destination_amount, source_currency, destination_currency, fx_rate) =
-            self.validate_internal_pair_request(&request)?;
+        let pair_values = self.validate_internal_pair_request(&request)?;
 
         let is_update = request.transfer_out_id.is_some() || request.transfer_in_id.is_some();
         let mut old_account_ids: HashSet<String> = HashSet::new();
@@ -3698,11 +3697,7 @@ impl ActivityServiceTrait for ActivityService {
                 &request,
                 transfer_out_id,
                 transfer_in_id,
-                source_amount,
-                destination_amount,
-                source_currency,
-                destination_currency,
-                fx_rate,
+                &pair_values,
             );
             for update in &mut updates {
                 let existing = self.activity_repository.get_activity(&update.id)?;
@@ -3716,14 +3711,7 @@ impl ActivityServiceTrait for ActivityService {
                 .bulk_mutate_activities(Vec::new(), prepared_updates, Vec::new())
                 .await?
         } else {
-            let creates = Self::build_internal_pair_create_request(
-                &request,
-                source_amount,
-                destination_amount,
-                source_currency,
-                destination_currency,
-                fx_rate,
-            );
+            let creates = Self::build_internal_pair_create_request(&request, &pair_values);
             let mut prepared_creates = Vec::new();
             for create in creates {
                 prepared_creates.push(self.prepare_new_activity(create).await?);
