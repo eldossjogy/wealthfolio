@@ -321,7 +321,9 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
     assetId:
       isTransferType && !isSecurityTransferActivity
         ? undefined
-        : (activity?.assetSymbol ?? activity?.assetId),
+        : (activity?.assetSymbol ?? activity?.assetId)
+          ? (activity?.assetSymbol ?? activity?.assetId)
+          : undefined,
     activityDate: activity?.date
       ? new Date(activity.date)
       : (() => {
