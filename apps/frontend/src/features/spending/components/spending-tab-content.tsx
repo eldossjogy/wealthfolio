@@ -652,17 +652,6 @@ export default function SpendingTabContent() {
         }}
       >
         <div className="h-[280px] [&_.recharts-layer]:outline-none [&_.recharts-rectangle]:outline-none [&_.recharts-surface]:outline-none">
-          {!isLoading && barData.length > 0 && avgValue > 0 && (
-            <div className="text-muted-foreground/80 flex items-center justify-end gap-1.5 px-6 pt-1 text-[11px] tabular-nums">
-              <span
-                aria-hidden
-                className="inline-block h-px w-3.5 border-t border-dashed border-current opacity-60"
-              />
-              <span>
-                {avgLabel} · {formatCompactAmount(avgValue, currency)}
-              </span>
-            </div>
-          )}
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <Skeleton className="h-full w-full" />
@@ -705,6 +694,17 @@ export default function SpendingTabContent() {
                         <div className="text-foreground font-semibold tabular-nums">
                           {p.future ? "—" : <PrivacyAmount value={p.value} currency={currency} />}
                         </div>
+                        {avgValue > 0 && (
+                          <div className="text-muted-foreground/70 mt-1 flex items-center gap-1.5 tabular-nums">
+                            <span
+                              aria-hidden
+                              className="inline-block h-px w-3 border-t border-dashed border-current opacity-60"
+                            />
+                            <span>
+                              {avgLabel} · {formatCompactAmount(avgValue, currency)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   }}
@@ -754,11 +754,11 @@ export default function SpendingTabContent() {
         </div>
 
         <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-24 md:px-6 md:pb-6 md:pt-20 lg:px-10 lg:pb-8 lg:pt-24">
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-20">
-            <div className="space-y-6 lg:col-span-2">
+          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:gap-20">
+            <div className="contents lg:col-span-2 lg:block lg:space-y-6">
               <DashboardCard
                 title="Where it went"
-                className="overflow-hidden"
+                className="order-1 overflow-hidden lg:order-none"
                 action={
                   <div className="flex items-center gap-3">
                     <SegmentedToggle
@@ -801,29 +801,33 @@ export default function SpendingTabContent() {
                 )}
               </DashboardCard>
 
-              <RecentActivityCard
-                activities={activities}
-                accountTypeById={accountTypeById}
-                categoriesMeta={categoriesMeta}
-                currency={currency}
-                uncategorizedCount={uncategorizedCount}
-              />
+              <div className="order-3 lg:order-none">
+                <RecentActivityCard
+                  activities={activities}
+                  accountTypeById={accountTypeById}
+                  categoriesMeta={categoriesMeta}
+                  currency={currency}
+                  uncategorizedCount={uncategorizedCount}
+                />
+              </div>
             </div>
 
-            <div className="space-y-6 lg:col-span-1">
-              <BudgetLineChartCard
-                target={budget?.computed.totals.spendingPlanned ?? 0}
-                spent={monthReport?.current.outflow ?? 0}
-                currency={budget?.computed.currency ?? currency}
-                historicalDailyAvg={historicalDailyAvg}
-                allocations={budget?.computed.groupRows.flatMap((row) => row.categories) ?? []}
-                spendingBreakdown={monthReport?.spendingBreakdown ?? []}
-                categoriesMeta={categoriesMeta}
-                monthByDay={monthReport?.byDay ?? []}
-              />
+            <div className="contents lg:col-span-1 lg:block lg:space-y-6">
+              <div className="order-2 lg:order-none">
+                <BudgetLineChartCard
+                  target={budget?.computed.totals.spendingPlanned ?? 0}
+                  spent={monthReport?.current.outflow ?? 0}
+                  currency={budget?.computed.currency ?? currency}
+                  historicalDailyAvg={historicalDailyAvg}
+                  allocations={budget?.computed.groupRows.flatMap((row) => row.categories) ?? []}
+                  spendingBreakdown={monthReport?.spendingBreakdown ?? []}
+                  categoriesMeta={categoriesMeta}
+                  monthByDay={monthReport?.byDay ?? []}
+                />
+              </div>
 
               {insights.length > 0 && (
-                <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+                <div className="border-border/40 bg-card/70 order-4 rounded-xl border p-4 backdrop-blur-xl md:p-5 lg:order-none">
                   <div className="mb-2 flex items-center gap-2">
                     <Icons.AlertCircle className="h-4 w-4 shrink-0" style={{ color: theme.deep }} />
                     <h3 className="text-foreground text-sm font-semibold">Worth a look</h3>
@@ -860,12 +864,14 @@ export default function SpendingTabContent() {
                 </div>
               )}
 
-              <EventsCard
-                activities={subsActivities}
-                accountTypeById={accountTypeById}
-                categoriesMeta={categoriesMeta}
-                theme={theme}
-              />
+              <div className="order-5 lg:order-none">
+                <EventsCard
+                  activities={subsActivities}
+                  accountTypeById={accountTypeById}
+                  categoriesMeta={categoriesMeta}
+                  theme={theme}
+                />
+              </div>
             </div>
           </div>
         </div>
