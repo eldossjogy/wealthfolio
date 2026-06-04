@@ -70,6 +70,29 @@ const INTERVAL_DESCRIPTIONS: Record<TimePeriod, string> = {
   ALL: "All Time",
 };
 
+// The three insights stages, surfaced as a "Dig deeper" strip under Recent
+// activity. Mirrors the StageNav on /spending/insights.
+const INSIGHT_STAGES = [
+  {
+    to: "/spending/insights?stage=where",
+    label: "Where I am",
+    sub: "Pace, budget & category breakdown",
+    Icon: Icons.PieChart,
+  },
+  {
+    to: "/spending/insights?stage=changed",
+    label: "What changed",
+    sub: "Period-over-period trends",
+    Icon: Icons.TrendingUp,
+  },
+  {
+    to: "/spending/insights?stage=when",
+    label: "When & where",
+    sub: "When you spend & spending events",
+    Icon: Icons.Calendar,
+  },
+] as const;
+
 function rangeToReportRequest(range: DateRange | undefined, timezone?: string | null) {
   const from = range?.from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const to = range?.to ?? new Date();
@@ -809,6 +832,30 @@ export default function SpendingTabContent() {
                   currency={currency}
                   uncategorizedCount={uncategorizedCount}
                 />
+              </div>
+
+              <div className="order-6 lg:order-none">
+                <h2 className="pb-2 text-sm font-semibold tracking-tight">Dig deeper</h2>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  {INSIGHT_STAGES.map((s) => (
+                    <Link
+                      key={s.to}
+                      to={s.to}
+                      className="border-border/50 bg-background/30 hover:border-border hover:bg-background/60 group flex flex-col gap-3 rounded-lg border p-3.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <s.Icon className="h-4 w-4" style={{ color: theme.deep }} />
+                        <Icons.ArrowRight className="text-muted-foreground/40 group-hover:text-foreground h-3.5 w-3.5 transition-colors" />
+                      </div>
+                      <div>
+                        <div className="text-foreground text-sm font-medium">{s.label}</div>
+                        <div className="text-muted-foreground/80 mt-0.5 text-xs leading-snug">
+                          {s.sub}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
 
