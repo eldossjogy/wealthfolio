@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Card,
@@ -631,6 +631,12 @@ export function RebalanceTab({
     planResult.inputContextKey === inputContextKey &&
     planResult.sourceKey !== sourceKey;
   const isSellMode = scenarioMode !== "cash_flow_only";
+
+  useEffect(() => {
+    if (!profile?.allowSells && isSellMode) {
+      setScenarioMode("cash_flow_only");
+    }
+  }, [profile?.allowSells, isSellMode]);
 
   function handleCashChange(value: string) {
     setCashDraft({ key: inputContextKey, value });
