@@ -439,10 +439,13 @@ pub async fn initialize_context(
         allocation_target_repository,
         taxonomy_service.clone(),
     ));
-    let drift_service = Arc::new(DriftService::new(
-        allocation_target_service.clone(),
-        allocation_service.clone(),
-    ));
+    let drift_service = Arc::new(
+        DriftService::new(
+            allocation_target_service.clone(),
+            allocation_service.clone(),
+        )
+        .with_taxonomy_service(taxonomy_service.clone()),
+    );
     let rebalance_service = Arc::new(RebalanceService::new(
         allocation_target_service.clone(),
         drift_service.clone(),

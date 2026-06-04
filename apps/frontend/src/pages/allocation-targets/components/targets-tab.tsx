@@ -265,7 +265,7 @@ function TargetEditor({
   const [targetName, setTargetName] = useState(target?.name ?? "");
   const [nameTouched, setNameTouched] = useState(!!target);
   const [driftBandPct, setDriftBandPct] = useState(target ? target.driftBandBps / 100 : 5);
-  const [allowSells, setAllowSells] = useState(target?.allowSells ?? false);
+  const [allowSells, setAllowSells] = useState(target?.allowSells ?? true);
   const [rebalanceGoal, setRebalanceGoal] = useState<RebalanceGoal>(
     target?.rebalanceGoal ?? "nearest_band",
   );
@@ -353,7 +353,7 @@ function TargetEditor({
       setTargetName("");
       setNameTouched(false);
       setDriftBandPct(5);
-      setAllowSells(false);
+      setAllowSells(true);
       setRebalanceGoal("nearest_band");
       setMinTradeAmount("0");
       setWholeSharesOnly(false);

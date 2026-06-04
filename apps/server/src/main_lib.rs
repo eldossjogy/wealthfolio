@@ -463,7 +463,8 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         wealthfolio_core::portfolio::allocation_targets::DriftService::new(
             allocation_target_service.clone(),
             allocation_service.clone(),
-        ),
+        )
+        .with_taxonomy_service(taxonomy_service.clone()),
     );
     let rebalance_service: Arc<
         dyn wealthfolio_core::portfolio::allocation_targets::RebalanceServiceTrait + Send + Sync,
