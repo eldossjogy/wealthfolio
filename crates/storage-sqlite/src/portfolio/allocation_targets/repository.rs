@@ -250,6 +250,10 @@ impl AllocationTargetRepositoryTrait for AllocationTargetRepository {
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
 
+                    for old_id in existing_weight_ids.difference(&incoming_weight_ids) {
+                        tx.delete::<AllocationTargetWeightDB>(old_id.clone());
+                    }
+
                     let updated = diesel::update(
                         allocation_targets::table.filter(allocation_targets::id.eq(&target_id)),
                     )
@@ -274,9 +278,6 @@ impl AllocationTargetRepositoryTrait for AllocationTargetRepository {
                             .map_err(StorageError::from)?;
                     }
 
-                    for old_id in existing_weight_ids.difference(&incoming_weight_ids) {
-                        tx.delete::<AllocationTargetWeightDB>(old_id.clone());
-                    }
                     for weight in &db_weights {
                         if existing_weight_ids.contains(&weight.id) {
                             tx.update(weight)?;
@@ -445,6 +446,50 @@ mod tests {
         assert_eq!(saved.weights.len(), 1);
         assert_eq!(saved.weights[0].taxonomy_id, "regions");
         assert_eq!(saved.weights[0].category_id, "R10");
+    }
+
+    #[tokio::test]
+    async fn save_target_with_weights_orders_child_deletes_before_target_update() {
+        let repo = setup_repo();
+        repo.create_target(target("asset_classes")).await.unwrap();
+        repo.save_weights("target-1", vec![weight("asset_classes", "CASH")])
+            .await
+            .unwrap();
+
+        repo.save_target_with_weights(target("regions"), vec![weight("regions", "R10")])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outbox_rows(&repo),
+            vec![
+                (
+                    "allocation_target".to_string(),
+                    "target-1".to_string(),
+                    "create".to_string()
+                ),
+                (
+                    "allocation_target_weight".to_string(),
+                    "weight-asset_classes-CASH".to_string(),
+                    "create".to_string()
+                ),
+                (
+                    "allocation_target_weight".to_string(),
+                    "weight-asset_classes-CASH".to_string(),
+                    "delete".to_string()
+                ),
+                (
+                    "allocation_target".to_string(),
+                    "target-1".to_string(),
+                    "update".to_string()
+                ),
+                (
+                    "allocation_target_weight".to_string(),
+                    "weight-regions-R10".to_string(),
+                    "create".to_string()
+                ),
+            ]
+        );
     }
 
     #[tokio::test]
