@@ -292,6 +292,33 @@ mod tests {
     }
 
     #[test]
+    fn test_plan_portfolio_job_holdings_to_transactions_triggers_recalc() {
+        let events = vec![DomainEvent::TrackingModeChanged {
+            account_id: "acc1".to_string(),
+            old_mode: TrackingMode::Holdings,
+            new_mode: TrackingMode::Transactions,
+            is_connected: true,
+        }];
+
+        let result = plan_portfolio_job(&events, "UTC").unwrap();
+        assert_eq!(result.account_ids, Some(vec!["acc1".to_string()]));
+        assert!(result.since_date.is_none());
+    }
+
+    #[test]
+    fn test_plan_portfolio_job_transactions_to_holdings_does_not_trigger_recalc() {
+        let events = vec![DomainEvent::TrackingModeChanged {
+            account_id: "acc1".to_string(),
+            old_mode: TrackingMode::Transactions,
+            new_mode: TrackingMode::Holdings,
+            is_connected: true,
+        }];
+
+        let result = plan_portfolio_job(&events, "UTC");
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn test_plan_portfolio_job_assets_created_contributes_ids() {
         let events = vec![
             DomainEvent::ActivitiesChanged {

@@ -329,6 +329,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                     value={field.value}
                     onChange={(d?: Date) => field.onChange(d)}
                     disabled={field.disabled}
+                    enableTime
                   />
                   <FormMessage />
                 </FormItem>

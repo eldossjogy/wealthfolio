@@ -20,7 +20,6 @@ import {
 } from "@wealthfolio/ui";
 import { Icons } from "@wealthfolio/ui/components/ui/icons";
 import { Skeleton } from "@wealthfolio/ui/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@wealthfolio/ui/components/ui/tooltip";
 import { format } from "date-fns";
 import { useMemo, useState } from "react";
 import { AccountsSummary } from "./accounts-summary";
@@ -134,7 +133,10 @@ export function DashboardContent() {
   return (
     <div className="flex min-h-full flex-col">
       <div className="px-4 pb-1 pt-2 md:px-6 md:pb-2 lg:px-8">
-        <PortfolioUpdateTrigger lastCalculatedAt={currentValuation?.calculatedAt}>
+        <PortfolioUpdateTrigger
+          lastCalculatedAt={currentValuation?.calculatedAt}
+          notices={performanceMessages}
+        >
           <div className="flex items-start gap-2">
             <div>
               <Balance
@@ -177,20 +179,9 @@ export function DashboardContent() {
                       />
                     )}
                     {performanceMessages.length > 0 && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-flex cursor-help items-center">
-                            <Icons.AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-80">
-                          <div className="space-y-1">
-                            {performanceMessages.slice(0, 3).map((message) => (
-                              <p key={message}>{message}</p>
-                            ))}
-                          </div>
-                        </TooltipContent>
-                      </Tooltip>
+                      <span className="inline-flex cursor-help items-center" aria-hidden>
+                        <Icons.AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                      </span>
                     )}
                   </>
                 )}
