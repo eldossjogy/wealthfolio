@@ -264,9 +264,9 @@ impl DriftPriorityOptimizer {
                             }
                         };
                         if current_bps <= stop_bps {
-                            // Already at or below stop — no sell benefit for this category
-                            max_shares = Decimal::ZERO;
-                            break;
+                            // This sleeve is not overweight — skip cap for it.
+                            // Let drift_before - drift_after reject net-bad sells.
+                            continue;
                         }
                         let stop_value = stop_bps / scale * total_value;
                         let cap = (current_v - stop_value) / expo;
