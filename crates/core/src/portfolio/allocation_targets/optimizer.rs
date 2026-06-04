@@ -207,6 +207,7 @@ impl DriftPriorityOptimizer {
         goal: &RebalanceGoal,
         drift_band: Decimal,
         whole_shares_only: bool,
+        min_trade_amount: Decimal,
     ) -> (HashMap<String, Decimal>, Decimal, Vec<SuggestedManualTrade>) {
         if total_value == Decimal::ZERO || sell_candidates.is_empty() {
             return (values.clone(), Decimal::ZERO, vec![]);
@@ -426,7 +427,11 @@ impl DriftPriorityOptimizer {
                     ),
                 }
             })
+            .filter(|t| min_trade_amount <= Decimal::ZERO || t.estimated_amount >= min_trade_amount)
             .collect();
+
+        // Recompute proceeds from kept sell trades so dust sells don't fund buys.
+        let proceeds: Decimal = sell_trades.iter().map(|t| t.estimated_amount).sum();
 
         (values, proceeds, sell_trades)
     }
@@ -652,6 +657,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     &profile.rebalance_goal,
                     drift_band,
                     profile.whole_shares_only,
+                    profile.min_trade_amount,
                 );
                 values = updated_values;
                 (trades, proceeds)
@@ -763,6 +769,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                         &profile.rebalance_goal,
                         drift_band,
                         profile.whole_shares_only,
+                        profile.min_trade_amount,
                     );
                     values = updated_values;
                     // Merge sell trades into sell_trades (already empty for Hybrid first pass).
