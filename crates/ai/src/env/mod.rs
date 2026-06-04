@@ -9,6 +9,7 @@ use std::sync::Arc;
 use wealthfolio_core::{
     accounts::AccountServiceTrait,
     activities::ActivityServiceTrait,
+    assets::AssetServiceTrait,
     goals::GoalServiceTrait,
     health::HealthServiceTrait,
     portfolio::{
@@ -66,6 +67,9 @@ pub trait AiEnvironment: Send + Sync {
 
     /// Get the quote service for symbol search.
     fn quote_service(&self) -> Arc<dyn QuoteServiceTrait>;
+
+    /// Get the asset service for resolving local active assets.
+    fn asset_service(&self) -> Arc<dyn AssetServiceTrait>;
 
     /// Get the allocation service for portfolio allocations.
     fn allocation_service(&self) -> Arc<dyn AllocationServiceTrait>;

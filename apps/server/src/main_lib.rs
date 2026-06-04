@@ -705,6 +705,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         secret_store.clone(),
         ai_chat_repository,
         quote_service.clone(),
+        asset_service.clone(),
         allocation_service.clone(),
         performance_service.clone(),
         income_service.clone(),

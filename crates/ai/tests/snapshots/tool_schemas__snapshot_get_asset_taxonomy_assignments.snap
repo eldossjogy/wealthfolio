@@ -1,0 +1,21 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "get_asset_taxonomy_assignments",
+  "parameters": {
+    "properties": {
+      "assetQuery": {
+        "type": "string"
+      },
+      "taxonomyId": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "assetQuery"
+    ],
+    "type": "object"
+  }
+}

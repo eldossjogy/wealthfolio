@@ -1,0 +1,43 @@
+---
+source: crates/ai/tests/tool_schemas.rs
+expression: snapshot
+---
+{
+  "name": "prepare_asset_classification",
+  "parameters": {
+    "properties": {
+      "assetQuery": {
+        "type": "string"
+      },
+      "assignments": {
+        "items": {
+          "properties": {
+            "categoryId": {
+              "type": "string"
+            },
+            "weightBasisPoints": {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "categoryId",
+            "weightBasisPoints"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "taxonomyId": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "assetQuery",
+      "taxonomyId",
+      "assignments"
+    ],
+    "type": "object"
+  }
+}

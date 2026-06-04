@@ -42,6 +42,9 @@ pub const DEFAULT_TOOLS_ALLOWLIST: &[&str] = &[
     "propose_transaction_categories",
     "list_categorization_context",
     "create_categorization_rule",
+    "list_asset_taxonomies",
+    "get_asset_taxonomy_assignments",
+    "prepare_asset_classification",
 ];
 
 const LEGACY_VISIBLE_DATA_TOOLS: &[&str] = &[

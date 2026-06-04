@@ -24,6 +24,7 @@ use futures::stream::BoxStream;
 use log::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use crate::env::AiEnvironment;
@@ -398,26 +399,39 @@ impl<E: AiEnvironment + 'static> ChatService<E> {
     ) -> Result<ChatMessage, AiError> {
         let repo = self.env.chat_repository();
 
-        // Get all messages in the thread to find the one with this tool call
-        let messages = repo.get_messages_by_thread(thread_id)?;
-
-        // Find the message containing this tool_call_id
         let mut target_message: Option<ChatMessage> = None;
-        for msg in messages {
-            for part in &msg.content.parts {
-                if let ChatMessagePart::ToolResult {
-                    tool_call_id: ref id,
-                    ..
-                } = part
-                {
-                    if id == tool_call_id {
-                        target_message = Some(msg);
-                        break;
+        let retry_delays = [
+            Duration::from_millis(150),
+            Duration::from_millis(350),
+            Duration::from_millis(750),
+            Duration::from_millis(1500),
+            Duration::from_millis(3000),
+        ];
+
+        for attempt in 0..=retry_delays.len() {
+            let messages = repo.get_messages_by_thread(thread_id)?;
+            for msg in messages {
+                for part in &msg.content.parts {
+                    if let ChatMessagePart::ToolResult {
+                        tool_call_id: ref id,
+                        ..
+                    } = part
+                    {
+                        if id == tool_call_id {
+                            target_message = Some(msg);
+                            break;
+                        }
                     }
+                }
+                if target_message.is_some() {
+                    break;
                 }
             }
             if target_message.is_some() {
                 break;
+            }
+            if let Some(delay) = retry_delays.get(attempt) {
+                sleep(*delay).await;
             }
         }
 

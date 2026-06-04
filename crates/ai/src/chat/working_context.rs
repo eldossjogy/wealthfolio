@@ -343,4 +343,46 @@ mod tests {
         assert!(rendered.contains("status: prepared, not imported yet"));
         assert!(!rendered.contains("2025-01-01,AAPL"));
     }
+
+    #[test]
+    fn does_not_reuse_selected_asset_classification_candidate_for_new_turns() {
+        let mut assistant = ChatMessage::assistant("thread-1");
+        assistant.content = ChatMessageContent::new(vec![
+            ChatMessagePart::ToolCall {
+                tool_call_id: "call-1".to_string(),
+                name: "prepare_asset_classification".to_string(),
+                arguments: serde_json::json!({
+                    "assetQuery": "VT",
+                    "taxonomyId": "taxonomy-sector",
+                    "assignments": []
+                }),
+            },
+            ChatMessagePart::ToolResult {
+                tool_call_id: "call-1".to_string(),
+                success: true,
+                data: serde_json::json!({
+                    "assetQuery": "VT",
+                    "taxonomy": {
+                        "taxonomyId": "taxonomy-sector",
+                        "name": "Industries (GICS)",
+                        "isSingleSelect": false
+                    },
+                    "draftStatus": "assetSelected",
+                    "selectedAssetId": "asset-vt-xnas",
+                    "selectedAsset": {
+                        "assetId": "asset-vt-xnas",
+                        "label": "VT - Vanguard Total World Stock Index Fund ETF Shares",
+                        "exchangeMic": "XNAS",
+                        "currency": "USD"
+                    }
+                }),
+                meta: HashMap::new(),
+                error: None,
+            },
+        ]);
+
+        let context = ChatWorkingContext::from_messages_and_attachments(&[assistant], &[]);
+
+        assert!(context.render().is_none());
+    }
 }

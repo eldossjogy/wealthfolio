@@ -27,6 +27,20 @@ fn default_allowlist_includes_all_categorization_tools() {
 }
 
 #[test]
+fn default_allowlist_includes_all_asset_classification_tools() {
+    for tool in [
+        "list_asset_taxonomies",
+        "get_asset_taxonomy_assignments",
+        "prepare_asset_classification",
+    ] {
+        assert!(
+            DEFAULT_TOOLS_ALLOWLIST.contains(&tool),
+            "DEFAULT_TOOLS_ALLOWLIST missing {tool} - new chat threads won't have access to it",
+        );
+    }
+}
+
+#[test]
 fn default_allowlist_includes_core_data_tools() {
     for tool in [
         "get_accounts",
