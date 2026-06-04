@@ -29,6 +29,7 @@ import type {
   PortfolioAllocations,
   AllocationTarget,
   AccountScope,
+  RebalanceGoal,
   TargetScopeType,
   TaxonomyCategory,
 } from "@/lib/types";
@@ -265,6 +266,11 @@ function TargetEditor({
   const [nameTouched, setNameTouched] = useState(!!target);
   const [driftBandPct, setDriftBandPct] = useState(target ? target.driftBandBps / 100 : 5);
   const [allowSells, setAllowSells] = useState(target?.allowSells ?? false);
+  const [rebalanceGoal, setRebalanceGoal] = useState<RebalanceGoal>(
+    target?.rebalanceGoal ?? "nearest_band",
+  );
+  const [minTradeAmount, setMinTradeAmount] = useState(target?.minTradeAmount ?? "0");
+  const [wholeSharesOnly, setWholeSharesOnly] = useState(target?.wholeSharesOnly ?? false);
   const [weights, setWeights] = useState<WeightDraft[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -338,6 +344,9 @@ function TargetEditor({
       setNameTouched(true);
       setDriftBandPct(resetTargetDriftBandBps / 100);
       setAllowSells(target?.allowSells ?? false);
+      setRebalanceGoal(target?.rebalanceGoal ?? "nearest_band");
+      setMinTradeAmount(target?.minTradeAmount ?? "0");
+      setWholeSharesOnly(target?.wholeSharesOnly ?? false);
     } else {
       setTaxonomyId("asset_classes");
       setStartId("current");
@@ -345,6 +354,9 @@ function TargetEditor({
       setNameTouched(false);
       setDriftBandPct(5);
       setAllowSells(false);
+      setRebalanceGoal("nearest_band");
+      setMinTradeAmount("0");
+      setWholeSharesOnly(false);
     }
     setWeights([]);
     setHasUnsavedChanges(false);
@@ -359,6 +371,9 @@ function TargetEditor({
     resetTargetTaxonomyId,
     onUnsavedChange,
     target?.allowSells,
+    target?.rebalanceGoal,
+    target?.minTradeAmount,
+    target?.wholeSharesOnly,
   ]);
 
   useEffect(() => {
@@ -429,6 +444,9 @@ function TargetEditor({
         triggerType: "threshold",
         driftBandBps: Math.round(driftBandPct * 100),
         allowSells,
+        rebalanceGoal,
+        minTradeAmount: minTradeAmount === "" ? "0" : minTradeAmount,
+        wholeSharesOnly,
       } as const;
 
       const saved = await saveTarget.mutateAsync({
@@ -460,6 +478,9 @@ function TargetEditor({
       setNameTouched(true);
       setDriftBandPct(target.driftBandBps / 100);
       setAllowSells(target.allowSells ?? false);
+      setRebalanceGoal(target.rebalanceGoal ?? "nearest_band");
+      setMinTradeAmount(target.minTradeAmount ?? "0");
+      setWholeSharesOnly(target.wholeSharesOnly ?? false);
       if (savedWeightDrafts) setWeights(savedWeightDrafts);
     } else {
       setTaxonomyId("asset_classes");
@@ -467,6 +488,9 @@ function TargetEditor({
       setTargetName("");
       setNameTouched(false);
       setDriftBandPct(5);
+      setRebalanceGoal("nearest_band");
+      setMinTradeAmount("0");
+      setWholeSharesOnly(false);
       setWeights([]);
     }
     initializedGuidedWeightsKey.current = null;
@@ -631,6 +655,80 @@ function TargetEditor({
               {allowSells
                 ? "Sell overweight positions to fund underweight ones."
                 : "Deploy new cash only — no positions are sold."}
+            </p>
+          </section>
+
+          <section className="bg-card/80 rounded-lg border p-5 shadow-sm">
+            <div className="text-muted-foreground mb-3 text-[11px] font-medium uppercase tracking-wider">
+              Rebalance goal
+            </div>
+            <AnimatedToggleGroup<RebalanceGoal>
+              value={rebalanceGoal}
+              onValueChange={(v) => {
+                setRebalanceGoal(v);
+                markDirty();
+              }}
+              items={[
+                { value: "nearest_band", label: "Nearest band" },
+                { value: "exact_target", label: "Exact target" },
+              ]}
+              rounded="lg"
+              className="bg-muted/30 w-full border [&_button]:flex-1 [&_button]:py-2.5 [&_button]:text-[13px]"
+            />
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              {rebalanceGoal === "exact_target"
+                ? "Deploy cash until each sleeve reaches exactly its target weight."
+                : "Stop once each sleeve is within the drift tolerance band."}
+            </p>
+          </section>
+
+          <section className="bg-card/80 rounded-lg border p-5 shadow-sm">
+            <div className="text-muted-foreground mb-3 text-[11px] font-medium uppercase tracking-wider">
+              Share sizing
+            </div>
+            <AnimatedToggleGroup<"fractional" | "whole">
+              value={wholeSharesOnly ? "whole" : "fractional"}
+              onValueChange={(v) => {
+                setWholeSharesOnly(v === "whole");
+                markDirty();
+              }}
+              items={[
+                { value: "fractional", label: "Fractional" },
+                { value: "whole", label: "Whole shares" },
+              ]}
+              rounded="lg"
+              className="bg-muted/30 w-full border [&_button]:flex-1 [&_button]:py-2.5 [&_button]:text-[13px]"
+            />
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              {wholeSharesOnly
+                ? "Suggest integer share quantities only."
+                : "Allow fractional quantities for precise allocation."}
+            </p>
+          </section>
+
+          <section className="bg-card/80 rounded-lg border p-5 shadow-sm">
+            <label className="block">
+              <div className="text-muted-foreground mb-3 text-[11px] font-medium uppercase tracking-wider">
+                Minimum trade amount
+              </div>
+              <div className="border-input bg-background focus-within:ring-ring flex h-10 items-center rounded-md border px-3 focus-within:ring-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={minTradeAmount === "0" ? "" : minTradeAmount}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMinTradeAmount(v === "" ? "0" : v);
+                    markDirty();
+                  }}
+                  placeholder="0"
+                  className="text-foreground placeholder:text-muted-foreground/60 w-full bg-transparent text-[14px] outline-none"
+                />
+              </div>
+            </label>
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              Trades below this amount are excluded from the plan.
             </p>
           </section>
         </div>
