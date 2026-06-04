@@ -496,8 +496,30 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         let max_drift_before = Self::max_drift_bps(&values, &categories, total_value);
 
         // ── Sell phase (SellToRebalance / Hybrid) ────────────────────────────
-        // For Hybrid: first check whether cash alone can fix all breached sleeves.
-        // If yes, skip sells. If no, run the sell phase to generate proceeds.
+        //
+        // SellToRebalance: always sells overweight, buy pool = sell proceeds only
+        //   (available_cash is not used for buys; it stays in the account).
+        //
+        // Hybrid: uses available cash first. Only sells if at least one required
+        //   category is currently overweight outside its band — cash buys cannot
+        //   reduce an overweight, so sells are necessary. Buy pool = cash + proceeds.
+        //
+        // CashFlowOnly: no sells, buy pool = available_cash.
+
+        // Hybrid: check analytically whether any required category is overweight
+        // outside its band. Cash can never fix overweight (only sells can).
+        let has_overweight_outside_band = categories
+            .iter()
+            .filter(|c| c.is_required && !c.is_cash)
+            .any(|c| {
+                if total_value == Decimal::ZERO {
+                    return false;
+                }
+                let current_bps = c.current_value / total_value * scale;
+                let upper_band = Decimal::from(c.target_bps) + drift_band;
+                current_bps > upper_band
+            });
+
         let (sell_trades, sell_proceeds) = match &scenario_mode {
             ScenarioMode::CashFlowOnly => (vec![], Decimal::ZERO),
             ScenarioMode::SellToRebalance => {
@@ -514,15 +536,8 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 (trades, proceeds)
             }
             ScenarioMode::Hybrid => {
-                // Check if cash-only can resolve all out-of-band required sleeves.
-                let all_in_band = Self::total_drift(
-                    &values,
-                    &categories,
-                    total_value,
-                    &profile.rebalance_goal,
-                    drift_band,
-                ) == Decimal::ZERO;
-                if all_in_band {
+                if !has_overweight_outside_band {
+                    // Cash alone is sufficient — no overweight to sell.
                     (vec![], Decimal::ZERO)
                 } else {
                     let (updated_values, proceeds, trades) = Self::run_sell_phase(
@@ -538,6 +553,14 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                     (trades, proceeds)
                 }
             }
+        };
+
+        // Buy pool: SellToRebalance uses sell proceeds only (available_cash stays
+        // in the account). Hybrid and CashFlowOnly use available_cash (+ proceeds
+        // if sells occurred in Hybrid).
+        let buy_pool = match &scenario_mode {
+            ScenarioMode::SellToRebalance => sell_proceeds,
+            _ => available_cash + sell_proceeds,
         };
 
         // ── Emit NoBuyCandidate for required underweight categories with no candidate coverage.
@@ -581,7 +604,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         });
 
         let mut shares_bought: Vec<Decimal> = vec![Decimal::ZERO; candidates.len()];
-        let mut cash = available_cash + sell_proceeds;
+        let mut cash = buy_pool;
 
         // Greedy: each iteration buys 1 share of the candidate with the highest
         // (drift_before - drift_after) / price score. Fractional mode uses the
@@ -761,8 +784,7 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
         // Draw from cash left after kept asset trades (including sell proceeds).
         // Greedy selections below min-trade threshold are dropped, so they must not
         // starve manual sleeve trades.
-        let mut manual_cash = available_cash + sell_proceeds
-            - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
+        let mut manual_cash = buy_pool - trades.iter().map(|t| t.estimated_amount).sum::<Decimal>();
         for cat in &no_candidate_categories {
             if manual_cash <= Decimal::ZERO {
                 break;
