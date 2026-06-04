@@ -968,13 +968,21 @@ fn load_entity_metadata_tx(
 }
 
 fn should_apply_against_metadata(
+    entity: SyncEntity,
     meta: &SyncEntityMetadataDB,
     op: SyncOperation,
     client_timestamp: &str,
     event_id: &str,
 ) -> Result<bool> {
     let previous_op = enum_from_db::<SyncOperation>(&meta.last_op)?;
-    if op == SyncOperation::Delete && previous_op != SyncOperation::Delete {
+    if entity == SyncEntity::SpendingPresetRuleDeletion {
+        Ok(should_apply_lww(
+            &meta.last_client_timestamp,
+            &meta.last_event_id,
+            client_timestamp,
+            event_id,
+        ))
+    } else if op == SyncOperation::Delete && previous_op != SyncOperation::Delete {
         Ok(true)
     } else if previous_op == SyncOperation::Delete
         && matches!(op, SyncOperation::Create | SyncOperation::Update)
@@ -1429,9 +1437,13 @@ fn apply_remote_event_lww_tx(
     let metadata_row = load_entity_metadata_tx(conn, &entity_db, &entity_id_value)?;
 
     let mut should_apply = match metadata_row.as_ref() {
-        Some(meta) => {
-            should_apply_against_metadata(meta, op, &client_timestamp_value, &event_id_value)?
-        }
+        Some(meta) => should_apply_against_metadata(
+            entity,
+            meta,
+            op,
+            &client_timestamp_value,
+            &event_id_value,
+        )?,
         None => true,
     };
 
@@ -5636,6 +5648,77 @@ mod tests {
             .get_result(&mut conn)
             .expect("count preset deletion");
         assert_eq!(tombstone_count, 0);
+    }
+
+    #[tokio::test]
+    async fn replay_spending_preset_rule_deletion_recreates_after_delete() {
+        let (pool, writer) = setup_db();
+        let repo = AppSyncRepository::new(pool.clone(), writer);
+        let entity_id = preset_rule_deletion_id("ca", "groceries");
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                entity_id.clone(),
+                SyncOperation::Update,
+                "evt-preset-rule-deletion-upsert".to_string(),
+                "2026-02-15T00:00:00Z".to_string(),
+                1,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries",
+                    "ruleId": "rule-ca-groceries",
+                    "deletedAt": "2026-02-15T00:00:00Z"
+                }),
+            )
+            .await
+            .expect("apply preset rule deletion");
+        assert!(applied);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                entity_id.clone(),
+                SyncOperation::Delete,
+                "evt-preset-rule-deletion-delete".to_string(),
+                "2026-02-15T00:00:01Z".to_string(),
+                2,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries"
+                }),
+            )
+            .await
+            .expect("delete preset rule deletion");
+        assert!(applied);
+
+        let applied = repo
+            .apply_remote_event_lww(
+                SyncEntity::SpendingPresetRuleDeletion,
+                entity_id,
+                SyncOperation::Update,
+                "evt-preset-rule-deletion-recreate".to_string(),
+                "2026-02-15T00:00:02Z".to_string(),
+                3,
+                serde_json::json!({
+                    "presetId": "ca",
+                    "presetRuleKey": "groceries",
+                    "ruleId": "rule-ca-groceries",
+                    "deletedAt": "2026-02-15T00:00:02Z"
+                }),
+            )
+            .await
+            .expect("recreate preset rule deletion");
+        assert!(applied);
+
+        let mut conn = get_connection(&pool).expect("conn");
+        let tombstone_count: i64 = spending_preset_rule_deletions::table
+            .filter(spending_preset_rule_deletions::preset_id.eq("ca"))
+            .filter(spending_preset_rule_deletions::preset_rule_key.eq("groceries"))
+            .count()
+            .get_result(&mut conn)
+            .expect("count preset deletion");
+        assert_eq!(tombstone_count, 1);
     }
 
     #[tokio::test]
