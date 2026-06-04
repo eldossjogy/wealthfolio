@@ -432,6 +432,7 @@ impl DriftPriorityOptimizer {
     }
 
     /// Greedy buy loop. Mutates `values` and returns shares bought per candidate index.
+    #[allow(clippy::too_many_arguments)]
     fn run_buy_greedy(
         values: &mut HashMap<String, Decimal>,
         candidates: &[AssetCandidate],
