@@ -500,6 +500,7 @@ function InputBar({
   hasPlan,
   isCalculating,
   isSourceLoading,
+  isSellMode,
 }: {
   cashValue: string;
   availableCash: number;
@@ -509,6 +510,7 @@ function InputBar({
   hasPlan: boolean;
   isCalculating: boolean;
   isSourceLoading: boolean;
+  isSellMode: boolean;
 }) {
   const deploy = parseCashValue(cashValue);
   const availableCashLimit = cashInputLimit(availableCash, currency);
@@ -516,9 +518,8 @@ function InputBar({
   const canCalculate =
     !isCalculating &&
     !isSourceLoading &&
-    availableCashLimit > 0 &&
-    cashValue.trim().length > 0 &&
-    deploy > 0 &&
+    (isSellMode || (availableCashLimit > 0 && deploy > 0)) &&
+    (isSellMode || cashValue.trim().length > 0) &&
     !overBudget;
 
   return (
@@ -711,6 +712,7 @@ export function RebalanceTab({
         hasPlan={!!plan || hasStalePlan}
         isCalculating={isCalculating}
         isSourceLoading={!sourceReady}
+        isSellMode={isSellMode}
       />
 
       {hasStalePlan && sourceReady && !isCalculating && (
