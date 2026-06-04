@@ -411,7 +411,7 @@ function TradesTable({ trades, currency }: { trades: SuggestedManualTrade[]; cur
             </td>
             <td className="text-foreground py-3 pr-3 text-right font-semibold tabular-nums">
               {formatAmount(
-                trades.reduce((s, t) => s + t.estimatedAmount, 0),
+                trades.filter((t) => t.action === "buy").reduce((s, t) => s + t.estimatedAmount, 0),
                 currency,
               )}
             </td>
