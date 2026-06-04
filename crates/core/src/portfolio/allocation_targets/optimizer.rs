@@ -744,7 +744,13 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                         }
                         let v = values.get(&c.category_id).copied().unwrap_or_default();
                         let bps = v / total_value * scale;
-                        bps > Decimal::from(c.target_bps) + drift_band
+                        let threshold = match profile.rebalance_goal {
+                            RebalanceGoal::ExactTarget => Decimal::from(c.target_bps),
+                            RebalanceGoal::NearestBand => {
+                                (Decimal::from(c.target_bps) + drift_band).min(dec!(10000))
+                            }
+                        };
+                        bps > threshold
                     });
 
                 if still_overweight && !sell_candidates.is_empty() {
