@@ -1804,4 +1804,125 @@ mod tests {
             "drift must improve"
         );
     }
+
+    #[tokio::test]
+    async fn sell_to_rebalance_does_not_use_available_cash_for_buys() {
+        // SellToRebalance buy pool = sell proceeds only. With zero proceeds (nothing
+        // to sell because equity and bond are both at target), no buys should happen
+        // even if available_cash > 0. Conversely, with €0 available_cash and
+        // overweight bonds → we should still get buys funded by sell proceeds.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(30), dec!(3000));
+        let h_bnd = make_holding("h2", "BND", dec!(70), dec!(7000)); // $100/share
+        let c_vti = make_contribution(&h_vti, "equity", dec!(3000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(7000));
+        let rows = vec![
+            make_drift_row("equity", 3000, 7000, total),
+            make_drift_row("bond", 7000, 3000, total),
+        ];
+        // available_cash = 0 — SellToRebalance must still produce buys via proceeds.
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(0), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(0), ScenarioMode::SellToRebalance))
+            .await
+            .unwrap();
+
+        let sell_proceeds: Decimal = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "sell")
+            .map(|t| t.estimated_amount)
+            .sum();
+        let buy_total: Decimal = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "buy")
+            .map(|t| t.estimated_amount)
+            .sum();
+
+        assert!(sell_proceeds > dec!(0), "should sell overweight bond");
+        assert!(buy_total > dec!(0), "proceeds should fund equity buys");
+        // buy_total must not exceed sell_proceeds (no cash used for buys).
+        assert!(
+            buy_total <= sell_proceeds,
+            "buys ({}) must not exceed sell proceeds ({}) — available_cash must not fund buys",
+            buy_total,
+            sell_proceeds
+        );
+    }
+
+    #[tokio::test]
+    async fn hybrid_sells_less_than_sell_to_rebalance_when_cash_dilutes_overweight() {
+        // With significant available cash, Hybrid's pass-1 cash buys dilute the
+        // overweight category's percentage share. Pass-2 sell phase then needs to
+        // sell less than SellToRebalance would (which ignores the cash).
+        // Equity 30% (target 70%), Bond 70% (target 30%). Cash = $4000.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(30), dec!(3000));
+        let h_bnd = make_holding("h2", "BND", dec!(70), dec!(7000)); // $100/share
+        let c_vti = make_contribution(&h_vti, "equity", dec!(3000));
+        let c_bnd = make_contribution(&h_bnd, "bond", dec!(7000));
+        let rows = vec![
+            make_drift_row("equity", 3000, 7000, total),
+            make_drift_row("bond", 7000, 3000, total),
+        ];
+
+        let svc_sell = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows.clone(), total),
+            make_contributions(vec![
+                make_contribution(&h_vti, "equity", dec!(3000)),
+                make_contribution(&h_bnd, "bond", dec!(7000)),
+            ]),
+            vec![
+                make_cash_holding(dec!(4000), "USD"),
+                h_vti.clone(),
+                h_bnd.clone(),
+            ],
+        );
+        let svc_hybrid = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(rows, total),
+            make_contributions(vec![c_vti, c_bnd]),
+            vec![make_cash_holding(dec!(4000), "USD"), h_vti, h_bnd],
+        );
+
+        let plan_sell = svc_sell
+            .calculate_plan(make_input_with_mode(
+                dec!(4000),
+                ScenarioMode::SellToRebalance,
+            ))
+            .await
+            .unwrap();
+        let plan_hybrid = svc_hybrid
+            .calculate_plan(make_input_with_mode(dec!(4000), ScenarioMode::Hybrid))
+            .await
+            .unwrap();
+
+        let sell_amount = |plan: &crate::portfolio::allocation_targets::RebalancePlan| -> Decimal {
+            plan.trades
+                .iter()
+                .filter(|t| t.action == "sell")
+                .map(|t| t.estimated_amount)
+                .sum()
+        };
+
+        let str_sells = sell_amount(&plan_sell);
+        let hybrid_sells = sell_amount(&plan_hybrid);
+
+        assert!(
+            hybrid_sells <= str_sells,
+            "Hybrid should sell ≤ SellToRebalance: hybrid={} str={}",
+            hybrid_sells,
+            str_sells
+        );
+        // Both should improve drift.
+        assert!(plan_sell.max_drift_bps_after < plan_sell.max_drift_bps_before);
+        assert!(plan_hybrid.max_drift_bps_after < plan_hybrid.max_drift_bps_before);
+    }
 }
