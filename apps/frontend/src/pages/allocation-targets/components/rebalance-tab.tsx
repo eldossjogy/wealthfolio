@@ -769,8 +769,12 @@ export function RebalanceTab({
                     {(() => {
                       const buys = plan.trades.filter((t) => t.action === "buy").length;
                       const sells = plan.trades.filter((t) => t.action === "sell").length;
+                      const sellProceeds = plan.trades
+                        .filter((t) => t.action === "sell")
+                        .reduce((s, t) => s + t.estimatedAmount, 0);
+                      const netDeployed = plan.cashUsed - sellProceeds;
                       return sells > 0
-                        ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""} · ${formatAmount(plan.cashUsed, currency)} net deployed`
+                        ? `${buys} buy${buys !== 1 ? "s" : ""} · ${sells} sell${sells !== 1 ? "s" : ""} · ${formatAmount(netDeployed, currency)} new cash`
                         : `${buys} buy${buys !== 1 ? "s" : ""} · ${formatAmount(plan.cashUsed, currency)} deployed`;
                     })()}
                   </CardDescription>
