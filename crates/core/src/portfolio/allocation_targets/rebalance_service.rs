@@ -1858,9 +1858,13 @@ mod tests {
 
     #[tokio::test]
     async fn hybrid_sells_less_than_sell_to_rebalance_when_cash_dilutes_overweight() {
-        // With significant available cash, Hybrid's pass-1 cash buys dilute the
-        // overweight category's percentage share. Pass-2 sell phase then needs to
-        // sell less than SellToRebalance would (which ignores the cash).
+        // Hybrid uses available_cash for pass-1 buys, then sells only remaining
+        // overweight in pass-2. SellToRebalance ignores available_cash and sells
+        // everything needed up front. Because Hybrid's pass-1 buys reduce
+        // underweight drift, its pass-2 sell phase may sell ≤ SellToRebalance.
+        // Note: total_value is fixed, so cash buys are a cash↔asset swap and do
+        // not reduce an untouched overweight category's bps. The sell reduction
+        // comes from Hybrid's two-pass ordering, not from cash diluting overweight.
         // Equity 30% (target 70%), Bond 70% (target 30%). Cash = $4000.
         let total = dec!(10000);
         let h_vti = make_holding("h1", "VTI", dec!(30), dec!(3000));
