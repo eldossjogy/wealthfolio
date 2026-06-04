@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 
 use super::model::{Event, EventType, EventWithTypeName, NewEvent, NewEventType, UpdateEvent};
@@ -88,8 +88,21 @@ impl EventsService {
         event: &Event,
         activity_date: &DateTime<Utc>,
     ) -> Result<bool> {
-        let start = parse_event_start_bound(&event.start_date)?;
-        let end = parse_event_end_bound(&event.end_date)?;
+        let mut start = parse_event_start_bound(&event.start_date)?;
+        let mut end = parse_event_end_bound(&event.end_date)?;
+        // Date-only bounds are floating calendar dates with no timezone, but an
+        // activity is stored as a UTC instant of the user's local time. An
+        // activity on the same calendar day can therefore land up to a full UTC
+        // offset outside the naive-UTC interpretation of the bound. Widen the
+        // window by the real-world offset extremes (UTC+14 .. UTC-12) so a
+        // same-day activity is never rejected as "outside the range" purely due
+        // to timezone skew. Explicit RFC3339 (timed) bounds get no tolerance.
+        if is_date_only(&event.start_date) {
+            start -= Duration::hours(14);
+        }
+        if is_date_only(&event.end_date) {
+            end += Duration::hours(12);
+        }
         Ok(activity_date >= &start && activity_date <= &end)
     }
 
@@ -218,6 +231,13 @@ fn validate_event_range(start: &str, end: &str) -> Result<()> {
         return Err(SpendingError::InvalidEventRange.into());
     }
     Ok(())
+}
+
+/// A date-only bound (`YYYY-MM-DD`) is a floating calendar date; an RFC3339
+/// value carries an explicit time/zone. Detected by the absence of the `T`
+/// time separator.
+fn is_date_only(s: &str) -> bool {
+    !s.contains('T')
 }
 
 /// Parse an event start boundary. Tries RFC3339 first, then `YYYY-MM-DD`
@@ -840,5 +860,37 @@ mod tests {
         let tags = tags.lock().unwrap();
         assert_eq!(tags.get("a1"), Some(&"ev1".to_string()));
         assert_eq!(tags.get("a2"), None);
+    }
+
+    #[tokio::test]
+    async fn contains_date_only_event_tolerates_timezone_skew() {
+        let (svc, _, _, _, _) = make_service(vec![], vec![], vec![]);
+        let event = ev("ev1", &ymd(2024, 6, 4), &ymd(2024, 6, 4));
+
+        // A single-day event "2024-06-04" must contain same-calendar-day
+        // activities from any plausible timezone, even though their UTC instant
+        // falls before/after the naive-UTC day boundary.
+        // UTC+5 user at 00:30 local on 06-04 → 2024-06-03T19:30Z.
+        let early = Utc.with_ymd_and_hms(2024, 6, 3, 19, 30, 0).unwrap();
+        // UTC-5 user at 23:30 local on 06-04 → 2024-06-05T04:30Z.
+        let late = Utc.with_ymd_and_hms(2024, 6, 5, 4, 30, 0).unwrap();
+        assert!(svc.contains_activity_date(&event, &early).unwrap());
+        assert!(svc.contains_activity_date(&event, &late).unwrap());
+
+        // Well outside the tolerance window stays rejected.
+        let way_before = Utc.with_ymd_and_hms(2024, 6, 2, 0, 0, 0).unwrap();
+        let way_after = Utc.with_ymd_and_hms(2024, 6, 6, 0, 0, 0).unwrap();
+        assert!(!svc.contains_activity_date(&event, &way_before).unwrap());
+        assert!(!svc.contains_activity_date(&event, &way_after).unwrap());
+    }
+
+    #[tokio::test]
+    async fn contains_timed_event_bound_gets_no_tolerance() {
+        let (svc, _, _, _, _) = make_service(vec![], vec![], vec![]);
+        let event = ev("ev1", "2024-06-04T00:00:00Z", "2024-06-04T23:59:59Z");
+        // An explicit RFC3339 window is precise — an instant a minute past the
+        // end is out of range with no timezone widening.
+        let just_after = Utc.with_ymd_and_hms(2024, 6, 5, 0, 1, 0).unwrap();
+        assert!(!svc.contains_activity_date(&event, &just_after).unwrap());
     }
 }

@@ -263,13 +263,17 @@ export function EventFormDialog({
           endDate: endDateStr,
         };
         const created = await create.mutateAsync(newEvent);
+        // The event is persisted; tagging is a best-effort follow-up. A failed
+        // tag must not strand the dialog open or discard the created event —
+        // each tag mutation already surfaces its own error toast, so we settle
+        // all of them and finalize regardless.
         if (activityId) {
-          await setEventOnActivity.mutateAsync({ activityId, eventId: created.id });
+          await setEventOnActivity.mutateAsync({ activityId, eventId: created.id }).catch(() => {});
         } else if (selectedCandidateIds.length > 0) {
           // Bulk-tag the suggested transactions in parallel. No bulk endpoint
           // exists today; the N round-trips are acceptable since the user has
           // already opted into the set explicitly.
-          await Promise.all(
+          await Promise.allSettled(
             selectedCandidateIds.map((id) =>
               setEventOnActivity.mutateAsync({ activityId: id, eventId: created.id }),
             ),
