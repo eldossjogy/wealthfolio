@@ -18,6 +18,8 @@ export interface ActivityTaxonomyAssignment {
   updatedAt: string;
 }
 
+export type CashFlowBucket = "spending" | "income" | "saving" | "neutral";
+
 export type CashActivityStatusFilter = "all" | "needs_review" | "uncategorized" | "categorized";
 
 export type CashActivitySortField = "date" | "amount";
@@ -51,6 +53,7 @@ export interface CashActivitySearchRequest {
  * the spending feature.
  */
 export interface CashActivity extends Activity {
+  cashFlowBucket: CashFlowBucket;
   assignments: ActivityTaxonomyAssignment[];
   /** Spending event tag from the `activity_events` join. `undefined` when untagged. */
   eventId?: string | null;

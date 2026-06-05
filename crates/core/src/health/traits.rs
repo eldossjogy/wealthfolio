@@ -181,11 +181,12 @@ pub trait HealthDismissalStore: Send + Sync {
 // =============================================================================
 
 use super::checks::{
-    AssetHoldingInfo, ConsistencyIssueInfo, FxPairInfo, LegacyMigrationInfo, QuoteSyncErrorInfo,
-    UnclassifiedAssetInfo, UnconfiguredAccountInfo,
+    AssetHoldingInfo, ConsistencyIssueInfo, FxPairInfo, InvalidTransferGroupInfo,
+    LegacyMigrationInfo, QuoteSyncErrorInfo, UnclassifiedAssetInfo, UnconfiguredAccountInfo,
 };
 use super::model::{FixAction, HealthStatus};
 use crate::accounts::AccountServiceTrait;
+use crate::activities::ActivityServiceTrait;
 use crate::assets::AssetServiceTrait;
 use crate::portfolio::holdings::HoldingsServiceTrait;
 use crate::portfolio::valuation::ValuationServiceTrait;
@@ -249,6 +250,7 @@ pub trait HealthServiceTrait: Send + Sync {
         unconfigured_accounts: &[UnconfiguredAccountInfo],
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
+        invalid_transfer_groups: &[InvalidTransferGroupInfo],
     ) -> Result<HealthStatus>;
 
     /// Gets the cached health status.
@@ -324,6 +326,7 @@ pub trait HealthServiceTrait: Send + Sync {
         asset_service: Arc<dyn AssetServiceTrait>,
         taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         valuation_service: Arc<dyn ValuationServiceTrait>,
+        activity_service: Arc<dyn ActivityServiceTrait>,
         configured_timezone: Option<&str>,
         client_timezone: Option<&str>,
     ) -> Result<HealthStatus>;

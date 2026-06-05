@@ -3,6 +3,7 @@ import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport } from "@/hooks/use-platform";
 import { QueryKeys } from "@/lib/query-keys";
 import { Holding, HoldingType } from "@/lib/types";
+import { AccountType, isLiabilityAccountType } from "@/lib/constants";
 import { canAddHoldings } from "@/lib/activity-restrictions";
 import { HoldingsTable } from "@/pages/holdings/components/holdings-table";
 import { HoldingsTableMobile } from "@/pages/holdings/components/holdings-table-mobile";
@@ -56,6 +57,13 @@ const AccountHoldings = ({
     return canAddHoldings(selectedAccount ?? undefined);
   }, [selectedAccount]);
 
+  // Cash and credit-card accounts hold no investments, so a "no holdings"
+  // empty state never applies — they only track activity / cash balance.
+  const isCashOrCreditAccount = useMemo(() => {
+    const accountType = selectedAccount?.accountType;
+    return accountType === AccountType.CASH || isLiabilityAccountType(accountType);
+  }, [selectedAccount]);
+
   const filteredHoldings = holdings?.filter((holding) => holding.holdingType !== HoldingType.CASH);
 
   const typeOptions = useMemo(() => {
@@ -81,6 +89,48 @@ const AccountHoldings = ({
   if (!filteredHoldings || filteredHoldings.length === 0) {
     if (!showEmptyState) {
       return null;
+    }
+
+    // Cash / credit-card accounts have no investment holdings by nature. When
+    // the account already has activity (a cash balance), show nothing here —
+    // the balance lives in the metrics panel. Only prompt to add an activity
+    // when there is no activity at all.
+    if (isCashOrCreditAccount) {
+      if (holdings && holdings.length > 0) {
+        return null;
+      }
+
+      return (
+        <div className="flex items-center justify-center py-16">
+          <EmptyPlaceholder
+            icon={<Icons.TrendingUp className="text-muted-foreground h-10 w-10" />}
+            title="No activity yet"
+            description="Get started by adding your first transaction or importing activity from a CSV file."
+          >
+            <div className="flex flex-col items-center gap-3 sm:flex-row">
+              <Button
+                size="default"
+                onClick={() =>
+                  navigate(
+                    `/activities/manage?account=${accountId}&redirect-to=/accounts/${accountId}`,
+                  )
+                }
+              >
+                <Icons.Plus className="mr-2 h-4 w-4" />
+                Add Transaction
+              </Button>
+              <Button
+                size="default"
+                variant="outline"
+                onClick={() => navigate(`/import?account=${accountId}`)}
+              >
+                <Icons.Import className="mr-2 h-4 w-4" />
+                Import from CSV
+              </Button>
+            </div>
+          </EmptyPlaceholder>
+        </div>
+      );
     }
 
     // Different empty state for HOLDINGS mode (manual accounts can edit, connected accounts cannot)

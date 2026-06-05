@@ -9,6 +9,11 @@ pub struct SpendingInsightRequest {
     pub start_date: String,
     /// RFC3339, inclusive.
     pub end_date: String,
+    /// Optional explicit comparison window. When provided, both start and end
+    /// must be present and they override `compare`.
+    pub compare_start_date: Option<String>,
+    /// RFC3339, inclusive.
+    pub compare_end_date: Option<String>,
     /// Defaults to the user's opted-in spending accounts.
     pub account_ids: Option<Vec<String>>,
     /// Defaults to `Prior` (matched-size window immediately preceding).
@@ -98,6 +103,11 @@ pub struct PaceState {
 pub struct Headline {
     pub spent: f64,
     pub income: f64,
+    /// Money classified as Saving (transfers from cash accounts into investing
+    /// accounts). Its own bucket, parallel to `income` — excluded from `spent`.
+    /// `net_cashflow = income - spent - saved`.
+    #[serde(default)]
+    pub saved: f64,
     pub net_cashflow: f64,
     /// Total budget for the window: Σ groups[i].budget.total + Σ groups[i].buffer.total.
     pub budget: f64,
@@ -160,6 +170,15 @@ pub struct UncategorizedBucket {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CategoryBreakdownRow {
+    pub taxonomy_id: String,
+    pub category_id: String,
+    pub amount: f64,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DayBucket {
     /// `YYYY-MM-DD`
     pub date: String,
@@ -185,6 +204,8 @@ pub struct MonthBucket {
     pub month: String,
     pub spent: f64,
     pub income: f64,
+    #[serde(default)]
+    pub saved: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +231,10 @@ pub struct SpendingInsight {
     pub headline: Headline,
     pub groups: Vec<GroupInsight>,
     pub uncategorized: UncategorizedBucket,
+    #[serde(default)]
+    pub income_breakdown: Vec<CategoryBreakdownRow>,
+    #[serde(default)]
+    pub savings_breakdown: Vec<CategoryBreakdownRow>,
     pub by_day: Vec<DayBucket>,
     pub by_day_by_category: Vec<DayCategoryBucket>,
     pub by_month: Vec<MonthBucket>,

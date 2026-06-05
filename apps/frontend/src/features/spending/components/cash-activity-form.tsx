@@ -52,9 +52,11 @@ import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
+import type { CashFlowBucket } from "../types/cash-activity";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 
 const formSchema = z.object({
   id: z.string().optional(),
@@ -82,6 +84,7 @@ interface CashActivityFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activity?: Activity & {
+    cashFlowBucket?: CashFlowBucket;
     categoryAssignmentId?: string;
     categoryTaxonomyId?: string;
     categoryId?: string;
@@ -108,6 +111,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
   // QuickCategorizePopover loads its own data internally.
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
+  const savings = useTaxonomy(SAVINGS_TAXONOMY);
 
   const allCategoriesById = useMemo(() => {
     const map = new Map<string, { name: string; color: string | null; parentId: string | null }>();
@@ -117,8 +121,11 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
     (income.data?.categories ?? []).forEach((c) =>
       map.set(c.id, { name: c.name, color: c.color, parentId: c.parentId ?? null }),
     );
+    (savings.data?.categories ?? []).forEach((c) =>
+      map.set(c.id, { name: c.name, color: c.color, parentId: c.parentId ?? null }),
+    );
     return map;
-  }, [spending.data?.categories, income.data?.categories]);
+  }, [spending.data?.categories, income.data?.categories, savings.data?.categories]);
 
   // Event lookup for the trigger label. Errors surface only via the
   // QuickEventPopover the user opens to pick an event (handled there);
@@ -178,6 +185,16 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
     selectedAccount?.accountType,
     activity?.subtype,
   );
+  const cashFlowBucket = activity?.cashFlowBucket;
+  const isNeutralBucket = cashFlowBucket === "neutral";
+  const categoryScope =
+    cashFlowBucket === "saving" ? "saving" : isIncomeType ? "income" : "expense";
+  const categoryLabel =
+    cashFlowBucket === "saving"
+      ? "Savings Category"
+      : isIncomeType
+        ? "Income Source"
+        : "Spending Category";
 
   useEffect(() => {
     if (!selectedAccount) return;
@@ -329,6 +346,7 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                     value={field.value}
                     onChange={(d?: Date) => field.onChange(d)}
                     disabled={field.disabled}
+                    enableTime
                   />
                   <FormMessage />
                 </FormItem>
@@ -364,50 +382,56 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                   : null;
                 return (
                   <FormItem>
-                    <FormLabel>{isIncomeType ? "Income Source" : "Spending Category"}</FormLabel>
-                    <QuickCategorizePopover
-                      scope={isIncomeType ? "income" : "expense"}
-                      selectedCategoryId={currentCatId ?? null}
-                      onSelect={(tax, catId) => field.onChange(`${tax}:${catId}`)}
-                      onClear={() => field.onChange("")}
-                      trigger={
-                        <FormControl>
-                          <button
-                            type="button"
-                            className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
-                            aria-label={
-                              currentCat
-                                ? `Change category (${currentCat.name})`
-                                : "Pick a category"
-                            }
-                          >
-                            {currentCat ? (
-                              <span className="flex min-w-0 items-center gap-2">
-                                {currentCat.color && (
-                                  <span
-                                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                    style={{ backgroundColor: currentCat.color }}
-                                    aria-hidden="true"
-                                  />
-                                )}
-                                <span className="truncate">
-                                  {currentParent ? `${currentParent.name} / ` : ""}
-                                  {currentCat.name}
+                    <FormLabel>{isNeutralBucket ? "Category" : categoryLabel}</FormLabel>
+                    {isNeutralBucket ? (
+                      <div className="border-input bg-muted/40 text-muted-foreground h-input-height flex items-center rounded-md border px-3 py-2 text-sm">
+                        Neutral transfer
+                      </div>
+                    ) : (
+                      <QuickCategorizePopover
+                        scope={categoryScope}
+                        selectedCategoryId={currentCatId ?? null}
+                        onSelect={(tax, catId) => field.onChange(`${tax}:${catId}`)}
+                        onClear={() => field.onChange("")}
+                        trigger={
+                          <FormControl>
+                            <button
+                              type="button"
+                              className="border-input bg-input-bg dark:bg-input/30 hover:bg-accent/30 ring-offset-background focus:ring-ring h-input-height flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2"
+                              aria-label={
+                                currentCat
+                                  ? `Change category (${currentCat.name})`
+                                  : "Pick a category"
+                              }
+                            >
+                              {currentCat ? (
+                                <span className="flex min-w-0 items-center gap-2">
+                                  {currentCat.color && (
+                                    <span
+                                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                      style={{ backgroundColor: currentCat.color }}
+                                      aria-hidden="true"
+                                    />
+                                  )}
+                                  <span className="truncate">
+                                    {currentParent ? `${currentParent.name} / ` : ""}
+                                    {currentCat.name}
+                                  </span>
                                 </span>
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">
-                                Pick a category (optional)
-                              </span>
-                            )}
-                            <Icons.ChevronDown
-                              className="ml-2 h-4 w-4 shrink-0 opacity-50"
-                              aria-hidden="true"
-                            />
-                          </button>
-                        </FormControl>
-                      }
-                    />
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Pick a category (optional)
+                                </span>
+                              )}
+                              <Icons.ChevronDown
+                                className="ml-2 h-4 w-4 shrink-0 opacity-50"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </FormControl>
+                        }
+                      />
+                    )}
                     <FormMessage />
                   </FormItem>
                 );

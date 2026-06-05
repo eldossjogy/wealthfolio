@@ -37,6 +37,14 @@ export function ActivityFormRenderer({
   }
 
   const config = ACTIVITY_FORM_CONFIG[selectedType];
+  if (!config) {
+    return (
+      <div className="text-muted-foreground flex h-40 items-center justify-center text-center text-sm">
+        This activity type can't be edited here.
+      </div>
+    );
+  }
+
   const FormComponent = config.component;
   const defaultAccountId = (defaultValues as { accountId?: string } | undefined)?.accountId ?? "";
   const defaultCurrency = (defaultValues as { currency?: string } | undefined)?.currency ?? "";

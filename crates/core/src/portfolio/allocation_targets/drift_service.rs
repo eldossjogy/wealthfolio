@@ -8,6 +8,7 @@ use std::sync::Arc;
 use crate::errors::Result as CoreResult;
 use crate::portfolio::allocation::{AllocationServiceTrait, TaxonomyHoldingContributions};
 use crate::portfolio::holdings::HoldingType;
+use crate::taxonomies::TaxonomyServiceTrait;
 
 use super::model::{
     AllocationTarget, AllocationTargetWeight, DriftHoldingRow, DriftHoldingsReport, DriftReport,
@@ -55,6 +56,7 @@ pub trait DriftServiceTrait: Send + Sync {
 pub struct DriftService {
     target_service: Arc<dyn AllocationTargetServiceTrait>,
     allocation_service: Arc<dyn AllocationServiceTrait>,
+    taxonomy_service: Option<Arc<dyn TaxonomyServiceTrait>>,
 }
 
 impl DriftService {
@@ -65,6 +67,33 @@ impl DriftService {
         Self {
             target_service,
             allocation_service,
+            taxonomy_service: None,
+        }
+    }
+
+    /// Provide the taxonomy service so category display names/colors can be
+    /// resolved for targeted categories that currently hold nothing. Without
+    /// it, such rows fall back to showing the raw category id.
+    pub fn with_taxonomy_service(
+        mut self,
+        taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
+    ) -> Self {
+        self.taxonomy_service = Some(taxonomy_service);
+        self
+    }
+
+    /// id → (display name, color) for every category in a taxonomy.
+    fn category_meta_for_taxonomy(&self, taxonomy_id: &str) -> HashMap<String, (String, String)> {
+        let Some(service) = self.taxonomy_service.as_ref() else {
+            return HashMap::new();
+        };
+        match service.get_taxonomy(taxonomy_id) {
+            Ok(Some(twc)) => twc
+                .categories
+                .into_iter()
+                .map(|category| (category.id, (category.name, category.color)))
+                .collect(),
+            _ => HashMap::new(),
         }
     }
 
@@ -132,6 +161,7 @@ impl DriftService {
         target: &AllocationTarget,
         weights: &[AllocationTargetWeight],
         contributions: &TaxonomyHoldingContributions,
+        category_meta: &HashMap<String, (String, String)>,
     ) -> Vec<DriftRow> {
         let total_value = contributions.total_value;
         let current_by_category = Self::current_by_category(contributions);
@@ -165,9 +195,19 @@ impl DriftService {
                     category_id: weight.category_id.clone(),
                     category_name: current
                         .map(|current| current.name.clone())
+                        .or_else(|| {
+                            category_meta
+                                .get(weight.category_id.as_str())
+                                .map(|(name, _)| name.clone())
+                        })
                         .unwrap_or_else(|| weight.category_id.clone()),
                     color: current
                         .map(|current| current.color.clone())
+                        .or_else(|| {
+                            category_meta
+                                .get(weight.category_id.as_str())
+                                .map(|(_, color)| color.clone())
+                        })
                         .unwrap_or_else(|| "#94a3b8".to_string()),
                     current_bps,
                     target_bps,
@@ -331,7 +371,8 @@ impl DriftService {
             )
             .await?;
 
-        let rows = Self::build_drift_rows(&target, &weights, &contributions);
+        let category_meta = self.category_meta_for_taxonomy(&target.taxonomy_id);
+        let rows = Self::build_drift_rows(&target, &weights, &contributions, &category_meta);
         let max_drift_bps = rows
             .iter()
             .filter(|row| Self::is_gap_row(row))

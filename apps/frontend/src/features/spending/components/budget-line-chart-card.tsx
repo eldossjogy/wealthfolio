@@ -285,13 +285,21 @@ export function BudgetLineChartCard({
               vectorEffect="non-scaling-stroke"
             />
           )}
-          {cumulative.length > 0 && (
-            <>
-              <circle cx={endX} cy={endY} r={4.5} fill={a.lineColor} />
-              <circle cx={endX} cy={endY} r={2} fill="white" />
-            </>
-          )}
         </svg>
+        {cumulative.length > 0 && (
+          // Rendered as HTML rather than an SVG <circle> so it stays round: the
+          // SVG uses preserveAspectRatio="none", which would stretch a circle
+          // into an ellipse.
+          <div
+            className="absolute h-[9px] w-[9px] rounded-full bg-white"
+            style={{
+              left: `${pillLeftPctRaw}%`,
+              top: `${endY}px`,
+              transform: "translate(-50%, -50%)",
+              border: `2.5px solid ${a.lineColor}`,
+            }}
+          />
+        )}
         {cumulative.length > 0 && (
           <div
             className="absolute whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums shadow-sm"

@@ -1286,7 +1286,7 @@ export const AssetProfilePage = () => {
                   totalGainAmount={profile.totalGainAmount}
                   totalGainPercent={profile.totalGainPercent}
                   quoteHistory={quoteHistory ?? []}
-                  className={`col-span-1 ${holding ? "md:col-span-2" : "md:col-span-3"}`}
+                  className={`col-span-1 ${symbolHolding ? "md:col-span-2" : "md:col-span-3"}`}
                 />
                 {symbolHolding && (
                   <AssetDetailCard assetData={symbolHolding} className="col-span-1 md:col-span-1" />
@@ -1313,7 +1313,7 @@ export const AssetProfilePage = () => {
                   totalGainAmount={profile.totalGainAmount}
                   totalGainPercent={profile.totalGainPercent}
                   quoteHistory={quoteHistory ?? []}
-                  className={`col-span-1 ${holding ? "md:col-span-2" : "md:col-span-3"}`}
+                  className={`col-span-1 ${symbolHolding ? "md:col-span-2" : "md:col-span-3"}`}
                 />
                 {symbolHolding && (
                   <AssetDetailCard assetData={symbolHolding} className="col-span-1 md:col-span-1" />

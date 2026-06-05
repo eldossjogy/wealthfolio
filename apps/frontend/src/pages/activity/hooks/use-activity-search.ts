@@ -13,6 +13,9 @@ export interface ActivitySearchFilters {
   activityTypes: ActivityType[];
   instrumentTypes?: string[];
   status?: ActivityStatusFilter;
+  /** Inclusive date bounds (YYYY-MM-DD) — used by Health Center deeplinks. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 interface BaseOptions {
@@ -94,8 +97,17 @@ export function useActivitySearch(options: UseActivitySearchOptions): UseActivit
       activityTypes: filters.activityTypes.length > 0 ? filters.activityTypes : undefined,
       instrumentTypes: filters.instrumentTypes?.length ? filters.instrumentTypes : undefined,
       needsReview,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
     } as Record<string, unknown>;
-  }, [filters.accountIds, filters.activityTypes, filters.instrumentTypes, filters.status]);
+  }, [
+    filters.accountIds,
+    filters.activityTypes,
+    filters.instrumentTypes,
+    filters.status,
+    filters.dateFrom,
+    filters.dateTo,
+  ]);
 
   const primarySort = useMemo(
     () =>

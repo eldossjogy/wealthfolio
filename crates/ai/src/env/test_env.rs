@@ -27,8 +27,9 @@ use wealthfolio_core::{
     },
     health::{
         checks::{
-            AssetHoldingInfo, ConsistencyIssueInfo, FxPairInfo, LegacyMigrationInfo,
-            QuoteSyncErrorInfo, UnclassifiedAssetInfo, UnconfiguredAccountInfo,
+            AssetHoldingInfo, ConsistencyIssueInfo, FxPairInfo, InvalidTransferGroupInfo,
+            LegacyMigrationInfo, QuoteSyncErrorInfo, UnclassifiedAssetInfo,
+            UnconfiguredAccountInfo,
         },
         FixAction, HealthConfig, HealthServiceTrait, HealthStatus,
     },
@@ -1652,6 +1653,7 @@ impl HealthServiceTrait for MockHealthService {
         _unconfigured_accounts: &[UnconfiguredAccountInfo],
         _configured_timezone: Option<&str>,
         _client_timezone: Option<&str>,
+        _invalid_transfer_groups: &[InvalidTransferGroupInfo],
     ) -> CoreResult<HealthStatus> {
         Ok(HealthStatus::healthy())
     }
@@ -1665,6 +1667,7 @@ impl HealthServiceTrait for MockHealthService {
         _asset_service: Arc<dyn AssetServiceTrait>,
         _taxonomy_service: Arc<dyn TaxonomyServiceTrait>,
         _valuation_service: Arc<dyn ValuationServiceTrait>,
+        _activity_service: Arc<dyn ActivityServiceTrait>,
         _configured_timezone: Option<&str>,
         _client_timezone: Option<&str>,
     ) -> CoreResult<HealthStatus> {

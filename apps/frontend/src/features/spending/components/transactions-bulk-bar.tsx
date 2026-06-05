@@ -1,10 +1,11 @@
 import { Button, Icons } from "@wealthfolio/ui";
 
-import { QuickCategorizePopover } from "./quick-categorize-popover";
+import { QuickCategorizePopover, type QuickCategorizeScope } from "./quick-categorize-popover";
 import { QuickEventPopover } from "./quick-event-popover";
 
 interface TransactionsBulkBarProps {
   selectedCount: number;
+  categoryScope: QuickCategorizeScope | null;
   onCategorize: (taxonomyId: string, categoryId: string) => void;
   onTagEvent: (eventId: string | null) => void;
   onDelete: () => void;
@@ -13,6 +14,7 @@ interface TransactionsBulkBarProps {
 
 export function TransactionsBulkBar({
   selectedCount,
+  categoryScope,
   onCategorize,
   onTagEvent,
   onDelete,
@@ -29,16 +31,29 @@ export function TransactionsBulkBar({
         <span className="font-medium">{selectedCount} selected</span>
       </div>
       <div className="flex items-center gap-2">
-        <QuickCategorizePopover
-          align="end"
-          onSelect={onCategorize}
-          trigger={
-            <Button size="sm" variant="default">
-              <Icons.Tag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-              Categorize
-            </Button>
-          }
-        />
+        {categoryScope ? (
+          <QuickCategorizePopover
+            align="end"
+            scope={categoryScope}
+            onSelect={onCategorize}
+            trigger={
+              <Button size="sm" variant="default">
+                <Icons.Tag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                Categorize
+              </Button>
+            }
+          />
+        ) : (
+          <Button
+            size="sm"
+            variant="default"
+            disabled
+            title="Select transactions from one non-neutral cash-flow bucket to categorize"
+          >
+            <Icons.Tag className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Categorize
+          </Button>
+        )}
         <QuickEventPopover
           align="end"
           onSelect={(eventId) => onTagEvent(eventId)}

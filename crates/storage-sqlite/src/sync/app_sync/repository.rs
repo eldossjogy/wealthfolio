@@ -151,7 +151,7 @@ impl SyncRowFilter {
             Self::UserTaxonomies => "is_system = 0",
             // Spending/income seed category IDs use the `cat_` prefix; user-created rows use UUIDs.
             Self::SyncableTaxonomyCategories => {
-                "taxonomy_id = 'custom_groups' OR (taxonomy_id IN ('spending_categories', 'income_sources') AND id NOT LIKE 'cat_%')"
+                "taxonomy_id = 'custom_groups' OR (taxonomy_id IN ('spending_categories', 'income_sources', 'savings_categories') AND id NOT LIKE 'cat_%')"
             }
             Self::UserModifiedBudgetGroups | Self::UserModifiedBudgetGroupAssignments => {
                 "is_system = 0 OR updated_at != created_at"
@@ -1034,7 +1034,7 @@ fn validate_spending_decimal_field(
 fn is_syncable_system_taxonomy_id(taxonomy_id: &str) -> bool {
     matches!(
         taxonomy_id,
-        "custom_groups" | "spending_categories" | "income_sources"
+        "custom_groups" | "spending_categories" | "income_sources" | "savings_categories"
     )
 }
 
@@ -2852,6 +2852,7 @@ mod tests {
         assert!(filter.contains("custom_groups"));
         assert!(filter.contains("spending_categories"));
         assert!(filter.contains("income_sources"));
+        assert!(filter.contains("savings_categories"));
         assert!(filter.contains("id NOT LIKE 'cat_%'"));
     }
 

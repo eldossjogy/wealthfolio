@@ -19,12 +19,15 @@ import type { TaxonomyCategory } from "@/lib/types";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
+
+export type QuickCategorizeScope = "expense" | "income" | "saving" | "both";
 
 export interface QuickCategorizePopoverProps {
   trigger: React.ReactNode;
   selectedCategoryId?: string | null;
-  /** Bias the picker towards expense or income categories. */
-  scope?: "expense" | "income" | "both";
+  /** Category bucket to show. Categories label the cash-flow bucket; they do not change it. */
+  scope?: QuickCategorizeScope;
   onSelect: (taxonomyId: string, categoryId: string) => void;
   onClear?: () => void;
   align?: "start" | "center" | "end";
@@ -34,7 +37,7 @@ interface FlatOption {
   taxonomyId: string;
   category: TaxonomyCategory;
   parent: TaxonomyCategory | null;
-  group: "Expense" | "Income";
+  group: "Expense" | "Savings" | "Income";
 }
 
 function flattenTaxonomy(
@@ -65,20 +68,28 @@ export function QuickCategorizePopover({
   const [open, setOpen] = useState(false);
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
+  const savings = useTaxonomy(SAVINGS_TAXONOMY);
 
   const options = useMemo<FlatOption[]>(() => {
     const out: FlatOption[] = [];
-    if (scope !== "income") {
+    if (scope === "expense" || scope === "both") {
       out.push(...flattenTaxonomy(SPENDING_TAXONOMY, spending.data?.categories ?? [], "Expense"));
     }
-    if (scope !== "expense") {
+    if (scope === "saving") {
+      out.push(...flattenTaxonomy(SAVINGS_TAXONOMY, savings.data?.categories ?? [], "Savings"));
+    }
+    if (scope === "income" || scope === "both") {
       out.push(...flattenTaxonomy(INCOME_TAXONOMY, income.data?.categories ?? [], "Income"));
     }
     return out;
-  }, [spending.data?.categories, income.data?.categories, scope]);
+  }, [spending.data?.categories, savings.data?.categories, income.data?.categories, scope]);
 
   const grouped = useMemo(() => {
-    const groups: Record<FlatOption["group"], FlatOption[]> = { Expense: [], Income: [] };
+    const groups: Record<FlatOption["group"], FlatOption[]> = {
+      Expense: [],
+      Savings: [],
+      Income: [],
+    };
     options.forEach((o) => groups[o.group].push(o));
     return groups;
   }, [options]);
@@ -96,12 +107,12 @@ export function QuickCategorizePopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent className="w-[280px] p-0" align={align}>
+      <PopoverContent className="w-70 p-0" align={align}>
         <Command>
           <CommandInput placeholder="Search categories..." />
           <CommandList>
             <CommandEmpty>No categories found.</CommandEmpty>
-            {(["Expense", "Income"] as const).map((groupKey) => {
+            {(["Expense", "Savings", "Income"] as const).map((groupKey) => {
               const items = grouped[groupKey];
               if (items.length === 0) return null;
               return (

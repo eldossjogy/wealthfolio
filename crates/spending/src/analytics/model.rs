@@ -18,9 +18,13 @@ pub struct ReportRequest {
 pub struct PeriodSummary {
     /// Sum of DEPOSIT/TRANSFER_IN/INTEREST amounts (absolute)
     pub income: f64,
-    /// Sum of WITHDRAWAL/TRANSFER_OUT/FEE amounts (absolute)
+    /// Consumption outflow (WITHDRAWAL/FEE/external TRANSFER_OUT), savings excluded.
     pub outflow: f64,
-    /// income - outflow
+    /// Money classified as Saving (cross-boundary cash transfer-outs to
+    /// investing accounts). Its own bucket, parallel to `income`.
+    #[serde(default)]
+    pub saved: f64,
+    /// income - outflow - saved
     pub net: f64,
     /// Count of activities included
     pub count: usize,
@@ -67,6 +71,8 @@ pub struct MonthlyReport {
     pub prior: PeriodSummary,
     pub spending_breakdown: Vec<CategoryBreakdownRow>,
     pub income_breakdown: Vec<CategoryBreakdownRow>,
+    #[serde(default)]
+    pub savings_breakdown: Vec<CategoryBreakdownRow>,
     pub by_day: Vec<DayBucket>,
     pub by_day_by_category: Vec<DayCategoryBucket>,
 }

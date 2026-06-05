@@ -130,7 +130,7 @@ impl RebalanceService {
                     kind: RebalanceWarningKind::UnclassifiedAsset,
                     category_id: "__UNKNOWN__".to_string(),
                     message: format!(
-                        "{}: no taxonomy assignments for this taxonomy. Classify it to include in the drift planner.",
+                        "{} isn't classified for this target, so it's excluded from the plan. Classify it to include it.",
                         symbol
                     ),
                 });
@@ -142,7 +142,7 @@ impl RebalanceService {
                     kind: RebalanceWarningKind::PartialClassification,
                     category_id: repr.category_id.clone(),
                     message: format!(
-                        "{}: partial classification (<100%). Known exposure used; unclassified remainder ignored.",
+                        "{} is only partly classified, so only its known exposure counts toward the plan; the rest is ignored.",
                         symbol
                     ),
                 });

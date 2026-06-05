@@ -867,6 +867,7 @@ mod tests {
     use rust_decimal::Decimal;
     use wealthfolio_core::activities::{Activity, ActivityStatus};
     use wealthfolio_core::taxonomies::Category;
+    use wealthfolio_spending::cash_activities::model::CashFlowBucket;
 
     // ----- normalize_payee -------------------------------------------------
 
@@ -1019,6 +1020,7 @@ mod tests {
                 created_at: now,
                 updated_at: now,
             },
+            cash_flow_bucket: CashFlowBucket::Spending,
             assignments,
             event_id: None,
         }

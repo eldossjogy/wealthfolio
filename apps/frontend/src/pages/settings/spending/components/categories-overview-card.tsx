@@ -6,12 +6,13 @@ import type { TaxonomyCategory } from "@/lib/types";
 import { OverviewCard, type OverviewChip } from "./overview-card";
 
 interface Props {
-  variant: "expense" | "income";
+  variant: "expense" | "income" | "savings";
 }
 
 const TAXONOMY_ID = {
   expense: "spending_categories",
   income: "income_sources",
+  savings: "savings_categories",
 } as const;
 
 export function CategoriesOverviewCard({ variant }: Props) {
@@ -40,29 +41,47 @@ export function CategoriesOverviewCard({ variant }: Props) {
     };
   }, [data?.categories]);
 
-  const title = variant === "expense" ? "Expense categories" : "Income sources";
+  const title =
+    variant === "expense"
+      ? "Expense categories"
+      : variant === "income"
+        ? "Income sources"
+        : "Savings categories";
   const description =
     topCount === 0
       ? variant === "expense"
         ? "Group transactions into expense buckets."
-        : "Group transactions into income sources."
+        : variant === "income"
+          ? "Group transactions into income sources."
+          : "Group saved cash flows."
       : variant === "expense"
         ? `${topCount} top-level · ${subCount} subcategories`
-        : `${topCount} sources${subCount > 0 ? ` · ${subCount} subcategories` : ""}`;
+        : variant === "income"
+          ? `${topCount} sources${subCount > 0 ? ` · ${subCount} subcategories` : ""}`
+          : `${topCount} destinations${subCount > 0 ? ` · ${subCount} subcategories` : ""}`;
+  const tab = variant === "savings" ? "savings" : variant;
 
   return (
     <OverviewCard
       title={title}
       description={description}
       chips={chips}
-      manageHref={`/settings/spending/categories?tab=${variant}`}
-      emptyTitle={variant === "expense" ? "No expense categories yet" : "No income sources yet"}
+      manageHref={`/settings/spending/categories?tab=${tab}`}
+      emptyTitle={
+        variant === "expense"
+          ? "No expense categories yet"
+          : variant === "income"
+            ? "No income sources yet"
+            : "No savings categories yet"
+      }
       emptyDescription={
         variant === "expense"
           ? "Create categories to organize cash transactions."
-          : "Create sources to categorize incoming cash flows."
+          : variant === "income"
+            ? "Create sources to categorize incoming cash flows."
+            : "Create categories to organize saved cash flows."
       }
-      emptyCtaLabel={variant === "expense" ? "Add category" : "Add source"}
+      emptyCtaLabel={variant === "income" ? "Add source" : "Add category"}
       isLoading={isLoading}
       showDistribution
     />

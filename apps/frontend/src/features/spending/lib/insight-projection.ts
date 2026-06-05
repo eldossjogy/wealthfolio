@@ -39,17 +39,20 @@ export function insightToReportProjection(insight: SpendingInsight): InsightRepo
     current: {
       income: insight.headline.income,
       outflow: insight.headline.spent,
+      saved: insight.headline.saved,
       net: insight.headline.netCashflow,
       count: 0,
     },
     prior: {
       income: 0,
       outflow: insight.headline.priorSpent,
+      saved: 0,
       net: -insight.headline.priorSpent,
       count: 0,
     },
     spendingBreakdown: currentSpendingBreakdown,
-    incomeBreakdown: [],
+    incomeBreakdown: insight.incomeBreakdown ?? [],
+    savingsBreakdown: insight.savingsBreakdown ?? [],
     byDay: insight.byDay.map((b) => ({
       date: b.date,
       income: b.income,
@@ -75,16 +78,20 @@ export function insightToReportProjection(insight: SpendingInsight): InsightRepo
     current: {
       income: 0,
       outflow: insight.headline.priorSpent,
+      saved: 0,
       net: -insight.headline.priorSpent,
       count: 0,
     },
     prior: {
       income: 0,
       outflow: 0,
+      saved: 0,
       net: 0,
       count: 0,
     },
     spendingBreakdown: priorSpendingBreakdown,
+    incomeBreakdown: [],
+    savingsBreakdown: [],
   };
 
   const budget = projectBudget(insight);
@@ -226,12 +233,14 @@ function projectMonths(insight: SpendingInsight): MonthBucket[] {
       current: {
         income: m.income,
         outflow: m.spent,
-        net: m.income - m.spent,
+        saved: m.saved,
+        net: m.income - m.spent - m.saved,
         count: 0,
       },
-      prior: { income: 0, outflow: 0, net: 0, count: 0 },
+      prior: { income: 0, outflow: 0, saved: 0, net: 0, count: 0 },
       spendingBreakdown: Array.from(breakdownByMonth.get(m.month)?.values() ?? []),
       incomeBreakdown: [],
+      savingsBreakdown: [],
       byDay: [],
       byDayByCategory: [],
     },

@@ -17,12 +17,15 @@ import { formatDateTime } from "@/lib/utils";
 interface PortfolioUpdateTriggerProps {
   lastCalculatedAt: string | undefined;
   children: ReactNode;
+  /** Informational notes about the displayed return (e.g. why TWR is unavailable for this scope). */
+  notices?: string[];
 }
 
 // Rename function
 export function PortfolioUpdateTrigger({
   lastCalculatedAt,
   children,
+  notices = [],
 }: PortfolioUpdateTriggerProps) {
   // Instantiate the mutation hooks inside the component
   const updatePortfolioMutation = useUpdatePortfolioMutation();
@@ -45,6 +48,18 @@ export function PortfolioUpdateTrigger({
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-80 shadow-none">
         <div className="flex flex-col space-y-4">
+          {notices.length > 0 && (
+            <div className="flex gap-2.5 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+              <Icons.AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+              <div className="space-y-1.5">
+                {notices.map((notice) => (
+                  <p key={notice} className="text-foreground/80 text-xs font-light leading-relaxed">
+                    {notice}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <h4 className="flex text-sm font-light">
               <Icons.Calendar className="mr-2 h-4 w-4" />

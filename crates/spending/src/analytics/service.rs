@@ -17,7 +17,8 @@ use super::model::{
 };
 use crate::activity_assignments::ActivityTaxonomyAssignmentRepositoryTrait;
 use crate::activity_classification::{
-    activity_abs_amount, classify_activity, decimal_to_f64, SpendingClassification,
+    activity_abs_amount, classify_activity, classify_activity_for_aggregation, decimal_to_f64,
+    within_spending_transfer_groups, SpendingClassification,
 };
 use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
@@ -29,6 +30,7 @@ const SPENDING_TAXONOMY: &str = "spending_categories";
 /// with `insight-projection.ts::UNCATEGORIZED_CATEGORY_ID`.
 const UNCATEGORIZED_CATEGORY_ID: &str = "__uncategorized__";
 const INCOME_TAXONOMY: &str = "income_sources";
+const SAVINGS_TAXONOMY: &str = "savings_categories";
 
 type CategoryAccumulator = (Option<String>, String, Option<String>, Decimal, usize);
 type SubcategoryAccumulator = (
@@ -118,35 +120,55 @@ impl AnalyticsService {
                 prior: PeriodSummary::default(),
                 spending_breakdown: vec![],
                 income_breakdown: vec![],
+                savings_breakdown: vec![],
                 by_day: vec![],
                 by_day_by_category: vec![],
             });
         }
-        let target_accounts: Vec<String> = match req.account_ids.clone() {
+        let requested_accounts: Vec<String> = match req.account_ids.clone() {
             Some(ids) => ids
                 .into_iter()
                 .filter(|id| s.account_ids.contains(id))
                 .collect(),
             None => s.account_ids.clone(),
         };
-        if target_accounts.is_empty() {
+        if requested_accounts.is_empty() {
             return Ok(MonthlyReport {
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
                 spending_breakdown: vec![],
                 income_breakdown: vec![],
+                savings_breakdown: vec![],
                 by_day: vec![],
                 by_day_by_category: vec![],
             });
         }
-        let (target_accounts, account_types) =
-            self.resolve_spending_account_types(&target_accounts)?;
-        if target_accounts.is_empty() {
+        let (all_spending_accounts, account_types) =
+            self.resolve_spending_account_types(&s.account_ids)?;
+        if all_spending_accounts.is_empty() {
             return Ok(MonthlyReport {
                 current: PeriodSummary::default(),
                 prior: PeriodSummary::default(),
                 spending_breakdown: vec![],
                 income_breakdown: vec![],
+                savings_breakdown: vec![],
+                by_day: vec![],
+                by_day_by_category: vec![],
+            });
+        }
+        let all_spending_account_ids: HashSet<&str> =
+            all_spending_accounts.iter().map(String::as_str).collect();
+        let target_account_ids: HashSet<String> = requested_accounts
+            .into_iter()
+            .filter(|id| all_spending_account_ids.contains(id.as_str()))
+            .collect();
+        if target_account_ids.is_empty() {
+            return Ok(MonthlyReport {
+                current: PeriodSummary::default(),
+                prior: PeriodSummary::default(),
+                spending_breakdown: vec![],
+                income_breakdown: vec![],
+                savings_breakdown: vec![],
                 by_day: vec![],
                 by_day_by_category: vec![],
             });
@@ -163,8 +185,10 @@ impl AnalyticsService {
 
         let activities = self
             .activity_repo
-            .get_activities_by_account_ids(&target_accounts)
+            .get_activities_by_account_ids(&all_spending_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let transfer_context_acts: Vec<&Activity> = activities.iter().collect();
+        let transfer_groups = within_spending_transfer_groups(&transfer_context_acts);
 
         let in_window = |a: &Activity, lo: DateTime<Utc>, hi: DateTime<Utc>| {
             a.activity_date >= lo && a.activity_date <= hi
@@ -172,13 +196,36 @@ impl AnalyticsService {
 
         let current_acts: Vec<&Activity> = activities
             .iter()
-            .filter(|a| in_window(a, start, end))
+            .filter(|a| target_account_ids.contains(&a.account_id) && in_window(a, start, end))
             .collect();
         let prior_acts: Vec<&Activity> = activities
             .iter()
-            .filter(|a| in_window(a, prior_start, prior_end))
+            .filter(|a| {
+                target_account_ids.contains(&a.account_id) && in_window(a, prior_start, prior_end)
+            })
             .collect();
 
+        // Assignments for current + prior windows. Totals are bucketed by
+        // activity flow; assignments only label spending/income breakdowns.
+        let assignment_ids: Vec<String> = current_acts
+            .iter()
+            .chain(prior_acts.iter())
+            .map(|a| a.id.clone())
+            .collect();
+        let all_assignments = self
+            .assignment_repo
+            .list_for_activities(&assignment_ids)
+            .await?;
+        let mut assignments_by_activity: HashMap<
+            String,
+            Vec<crate::activity_assignments::ActivityTaxonomyAssignment>,
+        > = HashMap::new();
+        for asg in all_assignments {
+            assignments_by_activity
+                .entry(asg.activity_id.clone())
+                .or_default()
+                .push(asg);
+        }
         // FX as-of: end of the active window for current, end of the prior
         // window for prior. Matches insight's per-window snapshot convention.
         let fx_as_of_current = end.date_naive();
@@ -187,6 +234,7 @@ impl AnalyticsService {
         let current = summarize(
             &current_acts,
             &account_types,
+            &transfer_groups,
             fx,
             base_currency,
             fx_as_of_current,
@@ -194,6 +242,7 @@ impl AnalyticsService {
         let prior = summarize(
             &prior_acts,
             &account_types,
+            &transfer_groups,
             fx,
             base_currency,
             fx_as_of_prior,
@@ -253,37 +302,28 @@ impl AnalyticsService {
             .collect();
         by_day.sort_by(|a, b| a.date.cmp(&b.date));
 
-        // Category breakdown — fetch assignments for the activities in scope.
-        // Use a single batched `list_for_activities` call rather than a
-        // per-activity round-trip (was an N+1 against the assignments table).
-        let current_ids: Vec<String> = current_acts.iter().map(|a| a.id.clone()).collect();
-        let all_assignments = self
-            .assignment_repo
-            .list_for_activities(&current_ids)
-            .await?;
-        let mut assignments_by_activity: HashMap<
-            String,
-            Vec<crate::activity_assignments::ActivityTaxonomyAssignment>,
-        > = HashMap::new();
-        for asg in all_assignments {
-            assignments_by_activity
-                .entry(asg.activity_id.clone())
-                .or_default()
-                .push(asg);
-        }
+        // Category breakdown — reuses `assignments_by_activity` loaded above
+        // (covers current + prior in a single batched call).
         let mut spending_acc: HashMap<(String, String), (Decimal, usize)> = HashMap::new();
         let mut income_acc: HashMap<(String, String), (Decimal, usize)> = HashMap::new();
+        let mut savings_acc: HashMap<(String, String), (Decimal, usize)> = HashMap::new();
         // (date, taxonomy_id, category_id) → (amount, count)
         let mut by_day_cat_acc: HashMap<(String, String, String), (Decimal, usize)> =
             HashMap::new();
         for a in &current_acts {
-            let Some(classification) = classification_for(a, &account_types) else {
+            let Some(account_type) = account_types.get(&a.account_id) else {
                 continue;
             };
+            let classification =
+                classify_activity_for_aggregation(a, account_type, &transfer_groups);
             let amt = activity_abs_amount(a);
             let income_native = classification.income_amount(amt);
             let spending_native = classification.spending_amount(amt);
-            if income_native == Decimal::ZERO && spending_native == Decimal::ZERO {
+            let saving_native = classification.saving_amount(amt);
+            if income_native == Decimal::ZERO
+                && spending_native == Decimal::ZERO
+                && saving_native == Decimal::ZERO
+            {
                 continue;
             }
             let income_amount = fx_to_target(
@@ -302,6 +342,14 @@ impl AnalyticsService {
                 fx_as_of_current,
             )
             .unwrap_or(Decimal::ZERO);
+            let saving_amount = fx_to_target(
+                fx,
+                saving_native,
+                &a.currency,
+                base_currency,
+                fx_as_of_current,
+            )
+            .unwrap_or(Decimal::ZERO);
             let day = wealthfolio_core::utils::time_utils::activity_date_in_user_timezone(
                 a.activity_date,
                 timezone,
@@ -312,6 +360,8 @@ impl AnalyticsService {
                 .cloned()
                 .unwrap_or_default();
             let mut had_spending_assignment = false;
+            let mut had_income_assignment = false;
+            let mut had_saving_assignment = false;
             // Single-select per (activity, taxonomy): dedupe defensively here
             // so a corrupted DB row with two spending_categories assignments
             // for one activity doesn't double-count into spending_breakdown
@@ -331,15 +381,20 @@ impl AnalyticsService {
                     );
                     continue;
                 }
-                let bucket =
-                    if asg.taxonomy_id == SPENDING_TAXONOMY && spending_amount != Decimal::ZERO {
-                        had_spending_assignment = true;
-                        Some((&mut spending_acc, spending_amount))
-                    } else if asg.taxonomy_id == INCOME_TAXONOMY && income_amount != Decimal::ZERO {
-                        Some((&mut income_acc, income_amount))
-                    } else {
-                        None
-                    };
+                let bucket = if asg.taxonomy_id == SPENDING_TAXONOMY
+                    && spending_amount != Decimal::ZERO
+                {
+                    had_spending_assignment = true;
+                    Some((&mut spending_acc, spending_amount))
+                } else if asg.taxonomy_id == INCOME_TAXONOMY && income_amount != Decimal::ZERO {
+                    had_income_assignment = true;
+                    Some((&mut income_acc, income_amount))
+                } else if asg.taxonomy_id == SAVINGS_TAXONOMY && saving_amount != Decimal::ZERO {
+                    had_saving_assignment = true;
+                    Some((&mut savings_acc, saving_amount))
+                } else {
+                    None
+                };
                 if let Some((b, bucket_amount)) = bucket {
                     let entry = b
                         .entry((asg.taxonomy_id.clone(), asg.category_id.clone()))
@@ -381,6 +436,26 @@ impl AnalyticsService {
                 dc.0 += spending_amount;
                 dc.1 += 1;
             }
+            if !had_income_assignment && income_amount != Decimal::ZERO {
+                let entry = income_acc
+                    .entry((
+                        INCOME_TAXONOMY.to_string(),
+                        UNCATEGORIZED_CATEGORY_ID.to_string(),
+                    ))
+                    .or_insert((Decimal::ZERO, 0));
+                entry.0 += income_amount;
+                entry.1 += 1;
+            }
+            if !had_saving_assignment && saving_amount != Decimal::ZERO {
+                let entry = savings_acc
+                    .entry((
+                        SAVINGS_TAXONOMY.to_string(),
+                        UNCATEGORIZED_CATEGORY_ID.to_string(),
+                    ))
+                    .or_insert((Decimal::ZERO, 0));
+                entry.0 += saving_amount;
+                entry.1 += 1;
+            }
         }
 
         let mut spending_breakdown: Vec<CategoryBreakdownRow> = spending_acc
@@ -418,6 +493,23 @@ impl AnalyticsService {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        let mut savings_breakdown: Vec<CategoryBreakdownRow> = savings_acc
+            .into_iter()
+            .map(
+                |((taxonomy_id, category_id), (amount, count))| CategoryBreakdownRow {
+                    taxonomy_id,
+                    category_id,
+                    amount: decimal_to_f64(amount),
+                    count,
+                },
+            )
+            .collect();
+        savings_breakdown.sort_by(|a, b| {
+            b.amount
+                .partial_cmp(&a.amount)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
         let mut by_day_by_category: Vec<DayCategoryBucket> = by_day_cat_acc
             .into_iter()
             .filter(|(_, (amount, _))| *amount != Decimal::ZERO)
@@ -438,6 +530,7 @@ impl AnalyticsService {
             prior,
             spending_breakdown,
             income_breakdown,
+            savings_breakdown,
             by_day,
             by_day_by_category,
         })
@@ -447,36 +540,40 @@ impl AnalyticsService {
 fn summarize(
     acts: &[&Activity],
     account_types: &HashMap<String, String>,
+    within_groups: &std::collections::HashSet<String>,
     fx: &dyn wealthfolio_core::fx::FxServiceTrait,
     target_currency: &str,
     fx_as_of: NaiveDate,
 ) -> PeriodSummary {
     let mut income = Decimal::ZERO;
     let mut outflow = Decimal::ZERO;
+    let mut saved = Decimal::ZERO;
     let mut count = 0;
     for a in acts {
-        let Some(classification) = classification_for(a, account_types) else {
+        let Some(account_type) = account_types.get(&a.account_id) else {
             continue;
         };
+        // Income-pattern buckets: classification decides spend/income/saving;
+        // a cross-boundary transfer-out → Saving. Amounts never overlap.
+        let classification = classify_activity_for_aggregation(a, account_type, within_groups);
         let amt = activity_abs_amount(a);
         let income_native = classification.income_amount(amt);
         let spending_native = classification.spending_amount(amt);
-        if income_native == Decimal::ZERO && spending_native == Decimal::ZERO {
+        let saving_native = classification.saving_amount(amt);
+        if income_native == Decimal::ZERO
+            && spending_native == Decimal::ZERO
+            && saving_native == Decimal::ZERO
+        {
             continue;
         }
         // FX-convert each activity to the report currency at `fx_as_of`,
         // matching insight::aggregate_spend so the two services agree.
-        let converted_income =
-            fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
-                .unwrap_or(Decimal::ZERO);
-        let converted_outflow =
-            fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
-                .unwrap_or(Decimal::ZERO);
-        if converted_income == Decimal::ZERO && converted_outflow == Decimal::ZERO {
-            continue;
-        }
-        income += converted_income;
-        outflow += converted_outflow;
+        income += fx_to_target(fx, income_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
+        outflow += fx_to_target(fx, spending_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
+        saved += fx_to_target(fx, saving_native, &a.currency, target_currency, fx_as_of)
+            .unwrap_or(Decimal::ZERO);
         // `count` is "activities that contributed income OR outflow" — it
         // counts each activity once, regardless of how many spending/income
         // category assignments it carries. Consumers that need spending-only
@@ -485,16 +582,15 @@ fn summarize(
         // two fields measure different things; they're not expected to match.
         count += 1;
     }
-    // All three monetary fields are signed so `Σ by_day.outflow == current.outflow`
-    // and `current.net == income - outflow` hold by construction. Matches the
-    // insight pipeline's `Headline.spent` / `Headline.net_cashflow`
-    // (insight/service.rs:337) which has always been signed. UI consumers
-    // that want a non-negative "Spent" badge for refund-heavy periods can
-    // clamp at render time.
+    // Monetary fields are signed so `current.net == income - outflow - saved`
+    // holds by construction, matching the insight pipeline's
+    // `Headline.net_cashflow`. `outflow` is consumption-only (savings excluded);
+    // UI that wants a non-negative "Spent" badge clamps at render time.
     PeriodSummary {
         income: decimal_to_f64(income),
         outflow: decimal_to_f64(outflow),
-        net: decimal_to_f64(income - outflow),
+        saved: decimal_to_f64(saved),
+        net: decimal_to_f64(income - outflow - saved),
         count,
     }
 }

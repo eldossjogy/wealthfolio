@@ -25,12 +25,24 @@ export type { AccountSelectOption };
 
 interface ActivityFormProps {
   accounts: AccountSelectOption[];
+  /**
+   * Full active-account list for the Transfer form's From/To selectors. Unlike
+   * `accounts` (which the Spending split may narrow to investment accounts), a
+   * transfer can target any account, so its counterparties are drawn from this.
+   */
+  transferAccounts?: AccountSelectOption[];
   activity?: Partial<ActivityDetails>;
   open?: boolean;
   onClose?: () => void;
 }
 
-export function ActivityForm({ accounts, activity, open, onClose }: ActivityFormProps) {
+export function ActivityForm({
+  accounts,
+  transferAccounts,
+  activity,
+  open,
+  onClose,
+}: ActivityFormProps) {
   // Derive the editing state and initial type from activity prop
   const isEditing = !!activity?.id;
   const initialType = mapActivityTypeToPicker(activity?.activityType);
@@ -41,13 +53,14 @@ export function ActivityForm({ accounts, activity, open, onClose }: ActivityForm
   // For editing, always use the activity's type; for new, use local state
   const effectiveSelectedType = isEditing ? initialType : selectedType;
 
-  // Filter accounts by selected activity type (exclude HOLDINGS accounts for unsupported types)
+  // Filter accounts by selected activity type (exclude HOLDINGS accounts for unsupported types).
+  // Transfers use the full account list so spending/saving accounts are valid counterparties.
   const filteredAccounts = useMemo(() => {
-    if (!effectiveSelectedType) return accounts;
-    return accounts.filter((acc) =>
-      restrictionAllowsType(acc.restrictionLevel, effectiveSelectedType),
-    );
-  }, [accounts, effectiveSelectedType]);
+    const base =
+      effectiveSelectedType === "TRANSFER" && transferAccounts ? transferAccounts : accounts;
+    if (!effectiveSelectedType) return base;
+    return base.filter((acc) => restrictionAllowsType(acc.restrictionLevel, effectiveSelectedType));
+  }, [accounts, transferAccounts, effectiveSelectedType]);
 
   // Use the activity form hook with the effective type
   const { defaultValues, isLoading, isError, error, handleSubmit } = useActivityForm({

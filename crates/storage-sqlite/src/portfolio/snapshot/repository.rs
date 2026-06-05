@@ -253,8 +253,7 @@ impl SnapshotRepository {
         Ok(results_map)
     }
 
-    /// Deletes only CALCULATED snapshots for the given account IDs.
-    /// Manual, CSV-imported, and broker-imported snapshots are preserved.
+    /// Deletes all snapshots for the given account IDs.
     pub async fn delete_snapshots_by_account_ids(
         &self,
         account_ids_to_delete: &[String],
@@ -269,14 +268,10 @@ impl SnapshotRepository {
 
         self.writer
             .exec(move |conn| {
-                // Only delete CALCULATED snapshots - preserve manual/imported snapshots
-                let deleted_count = diesel::delete(
-                    holdings_snapshots
-                        .filter(account_id.eq_any(final_ids))
-                        .filter(source.eq("CALCULATED")),
-                )
-                .execute(conn)
-                .map_err(StorageError::from)?;
+                let deleted_count =
+                    diesel::delete(holdings_snapshots.filter(account_id.eq_any(final_ids)))
+                        .execute(conn)
+                        .map_err(StorageError::from)?;
                 Ok(deleted_count)
             })
             .await
@@ -605,35 +600,18 @@ impl SnapshotRepository {
     ) -> Result<()> {
         use crate::schema::holdings_snapshots::dsl::*;
         let account_id_owned = target_account_id.to_string();
-        let anchor_dates = self
-            .get_anchor_snapshot_dates_for_account(target_account_id)
-            .await?;
-
-        let filtered_snapshots: Vec<AccountStateSnapshot> = if anchor_dates.is_empty() {
-            snapshots_to_save.to_vec()
-        } else {
-            snapshots_to_save
-                .iter()
-                .filter(|s| {
-                    let date_key = s.snapshot_date.format("%Y-%m-%d").to_string();
-                    !anchor_dates.contains(&date_key)
-                })
-                .cloned()
-                .collect()
-        };
 
         // Capture positions for the snapshot_positions dual-write before the
         // AccountStateSnapshotDB::from conversion. Mirrors save_snapshots:
-        // without this, the FK ON DELETE CASCADE wipes snapshot_positions
-        // rows tied to the deleted CALCULATED snapshots, and the replacement
-        // INSERT below never repopulates them — breaking the dual-write
-        // invariant for every Full recalc.
-        let positions_to_write: Vec<(String, HashMap<String, Position>)> = filtered_snapshots
+        // without this, the FK ON DELETE CASCADE wipes snapshot_positions rows
+        // tied to deleted snapshots, and the replacement INSERT below never
+        // repopulates them.
+        let positions_to_write: Vec<(String, HashMap<String, Position>)> = snapshots_to_save
             .iter()
             .map(|s| (s.id.clone(), s.positions.clone()))
             .collect();
 
-        let db_models: Vec<AccountStateSnapshotDB> = filtered_snapshots
+        let db_models: Vec<AccountStateSnapshotDB> = snapshots_to_save
             .iter()
             .cloned()
             .map(AccountStateSnapshotDB::from)
@@ -641,15 +619,9 @@ impl SnapshotRepository {
 
         self.writer
             .exec(move |conn| {
-                // Delete only CALCULATED snapshots for this account
-                // Preserves MANUAL_ENTRY, BROKER_IMPORTED, CSV_IMPORT snapshots
-                diesel::delete(
-                    holdings_snapshots
-                        .filter(account_id.eq(&account_id_owned))
-                        .filter(source.eq(SOURCE_CALCULATED)),
-                )
-                .execute(conn)
-                .map_err(StorageError::from)?;
+                diesel::delete(holdings_snapshots.filter(account_id.eq(&account_id_owned)))
+                    .execute(conn)
+                    .map_err(StorageError::from)?;
 
                 // Save new ones (using replace_into to handle conflicts)
                 if !db_models.is_empty() {
@@ -688,27 +660,6 @@ impl SnapshotRepository {
                     .filter(account_id.eq(&account_id_owned))
                     .filter(snapshot_date.ge(start_date_str))
                     .filter(snapshot_date.le(end_date_str))
-                    .filter(source.ne(SOURCE_CALCULATED))
-                    .load::<String>(conn)
-                    .map_err(|e| Error::from(StorageError::from(e)))?;
-                Ok(dates.into_iter().collect())
-            })
-            .await
-    }
-
-    async fn get_anchor_snapshot_dates_for_account(
-        &self,
-        target_account_id: &str,
-    ) -> Result<HashSet<String>> {
-        use crate::schema::holdings_snapshots::dsl::*;
-
-        let account_id_owned = target_account_id.to_string();
-
-        self.writer
-            .exec(move |conn| {
-                let dates = holdings_snapshots
-                    .select(snapshot_date)
-                    .filter(account_id.eq(&account_id_owned))
                     .filter(source.ne(SOURCE_CALCULATED))
                     .load::<String>(conn)
                     .map_err(|e| Error::from(StorageError::from(e)))?;
@@ -1350,7 +1301,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_overwrite_all_preserves_manual_snapshots() {
+    async fn test_overwrite_all_deletes_existing_snapshots() {
         let (repo, pool, _temp_dir) = create_test_repository().await;
         let account_id = "test-account-1";
         create_test_account(&pool, account_id);
@@ -1394,7 +1345,6 @@ mod tests {
             SnapshotSource::Calculated,
         );
 
-        // Overwrite - this should only delete CALCULATED, keeping MANUAL_ENTRY and BROKER_IMPORTED
         repo.overwrite_all_snapshots_for_account(
             account_id,
             std::slice::from_ref(&new_calculated_snapshot),
@@ -1402,30 +1352,70 @@ mod tests {
         .await
         .expect("Failed to overwrite snapshots");
 
-        // Verify: should have 3 snapshots (2 preserved + 1 new)
         let final_snapshots = repo
             .get_snapshots_by_account(account_id, None, None)
             .expect("Failed to get final snapshots");
         assert_eq!(
             final_snapshots.len(),
-            3,
-            "Should have 3 snapshots after overwrite: manual + broker + new calculated"
+            1,
+            "Full overwrite should remove stale manual/broker snapshots"
         );
 
-        // Verify the manual and broker snapshots are preserved
-        let sources: Vec<SnapshotSource> = final_snapshots.iter().map(|s| s.source).collect();
-        assert!(
-            sources.contains(&SnapshotSource::ManualEntry),
-            "Manual snapshot should be preserved"
+        assert_eq!(final_snapshots[0].source, SnapshotSource::Calculated);
+        assert_eq!(
+            final_snapshots[0].snapshot_date,
+            new_calculated_snapshot.snapshot_date
         );
-        assert!(
-            sources.contains(&SnapshotSource::BrokerImported),
-            "Broker snapshot should be preserved"
+    }
+
+    #[tokio::test]
+    async fn test_delete_snapshots_by_account_ids_deletes_all_sources() {
+        let (repo, pool, _temp_dir) = create_test_repository().await;
+        let account_id = "test-account-delete-all";
+        let other_account_id = "test-account-delete-other";
+        create_test_account(&pool, account_id);
+        create_test_account(&pool, other_account_id);
+
+        let calculated = create_test_snapshot(
+            account_id,
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            SnapshotSource::Calculated,
         );
-        assert!(
-            sources.contains(&SnapshotSource::Calculated),
-            "New calculated snapshot should exist"
+        let broker = create_test_snapshot(
+            account_id,
+            NaiveDate::from_ymd_opt(2024, 1, 2).unwrap(),
+            SnapshotSource::BrokerImported,
         );
+        let synthetic = create_test_snapshot(
+            account_id,
+            NaiveDate::from_ymd_opt(2024, 1, 3).unwrap(),
+            SnapshotSource::Synthetic,
+        );
+        let other = create_test_snapshot(
+            other_account_id,
+            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            SnapshotSource::BrokerImported,
+        );
+
+        repo.save_snapshots(&[calculated, broker, synthetic, other])
+            .await
+            .expect("Failed to save snapshots");
+
+        let deleted = repo
+            .delete_snapshots_by_account_ids(&[account_id.to_string()])
+            .await
+            .expect("Failed to delete snapshots");
+        assert_eq!(deleted, 3);
+
+        let remaining_for_account = repo
+            .get_snapshots_by_account(account_id, None, None)
+            .expect("Failed to get deleted account snapshots");
+        assert!(remaining_for_account.is_empty());
+
+        let remaining_for_other = repo
+            .get_snapshots_by_account(other_account_id, None, None)
+            .expect("Failed to get other account snapshots");
+        assert_eq!(remaining_for_other.len(), 1);
     }
 
     #[tokio::test]
@@ -1527,7 +1517,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_rebuild_only_deletes_calculated_not_broker() {
+    async fn test_full_rebuild_removes_broker_snapshots() {
         let (repo, pool, _temp_dir) = create_test_repository().await;
         let account_id = "test-account-4";
         create_test_account(&pool, account_id);
@@ -1569,15 +1559,13 @@ mod tests {
             .get_snapshots_by_account(account_id, None, None)
             .expect("Failed to get final");
 
-        // Should have 3: broker1, broker2, new_calculated
-        assert_eq!(final_snapshots.len(), 3);
-
-        // Verify broker snapshots preserved
+        assert_eq!(final_snapshots.len(), 1);
         let broker_count = final_snapshots
             .iter()
             .filter(|s| s.source == SnapshotSource::BrokerImported)
             .count();
-        assert_eq!(broker_count, 2, "Both broker snapshots should be preserved");
+        assert_eq!(broker_count, 0, "Broker snapshots should be removed");
+        assert_eq!(final_snapshots[0].source, SnapshotSource::Calculated);
     }
 
     #[tokio::test]

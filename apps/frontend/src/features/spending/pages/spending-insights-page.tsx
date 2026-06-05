@@ -30,18 +30,80 @@ import {
 import {
   addCalendarDays,
   addCalendarMonths,
+  calendarDaysBetweenInclusive,
+  calendarMonthsBetweenInclusive,
   createZonedDayHourFormatter,
+  daysInCalendarMonth,
   getZonedDateParts,
   zonedCalendarDateBoundaryToDate,
 } from "../lib/timezone";
 
 const SPENDING_TAXONOMY = "spending_categories";
+const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 const PERIOD_STORAGE_KEY = "spending-insights-period";
 const STAGE_STORAGE_KEY = "spending-insights-stage";
 const EMPTY_TAXONOMY: never[] = [];
 /** Heatmap window — last 12 weeks regardless of selected period. */
 const HEATMAP_WEEKS = 12;
 const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+function parseDateParam(value: string | null): { year: number; month: number; day: number } | null {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return { year, month, day };
+}
+
+function customRangeFromParams(
+  params: URLSearchParams,
+  timezone?: string | null,
+): ReportsRange | null {
+  const startParts = parseDateParam(params.get("from"));
+  const endParts = parseDateParam(params.get("to"));
+  if (!startParts || !endParts) return null;
+  const days = calendarDaysBetweenInclusive(startParts, endParts);
+  if (days <= 0) return null;
+  return {
+    start: zonedCalendarDateBoundaryToDate(startParts, "start", timezone),
+    end: zonedCalendarDateBoundaryToDate(endParts, "end", timezone),
+    days,
+    months: calendarMonthsBetweenInclusive(startParts, endParts),
+  };
+}
+
+function monthToDateRange(timezone?: string | null): ReportsRange {
+  const today = getZonedDateParts(new Date(), timezone);
+  const start = { year: today.year, month: today.month, day: 1 };
+  return {
+    start: zonedCalendarDateBoundaryToDate(start, "start", timezone),
+    end: zonedCalendarDateBoundaryToDate(today, "end", timezone),
+    days: calendarDaysBetweenInclusive(start, today),
+    months: 1,
+  };
+}
+
+function previousMonthMatchingRange(range: ReportsRange, timezone?: string | null): ReportsRange {
+  const currentStart = getZonedDateParts(range.start, timezone);
+  const currentEnd = getZonedDateParts(range.end, timezone);
+  const priorStartBase = addCalendarMonths(currentStart, -1);
+  const priorEndBase = addCalendarMonths(currentEnd, -1);
+  const priorStart = {
+    ...priorStartBase,
+    day: Math.min(currentStart.day, daysInCalendarMonth(priorStartBase.year, priorStartBase.month)),
+  };
+  const priorEnd = {
+    ...priorEndBase,
+    day: Math.min(currentEnd.day, daysInCalendarMonth(priorEndBase.year, priorEndBase.month)),
+  };
+
+  return {
+    start: zonedCalendarDateBoundaryToDate(priorStart, "start", timezone),
+    end: zonedCalendarDateBoundaryToDate(priorEnd, "end", timezone),
+    days: calendarDaysBetweenInclusive(priorStart, priorEnd),
+    months: calendarMonthsBetweenInclusive(priorStart, priorEnd),
+  };
+}
 
 /**
  * Spending insights — narrative-first, three-stage page.
@@ -55,6 +117,13 @@ const HEATMAP_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as c
  */
 const VALID_STAGES: InsightsStage[] = ["where", "changed", "when"];
 
+function normalizeReportsPeriod(value: string | null | undefined): ReportsPeriod | null {
+  if (!value) return null;
+  if (value === "1M") return "MTD";
+  if (REPORTS_PERIODS.includes(value as ReportsPeriod)) return value as ReportsPeriod;
+  return null;
+}
+
 export default function SpendingInsightsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,15 +132,16 @@ export default function SpendingInsightsPage() {
   const appTimezone = settings?.timezone ?? undefined;
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
 
-  const [period, setPeriod] = usePersistentState<ReportsPeriod>(
+  const [persistedPeriod, setPersistedPeriod] = usePersistentState<string>(
     PERIOD_STORAGE_KEY,
     DEFAULT_REPORTS_PERIOD,
   );
+  const period = normalizeReportsPeriod(persistedPeriod) ?? DEFAULT_REPORTS_PERIOD;
   const [stage, setStage] = usePersistentState<InsightsStage>(STAGE_STORAGE_KEY, "where");
 
   // ─── URL ↔ state sync ─────────────────────────────────────────────────────
-  // ?stage=where|changed|when and ?period=1M|3M|6M|YTD|1Y drive the page when
-  // present, otherwise fall back to the persisted localStorage values.
+  // ?stage=where|changed|when and ?period=MTD|30D|3M|6M|YTD|1Y drive the page
+  // when present, otherwise fall back to the persisted localStorage values.
   // Linking from the dashboard (`/spending/insights?stage=where`) and reload-
   // ability of the current view both rely on this.
   useEffect(() => {
@@ -79,9 +149,9 @@ export default function SpendingInsightsPage() {
     if (urlStage && VALID_STAGES.includes(urlStage as InsightsStage) && urlStage !== stage) {
       setStage(urlStage as InsightsStage);
     }
-    const urlPeriod = searchParams.get("period") as ReportsPeriod | null;
-    if (urlPeriod && REPORTS_PERIODS.includes(urlPeriod) && urlPeriod !== period) {
-      setPeriod(urlPeriod);
+    const urlPeriod = normalizeReportsPeriod(searchParams.get("period"));
+    if (urlPeriod && urlPeriod !== period) {
+      setPersistedPeriod(urlPeriod);
     }
     // Eslint disable: we intentionally run only on URL change, not on every
     // state change — the inverse direction (state → URL) is handled by the
@@ -106,17 +176,19 @@ export default function SpendingInsightsPage() {
 
   const setPeriodAndUrl = useCallback(
     (next: ReportsPeriod) => {
-      setPeriod(next);
+      setPersistedPeriod(next);
       setSearchParams(
         (prev) => {
           const p = new URLSearchParams(prev);
           p.set("period", next);
+          p.delete("from");
+          p.delete("to");
           return p;
         },
         { replace: true },
       );
     },
-    [setPeriod, setSearchParams],
+    [setPersistedPeriod, setSearchParams],
   );
 
   // Events-timeline pagination — independent from `period`. Stored alongside
@@ -132,12 +204,29 @@ export default function SpendingInsightsPage() {
     [period],
   );
 
-  const range = useMemo(() => periodToReportsRange(period, appTimezone), [period, appTimezone]);
+  const customRange = useMemo(
+    () => customRangeFromParams(searchParams, appTimezone),
+    [searchParams, appTimezone],
+  );
+  const range = useMemo(
+    () => customRange ?? periodToReportsRange(period, appTimezone),
+    [customRange, period, appTimezone],
+  );
+  const whatChangedWindow = useMemo(() => {
+    if (customRange || period !== "MTD") return null;
+    const current = monthToDateRange(appTimezone);
+    return {
+      current,
+      prior: previousMonthMatchingRange(current, appTimezone),
+    };
+  }, [customRange, period, appTimezone]);
   const eventsRange = useMemo(
     () => shiftRangeBack(range, period, eventsWindowOffset, appTimezone),
     [range, period, eventsWindowOffset, appTimezone],
   );
   const taxonomy = useTaxonomy(SPENDING_TAXONOMY);
+  const incomeTaxonomy = useTaxonomy(INCOME_TAXONOMY);
+  const savingsTaxonomy = useTaxonomy(SAVINGS_TAXONOMY);
   const { accounts = [] } = useAccounts({ filterActive: false });
 
   // ─── Single reconciled source of truth for the "Where I am" stage ─────────
@@ -157,6 +246,25 @@ export default function SpendingInsightsPage() {
     isError: insightErrored,
     refetch: refetchInsight,
   } = useSpendingInsight(insightRequest);
+  const whatChangedRequest = useMemo(() => {
+    if (!whatChangedWindow) return null;
+    return {
+      startDate: whatChangedWindow.current.start.toISOString(),
+      endDate: whatChangedWindow.current.end.toISOString(),
+      compareStartDate: whatChangedWindow.prior.start.toISOString(),
+      compareEndDate: whatChangedWindow.prior.end.toISOString(),
+      compare: "prior" as const,
+    };
+  }, [whatChangedWindow]);
+  const {
+    data: mtdComparisonInsight,
+    isLoading: isMtdComparisonLoading,
+    isError: mtdComparisonErrored,
+    refetch: refetchMtdComparison,
+  } = useSpendingInsight(
+    whatChangedRequest ?? insightRequest,
+    stage === "changed" && !!whatChangedRequest,
+  );
 
   // Project the reconciled insight into the presentation shapes used by the
   // existing child cards. Every number still flows from one server query.
@@ -164,6 +272,15 @@ export default function SpendingInsightsPage() {
     () => (insight ? insightToReportProjection(insight) : null),
     [insight],
   );
+  const whatChangedInsight = whatChangedRequest ? mtdComparisonInsight : insight;
+  const whatChangedProjection = useMemo(
+    () => (whatChangedInsight ? insightToReportProjection(whatChangedInsight) : null),
+    [whatChangedInsight],
+  );
+  const isWhatChangedLoading = whatChangedRequest ? isMtdComparisonLoading : isInsightLoading;
+  const whatChangedRange = whatChangedWindow?.current ?? range;
+  const whatChangedPriorRange = whatChangedWindow?.prior;
+  const categorySheetRange = stage === "changed" ? whatChangedRange : range;
   const taxonomyCategoriesForWhereIAm = useMemo(() => {
     const base = taxonomy.data?.categories ?? [];
     if (!insight || insight.uncategorized.txnCount === 0) return base;
@@ -309,7 +426,9 @@ export default function SpendingInsightsPage() {
           />
         )}
 
-        {(insightErrored || (stage === "when" && heatmapInsightErrored)) && (
+        {(insightErrored ||
+          (stage === "changed" && mtdComparisonErrored) ||
+          (stage === "when" && heatmapInsightErrored)) && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             <span>
               <span className="font-semibold">Couldn't load insights.</span> Showing zeros below.
@@ -318,6 +437,7 @@ export default function SpendingInsightsPage() {
               type="button"
               onClick={() => {
                 if (insightErrored) void refetchInsight();
+                if (mtdComparisonErrored) void refetchMtdComparison();
                 if (heatmapInsightErrored) void refetchHeatmapInsight();
               }}
               className="text-foreground hover:underline"
@@ -334,6 +454,8 @@ export default function SpendingInsightsPage() {
             priorReport={insightProjection?.priorReport}
             months={insightProjection?.months ?? []}
             taxonomyCategories={taxonomyCategoriesForWhereIAm}
+            incomeCategories={incomeTaxonomy.data?.categories ?? EMPTY_TAXONOMY}
+            savingsCategories={savingsTaxonomy.data?.categories ?? EMPTY_TAXONOMY}
             budget={insightProjection?.budget}
             currency={insight?.currency ?? baseCurrency}
             isLoading={isInsightLoading}
@@ -345,13 +467,15 @@ export default function SpendingInsightsPage() {
 
         {stage === "changed" && (
           <WhatChangedStage
-            range={range}
-            currentReport={insightProjection?.currentReport}
-            priorReport={insightProjection?.priorReport}
-            months={insightProjection?.months ?? []}
+            range={whatChangedRange}
+            priorRange={whatChangedPriorRange}
+            timezone={appTimezone}
+            currentReport={whatChangedProjection?.currentReport}
+            priorReport={whatChangedProjection?.priorReport}
+            months={whatChangedProjection?.months ?? []}
             taxonomyCategories={taxonomyCategoriesForWhereIAm}
-            currency={insight?.currency ?? baseCurrency}
-            isLoading={isInsightLoading}
+            currency={whatChangedInsight?.currency ?? insight?.currency ?? baseCurrency}
+            isLoading={isWhatChangedLoading}
             onCategoryClick={handleCategoryClick}
           />
         )}
@@ -384,8 +508,8 @@ export default function SpendingInsightsPage() {
         }}
         category={activeCategory}
         taxonomyCategories={taxonomyCategories}
-        rangeStart={range.start}
-        rangeEnd={range.end}
+        rangeStart={categorySheetRange.start}
+        rangeEnd={categorySheetRange.end}
         currency={baseCurrency}
       />
 
@@ -409,7 +533,8 @@ export default function SpendingInsightsPage() {
  *  month-based periods; YTD pages back by a full year so each click lands on
  *  the prior year's window. */
 const MONTHS_PER_PERIOD: Record<ReportsPeriod, number> = {
-  "1M": 1,
+  MTD: 1,
+  "30D": 1,
   "3M": 3,
   "6M": 6,
   YTD: 12,
@@ -423,6 +548,20 @@ function shiftRangeBack(
   timezone?: string | null,
 ): ReportsRange {
   if (offset === 0) return range;
+  if (period === "30D") {
+    const days = 30 * offset;
+    const start = zonedCalendarDateBoundaryToDate(
+      addCalendarDays(getZonedDateParts(range.start, timezone), -days),
+      "start",
+      timezone,
+    );
+    const end = zonedCalendarDateBoundaryToDate(
+      addCalendarDays(getZonedDateParts(range.end, timezone), -days),
+      "end",
+      timezone,
+    );
+    return { ...range, start, end };
+  }
   const months = MONTHS_PER_PERIOD[period] * offset;
   const start = zonedCalendarDateBoundaryToDate(
     addCalendarMonths(getZonedDateParts(range.start, timezone), -months),

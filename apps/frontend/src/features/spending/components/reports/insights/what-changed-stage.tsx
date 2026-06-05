@@ -4,7 +4,7 @@ import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import { PrivacyAmount, Skeleton, formatCompactAmount } from "@wealthfolio/ui";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
-import { cn, formatAmount } from "@/lib/utils";
+import { cn, formatAmount, resolveDisplayTimezone } from "@/lib/utils";
 
 import { CategoryIcon } from "../../category-chips";
 import { topCategoryId } from "../../../lib/category-rollup";
@@ -24,7 +24,7 @@ import {
 } from "../../../lib/change-descriptor";
 import { buildHeadline, type HeadlineFragment, type HeadlineModel } from "../../../lib/headline";
 import { UNCATEGORIZED_CATEGORY_ID } from "../../../lib/insight-projection";
-import { formatMonthName, formatMonthYear, formatPercentValue } from "./format";
+import { formatPercentValue } from "./format";
 
 const CARD_CLASS = "border-border/60 bg-card/40 rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS =
@@ -34,6 +34,8 @@ const SPARK_MARGIN = { top: 2, right: 0, left: 0, bottom: 0 };
 
 export interface WhatChangedStageProps {
   range: ReportsRange;
+  priorRange?: ReportsRange;
+  timezone?: string | null;
   currentReport: MonthlyReport | undefined;
   priorReport: MonthlyReport | undefined;
   months: MonthBucket[];
@@ -52,6 +54,8 @@ interface MoverDescriptor extends ChangeDescriptor {
 
 export function WhatChangedStage({
   range,
+  priorRange,
+  timezone,
   currentReport,
   priorReport,
   months,
@@ -60,7 +64,10 @@ export function WhatChangedStage({
   isLoading,
   onCategoryClick,
 }: WhatChangedStageProps) {
-  const labels = useMemo(() => buildPeriodLabels(range), [range]);
+  const labels = useMemo(
+    () => buildPeriodLabels(range, priorRange, timezone),
+    [range, priorRange, timezone],
+  );
 
   const currentTotal = currentReport?.current.outflow ?? 0;
   const priorTotal = priorReport?.current.outflow ?? 0;
@@ -800,16 +807,66 @@ interface PeriodLabels {
   combined: string;
 }
 
-function buildPeriodLabels(range: ReportsRange): PeriodLabels {
+function buildPeriodLabels(
+  range: ReportsRange,
+  priorRange?: ReportsRange,
+  timezone?: string | null,
+): PeriodLabels {
+  if (priorRange) {
+    const current = formatDateSpan(range.start, range.end, timezone);
+    const prior = formatDateSpan(priorRange.start, priorRange.end, timezone);
+    return { current, prior, combined: `${current.toUpperCase()} VS ${prior.toUpperCase()}` };
+  }
+
   const priorEnd = new Date(range.start.getTime() - 1);
 
   if (range.months <= 1) {
-    const current = formatMonthName(range.end);
-    const prior = formatMonthName(priorEnd);
+    const current = formatMonthNameInZone(range.end, timezone);
+    const prior = formatMonthNameInZone(priorEnd, timezone);
     return { current, prior, combined: `${current.toUpperCase()} VS ${prior.toUpperCase()}` };
   }
   const priorStart = new Date(priorEnd.getTime() - (range.end.getTime() - range.start.getTime()));
-  const current = `${formatMonthYear(range.start)} – ${formatMonthYear(range.end)}`;
-  const prior = `${formatMonthYear(priorStart)} – ${formatMonthYear(priorEnd)}`;
+  const current = `${formatMonthYearInZone(range.start, timezone)} – ${formatMonthYearInZone(
+    range.end,
+    timezone,
+  )}`;
+  const prior = `${formatMonthYearInZone(priorStart, timezone)} – ${formatMonthYearInZone(
+    priorEnd,
+    timezone,
+  )}`;
   return { current, prior, combined: `${range.months}M VS PRIOR ${range.months}M` };
+}
+
+function formatDateSpan(start: Date, end: Date, timezone?: string | null): string {
+  const timeZone = resolveDisplayTimezone(timezone);
+  const dateKey = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const monthDay = new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    month: "short",
+    day: "numeric",
+  });
+  if (dateKey.format(start) === dateKey.format(end)) {
+    return monthDay.format(start);
+  }
+  return `${monthDay.format(start)}-${monthDay.format(end)}`;
+}
+
+function formatMonthNameInZone(date: Date, timezone?: string | null): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: resolveDisplayTimezone(timezone),
+    month: "long",
+  }).format(date);
+}
+
+function formatMonthYearInZone(date: Date, timezone?: string | null): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: resolveDisplayTimezone(timezone),
+    month: "short",
+    year: "numeric",
+  }).format(date);
 }

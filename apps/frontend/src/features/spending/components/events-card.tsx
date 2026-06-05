@@ -61,7 +61,7 @@ export function EventsCard({
   // a server outage looks identical to "user has no events".
   if (eventsErrored) {
     return (
-      <div className="border-border/60 bg-card/40 rounded-xl border p-4 text-center text-xs backdrop-blur-xl md:p-5">
+      <div className="border-border/40 bg-card/70 rounded-xl border p-4 text-center text-xs backdrop-blur-xl md:p-5">
         <div className="text-muted-foreground">Couldn't load events.</div>
         <button
           type="button"
@@ -191,7 +191,7 @@ export function EventsCard({
   }
 
   return (
-    <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+    <div className="border-border/40 bg-card/70 rounded-xl border p-4 backdrop-blur-xl md:p-5">
       <div className="flex items-center gap-2">
         <HeaderIcon className="h-4 w-4 shrink-0" style={{ color: theme.deep }} />
         <div className="min-w-0 flex-1">
@@ -233,7 +233,7 @@ export function EventsCard({
             </div>
           </div>
 
-          <div className="border-border/40 text-muted-foreground/80 mt-3 flex items-center gap-3 border-t pt-2 text-[11px]">
+          <div className="border-border/40 text-muted-foreground/80 mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-2 text-[11px]">
             <span className="tabular-nums">
               <span className="text-foreground/90 font-semibold">
                 <PrivacyAmount value={dailyAvg} currency={currency} />

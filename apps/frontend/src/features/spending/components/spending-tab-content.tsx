@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useState, type FC, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
@@ -21,13 +21,13 @@ import { cn, formatAmount, formatDateISO } from "@/lib/utils";
 import Balance from "@/pages/dashboard/balance";
 
 import {
+  AnimatedToggleGroup,
   Icons,
-  IntervalSelector,
   PrivacyAmount,
   Skeleton,
   formatCompactAmount,
+  useIsMobile,
   usePersistentState,
-  type TimePeriod,
 } from "@wealthfolio/ui";
 
 import { useBudget } from "../hooks/use-budget";
@@ -36,6 +36,7 @@ import { useCashActivities, useUncategorizedCount } from "../hooks/use-cash-acti
 import { useSpendingReport } from "../hooks/use-spending-report";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { topCategoryId } from "../lib/category-rollup";
+import type { ReportsPeriod } from "../lib/reports-period";
 import { FOREST_THEME, themeBg, type Palette } from "../lib/theme";
 import {
   addCalendarDays,
@@ -56,19 +57,63 @@ import { RecentActivityCard } from "./recent-activity-card";
 
 const FUTURE_BAR = "#E5E7EB";
 const SPENDING_TAXONOMY = "spending_categories";
-const DEFAULT_INTERVAL: TimePeriod = "1M";
+type SpendingDashboardPeriod = "MTD" | "30D" | "3M" | "6M" | "YTD" | "1Y";
+
+const SPENDING_DASHBOARD_PERIODS: SpendingDashboardPeriod[] = [
+  "MTD",
+  "30D",
+  "3M",
+  "6M",
+  "YTD",
+  "1Y",
+];
+
+const DEFAULT_INTERVAL: SpendingDashboardPeriod = "MTD";
 const INTERVAL_STORAGE_KEY = "spending-interval";
-const INTERVAL_DESCRIPTIONS: Record<TimePeriod, string> = {
-  "1D": "past day",
-  "1W": "past week",
-  "1M": "past month",
+const INTERVAL_DESCRIPTIONS: Record<SpendingDashboardPeriod, string> = {
+  MTD: "this month",
+  "30D": "past 30 days",
   "3M": "past 3 months",
   "6M": "past 6 months",
   YTD: "year to date",
   "1Y": "past year",
-  "5Y": "past 5 years",
-  ALL: "All Time",
 };
+const SPENDING_DASHBOARD_PERIOD_LABELS: Record<SpendingDashboardPeriod, ReactNode> = {
+  MTD: (
+    <>
+      <span className="hidden sm:inline">This month</span>
+      <span className="sm:hidden">MTD</span>
+    </>
+  ),
+  "30D": "30D",
+  "3M": "3M",
+  "6M": "6M",
+  YTD: "YTD",
+  "1Y": "1Y",
+};
+
+// The three insights stages, surfaced as a "Dig deeper" strip under Recent
+// activity. Mirrors the StageNav on /spending/insights.
+const INSIGHT_STAGES = [
+  {
+    stage: "where",
+    label: "Where I am",
+    sub: "Pace, budget & category breakdown",
+    Icon: Icons.PieChart,
+  },
+  {
+    stage: "changed",
+    label: "What changed",
+    sub: "Period-over-period trends",
+    Icon: Icons.TrendingUp,
+  },
+  {
+    stage: "when",
+    label: "When & where",
+    sub: "When you spend & spending events",
+    Icon: Icons.Calendar,
+  },
+] as const;
 
 function rangeToReportRequest(range: DateRange | undefined, timezone?: string | null) {
   const from = range?.from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -83,16 +128,29 @@ function localDateFromParts(date: ZonedCalendarDate): Date {
   return new Date(date.year, date.month - 1, date.day);
 }
 
-function spendingIntervalData(code: TimePeriod, timezone?: string | null) {
+function isSpendingDashboardPeriod(
+  value: string | null | undefined,
+): value is SpendingDashboardPeriod {
+  return SPENDING_DASHBOARD_PERIODS.includes(value as SpendingDashboardPeriod);
+}
+
+function normalizeSpendingDashboardPeriod(
+  value: string | null | undefined,
+): SpendingDashboardPeriod {
+  if (isSpendingDashboardPeriod(value)) return value;
+  if (value === "1M") return "30D";
+  if (value === "5Y" || value === "ALL") return "1Y";
+  return DEFAULT_INTERVAL;
+}
+
+function spendingIntervalData(code: SpendingDashboardPeriod, timezone?: string | null) {
   const today = getZonedDateParts(new Date(), timezone);
   const start = (() => {
     switch (code) {
-      case "1D":
-        return addCalendarDays(today, -1);
-      case "1W":
-        return addCalendarDays(today, -7);
-      case "1M":
-        return addCalendarMonths(today, -1);
+      case "MTD":
+        return { year: today.year, month: today.month, day: 1 };
+      case "30D":
+        return addCalendarDays(today, -29);
       case "3M":
         return addCalendarMonths(today, -3);
       case "6M":
@@ -101,10 +159,6 @@ function spendingIntervalData(code: TimePeriod, timezone?: string | null) {
         return { year: today.year, month: 1, day: 1 };
       case "1Y":
         return { ...today, year: today.year - 1 };
-      case "5Y":
-        return { ...today, year: today.year - 5 };
-      case "ALL":
-        return { year: 1970, month: 1, day: 1 };
     }
   })();
 
@@ -116,6 +170,58 @@ function spendingIntervalData(code: TimePeriod, timezone?: string | null) {
       to: localDateFromParts(today),
     },
   };
+}
+
+function insightPeriodForDashboardInterval(code: SpendingDashboardPeriod): ReportsPeriod {
+  return code;
+}
+
+interface SpendingDashboardPeriodSelectorProps {
+  value: SpendingDashboardPeriod;
+  onValueChange: (next: SpendingDashboardPeriod) => void;
+  isLoading?: boolean;
+  className?: string;
+}
+
+function SpendingDashboardPeriodSelector({
+  value,
+  onValueChange,
+  isLoading,
+  className,
+}: SpendingDashboardPeriodSelectorProps) {
+  const isMobile = useIsMobile();
+  const items = SPENDING_DASHBOARD_PERIODS.map((period) => ({
+    value: period,
+    label: SPENDING_DASHBOARD_PERIOD_LABELS[period],
+    title: INTERVAL_DESCRIPTIONS[period],
+  }));
+
+  return (
+    <div
+      className={cn("pointer-events-none relative w-full min-w-0", className)}
+      aria-busy={isLoading ? "true" : undefined}
+    >
+      <div
+        className={cn(
+          "pointer-events-none relative z-30 flex w-full justify-center overflow-x-auto overflow-y-hidden",
+          "touch-pan-x snap-x snap-mandatory overscroll-x-contain scroll-smooth",
+          "px-2 md:px-0",
+          "[&::-webkit-scrollbar]:hidden",
+          "[scrollbar-width:none]",
+          "[-webkit-overflow-scrolling:touch]",
+        )}
+      >
+        <AnimatedToggleGroup
+          items={items}
+          value={value}
+          onValueChange={onValueChange}
+          size={isMobile ? "compact" : "sm"}
+          variant="default"
+          className="pointer-events-auto bg-transparent"
+        />
+      </div>
+    </div>
+  );
 }
 
 function priorRange(range: DateRange | undefined): DateRange | undefined {
@@ -167,15 +273,14 @@ export default function SpendingTabContent() {
   // and survives reload. Falls back to the persisted preference, then to
   // DEFAULT_INTERVAL. The "spendingInterval" prefix avoids colliding with
   // other dashboard tabs that may want their own `?interval`.
-  const [persistedInterval] = usePersistentState<TimePeriod>(
+  const [persistedInterval, setPersistedInterval] = usePersistentState<string>(
     INTERVAL_STORAGE_KEY,
     DEFAULT_INTERVAL,
   );
-  const VALID_INTERVALS: TimePeriod[] = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "5Y", "ALL"];
-  const urlInterval = searchParams.get("spendingInterval") as TimePeriod | null;
-  const intervalCode: TimePeriod =
-    urlInterval && VALID_INTERVALS.includes(urlInterval) ? urlInterval : persistedInterval;
-  const [activeCode, setActiveCode] = useState<TimePeriod>(intervalCode);
+  const intervalCode = normalizeSpendingDashboardPeriod(
+    searchParams.get("spendingInterval") ?? persistedInterval,
+  );
+  const [activeCode, setActiveCode] = useState<SpendingDashboardPeriod>(intervalCode);
   const theme: Palette = FOREST_THEME;
 
   const [whereItWentView, setWhereItWentView] = usePersistentState<"list" | "map">(
@@ -297,6 +402,22 @@ export default function SpendingTabContent() {
   // activity's currency (the pre-FX behavior) would mislabel multi-currency
   // accounts. Single-currency users see the same number either way.
   const currency = baseCurrency;
+  const dashboardInsightHref = useMemo(() => {
+    const period = insightPeriodForDashboardInterval(activeCode);
+    const rangeParams =
+      dateRange?.from && dateRange?.to
+        ? `&from=${formatDateISO(dateRange.from)}&to=${formatDateISO(dateRange.to)}`
+        : "";
+    const href = (stage: (typeof INSIGHT_STAGES)[number]["stage"], hash = "") =>
+      `/spending/insights?stage=${stage}&period=${period}${rangeParams}${hash}`;
+    const cashflow = href("where", "#cashflow");
+    return {
+      where: href("where"),
+      changed: href("changed"),
+      when: href("when"),
+      cashflow,
+    };
+  }, [activeCode, dateRange]);
   const accountTypeById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account.accountType])),
     [accounts],
@@ -315,14 +436,11 @@ export default function SpendingTabContent() {
   const priorIsMeaningful = priorSpending >= Math.max(100, totalSpending * 0.02);
   const displayDeltaPct = priorIsMeaningful ? deltaPct : null;
 
-  const handleIntervalSelect = (
-    code: TimePeriod,
-    description: string,
-    _range: DateRange | undefined,
-  ) => {
+  const handleIntervalSelect = (code: SpendingDashboardPeriod) => {
     const initial = spendingIntervalData(code, appTimezone);
     setActiveCode(code);
-    setSelectedIntervalDescription(initial.description || description);
+    setPersistedInterval(code);
+    setSelectedIntervalDescription(initial.description);
     setDateRange(initial.range);
     setSearchParams(
       (prev) => {
@@ -336,9 +454,8 @@ export default function SpendingTabContent() {
 
   const granularity: "day" | "week" | "month" = useMemo(() => {
     switch (activeCode) {
-      case "1D":
-      case "1W":
-      case "1M":
+      case "MTD":
+      case "30D":
         return "day";
       case "3M":
       case "6M":
@@ -513,7 +630,12 @@ export default function SpendingTabContent() {
   }, [report, priorReport, categoriesMeta]);
 
   const insights = useMemo(() => {
-    const items: { icon: string; title: React.ReactNode; sub: React.ReactNode }[] = [];
+    const items: {
+      icon: string;
+      title: React.ReactNode;
+      sub: React.ReactNode;
+      action?: React.ReactNode;
+    }[] = [];
     if (priorSpending > 0 && deltaPct > 0.2) {
       items.push({
         icon: "!",
@@ -542,6 +664,19 @@ export default function SpendingTabContent() {
           </>
         ),
         sub: "Categorize them to improve breakdowns",
+        action: (
+          <Link
+            to="/assistant"
+            state={{
+              aiPrompt: "Help me categorize all my uncategorized transactions.",
+            }}
+            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium underline-offset-4 hover:underline"
+            style={{ color: theme.deep }}
+          >
+            <Icons.Sparkles className="h-3 w-3" />
+            Ask AI to categorize
+          </Link>
+        ),
       });
       if (hasNoCategorizationRules) {
         items.push({
@@ -571,6 +706,7 @@ export default function SpendingTabContent() {
     isBalanceHidden,
     categorizationRules,
     categorizationRulesLoading,
+    theme.deep,
   ]);
 
   return (
@@ -620,8 +756,12 @@ export default function SpendingTabContent() {
           <CashFlowStrip
             income={report?.current.income ?? 0}
             spending={report?.current.outflow ?? 0}
+            saving={report?.current.saved ?? 0}
             currency={currency}
             isLoading={isLoading}
+            incomeHref={dashboardInsightHref.cashflow}
+            spendingHref={dashboardInsightHref.cashflow}
+            savingHref={dashboardInsightHref.cashflow}
           />
         </div>
       </div>
@@ -633,17 +773,6 @@ export default function SpendingTabContent() {
         }}
       >
         <div className="h-[280px] [&_.recharts-layer]:outline-none [&_.recharts-rectangle]:outline-none [&_.recharts-surface]:outline-none">
-          {!isLoading && barData.length > 0 && avgValue > 0 && (
-            <div className="text-muted-foreground/80 flex items-center justify-end gap-1.5 px-6 pt-1 text-[11px] tabular-nums">
-              <span
-                aria-hidden
-                className="inline-block h-px w-3.5 border-t border-dashed border-current opacity-60"
-              />
-              <span>
-                {avgLabel} · {formatCompactAmount(avgValue, currency)}
-              </span>
-            </div>
-          )}
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <Skeleton className="h-full w-full" />
@@ -686,6 +815,17 @@ export default function SpendingTabContent() {
                         <div className="text-foreground font-semibold tabular-nums">
                           {p.future ? "—" : <PrivacyAmount value={p.value} currency={currency} />}
                         </div>
+                        {avgValue > 0 && (
+                          <div className="text-muted-foreground/70 mt-1 flex items-center gap-1.5 tabular-nums">
+                            <span
+                              aria-hidden
+                              className="inline-block h-px w-3 border-t border-dashed border-current opacity-60"
+                            />
+                            <span>
+                              {avgLabel} · {formatCompactAmount(avgValue, currency)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   }}
@@ -724,22 +864,21 @@ export default function SpendingTabContent() {
             </ResponsiveContainer>
           )}
           <div className="flex w-full justify-center">
-            <IntervalSelector
+            <SpendingDashboardPeriodSelector
               className="pointer-events-auto relative z-20 w-full max-w-screen-sm sm:max-w-screen-md md:max-w-2xl lg:max-w-3xl"
-              onIntervalSelect={handleIntervalSelect}
+              value={activeCode}
+              onValueChange={handleIntervalSelect}
               isLoading={isLoading}
-              storageKey={INTERVAL_STORAGE_KEY}
-              defaultValue={DEFAULT_INTERVAL}
             />
           </div>
         </div>
 
         <div className="grow px-4 pb-[calc(var(--mobile-nav-ui-height)+max(var(--mobile-nav-gap),env(safe-area-inset-bottom)))] pt-24 md:px-6 md:pb-6 md:pt-20 lg:px-10 lg:pb-8 lg:pt-24">
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-20">
-            <div className="space-y-6 lg:col-span-2">
+          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:gap-20">
+            <div className="contents lg:col-span-2 lg:block lg:space-y-6">
               <DashboardCard
                 title="Where it went"
-                className="overflow-hidden"
+                className="order-1 overflow-hidden lg:order-none"
                 action={
                   <div className="flex items-center gap-3">
                     <SegmentedToggle
@@ -752,7 +891,7 @@ export default function SpendingTabContent() {
                       onChange={(v) => setWhereItWentView(v as "list" | "map")}
                     />
                     <Link
-                      to="/spending/insights?stage=where"
+                      to={dashboardInsightHref.where}
                       className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
                     >
                       View all →
@@ -782,29 +921,57 @@ export default function SpendingTabContent() {
                 )}
               </DashboardCard>
 
-              <RecentActivityCard
-                activities={activities}
-                accountTypeById={accountTypeById}
-                categoriesMeta={categoriesMeta}
-                currency={currency}
-                uncategorizedCount={uncategorizedCount}
-              />
+              <div className="order-3 lg:order-none">
+                <RecentActivityCard
+                  activities={activities}
+                  accountTypeById={accountTypeById}
+                  categoriesMeta={categoriesMeta}
+                  currency={currency}
+                  uncategorizedCount={uncategorizedCount}
+                />
+              </div>
+
+              <div className="order-6 lg:order-none">
+                <h2 className="pb-2 text-sm font-semibold tracking-tight">Dig deeper</h2>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  {INSIGHT_STAGES.map((s) => (
+                    <Link
+                      key={s.stage}
+                      to={dashboardInsightHref[s.stage]}
+                      className="border-border/50 bg-background/30 hover:border-border hover:bg-background/60 group flex flex-col gap-3 rounded-lg border p-3.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <s.Icon className="h-4 w-4" style={{ color: theme.deep }} />
+                        <Icons.ArrowRight className="text-muted-foreground/40 group-hover:text-foreground h-3.5 w-3.5 transition-colors" />
+                      </div>
+                      <div>
+                        <div className="text-foreground text-sm font-medium">{s.label}</div>
+                        <div className="text-muted-foreground/80 mt-0.5 text-xs leading-snug">
+                          {s.sub}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-6 lg:col-span-1">
-              <BudgetLineChartCard
-                target={budget?.computed.totals.spendingPlanned ?? 0}
-                spent={monthReport?.current.outflow ?? 0}
-                currency={budget?.computed.currency ?? currency}
-                historicalDailyAvg={historicalDailyAvg}
-                allocations={budget?.computed.groupRows.flatMap((row) => row.categories) ?? []}
-                spendingBreakdown={monthReport?.spendingBreakdown ?? []}
-                categoriesMeta={categoriesMeta}
-                monthByDay={monthReport?.byDay ?? []}
-              />
+            <div className="contents lg:col-span-1 lg:block lg:space-y-6">
+              <div className="order-2 lg:order-none">
+                <BudgetLineChartCard
+                  target={budget?.computed.totals.spendingPlanned ?? 0}
+                  spent={monthReport?.current.outflow ?? 0}
+                  currency={budget?.computed.currency ?? currency}
+                  historicalDailyAvg={historicalDailyAvg}
+                  allocations={budget?.computed.groupRows.flatMap((row) => row.categories) ?? []}
+                  spendingBreakdown={monthReport?.spendingBreakdown ?? []}
+                  categoriesMeta={categoriesMeta}
+                  monthByDay={monthReport?.byDay ?? []}
+                />
+              </div>
 
               {insights.length > 0 && (
-                <div className="border-border/60 bg-card/40 rounded-xl border p-4 backdrop-blur-xl md:p-5">
+                <div className="border-border/40 bg-card/70 order-4 rounded-xl border p-4 backdrop-blur-xl md:p-5 lg:order-none">
                   <div className="mb-2 flex items-center gap-2">
                     <Icons.AlertCircle className="h-4 w-4 shrink-0" style={{ color: theme.deep }} />
                     <h3 className="text-foreground text-sm font-semibold">Worth a look</h3>
@@ -826,12 +993,13 @@ export default function SpendingTabContent() {
                         <div>
                           <div className="text-foreground">{ins.title}</div>
                           <div className="text-muted-foreground/80 mt-0.5">{ins.sub}</div>
+                          {ins.action && <div>{ins.action}</div>}
                         </div>
                       </div>
                     ))}
                   </div>
                   <Link
-                    to="/spending/insights?stage=changed"
+                    to={dashboardInsightHref.changed}
                     className="text-muted-foreground hover:text-foreground ml-6 mt-3 inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline"
                   >
                     See trends
@@ -840,12 +1008,14 @@ export default function SpendingTabContent() {
                 </div>
               )}
 
-              <EventsCard
-                activities={subsActivities}
-                accountTypeById={accountTypeById}
-                categoriesMeta={categoriesMeta}
-                theme={theme}
-              />
+              <div className="order-5 lg:order-none">
+                <EventsCard
+                  activities={subsActivities}
+                  accountTypeById={accountTypeById}
+                  categoriesMeta={categoriesMeta}
+                  theme={theme}
+                />
+              </div>
             </div>
           </div>
         </div>

@@ -90,6 +90,15 @@ fn default_limit() -> usize {
     50
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CashFlowBucket {
+    Spending,
+    Income,
+    Saving,
+    Neutral,
+}
+
 /// Canonical cash-activity row, returned by every spending read path
 /// (`list()` and `search()`). Flattens the portfolio-wide `Activity` and
 /// adds the spending-domain enrichments — single-select category assignment
@@ -106,6 +115,9 @@ fn default_limit() -> usize {
 pub struct CashActivity {
     #[serde(flatten)]
     pub activity: Activity,
+    /// Accounting bucket for this activity. Categories label the bucket; they do
+    /// not move the activity between Spending, Income, Saving, and Neutral.
+    pub cash_flow_bucket: CashFlowBucket,
     /// Activity-scope assignments for this row. Typically 0 or 1 (single-select).
     pub assignments: Vec<ActivityTaxonomyAssignment>,
     /// Spending event tag from the `activity_events` join. `None` when untagged.

@@ -51,8 +51,8 @@ DROP INDEX IF EXISTS ix_activity_taxonomy_assignments_activity;
 DROP TABLE IF EXISTS activity_taxonomy_assignments;
 
 -- Drop seeded activity-scope categories + taxonomies
-DELETE FROM taxonomy_categories WHERE taxonomy_id IN ('spending_categories', 'income_sources');
-DELETE FROM taxonomies WHERE id IN ('spending_categories', 'income_sources');
+DELETE FROM taxonomy_categories WHERE taxonomy_id IN ('spending_categories', 'income_sources', 'savings_categories');
+DELETE FROM taxonomies WHERE id IN ('spending_categories', 'income_sources', 'savings_categories');
 
 -- Reverse taxonomy_categories.icon
 ALTER TABLE taxonomy_categories DROP COLUMN icon;
