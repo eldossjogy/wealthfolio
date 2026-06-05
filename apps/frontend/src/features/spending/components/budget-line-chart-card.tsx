@@ -8,8 +8,12 @@ import { formatCompactAmount, Icons, PrivacyAmount, useBalancePrivacy } from "@w
 import { CategoryIcon, type CategoryMetaMap } from "./category-chips";
 import { topCategoryId } from "../lib/category-rollup";
 import type { BudgetCategoryRow } from "../types/budget";
+import type { DayBucket } from "../types/report";
 
 type Status = "ok" | "warn" | "over";
+type PacePoint = { day: number; value: number };
+
+const MIN_HISTORICAL_PACE_MONTHS = 2;
 
 const STATUS_ACCENTS: Record<
   Status,
@@ -53,6 +57,7 @@ export function BudgetLineChartCard({
   spendingBreakdown,
   categoriesMeta,
   monthByDay,
+  historicalByDay,
 }: {
   target: number;
   spent: number;
@@ -61,7 +66,8 @@ export function BudgetLineChartCard({
   allocations: BudgetCategoryRow[];
   spendingBreakdown: { categoryId: string; amount: number; count: number }[];
   categoriesMeta: CategoryMetaMap;
-  monthByDay: { date: string; outflow: number }[];
+  monthByDay: DayBucket[];
+  historicalByDay: DayBucket[];
 }) {
   // All hooks must run unconditionally — the `target <= 0` early return below
   // sits between hooks otherwise, which trips "Rendered more hooks than during
@@ -147,6 +153,25 @@ export function BudgetLineChartCard({
     );
   }, [cumulative, daysInMonth, innerW, innerH, padL, padT, yMax]);
 
+  const historicalPace = useMemo(
+    () => buildHistoricalPaceCurve(historicalByDay, daysInMonth),
+    [historicalByDay, daysInMonth],
+  );
+
+  const targetPacePath = useMemo(() => {
+    if (!historicalPace || target <= 0) return "";
+    const xForDay = (day: number) => padL + ((day - 1) / Math.max(1, daysInMonth - 1)) * innerW;
+    const yForVal = (v: number) => padT + (1 - v / yMax) * innerH;
+    return toSvgPath(
+      historicalPace.points.map((p) => ({
+        day: p.day,
+        value: p.value * target,
+      })),
+      xForDay,
+      yForVal,
+    );
+  }, [historicalPace, target, daysInMonth, innerW, innerH, padL, padT, yMax]);
+
   const haveHistory = historicalDailyAvg > 0;
   const forecast =
     target > 0
@@ -183,7 +208,10 @@ export function BudgetLineChartCard({
   const forecastDelta = forecast - target;
   const willOverspend = forecastReliable && forecastDelta > 0;
 
-  const paceAtToday = (target * dayOfMonth) / daysInMonth;
+  const historicalPaceAtToday = historicalPace?.pctByDay[dayOfMonth];
+  const paceAtToday =
+    target *
+    (historicalPaceAtToday !== undefined ? historicalPaceAtToday : dayOfMonth / daysInMonth);
   const gapVsPace = spent - paceAtToday;
   const aheadOfPace = gapVsPace < 0;
 
@@ -263,17 +291,31 @@ export function BudgetLineChartCard({
           preserveAspectRatio="none"
           className="block h-[110px] w-full"
         >
-          <line
-            x1={paceX1}
-            y1={paceY1}
-            x2={paceX2}
-            y2={paceY2}
-            stroke="var(--muted-foreground)"
-            strokeOpacity={0.35}
-            strokeDasharray="3 4"
-            strokeWidth={1.25}
-            vectorEffect="non-scaling-stroke"
-          />
+          {targetPacePath ? (
+            <path
+              d={targetPacePath}
+              fill="none"
+              stroke="var(--muted-foreground)"
+              strokeOpacity={0.35}
+              strokeDasharray="3 4"
+              strokeWidth={1.25}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : (
+            <line
+              x1={paceX1}
+              y1={paceY1}
+              x2={paceX2}
+              y2={paceY2}
+              stroke="var(--muted-foreground)"
+              strokeOpacity={0.35}
+              strokeDasharray="3 4"
+              strokeWidth={1.25}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
           {actualPath && (
             <path
               d={actualPath}
@@ -348,7 +390,7 @@ export function BudgetLineChartCard({
           <div className="text-muted-foreground/60 text-[10px]">
             {forecastReliable
               ? haveHistory
-                ? "vs 90-day avg"
+                ? "vs last 3 months"
                 : "at current pace"
               : "more data needed"}
           </div>
@@ -395,6 +437,96 @@ export function BudgetLineChartCard({
       </div>
     </DashboardCard>
   );
+}
+
+function buildHistoricalPaceCurve(
+  byDay: DayBucket[],
+  currentDaysInMonth: number,
+): { points: PacePoint[]; pctByDay: number[] } | null {
+  const months = new Map<
+    string,
+    { daysInMonth: number; outflowByDay: Map<number, number>; total: number }
+  >();
+
+  for (const bucket of byDay) {
+    const parsed = parseDayBucketDate(bucket.date);
+    if (!parsed) continue;
+    const outflow = Number.isFinite(bucket.outflow) ? bucket.outflow : 0;
+
+    const key = `${parsed.year}-${String(parsed.month).padStart(2, "0")}`;
+    const month = months.get(key) ?? {
+      daysInMonth: new Date(parsed.year, parsed.month, 0).getDate(),
+      outflowByDay: new Map<number, number>(),
+      total: 0,
+    };
+    month.outflowByDay.set(parsed.day, (month.outflowByDay.get(parsed.day) ?? 0) + outflow);
+    month.total += outflow;
+    months.set(key, month);
+  }
+
+  const eligibleMonths = Array.from(months.values())
+    .filter((month) => month.total > 0)
+    .map((month) => {
+      const cumulativeByDay = Array.from({ length: month.daysInMonth + 1 }, () => 0);
+      let running = 0;
+      for (let day = 1; day <= month.daysInMonth; day++) {
+        running += month.outflowByDay.get(day) ?? 0;
+        cumulativeByDay[day] = Math.max(cumulativeByDay[day - 1], clamp(running, 0, month.total));
+      }
+      return { ...month, cumulativeByDay };
+    });
+
+  if (eligibleMonths.length < MIN_HISTORICAL_PACE_MONTHS) return null;
+
+  const pctByDay = Array.from({ length: currentDaysInMonth + 1 }, () => 0);
+  const points: PacePoint[] = [];
+  for (let day = 1; day <= currentDaysInMonth; day++) {
+    const values = eligibleMonths.map((month) => {
+      const historyDay = Math.min(
+        month.daysInMonth,
+        Math.max(1, Math.ceil((day / currentDaysInMonth) * month.daysInMonth)),
+      );
+      return clamp(month.cumulativeByDay[historyDay] / month.total, 0, 1);
+    });
+    const value = median(values);
+    pctByDay[day] = value;
+    points.push({ day, value });
+  }
+
+  return { points, pctByDay };
+}
+
+function parseDayBucketDate(date: string): { year: number; month: number; day: number } | null {
+  const [yearRaw, monthRaw, dayRaw] = date.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function toSvgPath(
+  points: PacePoint[],
+  xForDay: (day: number) => number,
+  yForVal: (value: number) => number,
+): string {
+  if (!points.length) return "";
+  return (
+    "M " +
+    points.map((p) => `${xForDay(p.day).toFixed(2)} ${yForVal(p.value).toFixed(2)}`).join(" L ")
+  );
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 const BudgetManageLink = () => (

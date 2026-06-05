@@ -967,6 +967,7 @@ export default function SpendingTabContent() {
                   spendingBreakdown={monthReport?.spendingBreakdown ?? []}
                   categoriesMeta={categoriesMeta}
                   monthByDay={monthReport?.byDay ?? []}
+                  historicalByDay={historyReport?.byDay ?? []}
                 />
               </div>
 
