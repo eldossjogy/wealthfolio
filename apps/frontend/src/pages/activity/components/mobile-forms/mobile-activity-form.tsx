@@ -321,14 +321,10 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
     assetId:
       isTransferType && !isSecurityTransferActivity
         ? undefined
-        : (activity?.assetSymbol ?? activity?.assetId),
-    activityDate: activity?.date
-      ? new Date(activity.date)
-      : (() => {
-          const date = new Date();
-          date.setHours(16, 0, 0, 0);
-          return date;
-        })(),
+        : (activity?.assetSymbol ?? activity?.assetId)
+          ? (activity?.assetSymbol ?? activity?.assetId)
+          : undefined,
+    activityDate: activity?.date ? new Date(activity.date) : new Date(),
     currency: activity?.currency ?? "",
     quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
     exchangeMic: activity?.exchangeMic,
