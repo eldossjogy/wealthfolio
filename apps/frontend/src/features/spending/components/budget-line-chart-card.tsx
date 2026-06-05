@@ -471,10 +471,7 @@ function buildHistoricalPaceCurve(
       let running = 0;
       for (let day = 1; day <= month.daysInMonth; day++) {
         running += month.outflowByDay.get(day) ?? 0;
-        cumulativeByDay[day] = Math.max(
-          cumulativeByDay[day - 1],
-          clamp(running, 0, month.total),
-        );
+        cumulativeByDay[day] = Math.max(cumulativeByDay[day - 1], clamp(running, 0, month.total));
       }
       return { ...month, cumulativeByDay };
     });
