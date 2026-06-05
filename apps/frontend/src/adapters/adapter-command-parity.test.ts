@@ -11,6 +11,9 @@ const repoRoot = path.resolve(currentDir, "../../../..");
 
 const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*['"`]([a-zA-Z0-9_]+)['"`]/g;
 const TAURI_REGISTERED_COMMAND_RE = /commands::[a-z_]+::([a-zA-Z0-9_]+)/g;
+const RUNTIME_EXPORT_RE =
+  /^export\s+(?:const|async\s+function|function|class|enum)\s+([a-zA-Z_$][\w$]*)/gm;
+const NAMED_REEXPORT_RE = /export\s*\{([^{}]*)\}\s*from\s*["']([^"']+)["']/g;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,6 +72,41 @@ function collectRegisteredTauriCommands(): Set<string> {
   return new Set([...source.matchAll(TAURI_REGISTERED_COMMAND_RE)].map((match) => match[1]));
 }
 
+function collectRuntimeExports(file: string): Set<string> {
+  const source = readFileSync(file, "utf8");
+  return new Set([...source.matchAll(RUNTIME_EXPORT_RE)].map((match) => match[1]));
+}
+
+function collectNamedReexports(
+  file: string,
+  modulePath: string,
+): { hasStar: boolean; names: Set<string> } {
+  const source = readFileSync(file, "utf8");
+  const names = new Set<string>();
+  let hasStar = false;
+
+  for (const match of source.matchAll(NAMED_REEXPORT_RE)) {
+    if (match[2] !== modulePath) continue;
+
+    for (const rawName of match[1].split(",")) {
+      const name = rawName
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.trim();
+      if (name) names.add(name);
+    }
+  }
+
+  if (
+    source.includes(`export * from "${modulePath}"`) ||
+    source.includes(`export * from '${modulePath}'`)
+  ) {
+    hasStar = true;
+  }
+
+  return { hasStar, names };
+}
+
 describe("adapter command parity", () => {
   it("registers every command reachable from the web adapter", () => {
     const files = [
@@ -98,6 +136,29 @@ describe("adapter command parity", () => {
     const missing = [...invokedCommands.entries()]
       .filter(([command]) => !registeredCommands.has(command))
       .map(([command, files]) => `${command}: ${files.join(", ")}`)
+      .sort();
+
+    expect(missing).toEqual([]);
+  });
+
+  it("re-exports shared runtime commands from the web adapter barrel", () => {
+    const sharedDir = path.join(frontendSrcDir, "adapters/shared");
+    const webIndexFile = path.join(frontendSrcDir, "adapters/web/index.ts");
+    const missing = readdirSync(sharedDir, { withFileTypes: true })
+      .filter(
+        (entry) => entry.isFile() && entry.name.endsWith(".ts") && entry.name !== "platform.ts",
+      )
+      .flatMap((entry) => {
+        const moduleName = entry.name.replace(/\.ts$/, "");
+        const sharedExports = collectRuntimeExports(path.join(sharedDir, entry.name));
+        const webReexports = collectNamedReexports(webIndexFile, `../shared/${moduleName}`);
+
+        if (webReexports.hasStar) return [];
+
+        return [...sharedExports]
+          .filter((name) => !webReexports.names.has(name))
+          .map((name) => `${moduleName}.${name}`);
+      })
       .sort();
 
     expect(missing).toEqual([]);

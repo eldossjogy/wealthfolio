@@ -3,7 +3,7 @@
 use super::*;
 use crate::accounts::{account_types, Account, AccountRepositoryTrait, AccountUpdate, NewAccount};
 use crate::assets::{
-    Asset, AssetKind, AssetRepositoryTrait, NewAsset, ProviderProfile, QuoteMode,
+    Asset, AssetKind, AssetRepositoryTrait, InstrumentType, NewAsset, ProviderProfile, QuoteMode,
     UpdateAssetProfile,
 };
 use crate::errors::Result;
@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
 
@@ -1296,6 +1297,48 @@ async fn test_staleness_detection() {
     assert_eq!(result.stale_assets.len(), 1);
     assert_eq!(result.stale_assets[0].asset_id, "AAPL");
     assert!(result.stale_assets[0].days_stale > 90);
+    assert_eq!(result.oldest_valuation_date, Some(old_date));
+}
+
+#[tokio::test]
+async fn test_expired_option_excluded_from_stale_valuations() {
+    let account = create_test_account("acc1", "SECURITIES", "USD");
+    let stock = create_test_asset("AAPL", AssetKind::Investment, "USD");
+    let mut option = create_test_asset("TSLA200117C00397500", AssetKind::Investment, "USD");
+    option.instrument_type = Some(InstrumentType::Option);
+    option.instrument_symbol = Some("TSLA200117C00397500".to_string());
+    option.metadata = Some(json!({
+        "option": {
+            "expiration": "2020-01-17"
+        }
+    }));
+
+    let stock_position = create_test_position("acc1", "AAPL", dec!(100), dec!(15000), "USD");
+    let option_position =
+        create_test_position("acc1", "TSLA200117C00397500", dec!(1), dec!(500), "USD");
+    let snapshot = create_test_snapshot(
+        "acc1",
+        vec![stock_position, option_position],
+        HashMap::new(),
+    );
+
+    let old_date = NaiveDate::from_ymd_opt(2023, 10, 7).unwrap();
+    let stock_quote = create_test_quote("AAPL", dec!(150), old_date, "USD");
+    let option_quote = create_test_quote("TSLA200117C00397500", dec!(25), old_date, "USD");
+
+    let service = create_net_worth_service(
+        vec![account],
+        vec![stock, option],
+        vec![snapshot],
+        vec![stock_quote, option_quote],
+    );
+
+    let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+    let result = service.get_net_worth(date).await.unwrap();
+
+    assert_eq!(result.assets.total, dec!(15000));
+    assert_eq!(result.stale_assets.len(), 1);
+    assert_eq!(result.stale_assets[0].asset_id, "AAPL");
     assert_eq!(result.oldest_valuation_date, Some(old_date));
 }
 

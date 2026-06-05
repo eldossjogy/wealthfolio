@@ -13,7 +13,7 @@ use super::net_worth_model::{
 };
 use super::net_worth_traits::NetWorthServiceTrait;
 use crate::accounts::{account_types, is_liability_account_type, AccountRepositoryTrait};
-use crate::assets::{AssetKind, AssetRepositoryTrait};
+use crate::assets::{Asset, AssetKind, AssetRepositoryTrait};
 use crate::constants::DECIMAL_PRECISION;
 use crate::errors::Result;
 use crate::fx::currency::normalize_amount;
@@ -81,6 +81,29 @@ impl NetWorthService {
             AssetKind::Fx => AssetCategory::Other, // Fx is not holdable
             AssetKind::Other => AssetCategory::Other,
         }
+    }
+
+    fn is_expired_option_asset(asset: &Asset, reference_date: NaiveDate) -> bool {
+        if !asset.is_option() {
+            return false;
+        }
+
+        let expiration = asset.option_spec().map(|spec| spec.expiration).or_else(|| {
+            [
+                asset.instrument_symbol.as_deref(),
+                asset.display_code.as_deref(),
+                Some(asset.id.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|symbol| {
+                crate::utils::occ_symbol::parse_occ_symbol(symbol)
+                    .ok()
+                    .map(|parsed| parsed.expiration)
+            })
+        });
+
+        matches!(expiration, Some(exp) if exp < reference_date)
     }
 
     /// Get the latest quote for an asset on or before the given date.
@@ -380,7 +403,17 @@ impl NetWorthServiceTrait for NetWorthService {
                     }
 
                     // Get asset info to determine category more precisely
-                    let asset = asset_map.get(asset_id);
+                    let asset = asset_map.get(asset_id).copied();
+                    if let Some(asset) = asset {
+                        if Self::is_expired_option_asset(asset, date) {
+                            debug!(
+                                "Skipping expired option {} while calculating net worth as of {}.",
+                                asset_id, date
+                            );
+                            continue;
+                        }
+                    }
+
                     let asset_name = asset.and_then(|a| {
                         a.name
                             .clone()
