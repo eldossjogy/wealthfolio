@@ -1984,6 +1984,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proportional_topup_uses_affordable_whole_share_candidate() {
+        // Both holdings are full equity exposure. The expensive one has higher
+        // exposure per share only because it costs more, but the sleeve budget cannot
+        // buy it. Top-up must fall back to the affordable candidate.
+        let total = dec!(10000);
+        let h_expensive = make_holding("h-expensive", "EXP", dec!(1), dec!(1500));
+        let h_cheap = make_holding("h-cheap", "CHEAP", dec!(1), dec!(100));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, true),
+            make_report(vec![make_drift_row("equity", 5000, 5000, total)], total),
+            make_contributions(vec![
+                make_contribution(&h_expensive, "equity", dec!(1500)),
+                make_contribution(&h_cheap, "equity", dec!(100)),
+            ]),
+            vec![make_cash_holding(dec!(1000), "USD"), h_expensive, h_cheap],
+        );
+
+        let plan = svc.calculate_plan(make_input(dec!(1000))).await.unwrap();
+
+        let trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("CHEAP"))
+            .expect("top-up should use the affordable equity candidate");
+        assert_eq!(trade.quantity, Some(dec!(10)));
+        assert_eq!(plan.cash_used, dec!(1000));
+    }
+
+    #[tokio::test]
+    async fn proportional_topup_preserves_required_cash_target() {
+        // Portfolio is exactly at its 80% equity / 20% cash target. The available
+        // cash is target cash, not excess cash, so top-up must not spend it and
+        // create drift from a zero-drift starting point.
+        let total = dec!(10000);
+        let h_vti = make_holding("h-vti", "VTI", dec!(80), dec!(8000));
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(
+                vec![
+                    make_drift_row("equity", 8000, 8000, total),
+                    DriftRow {
+                        is_cash: true,
+                        ..make_drift_row("cash", 2000, 2000, total)
+                    },
+                ],
+                total,
+            ),
+            make_contributions(vec![make_contribution(&h_vti, "equity", dec!(8000))]),
+            vec![make_cash_holding(dec!(2000), "USD"), h_vti],
+        );
+
+        let plan = svc.calculate_plan(make_input(dec!(2000))).await.unwrap();
+
+        assert_eq!(plan.max_drift_bps_before, 0);
+        assert_eq!(plan.cash_used, Decimal::ZERO);
+        assert_eq!(plan.cash_remaining, dec!(2000));
+        assert_eq!(plan.max_drift_bps_after, 0);
+    }
+
+    #[tokio::test]
     async fn sell_to_rebalance_does_not_top_up_remaining_proceeds() {
         // SellToRebalance: sell overweight bonds, use proceeds to buy equity.
         // Any leftover proceeds stay as cash_remaining — no proportional top-up.

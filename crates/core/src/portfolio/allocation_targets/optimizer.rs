@@ -131,6 +131,63 @@ impl DriftPriorityOptimizer {
             .collect()
     }
 
+    fn topup_shares_for_budget(
+        candidate: &AssetCandidate,
+        budget: Decimal,
+        profile: &RebalanceProfile,
+    ) -> Decimal {
+        if budget <= Decimal::ZERO || candidate.price <= Decimal::ZERO {
+            return Decimal::ZERO;
+        }
+
+        let shares = if profile.whole_shares_only {
+            (budget / candidate.price).floor()
+        } else {
+            budget / candidate.price
+        };
+
+        if shares <= Decimal::ZERO {
+            return Decimal::ZERO;
+        }
+
+        let amount = shares * candidate.price;
+        if profile.min_trade_amount > Decimal::ZERO && amount < profile.min_trade_amount {
+            return Decimal::ZERO;
+        }
+
+        shares
+    }
+
+    fn remaining_cash_excess_after_buys(
+        categories: &[CategoryState],
+        total_value: Decimal,
+        profile: &RebalanceProfile,
+        drift_band: Decimal,
+        sell_proceeds: Decimal,
+        buy_amount: Decimal,
+    ) -> Option<Decimal> {
+        let required_cash: Vec<&CategoryState> = categories
+            .iter()
+            .filter(|c| c.is_required && c.is_cash)
+            .collect();
+        if required_cash.is_empty() {
+            return None;
+        }
+        if total_value <= Decimal::ZERO {
+            return Some(Decimal::ZERO);
+        }
+
+        let current_cash: Decimal = required_cash.iter().map(|c| c.current_value).sum();
+        let target_bps: i32 = required_cash.iter().map(|c| c.target_bps).sum();
+        let stop_bps = match profile.rebalance_goal {
+            RebalanceGoal::ExactTarget => Decimal::from(target_bps),
+            RebalanceGoal::NearestBand => (Decimal::from(target_bps) + drift_band).min(dec!(10000)),
+        };
+        let stop_value = stop_bps / dec!(10000) * total_value;
+
+        Some((current_cash + sell_proceeds - stop_value - buy_amount).max(Decimal::ZERO))
+    }
+
     /// Per-category drift the planner tries to minimise.
     ///
     /// `ExactTarget` measures distance to the exact target. `NearestBand` only counts
@@ -446,7 +503,7 @@ impl DriftPriorityOptimizer {
 
     /// Proportional top-up: after the drift-improving greedy exhausts its gains, deploy
     /// remaining cash proportionally to `target_bps` weights. Each sleeve gets the
-    /// candidate with the highest per-share exposure to that category.
+    /// candidate with the highest category exposure per invested dollar.
     ///
     /// Accumulates into the caller's `shares_bought` so greedy + top-up shares for the
     /// same asset merge into a single output trade.
@@ -499,52 +556,39 @@ impl DriftPriorityOptimizer {
                 continue;
             }
 
-            // Best candidate = highest per-share exposure to this category.
+            // Best candidate = highest category exposure per invested dollar.
             // Tie-break: lower price preferred (consistent with greedy tie-break).
             let best = candidates
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| {
-                    c.price > Decimal::ZERO
-                        && c.exposure_per_share
-                            .get(&cat.category_id)
-                            .is_some_and(|e| *e > Decimal::ZERO)
+                .filter_map(|(idx, candidate)| {
+                    let exposure = candidate
+                        .exposure_per_share
+                        .get(&cat.category_id)
+                        .copied()
+                        .filter(|e| *e > Decimal::ZERO)?;
+                    if candidate.price <= Decimal::ZERO {
+                        return None;
+                    }
+                    let shares = Self::topup_shares_for_budget(candidate, sleeve_budget, profile);
+                    if shares <= Decimal::ZERO {
+                        return None;
+                    }
+                    Some((idx, candidate, shares, exposure / candidate.price))
                 })
-                .max_by(|(_, a), (_, b)| {
-                    let ea = a
-                        .exposure_per_share
-                        .get(&cat.category_id)
-                        .copied()
-                        .unwrap_or_default();
-                    let eb = b
-                        .exposure_per_share
-                        .get(&cat.category_id)
-                        .copied()
-                        .unwrap_or_default();
-                    ea.cmp(&eb)
+                .max_by(|(_, a, _, score_a), (_, b, _, score_b)| {
+                    score_a
+                        .cmp(score_b)
                         .then(b.price.cmp(&a.price))
-                        .then(a.symbol.cmp(&b.symbol))
-                        .then(a.asset_id.cmp(&b.asset_id))
+                        .then(b.symbol.cmp(&a.symbol))
+                        .then(b.asset_id.cmp(&a.asset_id))
                 });
 
-            let Some((best_idx, best_candidate)) = best else {
+            let Some((best_idx, best_candidate, shares, _)) = best else {
                 continue;
             };
-
-            let shares = if profile.whole_shares_only {
-                (sleeve_budget / best_candidate.price).floor()
-            } else {
-                sleeve_budget / best_candidate.price
-            };
-
-            if shares <= Decimal::ZERO {
-                continue;
-            }
 
             let amount = shares * best_candidate.price;
-            if profile.min_trade_amount > Decimal::ZERO && amount < profile.min_trade_amount {
-                continue;
-            }
 
             for (cat_id, expo) in &best_candidate.exposure_per_share {
                 *values.entry(cat_id.clone()).or_default() += expo * shares;
@@ -941,6 +985,17 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 .map(|(s, c)| s * c.price)
                 .sum();
             let topup_cash = (topup_pool - greedy_used).max(Decimal::ZERO);
+            let topup_cash = match Self::remaining_cash_excess_after_buys(
+                &categories,
+                total_value,
+                &profile,
+                drift_band,
+                sell_proceeds,
+                greedy_used,
+            ) {
+                Some(cash_excess) => topup_cash.min(cash_excess),
+                None => topup_cash,
+            };
             if topup_cash > Decimal::ZERO {
                 Self::run_proportional_topup(
                     &mut values,
