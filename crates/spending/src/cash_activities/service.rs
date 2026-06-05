@@ -12,20 +12,24 @@ use wealthfolio_core::activities::{Activity, ActivityRepositoryTrait};
 use super::{
     model::{
         CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
-        CashActivitySortField, CashActivityStatusFilter, SortDirection,
+        CashActivitySortField, CashActivityStatusFilter, CashFlowBucket, SortDirection,
     },
     CASH_ACTIVITY_TYPES,
 };
 use crate::activity_assignments::{
     ActivityTaxonomyAssignment, ActivityTaxonomyAssignmentService, BulkCategoryAssignment,
 };
-use crate::activity_classification::{classify_activity, SpendingClassification};
+use crate::activity_classification::{
+    classify_activity, classify_activity_for_aggregation, within_spending_transfer_groups,
+    SpendingClassification,
+};
 use crate::error::SpendingError;
 use crate::events::EventsService;
 use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
 const INCOME_TAXONOMY: &str = "income_sources";
+const SAVINGS_TAXONOMY: &str = "savings_categories";
 const MAX_CASH_ACTIVITY_SEARCH_LIMIT: usize = 1_000;
 
 /// Service for listing/searching activities scoped to the user's spending accounts.
@@ -76,16 +80,31 @@ impl CashActivityService {
             return Ok(Vec::new());
         }
 
-        let (target_accounts, account_types) =
-            self.resolve_target_accounts(filter.account_ids, &s.account_ids)?;
+        let (all_spending_accounts, account_types) =
+            self.resolve_target_accounts(None, &s.account_ids)?;
+        if all_spending_accounts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let all_spending_account_ids: HashSet<&str> =
+            all_spending_accounts.iter().map(String::as_str).collect();
+        let requested_accounts = filter
+            .account_ids
+            .unwrap_or_else(|| all_spending_accounts.clone());
+        let target_accounts: HashSet<String> = requested_accounts
+            .into_iter()
+            .filter(|id| all_spending_account_ids.contains(id.as_str()))
+            .collect();
         if target_accounts.is_empty() {
             return Ok(Vec::new());
         }
 
         let mut activities = self
             .activity_repo
-            .get_activities_by_account_ids(&target_accounts)
+            .get_activities_by_account_ids(&all_spending_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let transfer_context_acts: Vec<&Activity> = activities.iter().collect();
+        let transfer_groups = within_spending_transfer_groups(&transfer_context_acts);
+        activities.retain(|a| target_accounts.contains(&a.account_id));
 
         let allowed_types: Vec<String> = filter
             .activity_types
@@ -113,8 +132,10 @@ impl CashActivityService {
             .map(|a| {
                 let assignments = by_activity.remove(&a.id).unwrap_or_default();
                 let event_id = tag_map.remove(&a.id);
+                let cash_flow_bucket = cash_flow_bucket_for(&a, &account_types, &transfer_groups);
                 CashActivity {
                     activity: a,
+                    cash_flow_bucket,
                     assignments,
                     event_id,
                 }
@@ -137,8 +158,23 @@ impl CashActivityService {
             });
         }
 
-        let (target_accounts, account_types) =
-            self.resolve_target_accounts(req.account_ids, &s.account_ids)?;
+        let (all_spending_accounts, account_types) =
+            self.resolve_target_accounts(None, &s.account_ids)?;
+        if all_spending_accounts.is_empty() {
+            return Ok(CashActivitySearchResponse {
+                items: Vec::new(),
+                total_count: 0,
+            });
+        }
+        let all_spending_account_ids: HashSet<&str> =
+            all_spending_accounts.iter().map(String::as_str).collect();
+        let requested_accounts = req
+            .account_ids
+            .unwrap_or_else(|| all_spending_accounts.clone());
+        let target_accounts: HashSet<String> = requested_accounts
+            .into_iter()
+            .filter(|id| all_spending_account_ids.contains(id.as_str()))
+            .collect();
         if target_accounts.is_empty() {
             return Ok(CashActivitySearchResponse {
                 items: Vec::new(),
@@ -148,8 +184,11 @@ impl CashActivityService {
 
         let mut activities = self
             .activity_repo
-            .get_activities_by_account_ids(&target_accounts)
+            .get_activities_by_account_ids(&all_spending_accounts)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let transfer_context_acts: Vec<&Activity> = activities.iter().collect();
+        let transfer_groups = within_spending_transfer_groups(&transfer_context_acts);
+        activities.retain(|a| target_accounts.contains(&a.account_id));
 
         let allowed_types: Vec<String> = req
             .activity_types
@@ -226,10 +265,13 @@ impl CashActivityService {
 
             activities.retain(|a| {
                 let asgs = by_activity.get(a.id.as_str());
-                let is_neutral = account_types
-                    .get(&a.account_id)
-                    .is_some_and(|account_type| is_neutral_visible_cash_activity(a, account_type));
-                let has_category = is_neutral || asgs.map(|v| !v.is_empty()).unwrap_or(false);
+                let bucket = cash_flow_bucket_for(a, &account_types, &transfer_groups);
+                let expected_taxonomy = taxonomy_for_bucket(bucket);
+                let has_category = expected_taxonomy
+                    .and_then(|taxonomy_id| {
+                        asgs.map(|v| v.iter().any(|asg| asg.taxonomy_id == taxonomy_id))
+                    })
+                    .unwrap_or(bucket == CashFlowBucket::Neutral);
 
                 match req.status {
                     CashActivityStatusFilter::All => {}
@@ -254,8 +296,10 @@ impl CashActivityService {
                     if !cats.is_empty() {
                         let any = asgs
                             .map(|v| {
-                                v.iter()
-                                    .any(|asg| cats.iter().any(|c| c == &asg.category_id))
+                                v.iter().any(|asg| {
+                                    expected_taxonomy == Some(asg.taxonomy_id.as_str())
+                                        && cats.iter().any(|c| c == &asg.category_id)
+                                })
                             })
                             .unwrap_or(false);
                         if !any {
@@ -267,8 +311,10 @@ impl CashActivityService {
                     if !subs.is_empty() {
                         let any = asgs
                             .map(|v| {
-                                v.iter()
-                                    .any(|asg| subs.iter().any(|c| c == &asg.category_id))
+                                v.iter().any(|asg| {
+                                    expected_taxonomy == Some(asg.taxonomy_id.as_str())
+                                        && subs.iter().any(|c| c == &asg.category_id)
+                                })
                             })
                             .unwrap_or(false);
                         if !any {
@@ -323,8 +369,10 @@ impl CashActivityService {
             .map(|a| {
                 let assignments = by_activity.remove(&a.id).unwrap_or_default();
                 let event_id = tag_map.remove(&a.id);
+                let cash_flow_bucket = cash_flow_bucket_for(&a, &account_types, &transfer_groups);
                 CashActivity {
                     activity: a,
+                    cash_flow_bucket,
                     assignments,
                     event_id,
                 }
@@ -352,11 +400,16 @@ impl CashActivityService {
         }
 
         let allowed_accounts: HashSet<&str> = target_accounts.iter().map(String::as_str).collect();
-        let mut activities = self
+        let context_activities = self
             .activity_repo
-            .get_activities_by_ids(activity_ids)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .get_activities_by_account_ids(&target_accounts)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let transfer_context_acts: Vec<&Activity> = context_activities.iter().collect();
+        let transfer_groups = within_spending_transfer_groups(&transfer_context_acts);
+        let requested_ids: HashSet<&str> = activity_ids.iter().map(String::as_str).collect();
+        let mut activities = context_activities
             .into_iter()
+            .filter(|activity| requested_ids.contains(activity.id.as_str()))
             .filter(|activity| allowed_accounts.contains(activity.account_id.as_str()))
             .collect::<Vec<_>>();
         retain_classified_cash_activities(&mut activities, &account_types);
@@ -370,8 +423,11 @@ impl CashActivityService {
             .map(|activity| {
                 let assignments = by_activity.remove(&activity.id).unwrap_or_default();
                 let event_id = tag_map.remove(&activity.id);
+                let cash_flow_bucket =
+                    cash_flow_bucket_for(&activity, &account_types, &transfer_groups);
                 CashActivity {
                     activity,
+                    cash_flow_bucket,
                     assignments,
                     event_id,
                 }
@@ -393,7 +449,7 @@ impl CashActivityService {
         taxonomy_id: &str,
         category_id: &str,
     ) -> Result<ActivityTaxonomyAssignment> {
-        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id)
+        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id, true)
             .await?;
         self.assignments
             .assign_single(activity_id, taxonomy_id, category_id)
@@ -401,7 +457,7 @@ impl CashActivityService {
     }
 
     pub async fn unassign_category(&self, activity_id: &str, taxonomy_id: &str) -> Result<()> {
-        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id)
+        self.ensure_activity_assignment_allowed(activity_id, taxonomy_id, false)
             .await?;
         self.assignments.unassign(activity_id, taxonomy_id).await
     }
@@ -411,7 +467,7 @@ impl CashActivityService {
         items: &[BulkCategoryAssignment],
     ) -> Result<Vec<ActivityTaxonomyAssignment>> {
         for item in items {
-            self.ensure_activity_assignment_allowed(&item.activity_id, &item.taxonomy_id)
+            self.ensure_activity_assignment_allowed(&item.activity_id, &item.taxonomy_id, true)
                 .await?;
         }
         self.assignments.assign_many_single_select(items).await
@@ -490,14 +546,60 @@ impl CashActivityService {
         &self,
         activity_id: &str,
         taxonomy_id: &str,
+        enforce_bucket: bool,
     ) -> Result<Activity> {
-        if taxonomy_id != SPENDING_TAXONOMY && taxonomy_id != INCOME_TAXONOMY {
+        if taxonomy_id != SPENDING_TAXONOMY
+            && taxonomy_id != INCOME_TAXONOMY
+            && taxonomy_id != SAVINGS_TAXONOMY
+        {
             return Err(SpendingError::InvalidInput {
                 message: "Taxonomy is not assignable to spending activities".to_string(),
             }
             .into());
         }
-        self.ensure_activity_in_spending_scope(activity_id).await
+        let activity = self.ensure_activity_in_spending_scope(activity_id).await?;
+        if !enforce_bucket {
+            return Ok(activity);
+        }
+
+        let s = self.settings.get().await?;
+        let (target_accounts, account_types) =
+            self.resolve_target_accounts(None, &s.account_ids)?;
+        let Some(account_type) = account_types.get(&activity.account_id) else {
+            return Err(SpendingError::InvalidInput {
+                message: "Activity account does not support spending tracking".to_string(),
+            }
+            .into());
+        };
+        let context_activities = self
+            .activity_repo
+            .get_activities_by_account_ids(&target_accounts)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let transfer_context_acts: Vec<&Activity> = context_activities.iter().collect();
+        let transfer_groups = within_spending_transfer_groups(&transfer_context_acts);
+        let bucket = cash_flow_bucket_from_classification(classify_activity_for_aggregation(
+            &activity,
+            account_type,
+            &transfer_groups,
+        ));
+        let Some(expected_taxonomy) = taxonomy_for_bucket(bucket) else {
+            return Err(SpendingError::InvalidInput {
+                message: "Neutral transfers cannot be categorized. Change or unlink the transfer if it should count as spending.".to_string(),
+            }
+            .into());
+        };
+        if expected_taxonomy != taxonomy_id {
+            return Err(SpendingError::InvalidInput {
+                message: format!(
+                    "{} activities can only use {} categories. Categories label the cash-flow bucket; they do not change it.",
+                    bucket.label(),
+                    bucket.taxonomy_label(),
+                ),
+            }
+            .into());
+        }
+
+        Ok(activity)
     }
 
     async fn ensure_activity_in_spending_scope(&self, activity_id: &str) -> Result<Activity> {
@@ -548,6 +650,65 @@ fn retain_classified_cash_activities(
     });
 }
 
+fn cash_flow_bucket_for(
+    activity: &Activity,
+    account_types: &HashMap<String, String>,
+    transfer_groups: &HashSet<String>,
+) -> CashFlowBucket {
+    account_types
+        .get(&activity.account_id)
+        .map(|account_type| {
+            cash_flow_bucket_from_classification(classify_activity_for_aggregation(
+                activity,
+                account_type,
+                transfer_groups,
+            ))
+        })
+        .unwrap_or(CashFlowBucket::Neutral)
+}
+
+fn cash_flow_bucket_from_classification(classification: SpendingClassification) -> CashFlowBucket {
+    match classification {
+        SpendingClassification::Income => CashFlowBucket::Income,
+        SpendingClassification::Expense | SpendingClassification::ExpenseRefund => {
+            CashFlowBucket::Spending
+        }
+        SpendingClassification::Saving => CashFlowBucket::Saving,
+        SpendingClassification::InternalTransfer | SpendingClassification::Ignored => {
+            CashFlowBucket::Neutral
+        }
+    }
+}
+
+fn taxonomy_for_bucket(bucket: CashFlowBucket) -> Option<&'static str> {
+    match bucket {
+        CashFlowBucket::Spending => Some(SPENDING_TAXONOMY),
+        CashFlowBucket::Income => Some(INCOME_TAXONOMY),
+        CashFlowBucket::Saving => Some(SAVINGS_TAXONOMY),
+        CashFlowBucket::Neutral => None,
+    }
+}
+
+impl CashFlowBucket {
+    fn label(self) -> &'static str {
+        match self {
+            CashFlowBucket::Spending => "Spending",
+            CashFlowBucket::Income => "Income",
+            CashFlowBucket::Saving => "Saving",
+            CashFlowBucket::Neutral => "Neutral",
+        }
+    }
+
+    fn taxonomy_label(self) -> &'static str {
+        match self {
+            CashFlowBucket::Spending => "spending",
+            CashFlowBucket::Income => "income",
+            CashFlowBucket::Saving => "savings",
+            CashFlowBucket::Neutral => "no",
+        }
+    }
+}
+
 fn is_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
     matches!(
         classify_activity(activity, account_type),
@@ -558,7 +719,18 @@ fn is_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
 }
 
 fn is_neutral_visible_cash_activity(activity: &Activity, account_type: &str) -> bool {
-    account_type == account_types::CREDIT_CARD && activity.effective_type() == "TRANSFER_IN"
+    let activity_type = activity.effective_type();
+    // Credit-card payment received (incoming transfer to the card).
+    if account_type == account_types::CREDIT_CARD && activity_type == "TRANSFER_IN" {
+        return true;
+    }
+    // Linked transfers touching a cash account — savings moves to investing
+    // accounts and internal moves between cash accounts. Always shown in the
+    // ledger (we never hide an account's transactions); the totals layer
+    // decides saving vs neutral via classify_activity_for_aggregation.
+    account_type == account_types::CASH
+        && matches!(activity_type, "TRANSFER_IN" | "TRANSFER_OUT")
+        && activity.source_group_id.is_some()
 }
 
 fn group_assignments(

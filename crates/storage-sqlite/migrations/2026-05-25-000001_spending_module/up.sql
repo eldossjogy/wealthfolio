@@ -205,7 +205,7 @@ CREATE TABLE budget_group_assignments (
     FOREIGN KEY (group_id) REFERENCES budget_groups(id) ON DELETE CASCADE,
     FOREIGN KEY (taxonomy_id, category_id) REFERENCES taxonomy_categories(taxonomy_id, id) ON DELETE CASCADE,
 
-    CHECK (taxonomy_id = 'spending_categories'),
+    CHECK (taxonomy_id IN ('spending_categories', 'savings_categories')),
     CHECK (is_system IN (0, 1)),
     UNIQUE (taxonomy_id, category_id)
 );
@@ -272,7 +272,7 @@ CREATE TABLE budget_rollover_settings (
       OR start_month GLOB '[0-9][0-9][0-9][0-9]-1[0-2]'
     ),
     CHECK (
-      (target_type = 'category' AND taxonomy_id = 'spending_categories' AND category_id IS NOT NULL AND group_id IS NULL)
+      (target_type = 'category' AND taxonomy_id IN ('spending_categories', 'savings_categories') AND category_id IS NOT NULL AND group_id IS NULL)
       OR
       (target_type = 'group' AND taxonomy_id IS NULL AND category_id IS NULL AND group_id IS NOT NULL)
     )
@@ -309,7 +309,10 @@ VALUES
    1, 1, 200, 'activity'),
   ('income_sources', 'Income Sources', '#5A7A3E',
    'Income classification (Salary, Dividends, Rental, …) used to classify cash deposits.',
-   1, 1, 210, 'activity');
+   1, 1, 210, 'activity'),
+  ('savings_categories', 'Savings', '#6B8E54',
+   'Money set aside into savings/investments. Transfers from cash accounts into investing accounts default here. Tracked as its own headline bucket — excluded from spending totals.',
+   1, 1, 220, 'activity');
 
 -- ----------------------------------------------------------------------------
 -- 9a. Spending Categories: TOP LEVEL (parents)
@@ -317,7 +320,7 @@ VALUES
 
 INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
   ('cat_housing',         'spending_categories', NULL, 'Housing',          'housing',         '#A35742', 'Home',           1),
-  ('cat_groceries',       'spending_categories', NULL, 'Groceries',        'groceries',       '#5A7A3E', 'ShoppingCart',   2),
+  ('cat_groceries',       'spending_categories', NULL, 'Groceries',        'groceries',       '#355c4c', 'ShoppingCart',   2),
   ('cat_food',            'spending_categories', NULL, 'Food & Dining',    'food',            '#B89A4C', 'UtensilsCrossed',3),
   ('cat_transport',       'spending_categories', NULL, 'Transportation',   'transport',       '#7B96C9', 'Car',            4),
   ('cat_shopping',        'spending_categories', NULL, 'Shopping',         'shopping',        '#8E7CB3', 'ShoppingBag',    5),
@@ -329,7 +332,7 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
   ('cat_travel',          'spending_categories', NULL, 'Travel',           'travel',          '#3171B2', 'Plane',         11),
   ('cat_gifts',           'spending_categories', NULL, 'Gifts & Donations','gifts',           '#AF3029', 'Gift',          12),
   ('cat_fees',            'spending_categories', NULL, 'Fees & Charges',   'fees',            '#9C998E', 'CreditCard',    13),
-  ('cat_savings',         'spending_categories', NULL, 'Savings',          'savings',         '#6B8E54', 'PiggyBank',     14),
+  ('cat_savings',         'savings_categories',  NULL, 'Savings',          'savings',         '#6B8E54', 'PiggyBank',     14),
   ('cat_other_expense',   'spending_categories', NULL, 'Other Expenses',   'other_expense',   '#B6B2A4', 'MoreHorizontal',99);
 
 INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id, is_system) VALUES
@@ -346,7 +349,7 @@ INSERT INTO budget_group_assignments (id, group_id, taxonomy_id, category_id, is
   ('5a2a7585-9f60-4a4b-9cbe-420432720f28', 'a409e0d6-9152-49c8-a5b4-a147a8ac636e', 'spending_categories', 'cat_travel', 1),
   ('d48afe20-18d3-422e-bc26-bd16f4d9d78c', '8cbd26c8-e3b2-4176-8c61-e5c11e10b808', 'spending_categories', 'cat_gifts', 1),
   ('dc8d3b07-dbc5-4134-bc31-9f65a7f726bc', '3ff71753-5dd5-4372-9ca2-63d8d9a04851', 'spending_categories', 'cat_personal', 1),
-  ('2f46a6a5-dda6-41c7-b372-a0d4f2e571eb', '1fb6f2a3-3245-4702-83e8-ab116458d13e', 'spending_categories', 'cat_savings', 1),
+  ('2f46a6a5-dda6-41c7-b372-a0d4f2e571eb', '1fb6f2a3-3245-4702-83e8-ab116458d13e', 'savings_categories', 'cat_savings', 1),
   ('fb622784-fb8a-497d-8b36-8eb8f347c222', '6e25d097-0c73-4521-9407-d47e8dfb73e2', 'spending_categories', 'cat_other_expense', 1);
 
 -- ----------------------------------------------------------------------------
@@ -418,12 +421,12 @@ INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, i
 
 -- Savings
 INSERT INTO taxonomy_categories (id, taxonomy_id, parent_id, name, key, color, icon, sort_order) VALUES
-  ('cat_savings_emergency',    'spending_categories', 'cat_savings', 'Emergency Fund',           'savings_emergency',    '#6B8E54', 'Shield',     1),
-  ('cat_savings_retirement',   'spending_categories', 'cat_savings', 'Retirement',               'savings_retirement',   '#6B8E54', 'PiggyBank',  2),
-  ('cat_savings_investments',  'spending_categories', 'cat_savings', 'Investment Contributions', 'savings_investments',  '#6B8E54', 'TrendingUp', 3),
-  ('cat_savings_short_term',   'spending_categories', 'cat_savings', 'Short-Term Savings',       'savings_short_term',   '#6B8E54', 'Wallet',     4),
-  ('cat_savings_education',    'spending_categories', 'cat_savings', 'Education / 529',          'savings_education',    '#6B8E54', 'GraduationCap', 5),
-  ('cat_savings_charitable',   'spending_categories', 'cat_savings', 'Charitable Reserve',       'savings_charitable',   '#6B8E54', 'Heart',      6);
+  ('cat_savings_emergency',    'savings_categories', 'cat_savings', 'Emergency Fund',           'savings_emergency',    '#6B8E54', 'Shield',     1),
+  ('cat_savings_retirement',   'savings_categories', 'cat_savings', 'Retirement',               'savings_retirement',   '#6B8E54', 'PiggyBank',  2),
+  ('cat_savings_investments',  'savings_categories', 'cat_savings', 'Investment Contributions', 'savings_investments',  '#6B8E54', 'TrendingUp', 3),
+  ('cat_savings_short_term',   'savings_categories', 'cat_savings', 'Short-Term Savings',       'savings_short_term',   '#6B8E54', 'Wallet',     4),
+  ('cat_savings_education',    'savings_categories', 'cat_savings', 'Education / 529',          'savings_education',    '#6B8E54', 'GraduationCap', 5),
+  ('cat_savings_charitable',   'savings_categories', 'cat_savings', 'Charitable Reserve',       'savings_charitable',   '#6B8E54', 'Heart',      6);
 
 -- ----------------------------------------------------------------------------
 -- 9c. Income Sources: TOP LEVEL (parents)

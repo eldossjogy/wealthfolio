@@ -26,6 +26,7 @@ use crate::settings::SpendingSettingsService;
 
 const SPENDING_TAXONOMY: &str = "spending_categories";
 const INCOME_TAXONOMY: &str = "income_sources";
+const SAVINGS_TAXONOMY: &str = "savings_categories";
 const DEFAULT_PERIOD_KEY: &str = "default";
 const OTHER_GROUP_KEY: &str = "other";
 
@@ -1140,7 +1141,12 @@ fn default_assignment_inputs(
                 .map(|group_id| NewBudgetGroupAssignment {
                     id: Some(assignment.id.to_string()),
                     group_id: group_id.clone(),
-                    taxonomy_id: SPENDING_TAXONOMY.to_string(),
+                    taxonomy_id: if assignment.category_id == "cat_savings" {
+                        SAVINGS_TAXONOMY
+                    } else {
+                        SPENDING_TAXONOMY
+                    }
+                    .to_string(),
                     category_id: assignment.category_id.to_string(),
                 })
         })
@@ -1509,6 +1515,21 @@ mod tests {
         for assignment in DEFAULT_ASSIGNMENTS {
             uuid::Uuid::parse_str(assignment.id).unwrap();
         }
+    }
+
+    #[test]
+    fn default_savings_assignment_uses_savings_taxonomy() {
+        let group_by_key = DEFAULT_GROUPS
+            .iter()
+            .map(|g| (g.key.to_string(), g.id.to_string()))
+            .collect::<HashMap<_, _>>();
+        let assignments = default_assignment_inputs(&group_by_key);
+        let savings = assignments
+            .iter()
+            .find(|a| a.category_id == "cat_savings")
+            .expect("seeded savings assignment");
+
+        assert_eq!(savings.taxonomy_id, SAVINGS_TAXONOMY);
     }
 
     #[test]
