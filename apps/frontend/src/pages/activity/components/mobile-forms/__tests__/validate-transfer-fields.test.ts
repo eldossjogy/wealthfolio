@@ -4,6 +4,7 @@ import {
   validateTransferFields,
   type TransferValidationInput,
 } from "../mobile-activity-form";
+import { getMobileActivityAssetId } from "../mobile-activity-utils";
 
 const base: TransferValidationInput = {
   activityType: "TRANSFER_OUT",
@@ -283,5 +284,16 @@ describe("applyMobileIncomeUpdateClears", () => {
     expect(stakingUpdate.unitPrice).toBe(200);
     expect(cashCreate.quantity).toBeUndefined();
     expect(cashCreate.unitPrice).toBeUndefined();
+  });
+});
+
+describe("getMobileActivityAssetId", () => {
+  it("uses assetId when assetSymbol is blank", () => {
+    expect(getMobileActivityAssetId({ assetSymbol: "", assetId: "AAPL" })).toBe("AAPL");
+    expect(getMobileActivityAssetId({ assetSymbol: "  ", assetId: "MSFT" })).toBe("MSFT");
+  });
+
+  it("returns undefined when both identifiers are blank", () => {
+    expect(getMobileActivityAssetId({ assetSymbol: "", assetId: "" })).toBeUndefined();
   });
 });

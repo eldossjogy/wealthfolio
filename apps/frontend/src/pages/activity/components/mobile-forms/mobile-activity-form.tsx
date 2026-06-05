@@ -26,13 +26,14 @@ import { buildOccSymbol, parseOccSymbol } from "@/lib/occ-symbol";
 import { generateId } from "@/lib/id";
 import type { ActivityCreate, ActivityDetails, ActivityUpdate } from "@/lib/types";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm, type Resolver, type SubmitHandler } from "react-hook-form";
 import { toast } from "sonner";
 import { useActivityMutations } from "../../hooks/use-activity-mutations";
 import { showValidationToast, type AccountSelectOption } from "../forms/fields";
 import { newActivitySchema, type NewActivityFormValues } from "../forms/schemas";
 import { MobileActivitySteps } from "./mobile-activity-steps";
+import { getMobileActivityAssetId } from "./mobile-activity-utils";
 
 interface MobileActivityFormProps {
   accounts: AccountSelectOption[];
@@ -95,6 +96,12 @@ const CASH_AMOUNT_ACTIVITY_TYPES: readonly string[] = [
   ActivityType.CREDIT,
 ];
 const INCOME_ACTIVITY_TYPES: readonly string[] = [ActivityType.DIVIDEND, ActivityType.INTEREST];
+
+function isValidMobileActivityType(
+  type: string | undefined,
+): type is NewActivityFormValues["activityType"] {
+  return type ? MOBILE_ACTIVITY_TYPES.includes(type) : false;
+}
 
 /**
  * Validates transfer-specific fields that the Zod schema can't enforce
@@ -256,123 +263,132 @@ export function MobileActivityForm({
     saveInternalTransferPairMutation,
   } = useActivityMutations(onClose);
 
-  const isValidActivityType = (
-    type: string | undefined,
-  ): type is NewActivityFormValues["activityType"] => {
-    return type ? MOBILE_ACTIVITY_TYPES.includes(type) : false;
-  };
-
-  // Derive transfer mode from existing activity data
-  const isTransferType =
-    activity?.activityType === ActivityType.TRANSFER_IN ||
-    activity?.activityType === ActivityType.TRANSFER_OUT;
-  const isSecurityTransferActivity =
-    isTransferType &&
-    isSecuritiesTransfer(activity?.activityType ?? "", activity?.assetSymbol, activity?.assetId);
-  const initialTransferMode = isSecurityTransferActivity ? "securities" : "cash";
-  const flowMetadata = activity?.metadata?.flow as { is_external?: boolean } | undefined;
-  const initialIsExternal = isTransferType ? flowMetadata?.is_external === true : false;
-  const editingTransferIn = activity?.activityType === ActivityType.TRANSFER_IN;
-  const sourceAmount = editingTransferIn
-    ? activity?.counterpartAmount
-      ? Number(activity.counterpartAmount)
-      : undefined
-    : activity?.amount
-      ? Number(activity.amount)
-      : undefined;
-  const destinationAmount = editingTransferIn
-    ? activity?.amount
-      ? Number(activity.amount)
-      : undefined
-    : activity?.counterpartAmount
-      ? Number(activity.counterpartAmount)
+  const defaultValues = useMemo<Partial<NewActivityFormValues>>(() => {
+    // Derive transfer mode from existing activity data
+    const isTransferType =
+      activity?.activityType === ActivityType.TRANSFER_IN ||
+      activity?.activityType === ActivityType.TRANSFER_OUT;
+    const isSecurityTransferActivity =
+      isTransferType &&
+      isSecuritiesTransfer(activity?.activityType ?? "", activity?.assetSymbol, activity?.assetId);
+    const initialTransferMode = isSecurityTransferActivity ? "securities" : "cash";
+    const flowMetadata = activity?.metadata?.flow as { is_external?: boolean } | undefined;
+    const initialIsExternal = isTransferType ? flowMetadata?.is_external === true : false;
+    const editingTransferIn = activity?.activityType === ActivityType.TRANSFER_IN;
+    const sourceAmount = editingTransferIn
+      ? activity?.counterpartAmount
+        ? Number(activity.counterpartAmount)
+        : undefined
       : activity?.amount
         ? Number(activity.amount)
         : undefined;
-  const pairFxRate = activity?.fxRate ?? activity?.counterpartFxRate;
-  const fxRate = pairFxRate ? Number(pairFxRate) : undefined;
+    const destinationAmount = editingTransferIn
+      ? activity?.amount
+        ? Number(activity.amount)
+        : undefined
+      : activity?.counterpartAmount
+        ? Number(activity.counterpartAmount)
+        : activity?.amount
+          ? Number(activity.amount)
+          : undefined;
+    const pairFxRate = activity?.fxRate ?? activity?.counterpartFxRate;
+    const fxRate = pairFxRate ? Number(pairFxRate) : undefined;
 
-  // Detect option/bond activities for editing
-  const isOptionActivity = activity?.instrumentType === "OPTION";
-  const isBondActivity = activity?.instrumentType === "BOND";
-  const parsedOcc = isOptionActivity ? parseOccSymbol(activity?.assetSymbol ?? "") : null;
+    // Detect option/bond activities for editing
+    const isOptionActivity = activity?.instrumentType === "OPTION";
+    const isBondActivity = activity?.instrumentType === "BOND";
+    const parsedOcc = isOptionActivity ? parseOccSymbol(activity?.assetSymbol ?? "") : null;
 
-  const defaultValues: Partial<NewActivityFormValues> = {
-    id: activity?.id,
-    accountId:
-      isTransferType && !initialIsExternal && editingTransferIn
-        ? (activity?.counterpartAccountId ?? "")
-        : (activity?.accountId ?? ""),
-    activityType: isValidActivityType(activity?.activityType) ? activity.activityType : undefined,
-    amount: activity?.amount ? Number(activity.amount) : undefined,
-    sourceAmount,
-    destinationAmount,
-    sourceCurrency: editingTransferIn
-      ? (activity?.counterpartCurrency ?? activity?.currency)
-      : activity?.currency,
-    destinationCurrency: editingTransferIn
-      ? activity?.currency
-      : (activity?.counterpartCurrency ?? activity?.currency),
-    quantity:
-      isTransferType && !isSecurityTransferActivity
-        ? undefined
-        : activity?.quantity
-          ? Number(activity.quantity)
-          : undefined,
-    unitPrice:
-      isTransferType && !isSecurityTransferActivity
-        ? undefined
-        : activity?.unitPrice
-          ? Number(activity.unitPrice)
-          : undefined,
-    fee: activity?.fee ? Number(activity.fee) : 0,
-    comment: activity?.comment ?? null,
-    subtype: activity?.subtype ?? null,
-    fxRate,
-    assetId:
-      isTransferType && !isSecurityTransferActivity
-        ? undefined
-        : (activity?.assetSymbol ?? activity?.assetId)
-          ? (activity?.assetSymbol ?? activity?.assetId)
-          : undefined,
-    activityDate: activity?.date ? new Date(activity.date) : new Date(),
-    currency: activity?.currency ?? "",
-    quoteMode: activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
-    exchangeMic: activity?.exchangeMic,
-    showCurrencySelect: false,
-    ...(isTransferType && {
-      transferMode: initialTransferMode,
-      isExternal: initialIsExternal,
-      direction: activity?.activityType === ActivityType.TRANSFER_IN ? "in" : "out",
-      toAccountId: !initialIsExternal
-        ? editingTransferIn
-          ? (activity?.accountId ?? "")
-          : (activity?.counterpartAccountId ?? "")
-        : "",
-    }),
-    // Option defaults when editing an option activity
-    ...(isOptionActivity && {
-      assetType: "option" as const,
-      assetKind: "OPTION",
-      symbolQuoteCcy: activity?.currency ?? undefined,
-      underlyingSymbol: parsedOcc?.underlying ?? "",
-      strikePrice: parsedOcc?.strikePrice,
-      expirationDate: parsedOcc?.expiration,
-      optionType: parsedOcc?.optionType,
-      contractMultiplier: 100,
-    }),
-    // Bond defaults when editing a bond activity
-    ...(isBondActivity && {
-      assetType: "bond" as const,
-      assetKind: "BOND",
-      symbolQuoteCcy: activity?.currency ?? undefined,
-    }),
-  };
+    return {
+      id: activity?.id,
+      accountId:
+        isTransferType && !initialIsExternal && editingTransferIn
+          ? (activity?.counterpartAccountId ?? "")
+          : (activity?.accountId ?? ""),
+      activityType: isValidMobileActivityType(activity?.activityType)
+        ? activity.activityType
+        : undefined,
+      amount: activity?.amount ? Number(activity.amount) : undefined,
+      sourceAmount,
+      destinationAmount,
+      sourceCurrency: editingTransferIn
+        ? (activity?.counterpartCurrency ?? activity?.currency)
+        : activity?.currency,
+      destinationCurrency: editingTransferIn
+        ? activity?.currency
+        : (activity?.counterpartCurrency ?? activity?.currency),
+      quantity:
+        isTransferType && !isSecurityTransferActivity
+          ? undefined
+          : activity?.quantity
+            ? Number(activity.quantity)
+            : undefined,
+      unitPrice:
+        isTransferType && !isSecurityTransferActivity
+          ? undefined
+          : activity?.unitPrice
+            ? Number(activity.unitPrice)
+            : undefined,
+      fee: activity?.fee ? Number(activity.fee) : 0,
+      comment: activity?.comment ?? null,
+      subtype: activity?.subtype ?? null,
+      fxRate,
+      assetId:
+        isTransferType && !isSecurityTransferActivity
+          ? undefined
+          : getMobileActivityAssetId(activity),
+      activityDate: activity?.date ? new Date(activity.date) : new Date(),
+      currency: activity?.currency ?? "",
+      quoteMode:
+        activity?.assetQuoteMode === QuoteMode.MANUAL ? QuoteMode.MANUAL : QuoteMode.MARKET,
+      exchangeMic: activity?.exchangeMic,
+      showCurrencySelect: false,
+      ...(isTransferType && {
+        transferMode: initialTransferMode,
+        isExternal: initialIsExternal,
+        direction: activity?.activityType === ActivityType.TRANSFER_IN ? "in" : "out",
+        toAccountId: !initialIsExternal
+          ? editingTransferIn
+            ? (activity?.accountId ?? "")
+            : (activity?.counterpartAccountId ?? "")
+          : "",
+      }),
+      // Option defaults when editing an option activity
+      ...(isOptionActivity && {
+        assetType: "option" as const,
+        assetKind: "OPTION",
+        symbolQuoteCcy: activity?.currency ?? undefined,
+        underlyingSymbol: parsedOcc?.underlying ?? "",
+        strikePrice: parsedOcc?.strikePrice,
+        expirationDate: parsedOcc?.expiration,
+        optionType: parsedOcc?.optionType,
+        contractMultiplier: 100,
+      }),
+      // Bond defaults when editing a bond activity
+      ...(isBondActivity && {
+        assetType: "bond" as const,
+        assetKind: "BOND",
+        symbolQuoteCcy: activity?.currency ?? undefined,
+      }),
+    };
+  }, [activity]);
 
   const form = useForm<NewActivityFormValues>({
     resolver: zodResolver(newActivitySchema) as Resolver<NewActivityFormValues>,
     defaultValues: defaultValues as any,
   });
+  const { reset } = form;
+
+  useEffect(() => {
+    if (!open) return;
+
+    const nextDefaultValues = activity?.date
+      ? defaultValues
+      : { ...defaultValues, activityDate: new Date() };
+
+    reset(nextDefaultValues);
+    setCurrentStep(activity?.id ? 2 : 1);
+  }, [activity?.date, activity?.id, defaultValues, open, reset]);
 
   // Transfers may target any account (incl. spending/saving accounts the Spending
   // split hides from `accounts`), so widen the list once the type is a transfer.
