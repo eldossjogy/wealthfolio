@@ -3,6 +3,8 @@ import {
   ActivityType,
   DECIMAL_PRECISION,
   INCOME_ACTIVITY_TYPES,
+  InstrumentType,
+  METADATA_CONTRACT_MULTIPLIER,
   SYMBOL_REQUIRED_TYPES,
 } from "./constants";
 import { ActivityDetails } from "./types";
@@ -269,6 +271,23 @@ export const getUnitPrice = (activity: ActivityDetails): number => {
 };
 
 /**
+ * Returns the contract multiplier for an activity's instrument. Options trade in
+ * contracts that represent N underlying units (typically 100), so their cash
+ * value is quantity × unitPrice × multiplier. A non-default multiplier is stored
+ * on the activity metadata; otherwise options default to 100 and everything else
+ * to 1.
+ * @param activity The activity
+ * @returns The contract multiplier
+ */
+export const getContractMultiplier = (activity: ActivityDetails): number => {
+  const stored = Number(activity.metadata?.[METADATA_CONTRACT_MULTIPLIER]);
+  if (Number.isFinite(stored) && stored > 0) {
+    return stored;
+  }
+  return activity.instrumentType === InstrumentType.OPTION ? 100 : 1;
+};
+
+/**
  * Calculates the total value of an activity based on its type and data
  * @param activity The activity to calculate the value for
  * @returns The calculated value
@@ -320,7 +339,9 @@ export const calculateActivityValue = (activity: ActivityDetails): number => {
   const quantity = getQuantity(activity);
   const unitPrice = getUnitPrice(activity);
   const fee = getFee(activity);
-  let activityAmount = roundCurrency(Number(quantity) * Number(unitPrice));
+  let activityAmount = roundCurrency(
+    Number(quantity) * Number(unitPrice) * getContractMultiplier(activity),
+  );
 
   // Securities transfers imported without a unit price (legacy / some broker
   // exports) carry their monetary value on `amount`. Fall back to it so those

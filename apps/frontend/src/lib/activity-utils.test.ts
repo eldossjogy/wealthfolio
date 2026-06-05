@@ -1,4 +1,9 @@
-import { ACTIVITY_SUBTYPES, ActivityType } from "./constants";
+import {
+  ACTIVITY_SUBTYPES,
+  ActivityType,
+  InstrumentType,
+  METADATA_CONTRACT_MULTIPLIER,
+} from "./constants";
 import {
   isCashActivity,
   isCashTransfer,
@@ -152,6 +157,33 @@ describe("Activity Utilities", () => {
 
       // (10 * 100) - 10 = 990
       expect(calculateActivityValue(activity)).toBe(990);
+    });
+
+    it("should apply the contract multiplier for option BUY activities", () => {
+      const activity = createActivity({
+        activityType: ActivityType.BUY,
+        instrumentType: InstrumentType.OPTION,
+        quantity: "2",
+        unitPrice: "3",
+        fee: "1",
+      });
+
+      // (2 * 3 * 100) + 1 = 601
+      expect(calculateActivityValue(activity)).toBe(601);
+    });
+
+    it("should honor a non-default contract multiplier from metadata", () => {
+      const activity = createActivity({
+        activityType: ActivityType.SELL,
+        instrumentType: InstrumentType.OPTION,
+        quantity: "2",
+        unitPrice: "5",
+        fee: "0",
+        metadata: { [METADATA_CONTRACT_MULTIPLIER]: 10 },
+      });
+
+      // (2 * 5 * 10) - 0 = 100
+      expect(calculateActivityValue(activity)).toBe(100);
     });
 
     it("should calculate DEPOSIT activity value correctly", () => {
