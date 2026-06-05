@@ -89,9 +89,16 @@ interface CashActivityFormProps {
     categoryTaxonomyId?: string;
     categoryId?: string;
   };
+  /** Called when user selects Transfer in creation mode; receives the selected spending account id */
+  onTransferClick?: (accountId: string) => void;
 }
 
-export function CashActivityForm({ open, onOpenChange, activity }: CashActivityFormProps) {
+export function CashActivityForm({
+  open,
+  onOpenChange,
+  activity,
+  onTransferClick,
+}: CashActivityFormProps) {
   const isEditing = !!activity?.id;
   const qc = useQueryClient();
   const { accounts } = useAccounts({ filterActive: false });
@@ -178,8 +185,11 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
   const activityTypeOptions = useMemo(() => {
     const options = getActivityTypesForAccount(selectedAccount?.accountType);
     const currentType = activity?.activityType as FormValues["activityType"] | undefined;
-    return currentType && !options.includes(currentType) ? [...options, currentType] : options;
-  }, [activity?.activityType, selectedAccount?.accountType]);
+    const all = currentType && !options.includes(currentType) ? [...options, currentType] : options;
+    // In creation mode, hide TRANSFER_IN/OUT — user opens the full transfer form via button
+    if (!isEditing) return all.filter((t) => t !== "TRANSFER_IN" && t !== "TRANSFER_OUT");
+    return all;
+  }, [activity?.activityType, isEditing, selectedAccount?.accountType]);
   const isIncomeType = isCashActivityIncome(
     watchType,
     selectedAccount?.accountType,
@@ -335,6 +345,25 @@ export function CashActivityForm({ open, onOpenChange, activity }: CashActivityF
                 </FormItem>
               )}
             />
+
+            {/* Transfer button — creation only, redirects to the full transfer form */}
+            {!isEditing && onTransferClick && (
+              <FormItem>
+                <FormLabel>Transfer</FormLabel>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start gap-2"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onTransferClick(watchAccountId);
+                  }}
+                >
+                  <Icons.ArrowLeftRight className="h-4 w-4" />
+                  Transfer between accounts
+                </Button>
+              </FormItem>
+            )}
 
             <FormField
               control={form.control}

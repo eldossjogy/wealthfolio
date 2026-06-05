@@ -34,6 +34,8 @@ interface ActivityFormProps {
   activity?: Partial<ActivityDetails>;
   open?: boolean;
   onClose?: () => void;
+  /** When true, hides the activity type picker (use when type is already determined) */
+  hidePicker?: boolean;
 }
 
 export function ActivityForm({
@@ -42,6 +44,7 @@ export function ActivityForm({
   activity,
   open,
   onClose,
+  hidePicker,
 }: ActivityFormProps) {
   // Derive the editing state and initial type from activity prop
   const isEditing = !!activity?.id;
@@ -101,8 +104,8 @@ export function ActivityForm({
         </SheetHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto py-4">
-          {/* Activity Type Picker - only show when creating new activity */}
-          {!isEditing && (
+          {/* Activity Type Picker - only show when creating new activity and not locked to a type */}
+          {!isEditing && !hidePicker && (
             <ActivityTypePicker value={effectiveSelectedType} onSelect={setSelectedType} />
           )}
 
