@@ -89,6 +89,7 @@ export {
   deleteImportTemplate,
   deleteActivity,
   getImportTemplate,
+  getBrokerSyncProfile,
   getTransferPairForActivity,
   getAccountImportMapping,
   linkAccountTemplate,
@@ -99,6 +100,7 @@ export {
   listImportTemplates,
   previewImportAssets,
   saveAccountImportMapping,
+  saveBrokerSyncProfileRules,
   saveImportTemplate,
   saveInternalTransferPair,
   saveActivities,
@@ -327,6 +329,7 @@ export {
 // Allocation Target Commands
 export {
   archiveAllocationTarget,
+  calculateRebalancePlan,
   createAllocationTarget,
   deleteAllocationTarget,
   getAllocationTargetDrift,
