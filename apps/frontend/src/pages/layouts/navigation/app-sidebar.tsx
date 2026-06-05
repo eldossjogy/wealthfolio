@@ -15,7 +15,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { type NavLink, type NavigationProps, isPathActive } from "./app-navigation";
 import { ConnectNavItem } from "./connect-nav-item";
-
+import { useSettingsContext } from "@/lib/settings-provider";
 interface AppSidebarProps {
   navigation: NavigationProps;
 }
@@ -24,6 +24,8 @@ const modKey = isAppleDevice() ? "⌘" : "Ctrl";
 
 export function AppSidebar({ navigation }: AppSidebarProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const { settings } = useSettingsContext();
+  const expandAddon = settings?.expandAddon || false;
   const { logout, requiresAuth } = useAuth();
 
   return (
@@ -120,7 +122,11 @@ export function AppSidebar({ navigation }: AppSidebarProps) {
                 ))}
 
                 {navigation?.addons && navigation.addons.length > 0 && (
-                  <AddonsMenu addons={navigation.addons} collapsed={collapsed} />
+                  <AddonsMenu
+                    addons={navigation.addons}
+                    collapsed={collapsed}
+                    expandAddon={expandAddon}
+                  />
                 )}
               </nav>
             </div>
@@ -227,11 +233,52 @@ function NavItem({ item, collapsed, className, ...props }: NavItemProps) {
 interface AddonsMenuProps {
   addons: NavLink[];
   collapsed: boolean;
+  expandAddon: boolean;
 }
 
-function AddonsMenu({ addons, collapsed }: AddonsMenuProps) {
+function AddonsMenu({ addons, collapsed, expandAddon }: AddonsMenuProps) {
   const location = useLocation();
   const hasActiveAddon = addons.some((addon) => isPathActive(location.pathname, addon.href));
+
+  if (expandAddon) {
+    return (
+      <div className="flex flex-col gap-1">
+        {addons.map((addon) => {
+          const isActive = isPathActive(location.pathname, addon.href);
+          return (
+            <Button
+              key={addon.href}
+              variant={isActive ? "secondary" : "ghost"}
+              asChild
+              className={cn(
+                "text-foreground [&_svg]:size-5! mb-1 h-12 rounded-md transition-all duration-300",
+                collapsed ? "justify-center" : "justify-start",
+              )}
+            >
+              <Link
+                to={addon.href}
+                title={addon.title}
+                aria-current={isActive ? "page" : undefined}
+              >
+                <span aria-hidden="true">
+                  {addon.icon ?? <Icons.ArrowRight className="h-5 w-5" />}
+                </span>
+                <span
+                  className={cn({
+                    "ml-2 overflow-hidden text-ellipsis whitespace-nowrap transition-opacity delay-100 duration-300 ease-in-out": true,
+                    "sr-only opacity-0": collapsed,
+                    "block opacity-100": !collapsed,
+                  })}
+                >
+                  {addon.title}
+                </span>
+              </Link>
+            </Button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <DropdownMenu>

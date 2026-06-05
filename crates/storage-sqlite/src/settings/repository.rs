@@ -54,6 +54,9 @@ impl SettingsRepositoryTrait for SettingsRepository {
                     settings.sync_enabled = value.parse().unwrap_or(true);
                 }
                 "default_return_metric" => settings.default_return_metric = value,
+                "expand_addon" => {
+                    settings.expand_addon = value.parse().unwrap_or(false);
+                }
                 _ => {} // Ignore unknown settings
             }
         }
@@ -135,6 +138,16 @@ impl SettingsRepositoryTrait for SettingsRepository {
                         .map_err(StorageError::from)?;
                 }
 
+                if let Some(expand_addon) = settings.expand_addon {
+                    diesel::replace_into(app_settings)
+                        .values(&AppSettingDB {
+                            setting_key: "expand_addon".to_string(),
+                            setting_value: expand_addon.to_string(),
+                        })
+                        .execute(conn)
+                        .map_err(StorageError::from)?;
+                }
+
                 if let Some(sync_enabled) = settings.sync_enabled {
                     diesel::replace_into(app_settings)
                         .values(&AppSettingDB {
@@ -180,6 +193,7 @@ impl SettingsRepositoryTrait for SettingsRepository {
                     "menu_bar_visible" => "true",
                     "sync_enabled" => "true",
                     "default_return_metric" => "twr",
+                    "expand_addon" => "false",
                     _ => return Err(StorageError::from(diesel::result::Error::NotFound).into()),
                 };
                 Ok(default_value.to_string())

@@ -16,7 +16,7 @@ import {
 import { Switch } from "@wealthfolio/ui/components/ui/switch";
 import { usePlatform } from "@/hooks/use-platform";
 import { useSettingsContext } from "@/lib/settings-provider";
-
+import { useIsMobileViewport } from "@/hooks/use-platform";
 const appearanceFormSchema = z.object({
   theme: z.enum(["light", "dark", "system"], {
     required_error: "Please select a theme.",
@@ -26,6 +26,7 @@ const appearanceFormSchema = z.object({
     required_error: "Please select a font.",
   }),
   menuBarVisible: z.boolean(),
+  expandAddon: z.boolean(),
 });
 
 type AppearanceFormValues = z.infer<typeof appearanceFormSchema>;
@@ -33,10 +34,12 @@ type AppearanceFormValues = z.infer<typeof appearanceFormSchema>;
 export function AppearanceForm() {
   const { settings, updateSettings } = useSettingsContext();
   const { isMobile } = usePlatform();
+  const isMobileViewport = useIsMobileViewport();
   const defaultValues: Partial<AppearanceFormValues> = {
     theme: settings?.theme as AppearanceFormValues["theme"],
     font: settings?.font as AppearanceFormValues["font"],
     menuBarVisible: settings?.menuBarVisible ?? true,
+    expandAddon: settings?.expandAddon ?? false,
   };
   const form = useForm<AppearanceFormValues>({
     resolver: zodResolver(appearanceFormSchema),
@@ -118,6 +121,31 @@ export function AppearanceForm() {
                     onCheckedChange={(value) => {
                       field.onChange(value);
                       handlePartialUpdate({ menuBarVisible: value });
+                    }}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        )}
+        {!isMobile && !isMobileViewport && (
+          <FormField
+            control={form.control}
+            name="expandAddon"
+            render={({ field }) => (
+              <FormItem className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+                <div className="space-y-0.5">
+                  <FormLabel>Expand Add-ons list</FormLabel>
+                  <FormDescription>
+                    Toggle to display all add-ons individually in the sidebar.
+                  </FormDescription>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={(value) => {
+                      field.onChange(value);
+                      handlePartialUpdate({ expandAddon: value });
                     }}
                   />
                 </FormControl>

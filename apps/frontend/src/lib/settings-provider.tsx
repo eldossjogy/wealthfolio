@@ -18,6 +18,7 @@ interface ExtendedSettingsContextType extends SettingsContextType {
         | "onboardingCompleted"
         | "menuBarVisible"
         | "syncEnabled"
+        | "expandAddon"
       >
     >,
   ) => Promise<void>;
@@ -51,6 +52,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         | "onboardingCompleted"
         | "menuBarVisible"
         | "syncEnabled"
+        | "expandAddon"
       >
     >,
   ) => {

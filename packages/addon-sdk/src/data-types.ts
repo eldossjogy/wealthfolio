@@ -661,6 +661,7 @@ export interface Settings {
   autoUpdateCheckEnabled: boolean;
   menuBarVisible: boolean;
   syncEnabled: boolean;
+  expandAddon: boolean;
 }
 
 export type GoalType =

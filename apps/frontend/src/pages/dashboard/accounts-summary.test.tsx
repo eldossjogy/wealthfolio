@@ -99,6 +99,7 @@ const mockSettings: Settings = {
   autoUpdateCheckEnabled: true,
   menuBarVisible: true,
   syncEnabled: false,
+  expandAddon: false,
 };
 
 function createAccount(overrides: Partial<Account>): Account {
