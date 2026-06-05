@@ -1292,8 +1292,9 @@ mod tests {
 
     #[tokio::test]
     async fn fractional_mode_caps_trade_at_target_shortfall() {
-        // Fractional mode should size the whole recommendation fractionally, not buy
-        // a full share first and only fractionalize leftover cash.
+        // Fractional mode: greedy sizes the drift-closing buy fractionally (0.75 sh = $75),
+        // then the proportional top-up deploys the remaining $925 into the same ETF
+        // (9.25 sh). Combined: one ETF trade of 10 sh, cash_used = $1000.
         let total = dec!(10000);
         let h = make_holding("h1", "ETF", dec!(1), dec!(100)); // $100/share
         let c = make_contribution(&h, "equity", dec!(100));
@@ -1310,8 +1311,8 @@ mod tests {
             .iter()
             .find(|t| t.symbol.as_deref() == Some("ETF"))
             .expect("fractional ETF trade expected");
-        assert_eq!(trade.quantity, Some(dec!(0.75)));
-        assert_eq!(plan.cash_used, dec!(75));
+        assert_eq!(trade.quantity, Some(dec!(10.0000)));
+        assert_eq!(plan.cash_used, dec!(1000));
     }
 
     #[tokio::test]
@@ -1416,8 +1417,15 @@ mod tests {
 
     #[tokio::test]
     async fn nearest_band_stops_at_band_edge() {
-        // Equity 60% (target 70%, band 5%). NearestBand should stop once equity reaches
-        // the 65% band edge ($500 deployed), not optimize to the exact 70% target ($1000).
+        // Equity 60% (target 70%, band 5%).
+        //
+        // Greedy phase: NearestBand stops at the 65% band edge ($500 deployed);
+        // ExactTarget deploys all the way to 70% ($1000).
+        //
+        // Proportional top-up phase: both goals then deploy remaining cash
+        // proportionally to target_bps. So for this single-category portfolio both
+        // end up with cash_used = $1000. The difference between goals shows up in
+        // multi-category portfolios where scoring and stopping criteria diverge.
         let total = dec!(10000);
         let h = make_holding("h1", "VTI", dec!(60), dec!(6000)); // $100/share
         let rows = vec![make_drift_row("equity", 6000, 7000, total)];
@@ -1444,16 +1452,17 @@ mod tests {
             .await
             .unwrap();
 
+        // Both deploy all $1000: greedy + proportional top-up.
         assert_eq!(
             plan_band.cash_used,
-            dec!(500),
-            "nearest_band stops at the band edge ($500), got {}",
+            dec!(1000),
+            "nearest_band + top-up deploys all available cash, got {}",
             plan_band.cash_used
         );
         assert_eq!(
             plan_exact.cash_used,
             dec!(1000),
-            "exact_target deploys to the exact target ($1000), got {}",
+            "exact_target deploys all available cash, got {}",
             plan_exact.cash_used
         );
     }
@@ -1928,5 +1937,103 @@ mod tests {
         // Both should improve drift.
         assert!(plan_sell.max_drift_bps_after < plan_sell.max_drift_bps_before);
         assert!(plan_hybrid.max_drift_bps_after < plan_hybrid.max_drift_bps_before);
+    }
+
+    #[tokio::test]
+    async fn proportional_topup_deploys_remaining_cash_after_drift_resolved() {
+        // Portfolio: Equity 50% Bond 50% (both at target — no drift).
+        // User deposits $2000 cash. Greedy finds no drift-improving trade (drift=0).
+        // Top-up should deploy $2000 proportionally: $1000 equity (VTI), $1000 bond (BND).
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(50), dec!(5000)); // $100/share
+        let h_bnd = make_holding("h2", "BND", dec!(50), dec!(5000)); // $100/share
+        let svc = make_service(
+            make_profile(RebalanceGoal::ExactTarget, false),
+            make_report(
+                vec![
+                    make_drift_row("equity", 5000, 5000, total),
+                    make_drift_row("bond", 5000, 5000, total),
+                ],
+                total,
+            ),
+            make_contributions(vec![
+                make_contribution(&h_vti, "equity", dec!(5000)),
+                make_contribution(&h_bnd, "bond", dec!(5000)),
+            ]),
+            vec![make_cash_holding(dec!(2000), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc.calculate_plan(make_input(dec!(2000))).await.unwrap();
+
+        assert_eq!(plan.cash_used, dec!(2000), "all cash should be deployed");
+        assert_eq!(plan.cash_remaining, dec!(0));
+
+        let vti_trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("VTI"))
+            .expect("VTI trade expected");
+        let bnd_trade = plan
+            .trades
+            .iter()
+            .find(|t| t.symbol.as_deref() == Some("BND"))
+            .expect("BND trade expected");
+
+        // Each sleeve gets 50% of $2000 = $1000 → 10 shares each.
+        assert_eq!(vti_trade.estimated_amount, dec!(1000));
+        assert_eq!(bnd_trade.estimated_amount, dec!(1000));
+    }
+
+    #[tokio::test]
+    async fn sell_to_rebalance_does_not_top_up_remaining_proceeds() {
+        // SellToRebalance: sell overweight bonds, use proceeds to buy equity.
+        // Any leftover proceeds stay as cash_remaining — no proportional top-up.
+        // Portfolio: Equity 30% (target 50%), Bond 70% (target 50%). Cash = $0.
+        let total = dec!(10000);
+        let h_vti = make_holding("h1", "VTI", dec!(30), dec!(3000));
+        let h_bnd = make_holding("h2", "BND", dec!(70), dec!(7000)); // $100/share
+        let svc = make_service(
+            make_sell_profile(RebalanceGoal::ExactTarget),
+            make_report(
+                vec![
+                    make_drift_row("equity", 3000, 5000, total),
+                    make_drift_row("bond", 7000, 5000, total),
+                ],
+                total,
+            ),
+            make_contributions(vec![
+                make_contribution(&h_vti, "equity", dec!(3000)),
+                make_contribution(&h_bnd, "bond", dec!(7000)),
+            ]),
+            vec![make_cash_holding(dec!(0), "USD"), h_vti, h_bnd],
+        );
+        let plan = svc
+            .calculate_plan(make_input_with_mode(dec!(0), ScenarioMode::SellToRebalance))
+            .await
+            .unwrap();
+
+        // Sells BND to fund VTI buys. After rebalance, drift should be resolved.
+        let sells: Decimal = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "sell")
+            .map(|t| t.estimated_amount)
+            .sum();
+        let buys: Decimal = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "buy")
+            .map(|t| t.estimated_amount)
+            .sum();
+
+        assert!(sells > Decimal::ZERO, "should sell overweight bonds");
+        // No additional BND repurchase from top-up (circular sell→rebuy avoided).
+        let bnd_buys = plan
+            .trades
+            .iter()
+            .filter(|t| t.action == "buy" && t.symbol.as_deref() == Some("BND"))
+            .count();
+        assert_eq!(bnd_buys, 0, "SellToRebalance must not rebuy BND via top-up");
+        // Buys funded entirely by sell proceeds.
+        assert!(buys <= sells, "buys must not exceed sell proceeds");
     }
 }

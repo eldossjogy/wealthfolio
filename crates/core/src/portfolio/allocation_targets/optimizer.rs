@@ -444,6 +444,116 @@ impl DriftPriorityOptimizer {
         (kept_values, proceeds, sell_trades)
     }
 
+    /// Proportional top-up: after the drift-improving greedy exhausts its gains, deploy
+    /// remaining cash proportionally to `target_bps` weights. Each sleeve gets the
+    /// candidate with the highest per-share exposure to that category.
+    ///
+    /// Accumulates into the caller's `shares_bought` so greedy + top-up shares for the
+    /// same asset merge into a single output trade.
+    ///
+    /// Only called for CashFlowOnly and Hybrid (SellToRebalance leaves remaining proceeds
+    /// as cash_remaining to avoid circular sell→buy patterns).
+    fn run_proportional_topup(
+        values: &mut HashMap<String, Decimal>,
+        candidates: &[AssetCandidate],
+        shares_bought: &mut [Decimal],
+        cash: Decimal,
+        categories: &[CategoryState],
+        profile: &RebalanceProfile,
+    ) {
+        if cash <= Decimal::ZERO || candidates.is_empty() {
+            return;
+        }
+
+        let required_cats: Vec<&CategoryState> = categories
+            .iter()
+            .filter(|c| c.is_required && !c.is_cash && c.target_bps > 0)
+            .collect();
+
+        let total_target_bps: i32 = required_cats.iter().map(|c| c.target_bps).sum();
+        if total_target_bps == 0 {
+            return;
+        }
+
+        // Stable allocation order: largest sleeve first, then by category_id.
+        let mut cats_sorted = required_cats;
+        cats_sorted.sort_by(|a, b| {
+            b.target_bps
+                .cmp(&a.target_bps)
+                .then(a.category_id.cmp(&b.category_id))
+        });
+
+        let mut remaining = cash;
+
+        for cat in cats_sorted {
+            if remaining <= Decimal::ZERO {
+                break;
+            }
+
+            // Budget for this sleeve, capped at what's left.
+            let sleeve_budget = (cash * Decimal::from(cat.target_bps)
+                / Decimal::from(total_target_bps))
+            .min(remaining);
+
+            if sleeve_budget <= Decimal::ZERO {
+                continue;
+            }
+
+            // Best candidate = highest per-share exposure to this category.
+            // Tie-break: lower price preferred (consistent with greedy tie-break).
+            let best = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.price > Decimal::ZERO
+                        && c.exposure_per_share
+                            .get(&cat.category_id)
+                            .is_some_and(|e| *e > Decimal::ZERO)
+                })
+                .max_by(|(_, a), (_, b)| {
+                    let ea = a
+                        .exposure_per_share
+                        .get(&cat.category_id)
+                        .copied()
+                        .unwrap_or_default();
+                    let eb = b
+                        .exposure_per_share
+                        .get(&cat.category_id)
+                        .copied()
+                        .unwrap_or_default();
+                    ea.cmp(&eb)
+                        .then(b.price.cmp(&a.price))
+                        .then(a.symbol.cmp(&b.symbol))
+                        .then(a.asset_id.cmp(&b.asset_id))
+                });
+
+            let Some((best_idx, best_candidate)) = best else {
+                continue;
+            };
+
+            let shares = if profile.whole_shares_only {
+                (sleeve_budget / best_candidate.price).floor()
+            } else {
+                sleeve_budget / best_candidate.price
+            };
+
+            if shares <= Decimal::ZERO {
+                continue;
+            }
+
+            let amount = shares * best_candidate.price;
+            if profile.min_trade_amount > Decimal::ZERO && amount < profile.min_trade_amount {
+                continue;
+            }
+
+            for (cat_id, expo) in &best_candidate.exposure_per_share {
+                *values.entry(cat_id.clone()).or_default() += expo * shares;
+            }
+            remaining -= amount;
+            shares_bought[best_idx] += shares;
+        }
+    }
+
     /// Greedy buy loop. Mutates `values` and returns shares bought per candidate index.
     #[allow(clippy::too_many_arguments)]
     fn run_buy_greedy(
@@ -815,6 +925,33 @@ impl RebalanceOptimizer for DriftPriorityOptimizer {
                 scale,
             ),
         };
+
+        // Proportional top-up: deploy remaining cash proportionally to target_bps.
+        // Skipped for SellToRebalance (proceeds left over stay as cash_remaining to avoid
+        // circular sell→rebuy patterns).
+        let mut shares_bought = shares_bought;
+        if !matches!(scenario_mode, ScenarioMode::SellToRebalance) {
+            let topup_pool = match &scenario_mode {
+                ScenarioMode::Hybrid => available_cash + sell_proceeds,
+                _ => buy_pool,
+            };
+            let greedy_used: Decimal = shares_bought
+                .iter()
+                .zip(candidates.iter())
+                .map(|(s, c)| s * c.price)
+                .sum();
+            let topup_cash = (topup_pool - greedy_used).max(Decimal::ZERO);
+            if topup_cash > Decimal::ZERO {
+                Self::run_proportional_topup(
+                    &mut values,
+                    &candidates,
+                    &mut shares_bought,
+                    topup_cash,
+                    &categories,
+                    &profile,
+                );
+            }
+        }
 
         // Build trades from accumulated shares; apply min_trade_amount filter.
         let mut trades: Vec<SuggestedManualTrade> = Vec::new();
