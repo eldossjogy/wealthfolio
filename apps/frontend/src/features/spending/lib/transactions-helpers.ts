@@ -1,4 +1,4 @@
-import type { Activity, TaxonomyCategory } from "@/lib/types";
+import type { TaxonomyCategory } from "@/lib/types";
 
 import { getActivitySpendingAmount, isCashActivityIncome } from "./constants";
 import type { ActivityTaxonomyAssignment, CashActivity } from "../types/cash-activity";
@@ -19,6 +19,7 @@ export function pluralizeActivity(n: number): string {
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 
 /**
  * View-model for a transaction row. Pulls the (single) activity-scope assignment
@@ -26,7 +27,7 @@ const INCOME_TAXONOMY = "income_sources";
  * without re-doing lookups.
  */
 export interface TransactionRowVM {
-  activity: Activity;
+  activity: CashActivity;
   category: {
     assignmentId: string;
     taxonomyId: string;
@@ -42,6 +43,7 @@ export interface TransactionRowVM {
 export interface TransactionDisplay {
   isOutflow: boolean;
   isIncome: boolean;
+  isSaving: boolean;
   isRefund: boolean;
   isNeutral: boolean;
   /** "-" for outflow, "+" for income/refund, "" for neutral. */
@@ -51,9 +53,22 @@ export interface TransactionDisplay {
 }
 
 export function getTransactionDisplay(
-  activity: Activity,
+  activity: CashActivity,
   accountType: string | undefined,
 ): TransactionDisplay {
+  if (activity.cashFlowBucket) {
+    const amount = parseFloat(activity.amount ?? "0");
+    const safeAmount = Number.isFinite(amount) ? amount : 0;
+    const spendingAmount = getActivitySpendingAmount(activity, accountType);
+    const isIncome = activity.cashFlowBucket === "income";
+    const isSaving = activity.cashFlowBucket === "saving";
+    const isOutflow = isSaving || (activity.cashFlowBucket === "spending" && spendingAmount > 0);
+    const isNeutral = activity.cashFlowBucket === "neutral";
+    const isRefund = activity.cashFlowBucket === "spending" && spendingAmount < 0;
+    const sign = isOutflow ? "-" : isIncome || isRefund ? "+" : "";
+    return { isOutflow, isIncome, isSaving, isRefund, isNeutral, sign, safeAmount };
+  }
+
   const spendingAmount = getActivitySpendingAmount(activity, accountType);
   const isOutflow = spendingAmount > 0;
   const isInternalTransfer =
@@ -62,22 +77,32 @@ export function getTransactionDisplay(
   const isIncome =
     !isInternalTransfer &&
     isCashActivityIncome(activity.activityType, accountType, activity.subtype);
+  const isSaving = false;
   const isRefund = spendingAmount < 0;
   const isNeutral = !isOutflow && !isIncome && !isRefund;
   const sign = isOutflow ? "-" : isIncome || isRefund ? "+" : "";
   const amount = parseFloat(activity.amount ?? "0");
   const safeAmount = Number.isFinite(amount) ? amount : 0;
-  return { isOutflow, isIncome, isRefund, isNeutral, sign, safeAmount };
+  return { isOutflow, isIncome, isSaving, isRefund, isNeutral, sign, safeAmount };
 }
 
 export function toRowVM(
   item: CashActivity,
   allCategories: Map<string, TaxonomyCategory>,
 ): TransactionRowVM {
-  const asg = (item.assignments ?? []).find(
-    (x: ActivityTaxonomyAssignment) =>
-      x.taxonomyId === SPENDING_TAXONOMY || x.taxonomyId === INCOME_TAXONOMY,
-  );
+  const expectedTaxonomy =
+    item.cashFlowBucket === "income"
+      ? INCOME_TAXONOMY
+      : item.cashFlowBucket === "saving"
+        ? SAVINGS_TAXONOMY
+        : item.cashFlowBucket === "spending"
+          ? SPENDING_TAXONOMY
+          : null;
+  const asg = expectedTaxonomy
+    ? (item.assignments ?? []).find(
+        (x: ActivityTaxonomyAssignment) => x.taxonomyId === expectedTaxonomy,
+      )
+    : undefined;
   const cat = asg ? allCategories.get(asg.categoryId) : undefined;
   const parent = cat?.parentId ? allCategories.get(cat.parentId) : undefined;
 

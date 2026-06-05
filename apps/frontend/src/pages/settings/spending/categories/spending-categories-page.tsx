@@ -30,6 +30,7 @@ import { SpendingBackLink } from "../components/spending-back-link";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 
 function buildTree(categories: TaxonomyCategory[]): CategoryNode[] {
   const byParent = new Map<string | null, CategoryNode[]>();
@@ -51,13 +52,18 @@ export default function SpendingCategoriesPage() {
 
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
+  const savings = useTaxonomy(SAVINGS_TAXONOMY);
   const createCategory = useCreateCategory();
   const updateCategory = useUpdateCategory();
   const deleteCategory = useDeleteCategory();
 
   // URL is the source of truth for the active tab — no mirrored state, no sync effect.
-  const activeTab: "expense" | "income" =
-    searchParams.get("tab") === "income" ? "income" : "expense";
+  const activeTab: "expense" | "income" | "savings" =
+    searchParams.get("tab") === "income"
+      ? "income"
+      : searchParams.get("tab") === "savings"
+        ? "savings"
+        : "expense";
 
   const handleTabChange = (value: string) => {
     setSearchParams(
@@ -83,9 +89,18 @@ export default function SpendingCategoriesPage() {
     () => buildTree(income.data?.categories ?? []),
     [income.data?.categories],
   );
-  const isLoading = spending.isLoading || income.isLoading;
-  const total = expenseTree.length + incomeTree.length;
-  const activeTaxonomyId = activeTab === "expense" ? SPENDING_TAXONOMY : INCOME_TAXONOMY;
+  const savingsTree = useMemo(
+    () => buildTree(savings.data?.categories ?? []),
+    [savings.data?.categories],
+  );
+  const isLoading = spending.isLoading || income.isLoading || savings.isLoading;
+  const total = expenseTree.length + incomeTree.length + savingsTree.length;
+  const activeTaxonomyId =
+    activeTab === "expense"
+      ? SPENDING_TAXONOMY
+      : activeTab === "income"
+        ? INCOME_TAXONOMY
+        : SAVINGS_TAXONOMY;
 
   if (!settingsLoading && !isEnabled) {
     return <Navigate to="/settings/spending" replace />;
@@ -235,15 +250,19 @@ export default function SpendingCategoriesPage() {
           </EmptyPlaceholder>
         ) : (
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsList className="grid w-full max-w-md grid-cols-3">
               <TabsTrigger value="expense">Expense ({expenseTree.length})</TabsTrigger>
               <TabsTrigger value="income">Income ({incomeTree.length})</TabsTrigger>
+              <TabsTrigger value="savings">Savings ({savingsTree.length})</TabsTrigger>
             </TabsList>
             <TabsContent value="expense" className="mt-6">
               {renderCategoryList(expenseTree)}
             </TabsContent>
             <TabsContent value="income" className="mt-6">
               {renderCategoryList(incomeTree)}
+            </TabsContent>
+            <TabsContent value="savings" className="mt-6">
+              {renderCategoryList(savingsTree)}
             </TabsContent>
           </Tabs>
         )}

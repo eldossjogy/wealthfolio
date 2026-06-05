@@ -1,9 +1,9 @@
 /**
  * Period model for the Reports page.
  *
- * Distinct from the dashboard's `DashboardPeriod` because Reports operate on
- * larger time horizons by default (≥3 months), and they pair the active
- * window with a comparison window (prior period or YoY).
+ * Distinct from the portfolio-wide `TimePeriod` because spending reports use
+ * cashflow language: current month, trailing 30 days, and longer comparison
+ * windows.
  */
 
 import type { DateRange } from "@/lib/types";
@@ -19,11 +19,11 @@ import {
   type ZonedCalendarDate,
 } from "./timezone";
 
-export type ReportsPeriod = "1M" | "3M" | "6M" | "YTD" | "1Y";
+export type ReportsPeriod = "MTD" | "30D" | "3M" | "6M" | "YTD" | "1Y";
 
-export const REPORTS_PERIODS: ReportsPeriod[] = ["1M", "3M", "6M", "YTD", "1Y"];
+export const REPORTS_PERIODS: ReportsPeriod[] = ["MTD", "30D", "3M", "6M", "YTD", "1Y"];
 
-export const DEFAULT_REPORTS_PERIOD: ReportsPeriod = "6M";
+export const DEFAULT_REPORTS_PERIOD: ReportsPeriod = "MTD";
 
 export type ComparisonMode = "prior" | "yoy" | "none";
 
@@ -46,13 +46,12 @@ export function periodToReportsRange(
   const now = new Date();
   const today = getZonedDateParts(now, timezone);
 
-  // For 1M we span the full calendar month so "X days left in May" reads
-  // correctly and forecasts can project past today. Other periods stay
-  // "through today" since they cover multiple months and the "current month"
-  // is naturally the trailing edge.
+  // For MTD/This month we span the full calendar month so "X days left in May"
+  // reads correctly and forecasts can project past today. Other periods stay
+  // "through today" since the current month is naturally the trailing edge.
   const { start, end } = (() => {
     switch (period) {
-      case "1M": {
+      case "MTD": {
         return {
           start: { year: today.year, month: today.month, day: 1 },
           end: {
@@ -62,6 +61,11 @@ export function periodToReportsRange(
           },
         };
       }
+      case "30D":
+        return {
+          start: addCalendarDays(today, -29),
+          end: today,
+        };
       case "3M":
         return {
           start: addCalendarMonths({ year: today.year, month: today.month, day: 1 }, -2),
@@ -127,8 +131,10 @@ export function toDateRange(range: ReportsRange): DateRange {
 
 export function periodLabel(period: ReportsPeriod): string {
   switch (period) {
-    case "1M":
+    case "MTD":
       return "This month";
+    case "30D":
+      return "Past 30 days";
     case "3M":
       return "Past 3 months";
     case "6M":

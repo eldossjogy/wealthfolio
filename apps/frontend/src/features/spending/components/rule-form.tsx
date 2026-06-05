@@ -72,7 +72,7 @@ export interface RuleFormCategoryOption {
 
 interface RuleFormProps {
   rule?: CategorizationRule;
-  /** Flat list of activity-scope categories from spending_categories + income_sources. */
+  /** Flat list of activity-scope categories from spending, income, and savings taxonomies. */
   categoryOptions: RuleFormCategoryOption[];
   onSubmit: (values: RuleFormValues) => void;
   onCancel: () => void;

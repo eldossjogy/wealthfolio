@@ -32,7 +32,7 @@ export interface RulePresetMeta {
 
 interface RuleItemProps {
   rule: CategorizationRule;
-  /** category_id → display metadata (joined client-side from taxonomies) */
+  /** taxonomy_id:category_id → display metadata (joined client-side from taxonomies) */
   categoryMeta: Record<string, RuleCategoryMeta>;
   /** preset_id → display metadata. Missing entries fall back to the raw id. */
   presetMeta?: Record<string, RulePresetMeta>;
@@ -68,7 +68,14 @@ export function RuleItem({ rule, categoryMeta, presetMeta, onEdit, onDelete }: R
     setShowDeleteDialog(false);
   };
 
-  const target = rule.categoryId ? categoryMeta[rule.categoryId] : null;
+  const targetKey =
+    rule.taxonomyId && rule.categoryId ? `${rule.taxonomyId}:${rule.categoryId}` : null;
+  const target =
+    targetKey && categoryMeta[targetKey]
+      ? categoryMeta[targetKey]
+      : rule.categoryId
+        ? (categoryMeta[rule.categoryId] ?? null)
+        : null;
   const targetLabel = target
     ? target.parentName
       ? `${target.parentName} / ${target.name}`

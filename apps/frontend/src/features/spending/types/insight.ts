@@ -1,10 +1,13 @@
 import type { BudgetGroup } from "./budget";
+import type { CategoryBreakdownRow } from "./report";
 
 export type CompareMode = "prior" | "year_over_year";
 
 export interface SpendingInsightRequest {
   startDate: string; // RFC3339, inclusive
   endDate: string; // RFC3339, inclusive
+  compareStartDate?: string; // RFC3339, inclusive
+  compareEndDate?: string; // RFC3339, inclusive
   accountIds?: string[];
   compare?: CompareMode;
 }
@@ -49,6 +52,8 @@ export interface PaceState {
 export interface Headline {
   spent: number;
   income: number;
+  /** Outflow set aside into the Savings taxonomy; excluded from `spent`. */
+  saved: number;
   netCashflow: number;
   /** Σ groups.budget + Σ groups.buffer. */
   budget: number;
@@ -116,6 +121,7 @@ export interface MonthBucket {
   month: string; // YYYY-MM
   spent: number;
   income: number;
+  saved: number;
 }
 
 export interface SpendingInsight {
@@ -144,6 +150,8 @@ export interface SpendingInsight {
   headline: Headline;
   groups: GroupInsight[];
   uncategorized: UncategorizedBucket;
+  incomeBreakdown: CategoryBreakdownRow[];
+  savingsBreakdown: CategoryBreakdownRow[];
   byDay: DayBucket[];
   byDayByCategory: DayCategoryBucket[];
   byMonth: MonthBucket[];

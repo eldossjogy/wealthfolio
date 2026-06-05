@@ -1,6 +1,7 @@
 /**
- * KPI strip rendered above the spending-tab chart: income / spending / net.
+ * KPI strip rendered above the spending-tab chart: income / spending / saving / net.
  */
+import { Link } from "react-router-dom";
 import { Skeleton, formatCompactAmount } from "@wealthfolio/ui";
 import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import { cn } from "@/lib/utils";
@@ -8,13 +9,28 @@ import { cn } from "@/lib/utils";
 export interface CashFlowStripProps {
   income: number;
   spending: number;
+  /** Money set aside into the Savings taxonomy (transfers to investing accounts). */
+  saving?: number;
   currency: string;
   isLoading?: boolean;
+  incomeHref?: string;
+  spendingHref?: string;
+  savingHref?: string;
 }
 
-export function CashFlowStrip({ income, spending, currency, isLoading }: CashFlowStripProps) {
-  const net = income - spending;
+export function CashFlowStrip({
+  income,
+  spending,
+  saving = 0,
+  currency,
+  isLoading,
+  incomeHref,
+  spendingHref,
+  savingHref,
+}: CashFlowStripProps) {
+  const net = income - spending - saving;
   const netPositive = net >= 0;
+  const showSaving = saving > 0;
 
   if (isLoading) {
     return (
@@ -31,8 +47,30 @@ export function CashFlowStrip({ income, spending, currency, isLoading }: CashFlo
 
   return (
     <div className="flex items-end gap-6 sm:gap-8">
-      <KpiStat label="Income" value={income} sign="+" currency={currency} tone="success" />
-      <KpiStat label="Spending" value={spending} currency={currency} tone="muted" />
+      <KpiStat
+        label="Income"
+        value={income}
+        sign="+"
+        currency={currency}
+        tone="success"
+        href={incomeHref}
+      />
+      <KpiStat
+        label="Spending"
+        value={spending}
+        currency={currency}
+        tone="muted"
+        href={spendingHref}
+      />
+      {showSaving && (
+        <KpiStat
+          label="Saving"
+          value={saving}
+          currency={currency}
+          tone="saving"
+          href={savingHref}
+        />
+      )}
       <KpiStat
         label="Net"
         value={Math.abs(net)}
@@ -50,12 +88,14 @@ function KpiStat({
   sign,
   currency,
   tone,
+  href,
 }: {
   label: string;
   value: number;
   sign?: "+" | "−";
   currency: string;
-  tone: "success" | "destructive" | "muted";
+  tone: "success" | "destructive" | "muted" | "saving";
+  href?: string;
 }) {
   const { isBalanceHidden } = useBalancePrivacy();
   const toneClass =
@@ -63,14 +103,29 @@ function KpiStat({
       ? "text-success"
       : tone === "destructive"
         ? "text-destructive"
-        : "text-foreground";
-  return (
-    <div className="flex flex-col">
+        : tone === "saving"
+          ? "text-[#6B8E54]"
+          : "text-foreground";
+  const content = (
+    <>
       <span className="text-muted-foreground text-[11px] font-light tracking-wide">{label}</span>
       <span className={cn("text-sm font-medium tabular-nums", toneClass)}>
         {sign}
         {isBalanceHidden ? "••••" : formatCompactAmount(value, currency)}
       </span>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link
+        to={href}
+        className="hover:bg-foreground/5 focus-visible:ring-ring -m-1 flex flex-col rounded-md p-1 transition-colors focus-visible:outline-none focus-visible:ring-1"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className="flex flex-col">{content}</div>;
 }

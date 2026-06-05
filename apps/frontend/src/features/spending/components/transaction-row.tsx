@@ -51,7 +51,7 @@ function TransactionRowImpl({
   onDelete,
 }: TransactionRowProps) {
   const a = row.activity;
-  const { isOutflow, isIncome, isNeutral, sign, safeAmount } = getTransactionDisplay(
+  const { isOutflow, isIncome, isSaving, isNeutral, sign, safeAmount } = getTransactionDisplay(
     a,
     account?.accountType,
   );
@@ -102,7 +102,7 @@ function TransactionRowImpl({
           <span className="text-muted-foreground text-xs">Neutral</span>
         ) : (
           <QuickCategorizePopover
-            scope={isIncome ? "income" : "expense"}
+            scope={isIncome ? "income" : isSaving ? "saving" : "expense"}
             selectedCategoryId={row.category?.id ?? null}
             onSelect={(taxonomyId, categoryId) => onAssignCategory(a.id, taxonomyId, categoryId)}
             onClear={() => row.category && onClearCategory(a.id, row.category.taxonomyId)}
@@ -171,7 +171,13 @@ function TransactionRowImpl({
       <TableCell
         className={cn(
           "text-right text-sm font-medium tabular-nums",
-          isOutflow ? "text-destructive" : isNeutral ? "text-muted-foreground" : "text-success",
+          isSaving
+            ? "text-[#6B8E54]"
+            : isOutflow
+              ? "text-destructive"
+              : isNeutral
+                ? "text-muted-foreground"
+                : "text-success",
         )}
       >
         {sign}

@@ -33,7 +33,11 @@ import type {
   TaxonomyWithCategories,
 } from "@/lib/types";
 
-const ACTIVITY_TAXONOMY_IDS = new Set(["spending_categories", "income_sources"]);
+const ACTIVITY_TAXONOMY_IDS = new Set([
+  "spending_categories",
+  "income_sources",
+  "savings_categories",
+]);
 
 function invalidateActivityTaxonomyCaches(queryClient: QueryClient, taxonomyId: string) {
   if (ACTIVITY_TAXONOMY_IDS.has(taxonomyId)) {
@@ -63,7 +67,7 @@ function invalidateAllocationTargetDriftCaches(
 /**
  * Fetch taxonomies, optionally filtered by scope.
  * - scope="asset" (default for legacy rows): asset classifications shown in Settings → Classifications
- * - scope="activity": spending categories / income sources shown in Spending → Categories
+ * - scope="activity": spending, income, and savings taxonomies shown in Spending → Categories
  */
 export function useTaxonomies(options?: { scope?: TaxonomyScope }) {
   const query = useQuery<Taxonomy[], Error>({

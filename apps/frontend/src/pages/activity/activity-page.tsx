@@ -230,6 +230,23 @@ const ActivityPage = () => {
       }));
   }, [accounts, investmentAccounts, isSpendingEnabled, selectedActivity?.accountId]);
 
+  // Transfers move money between ANY accounts, including spending/saving cash
+  // accounts that the Spending split otherwise hides from the Investments view.
+  // The Transfer form's From/To selectors use this full active-account list so
+  // that bridge (e.g. brokerage ↔ savings) can be recorded.
+  const transferFormAccounts = useMemo(
+    () =>
+      accounts
+        .filter((acc: Account) => !acc.isArchived)
+        .map((account: Account) => ({
+          value: account.id,
+          label: account.name,
+          currency: account.currency,
+          restrictionLevel: getActivityRestrictionLevel(account),
+        })),
+    [accounts],
+  );
+
   // Intersect main's scope-resolved IDs with the spending-excluded set so the
   // Investments tab respects both the typed AccountScope (main's
   // portfolio-filters work) AND the spending opt-in partitioning (this
@@ -621,6 +638,7 @@ const ActivityPage = () => {
         <MobileActivityForm
           key={selectedActivity?.id ?? "new"}
           accounts={activityFormAccounts}
+          transferAccounts={transferFormAccounts}
           activity={selectedActivity}
           open={showForm}
           onClose={handleFormClose}
@@ -628,6 +646,7 @@ const ActivityPage = () => {
       ) : (
         <ActivityForm
           accounts={activityFormAccounts}
+          transferAccounts={transferFormAccounts}
           activity={selectedActivity}
           open={showForm}
           onClose={handleFormClose}

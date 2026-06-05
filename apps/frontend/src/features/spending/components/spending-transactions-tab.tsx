@@ -42,6 +42,7 @@ import { TransactionCard } from "./transaction-card";
 import { TransactionRow } from "./transaction-row";
 import { TransactionsBulkBar } from "./transactions-bulk-bar";
 import { TransactionsFilterBar, type FilterOption } from "./transactions-filter-bar";
+import type { QuickCategorizeScope } from "./quick-categorize-popover";
 import {
   CASH_ACTIVITY_TYPES,
   CASH_ACTIVITY_TYPE_LABELS,
@@ -67,6 +68,7 @@ import type { CashActivitySearchRequest, CashActivityStatusFilter } from "../typ
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 
 /**
  * Parse a `YYYY-MM-DD` URL param as LOCAL midnight. `new Date("YYYY-MM-DD")`
@@ -295,6 +297,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const { data: eventTypes = [] } = useEventTypes();
     const spending = useTaxonomy(SPENDING_TAXONOMY);
     const income = useTaxonomy(INCOME_TAXONOMY);
+    const savings = useTaxonomy(SAVINGS_TAXONOMY);
     const assignMutation = useAssignActivityCategory();
     const bulkAssignMutation = useBulkAssignCategories();
     const unassignMutation = useUnassignActivityCategory();
@@ -304,8 +307,9 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       const map = new Map<string, TaxonomyCategory>();
       (spending.data?.categories ?? []).forEach((c) => map.set(c.id, c));
       (income.data?.categories ?? []).forEach((c) => map.set(c.id, c));
+      (savings.data?.categories ?? []).forEach((c) => map.set(c.id, c));
       return map;
-    }, [spending.data?.categories, income.data?.categories]);
+    }, [spending.data?.categories, income.data?.categories, savings.data?.categories]);
 
     const topLevelCategories = useMemo(
       () =>
@@ -390,6 +394,20 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
       () => items.map((it) => toRowVM(it, allCategories)),
       [items, allCategories],
     );
+    const bulkCategoryScope = useMemo<QuickCategorizeScope | null>(() => {
+      if (selectedRowIds.size === 0) return null;
+      const buckets = new Set(
+        rows
+          .filter((row) => selectedRowIds.has(row.activity.id))
+          .map((row) => row.activity.cashFlowBucket),
+      );
+      if (buckets.size !== 1) return null;
+      const [bucket] = [...buckets];
+      if (bucket === "spending") return "expense";
+      if (bucket === "income") return "income";
+      if (bucket === "saving") return "saving";
+      return null;
+    }, [rows, selectedRowIds]);
 
     const filtersActive =
       !!debouncedSearch ||
@@ -721,6 +739,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
         {selectedRowIds.size > 0 && (
           <TransactionsBulkBar
             selectedCount={selectedRowIds.size}
+            categoryScope={bulkCategoryScope}
             onCategorize={handleBulkCategorize}
             onTagEvent={handleBulkSetEvent}
             onDelete={handleBulkDelete}

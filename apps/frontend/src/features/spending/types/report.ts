@@ -1,6 +1,8 @@
 export interface PeriodSummary {
   income: number;
   outflow: number;
+  /** Money set aside into the Savings taxonomy (transfers to investing accounts). */
+  saved: number;
   net: number;
   count: number;
 }
@@ -32,6 +34,7 @@ export interface MonthlyReport {
   prior: PeriodSummary;
   spendingBreakdown: CategoryBreakdownRow[];
   incomeBreakdown: CategoryBreakdownRow[];
+  savingsBreakdown: CategoryBreakdownRow[];
   byDay: DayBucket[];
   byDayByCategory: DayCategoryBucket[];
 }

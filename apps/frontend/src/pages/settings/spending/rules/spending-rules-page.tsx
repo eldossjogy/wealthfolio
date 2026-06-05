@@ -50,6 +50,7 @@ import { SpendingBackLink } from "../components/spending-back-link";
 
 const SPENDING_TAXONOMY = "spending_categories";
 const INCOME_TAXONOMY = "income_sources";
+const SAVINGS_TAXONOMY = "savings_categories";
 
 export default function SpendingRulesPage() {
   const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
@@ -62,6 +63,7 @@ export default function SpendingRulesPage() {
   const { data: presets = [], isError: presetsErrored, error: presetsError } = useRulePresets();
   const spending = useTaxonomy(SPENDING_TAXONOMY);
   const income = useTaxonomy(INCOME_TAXONOMY);
+  const savings = useTaxonomy(SAVINGS_TAXONOMY);
   const { create, update, remove, rerun } = useCategorizationRuleMutations();
 
   const [visibleModal, setVisibleModal] = useState(false);
@@ -71,13 +73,15 @@ export default function SpendingRulesPage() {
   const [presetFilter, setPresetFilter] = useState<string | null>(null);
   const [confirmRerunAllOpen, setConfirmRerunAllOpen] = useState(false);
 
-  const isLoading = rulesLoading || spending.isLoading || income.isLoading;
-  const hasLoadError = rulesErrored || presetsErrored || spending.isError || income.isError;
+  const isLoading = rulesLoading || spending.isLoading || income.isLoading || savings.isLoading;
+  const hasLoadError =
+    rulesErrored || presetsErrored || spending.isError || income.isError || savings.isError;
   const loadError =
     rulesError?.message ??
     presetsError?.message ??
     spending.error?.message ??
     income.error?.message ??
+    savings.error?.message ??
     "Rules could not load.";
 
   const { categoryOptions, categoryMeta } = useMemo(() => {
@@ -101,17 +105,20 @@ export default function SpendingRulesPage() {
     const opts: RuleFormCategoryOption[] = [
       ...buildOptions(SPENDING_TAXONOMY, spending.data?.categories ?? []),
       ...buildOptions(INCOME_TAXONOMY, income.data?.categories ?? []),
+      ...buildOptions(SAVINGS_TAXONOMY, savings.data?.categories ?? []),
     ];
     const meta: Record<string, RuleCategoryMeta> = {};
     opts.forEach((o) => {
-      meta[o.categoryId] = {
+      const entry = {
         name: o.label,
         color: o.color ?? null,
         parentName: o.parentName ?? null,
       };
+      meta[o.value] = entry;
+      meta[o.categoryId] ??= entry;
     });
     return { categoryOptions: opts, categoryMeta: meta };
-  }, [spending.data?.categories, income.data?.categories]);
+  }, [spending.data?.categories, income.data?.categories, savings.data?.categories]);
 
   const presetMeta = useMemo<Record<string, RulePresetMeta>>(() => {
     const meta: Record<string, RulePresetMeta> = {};

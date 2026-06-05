@@ -15,13 +15,14 @@ import { useBalancePrivacy } from "@/hooks/use-balance-privacy";
 import type { TaxonomyCategory } from "@/lib/types";
 import { cn, formatAmount } from "@/lib/utils";
 
+import { CategoryIcon } from "../../category-chips";
 import { rollUpToTopLevel, topCategoryId } from "../../../lib/category-rollup";
 import type { ReportsRange } from "../../../lib/reports-period";
 import type { BudgetCategoryRow, BudgetSnapshot } from "../../../types/budget";
 import type { PaceState } from "../../../types/insight";
 import type { CategoryBreakdownRow, MonthBucket, MonthlyReport } from "../../../types/report";
 import { CategoryHierarchyTable, type CategorySort } from "../category-hierarchy-table";
-import { formatMonthName, formatPercentValue } from "./format";
+import { formatMonthDay, formatMonthName, formatPercentValue } from "./format";
 
 // ─── shared chrome ────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ const CARD_CLASS =
   "border-border/60 bg-card/40 bg-gradient-to-br from-white/[0.07] via-transparent to-black/[0.04] dark:from-white/[0.025] dark:to-black/[0.06] rounded-2xl border p-5 backdrop-blur-xl";
 const LABEL_CLASS =
   "text-muted-foreground/70 text-[10px] font-semibold uppercase tracking-[0.12em]";
+const SAVINGS_GROUP_KEY = "savings";
 
 // ═════════════════════════════════════════════════════════════════════════
 // Top of page — pace narrative + spent + cashflow
@@ -40,6 +42,8 @@ export interface WhereIAmStageProps {
   priorReport: MonthlyReport | undefined;
   months: MonthBucket[];
   taxonomyCategories: TaxonomyCategory[];
+  incomeCategories: TaxonomyCategory[];
+  savingsCategories: TaxonomyCategory[];
   budget: BudgetSnapshot | undefined;
   currency: string;
   isLoading: boolean;
@@ -61,6 +65,8 @@ export function WhereIAmStage({
   priorReport,
   months,
   taxonomyCategories,
+  incomeCategories,
+  savingsCategories,
   budget,
   currency,
   isLoading,
@@ -89,6 +95,14 @@ export function WhereIAmStage({
         />
         <NetCashflowCard months={months} currency={currency} isLoading={isLoading} />
       </div>
+      <CashflowOverview
+        range={range}
+        currentReport={currentReport}
+        incomeCategories={incomeCategories}
+        savingsCategories={savingsCategories}
+        currency={currency}
+        isLoading={isLoading}
+      />
       <BreakdownCanvas
         currentReport={currentReport}
         priorReport={priorReport}
@@ -602,13 +616,15 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
   const totals = useMemo(() => {
     let income = 0;
     let spent = 0;
+    let saved = 0;
     for (const m of months) {
       income += m.report?.current.income ?? 0;
       spent += m.report?.current.outflow ?? 0;
+      saved += m.report?.current.saved ?? 0;
     }
-    const net = income - spent;
-    const savingsRate = income > 0 ? net / income : 0;
-    return { income, spent, net, savingsRate };
+    const net = income - spent - saved;
+    const surplusRate = income > 0 ? net / income : 0;
+    return { income, spent, saved, net, surplusRate };
   }, [months]);
 
   if (isLoading) {
@@ -622,9 +638,10 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
     );
   }
 
-  const denom = Math.max(totals.income, totals.spent, 1);
+  const denom = Math.max(totals.income, totals.spent, totals.saved, 1);
   const incomePct = (totals.income / denom) * 100;
   const spentPct = (totals.spent / denom) * 100;
+  const savedPct = (totals.saved / denom) * 100;
   const netToneClass = totals.net >= 0 ? "text-success" : "text-destructive";
 
   return (
@@ -650,14 +667,14 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
             )}
           >
             {(() => {
-              // Saved → savings rate (net/income), capped at 100% since you
-              // can't save more than your income.
+              // Net >= 0 means money left after spending and explicit saving.
+              // It is surplus/leftover cash, not the amount already saved.
               // Overspent → deficit as % of income ("by N%"). For deficits
               // greater than 100% of income the literal number ("Overspent
               // 250%") is misleading — cap the display at "by 100%+".
-              const ratePct = Math.abs(totals.savingsRate) * 100;
+              const ratePct = Math.abs(totals.surplusRate) * 100;
               if (totals.net >= 0) {
-                return `Saved ${formatPercentValue(Math.min(100, ratePct), { digits: 0 })}`;
+                return `Left over ${formatPercentValue(Math.min(100, ratePct), { digits: 0 })}`;
               }
               return ratePct >= 100
                 ? "Overspent by 100%+"
@@ -697,10 +714,214 @@ const NetCashflowCard: FC<NetCashflowCardProps> = ({ months, currency, isLoading
             <PrivacyAmount value={totals.spent} currency={currency} />
           </span>
         </div>
+        {totals.saved > 0 && (
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-muted-foreground w-12 shrink-0">Saved</span>
+            <div className="bg-foreground/5 h-1.5 flex-1 overflow-hidden rounded-full">
+              <div
+                className="h-full rounded-full bg-[#6B8E54]/70 transition-all"
+                style={{ width: `${savedPct}%` }}
+              />
+            </div>
+            <span className="text-foreground/90 w-20 shrink-0 text-right font-semibold tabular-nums">
+              <PrivacyAmount value={totals.saved} currency={currency} />
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
+// ═════════════════════════════════════════════════════════════════════════
+// Cashflow detail — compact income/saving support for the headline card
+// ═════════════════════════════════════════════════════════════════════════
+
+interface CashflowOverviewProps {
+  range: ReportsRange;
+  currentReport: MonthlyReport | undefined;
+  incomeCategories: TaxonomyCategory[];
+  savingsCategories: TaxonomyCategory[];
+  currency: string;
+  isLoading: boolean;
+}
+
+function CashflowOverview({
+  range,
+  currentReport,
+  incomeCategories,
+  savingsCategories,
+  currency,
+  isLoading,
+}: CashflowOverviewProps) {
+  const periodLabel = useMemo(() => buildPeriodSubtitle(range), [range]);
+  const incomeRows = useMemo(
+    () => buildCashflowRows(currentReport?.incomeBreakdown ?? [], incomeCategories),
+    [currentReport?.incomeBreakdown, incomeCategories],
+  );
+  const savingsRows = useMemo(
+    () => buildCashflowRows(currentReport?.savingsBreakdown ?? [], savingsCategories),
+    [currentReport?.savingsBreakdown, savingsCategories],
+  );
+  const hasIncome = incomeRows.length > 0;
+  const hasSaving = savingsRows.length > 0;
+
+  if (!isLoading && !hasIncome && !hasSaving) return null;
+
+  return (
+    <section id="cashflow">
+      <header className="mb-3">
+        <h2 className="text-foreground text-base font-semibold tracking-tight">Income & saving</h2>
+        <p className="text-muted-foreground text-xs">Non-spending cashflow for {periodLabel}.</p>
+      </header>
+      <div className="border-border/60 bg-card/40 overflow-hidden rounded-2xl border backdrop-blur-xl">
+        {isLoading ? (
+          <div className="grid gap-4 p-4 md:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-4/5" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div
+            className={cn(
+              "grid",
+              hasIncome &&
+                hasSaving &&
+                "divide-border/40 divide-y md:grid-cols-2 md:divide-x md:divide-y-0",
+            )}
+          >
+            {hasIncome && (
+              <CashflowGroup
+                label="Money in"
+                sublabel="Income sources"
+                rows={incomeRows}
+                currency={currency}
+              />
+            )}
+            {hasSaving && (
+              <CashflowGroup
+                label="Set aside"
+                sublabel="Saving destinations"
+                rows={savingsRows}
+                currency={currency}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+interface CashflowGroupProps {
+  label: string;
+  sublabel: string;
+  rows: CashflowRow[];
+  currency: string;
+}
+
+function CashflowGroup({ label, sublabel, rows, currency }: CashflowGroupProps) {
+  const visibleRows = rows.slice(0, 4);
+  const hiddenCount = Math.max(0, rows.length - visibleRows.length);
+
+  return (
+    <div className="p-4">
+      <div className="mb-3">
+        <div className={LABEL_CLASS}>{label}</div>
+        <div className="text-muted-foreground/70 mt-0.5 text-xs">{sublabel}</div>
+      </div>
+      <div className="space-y-2">
+        {visibleRows.map((row) => (
+          <div key={row.id}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  className="flex size-6 shrink-0 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: `${row.color}24`,
+                    color: row.color,
+                  }}
+                >
+                  <CategoryIcon icon={row.icon} fallback={row.name} className="size-3" />
+                </span>
+                <span className="truncate text-sm font-medium">{row.name}</span>
+              </div>
+              <span className="text-sm font-semibold tabular-nums">
+                <PrivacyAmount value={row.amount} currency={currency} />
+              </span>
+            </div>
+            {visibleRows.length > 1 && (
+              <div className="mt-2 flex items-center gap-2">
+                <div className="bg-foreground/5 h-1 flex-1 overflow-hidden rounded-full">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${row.share}%`,
+                      backgroundColor: row.color,
+                    }}
+                  />
+                </div>
+                <span className="text-muted-foreground/70 w-9 text-right text-[11px] tabular-nums">
+                  {Math.round(row.share)}%
+                </span>
+              </div>
+            )}
+          </div>
+        ))}
+        {hiddenCount > 0 && (
+          <div className="text-muted-foreground/70 text-xs tabular-nums">+{hiddenCount} more</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface CashflowRow {
+  id: string;
+  name: string;
+  color: string;
+  icon: string | null;
+  amount: number;
+  count: number;
+  share: number;
+}
+
+function buildCashflowRows(
+  breakdown: CategoryBreakdownRow[],
+  taxonomyCategories: TaxonomyCategory[],
+): CashflowRow[] {
+  const meta = new Map(taxonomyCategories.map((c) => [c.id, c]));
+  const byTop = new Map<string, CashflowRow>();
+  for (const row of breakdown) {
+    if (row.amount === 0) continue;
+    const topId =
+      row.categoryId === "__uncategorized__" ? row.categoryId : topCategoryId(row.categoryId, meta);
+    const top = meta.get(topId);
+    const existing = byTop.get(topId) ?? {
+      id: topId,
+      name: topId === "__uncategorized__" ? "Uncategorized" : (top?.name ?? topId),
+      color: topId === "__uncategorized__" ? "#9CA3AF" : (top?.color ?? "#9CA3AF"),
+      icon: top?.icon ?? null,
+      amount: 0,
+      count: 0,
+      share: 0,
+    };
+    existing.amount += row.amount;
+    existing.count += row.count;
+    byTop.set(topId, existing);
+  }
+
+  const rows = Array.from(byTop.values()).sort((a, b) => b.amount - a.amount);
+  const total = rows.reduce((sum, row) => sum + Math.max(0, row.amount), 0);
+  return rows.map((row) => ({
+    ...row,
+    share: total > 0 ? (Math.max(0, row.amount) / total) * 100 : 0,
+  }));
+}
 
 // ═════════════════════════════════════════════════════════════════════════
 // Breakdown canvas — chips + sort + footer wrapping the table
@@ -742,11 +963,11 @@ function BreakdownCanvas({
 
   // Memoize these so downstream `counts`/`filteredBreakdown` memos stay valid
   // — otherwise a fresh array on every render busts memoization.
-  const budgetRows = useMemo(
-    () => budget?.computed.groupRows.flatMap((row) => row.categories) ?? [],
+  const groupRows = useMemo(
+    () => budget?.computed.groupRows.filter((row) => row.group.key !== SAVINGS_GROUP_KEY) ?? [],
     [budget],
   );
-  const groupRows = useMemo(() => budget?.computed.groupRows ?? [], [budget]);
+  const budgetRows = useMemo(() => groupRows.flatMap((row) => row.categories), [groupRows]);
   const breakdown = useMemo(() => currentReport?.spendingBreakdown ?? [], [currentReport]);
   const priorBreakdown = useMemo(() => priorReport?.spendingBreakdown ?? [], [priorReport]);
 
@@ -795,9 +1016,9 @@ function BreakdownCanvas({
     <section id="breakdown">
       <header className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-foreground text-base font-semibold tracking-tight">Breakdown</h2>
+          <h2 className="text-foreground text-base font-semibold tracking-tight">Spending plan</h2>
           <p className="text-muted-foreground text-xs">
-            Where {periodLabel} went — tap any category to see subcategories.
+            Budgeted spending by category for {periodLabel}.
           </p>
         </div>
         <div className="text-muted-foreground/80 hidden items-center gap-1.5 text-xs md:inline-flex">
@@ -981,7 +1202,18 @@ function filterBreakdown({
 
 /** Subtitle copy that reflects the active range, not just the start month. */
 function buildPeriodSubtitle(range: ReportsRange): string {
-  if (range.months <= 1) return formatMonthName(range.start);
+  const sameMonth =
+    range.start.getFullYear() === range.end.getFullYear() &&
+    range.start.getMonth() === range.end.getMonth();
+  const lastDayOfMonth = new Date(
+    range.start.getFullYear(),
+    range.start.getMonth() + 1,
+    0,
+  ).getDate();
+  const isFullCalendarMonth =
+    sameMonth && range.start.getDate() === 1 && range.end.getDate() === lastDayOfMonth;
+  if (isFullCalendarMonth) return formatMonthName(range.start);
+  if (range.days <= 45) return `${formatMonthDay(range.start)} → ${formatMonthDay(range.end)}`;
   const start = formatMonthName(range.start);
   const end = formatMonthName(range.end);
   const sameYear = range.start.getFullYear() === range.end.getFullYear();

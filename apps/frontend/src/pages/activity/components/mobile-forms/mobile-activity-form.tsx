@@ -36,6 +36,11 @@ import { MobileActivitySteps } from "./mobile-activity-steps";
 
 interface MobileActivityFormProps {
   accounts: AccountSelectOption[];
+  /**
+   * Full active-account list for transfers. A transfer can target any account,
+   * including spending/saving accounts the Spending split hides from `accounts`.
+   */
+  transferAccounts?: AccountSelectOption[];
   activity?: Partial<ActivityDetails>;
   open?: boolean;
   onClose?: () => void;
@@ -236,7 +241,13 @@ function extractErrorMessage(error: unknown): string {
   return "Failed to save activity. Please check your inputs and try again.";
 }
 
-export function MobileActivityForm({ accounts, activity, open, onClose }: MobileActivityFormProps) {
+export function MobileActivityForm({
+  accounts,
+  transferAccounts,
+  activity,
+  open,
+  onClose,
+}: MobileActivityFormProps) {
   const [currentStep, setCurrentStep] = useState(activity?.id ? 2 : 1);
   const {
     addActivityMutation,
@@ -367,6 +378,14 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
     defaultValues: defaultValues as any,
   });
 
+  // Transfers may target any account (incl. spending/saving accounts the Spending
+  // split hides from `accounts`), so widen the list once the type is a transfer.
+  const watchedActivityType = form.watch("activityType");
+  const effectiveAccounts =
+    transferAccounts && TRANSFER_ACTIVITY_TYPES.includes(watchedActivityType ?? "")
+      ? transferAccounts
+      : accounts;
+
   // Handle sheet close - reset form and step
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
@@ -403,7 +422,7 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
         id,
         ...submitData
       } = data as any;
-      const account = accounts.find((a) => a.value === submitData.accountId);
+      const account = effectiveAccounts.find((a) => a.value === submitData.accountId);
       const isTransferActivity = TRANSFER_ACTIVITY_TYPES.includes(submitData.activityType);
       const isSecuritiesTransfer = isTransferActivity && (_tm ?? "cash") === "securities";
       const isAssetBackedIncome = isAssetBackedIncomeSubtype(
@@ -478,7 +497,7 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
       // Internal transfer: create paired TRANSFER_OUT + TRANSFER_IN activities
       if (isTransferActivity && !transferIsExternal && _toAccountId) {
         const fromAccount = account;
-        const toAccount = accounts.find((a) => a.value === _toAccountId);
+        const toAccount = effectiveAccounts.find((a) => a.value === _toAccountId);
 
         if (!isSecuritiesTransfer) {
           const sourceAmount = submitData.sourceAmount ?? submitData.amount;
@@ -790,7 +809,7 @@ export function MobileActivityForm({ accounts, activity, open, onClose }: Mobile
               <form onSubmit={handleValidatedSubmit} className="flex h-full flex-col">
                 <MobileActivitySteps
                   currentStep={currentStep}
-                  accounts={accounts}
+                  accounts={effectiveAccounts}
                   isEditing={!!activity?.id}
                 />
               </form>
