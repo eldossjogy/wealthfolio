@@ -17,6 +17,7 @@ export interface AccountSelectOption {
   value: string;
   label: string;
   currency: string;
+  accountType?: string;
   /** Activity restriction level based on account tracking mode. */
   restrictionLevel?: "none" | "limited" | "blocked";
 }

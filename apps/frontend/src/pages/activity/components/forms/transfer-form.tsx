@@ -1,6 +1,6 @@
 import { useSettings } from "@/hooks/use-settings";
 import { isSecuritiesTransfer } from "@/lib/activity-utils";
-import { ActivityType, QuoteMode } from "@/lib/constants";
+import { ActivityType, isLiabilityAccountType, QuoteMode } from "@/lib/constants";
 import { formatAmount } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AnimatedToggleGroup } from "@wealthfolio/ui/components/ui/animated-toggle-group";
@@ -354,6 +354,13 @@ export function TransferForm({
   const quantity = watch("quantity");
   const isManualAsset = quoteMode === QuoteMode.MANUAL;
   const isCashMode = transferMode === "cash";
+  const sourceAccountOptions = useMemo(
+    () => accounts.filter((account) => !isLiabilityAccountType(account.accountType)),
+    [accounts],
+  );
+  const destinationAccountOptions = accounts;
+  const externalAccountOptions =
+    direction === "out" ? sourceAccountOptions : destinationAccountOptions;
 
   // Get account currency from selected account (internal: fromAccount, external: accountId)
   const selectedAccount = useMemo(
@@ -366,6 +373,8 @@ export function TransferForm({
     [accounts, toAccountId],
   );
   const isInternalCashTransfer = !isExternal && isCashMode;
+  const isCreditCardPayment =
+    isInternalCashTransfer && isLiabilityAccountType(destinationAccount?.accountType);
   const effectiveSourceCurrency = sourceCurrency || accountCurrency || currency || baseCurrency;
   const effectiveDestinationCurrency =
     destinationCurrency || destinationAccount?.currency || effectiveSourceCurrency;
@@ -500,11 +509,13 @@ export function TransferForm({
   const getSubmitButtonText = () => {
     if (isEditing) return "Update";
 
-    const actionPrefix = isExternal
-      ? direction === "in"
-        ? "Transfer In"
-        : "Transfer Out"
-      : "Transfer";
+    const actionPrefix = isCreditCardPayment
+      ? "Payment"
+      : isExternal
+        ? direction === "in"
+          ? "Transfer In"
+          : "Transfer Out"
+        : "Transfer";
 
     const displayAmount = isInternalCashTransfer ? sourceAmount : amount;
     if (isCashMode && displayAmount && displayAmount > 0) {
@@ -516,11 +527,15 @@ export function TransferForm({
       return `${actionPrefix} ${quantity} ${assetId}`;
     }
 
-    return isExternal ? `Add ${actionPrefix}` : "Add Transfer";
+    return isCreditCardPayment
+      ? "Add Payment"
+      : isExternal
+        ? `Add ${actionPrefix}`
+        : "Add Transfer";
   };
 
   // Filter destination accounts to exclude source account (for internal transfers)
-  const toAccountOptions = accounts.filter((acc) => acc.value !== fromAccountId);
+  const toAccountOptions = destinationAccountOptions.filter((acc) => acc.value !== fromAccountId);
 
   const handleSubmit = createValidatedSubmit(form, async (data) => {
     // Ensure symbolQuoteCcy is set — manual/custom symbols leave it undefined
@@ -589,7 +604,7 @@ export function TransferForm({
             {isExternal ? (
               <AccountSelect
                 name="accountId"
-                accounts={accounts}
+                accounts={externalAccountOptions}
                 currencyName="currency"
                 label={direction === "in" ? "To Account" : "From Account"}
                 placeholder="Select account..."
@@ -599,7 +614,7 @@ export function TransferForm({
                 {/* From Account Selection */}
                 <AccountSelect
                   name="fromAccountId"
-                  accounts={accounts}
+                  accounts={sourceAccountOptions}
                   currencyName="currency"
                   label="From Account"
                   placeholder="Select source account..."

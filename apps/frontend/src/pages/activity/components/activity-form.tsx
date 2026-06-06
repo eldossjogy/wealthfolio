@@ -12,6 +12,7 @@ import {
 } from "@wealthfolio/ui/components/ui/sheet";
 import type { ActivityDetails } from "@/lib/types";
 import { restrictionAllowsType } from "@/lib/activity-restrictions";
+import { isLiabilityAccountType } from "@/lib/constants";
 import { useState, useCallback, useMemo } from "react";
 import { ActivityTypePicker } from "./activity-type-picker";
 import { ActivityFormRenderer } from "./activity-form-renderer";
@@ -22,6 +23,13 @@ import type { PickerActivityType } from "../config/activity-form-config";
 
 // Re-export for consumers
 export type { AccountSelectOption };
+
+function transferAllowsAccount(account: AccountSelectOption): boolean {
+  return (
+    restrictionAllowsType(account.restrictionLevel, "TRANSFER") ||
+    isLiabilityAccountType(account.accountType)
+  );
+}
 
 interface ActivityFormProps {
   accounts: AccountSelectOption[];
@@ -62,6 +70,9 @@ export function ActivityForm({
     const base =
       effectiveSelectedType === "TRANSFER" && transferAccounts ? transferAccounts : accounts;
     if (!effectiveSelectedType) return base;
+    if (effectiveSelectedType === "TRANSFER") {
+      return base.filter(transferAllowsAccount);
+    }
     return base.filter((acc) => restrictionAllowsType(acc.restrictionLevel, effectiveSelectedType));
   }, [accounts, transferAccounts, effectiveSelectedType]);
 

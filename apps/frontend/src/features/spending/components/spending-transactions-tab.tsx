@@ -49,6 +49,7 @@ import type { QuickCategorizeScope } from "./quick-categorize-popover";
 import {
   CASH_ACTIVITY_TYPES,
   CASH_ACTIVITY_TYPE_LABELS,
+  isCreditCardAccountType,
   isSpendingAccountType,
 } from "../lib/constants";
 import {
@@ -159,6 +160,9 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const [showForm, setShowForm] = useState(false);
     const [showTransferForm, setShowTransferForm] = useState(false);
     const [transferFromAccountId, setTransferFromAccountId] = useState<string | undefined>();
+    const [transferActivityType, setTransferActivityType] = useState<ActivityType>(
+      ActivityType.TRANSFER_OUT,
+    );
     const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
     const [deletePreview, setDeletePreview] = useState<DeletePreview | undefined>();
 
@@ -308,19 +312,30 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
             value: a.id,
             label: a.name,
             currency: a.currency,
+            accountType: a.accountType,
             restrictionLevel: getActivityRestrictionLevel(a),
           })),
       [accounts],
     );
 
-    const handleTransferClick = useCallback((accountId: string) => {
-      setTransferFromAccountId(accountId);
-      setShowTransferForm(true);
-    }, []);
+    const handleTransferClick = useCallback(
+      (accountId: string) => {
+        const account = accounts.find((a: Account) => a.id === accountId);
+        setTransferActivityType(
+          isCreditCardAccountType(account?.accountType)
+            ? ActivityType.TRANSFER_IN
+            : ActivityType.TRANSFER_OUT,
+        );
+        setTransferFromAccountId(accountId);
+        setShowTransferForm(true);
+      },
+      [accounts],
+    );
 
     const handleTransferFormClose = useCallback(() => {
       setShowTransferForm(false);
       setTransferFromAccountId(undefined);
+      setTransferActivityType(ActivityType.TRANSFER_OUT);
     }, []);
     const { data: events = [] } = useSpendingEvents();
     const { data: eventTypes = [] } = useEventTypes();
@@ -884,7 +899,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           <ActivityForm
             accounts={transferFormAccounts}
             transferAccounts={transferFormAccounts}
-            activity={{ activityType: ActivityType.TRANSFER_OUT, accountId: transferFromAccountId }}
+            activity={{ activityType: transferActivityType, accountId: transferFromAccountId }}
             open={showTransferForm}
             onClose={handleTransferFormClose}
             hidePicker

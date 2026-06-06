@@ -45,6 +45,7 @@ import {
 import {
   getActivityTypesForAccount,
   getCashActivityLabel,
+  isCreditCardAccountType,
   isCashActivityIncome,
   isSpendingAccountType,
 } from "../lib/constants";
@@ -182,6 +183,8 @@ export function CashActivityForm({
   const watchType = form.watch("activityType");
   const watchAccountId = form.watch("accountId");
   const selectedAccount = spendingAccounts.find((a) => a.id === watchAccountId);
+  const isCreditCardAccount = isCreditCardAccountType(selectedAccount?.accountType);
+  const transferActionLabel = isCreditCardAccount ? "Record payment" : "Transfer between accounts";
   const activityTypeOptions = useMemo(() => {
     const options = getActivityTypesForAccount(selectedAccount?.accountType);
     const currentType = activity?.activityType as FormValues["activityType"] | undefined;
@@ -349,18 +352,19 @@ export function CashActivityForm({
             {/* Transfer button — creation only, redirects to the full transfer form */}
             {!isEditing && onTransferClick && (
               <FormItem>
-                <FormLabel>Transfer</FormLabel>
+                <FormLabel>{isCreditCardAccount ? "Payment" : "Transfer"}</FormLabel>
                 <Button
                   type="button"
                   variant="outline"
                   className="w-full justify-start gap-2"
+                  disabled={!watchAccountId}
                   onClick={() => {
                     onOpenChange(false);
                     onTransferClick(watchAccountId);
                   }}
                 >
                   <Icons.ArrowLeftRight className="h-4 w-4" />
-                  Transfer between accounts
+                  {transferActionLabel}
                 </Button>
               </FormItem>
             )}
