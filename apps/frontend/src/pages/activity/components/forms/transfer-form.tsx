@@ -358,7 +358,7 @@ export function TransferForm({
     () => accounts.filter((account) => !isLiabilityAccountType(account.accountType)),
     [accounts],
   );
-  const destinationAccountOptions = accounts;
+  const destinationAccountOptions = isCashMode ? accounts : sourceAccountOptions;
   const externalAccountOptions =
     direction === "out" ? sourceAccountOptions : destinationAccountOptions;
 
@@ -447,6 +447,23 @@ export function TransferForm({
   }, [destinationAccount?.currency, setValue]);
 
   useEffect(() => {
+    if (isCashMode) return;
+
+    if (destinationAccount && isLiabilityAccountType(destinationAccount.accountType)) {
+      setValue("toAccountId", "", { shouldDirty: true, shouldValidate: false });
+    }
+
+    if (
+      isExternal &&
+      direction === "in" &&
+      selectedAccount &&
+      isLiabilityAccountType(selectedAccount.accountType)
+    ) {
+      setValue("accountId", "", { shouldDirty: true, shouldValidate: false });
+    }
+  }, [destinationAccount, direction, isCashMode, isExternal, selectedAccount, setValue]);
+
+  useEffect(() => {
     if (!isInternalCashTransfer || isCrossCurrencyInternalCash) return;
     if (sourceAmount != null && sourceAmount > 0) {
       setValue("destinationAmount", sourceAmount, {
@@ -477,6 +494,17 @@ export function TransferForm({
       setValue("unitPrice", null);
     } else {
       setValue("amount", null);
+      if (destinationAccount && isLiabilityAccountType(destinationAccount.accountType)) {
+        setValue("toAccountId", "");
+      }
+      if (
+        isExternal &&
+        direction === "in" &&
+        selectedAccount &&
+        isLiabilityAccountType(selectedAccount.accountType)
+      ) {
+        setValue("accountId", "");
+      }
     }
   };
 
@@ -603,6 +631,7 @@ export function TransferForm({
             {/* Account Selection - conditional based on external flag */}
             {isExternal ? (
               <AccountSelect
+                key={`external-${transferMode}-${direction}-${accountId || "none"}`}
                 name="accountId"
                 accounts={externalAccountOptions}
                 currencyName="currency"
@@ -622,6 +651,7 @@ export function TransferForm({
 
                 {/* To Account Selection */}
                 <AccountSelect
+                  key={`to-${transferMode}-${fromAccountId || "none"}-${toAccountId || "none"}`}
                   name="toAccountId"
                   accounts={toAccountOptions}
                   label="To Account"
