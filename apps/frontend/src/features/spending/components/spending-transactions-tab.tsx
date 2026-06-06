@@ -36,6 +36,9 @@ import {
 } from "@wealthfolio/ui";
 
 import { CashActivityForm } from "./cash-activity-form";
+import { ActivityForm } from "@/pages/activity/components/activity-form";
+import { getActivityRestrictionLevel } from "@/lib/activity-restrictions";
+import { ActivityType } from "@/lib/constants";
 import type { AmountRange } from "./amount-range-filter";
 import { DeleteTransactionsDialog, type DeletePreview } from "./delete-transactions-dialog";
 import { TransactionCard } from "./transaction-card";
@@ -46,6 +49,7 @@ import type { QuickCategorizeScope } from "./quick-categorize-popover";
 import {
   CASH_ACTIVITY_TYPES,
   CASH_ACTIVITY_TYPE_LABELS,
+  isCreditCardAccountType,
   isSpendingAccountType,
 } from "../lib/constants";
 import {
@@ -154,6 +158,11 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
 
     const [editingActivity, setEditingActivity] = useState<TransactionRowVM | undefined>();
     const [showForm, setShowForm] = useState(false);
+    const [showTransferForm, setShowTransferForm] = useState(false);
+    const [transferFromAccountId, setTransferFromAccountId] = useState<string | undefined>();
+    const [transferActivityType, setTransferActivityType] = useState<ActivityType>(
+      ActivityType.TRANSFER_OUT,
+    );
     const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
     const [deletePreview, setDeletePreview] = useState<DeletePreview | undefined>();
 
@@ -293,6 +302,41 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
         (a: Account) => isSpendingAccountType(a.accountType) && includedIds.has(a.id),
       );
     }, [accounts, spendingAccountIds]);
+
+    // All active accounts for the transfer form (same full list as the Investments tab uses)
+    const transferFormAccounts = useMemo(
+      () =>
+        accounts
+          .filter((a: Account) => !a.isArchived)
+          .map((a: Account) => ({
+            value: a.id,
+            label: a.name,
+            currency: a.currency,
+            accountType: a.accountType,
+            restrictionLevel: getActivityRestrictionLevel(a),
+          })),
+      [accounts],
+    );
+
+    const handleTransferClick = useCallback(
+      (accountId: string) => {
+        const account = accounts.find((a: Account) => a.id === accountId);
+        setTransferActivityType(
+          isCreditCardAccountType(account?.accountType)
+            ? ActivityType.TRANSFER_IN
+            : ActivityType.TRANSFER_OUT,
+        );
+        setTransferFromAccountId(accountId);
+        setShowTransferForm(true);
+      },
+      [accounts],
+    );
+
+    const handleTransferFormClose = useCallback(() => {
+      setShowTransferForm(false);
+      setTransferFromAccountId(undefined);
+      setTransferActivityType(ActivityType.TRANSFER_OUT);
+    }, []);
     const { data: events = [] } = useSpendingEvents();
     const { data: eventTypes = [] } = useEventTypes();
     const spending = useTaxonomy(SPENDING_TAXONOMY);
@@ -848,7 +892,19 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           open={showForm}
           onOpenChange={setShowForm}
           activity={editingActivityForForm}
+          onTransferClick={handleTransferClick}
         />
+
+        {showTransferForm && (
+          <ActivityForm
+            accounts={transferFormAccounts}
+            transferAccounts={transferFormAccounts}
+            activity={{ activityType: transferActivityType, accountId: transferFromAccountId }}
+            open={showTransferForm}
+            onClose={handleTransferFormClose}
+            hidePicker
+          />
+        )}
 
         <DeleteTransactionsDialog
           open={!!deletingIds && deletingIds.length > 0}

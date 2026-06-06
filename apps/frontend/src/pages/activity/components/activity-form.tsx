@@ -12,6 +12,7 @@ import {
 } from "@wealthfolio/ui/components/ui/sheet";
 import type { ActivityDetails } from "@/lib/types";
 import { restrictionAllowsType } from "@/lib/activity-restrictions";
+import { isLiabilityAccountType } from "@/lib/constants";
 import { useState, useCallback, useMemo } from "react";
 import { ActivityTypePicker } from "./activity-type-picker";
 import { ActivityFormRenderer } from "./activity-form-renderer";
@@ -22,6 +23,13 @@ import type { PickerActivityType } from "../config/activity-form-config";
 
 // Re-export for consumers
 export type { AccountSelectOption };
+
+function transferAllowsAccount(account: AccountSelectOption): boolean {
+  return (
+    restrictionAllowsType(account.restrictionLevel, "TRANSFER") ||
+    isLiabilityAccountType(account.accountType)
+  );
+}
 
 interface ActivityFormProps {
   accounts: AccountSelectOption[];
@@ -34,6 +42,8 @@ interface ActivityFormProps {
   activity?: Partial<ActivityDetails>;
   open?: boolean;
   onClose?: () => void;
+  /** When true, hides the activity type picker (use when type is already determined) */
+  hidePicker?: boolean;
 }
 
 export function ActivityForm({
@@ -42,6 +52,7 @@ export function ActivityForm({
   activity,
   open,
   onClose,
+  hidePicker,
 }: ActivityFormProps) {
   // Derive the editing state and initial type from activity prop
   const isEditing = !!activity?.id;
@@ -59,6 +70,9 @@ export function ActivityForm({
     const base =
       effectiveSelectedType === "TRANSFER" && transferAccounts ? transferAccounts : accounts;
     if (!effectiveSelectedType) return base;
+    if (effectiveSelectedType === "TRANSFER") {
+      return base.filter(transferAllowsAccount);
+    }
     return base.filter((acc) => restrictionAllowsType(acc.restrictionLevel, effectiveSelectedType));
   }, [accounts, transferAccounts, effectiveSelectedType]);
 
@@ -101,8 +115,8 @@ export function ActivityForm({
         </SheetHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto py-4">
-          {/* Activity Type Picker - only show when creating new activity */}
-          {!isEditing && (
+          {/* Activity Type Picker - only show when creating new activity and not locked to a type */}
+          {!isEditing && !hidePicker && (
             <ActivityTypePicker value={effectiveSelectedType} onSelect={setSelectedType} />
           )}
 
