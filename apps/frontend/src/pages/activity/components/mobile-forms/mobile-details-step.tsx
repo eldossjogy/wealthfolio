@@ -375,7 +375,8 @@ export function MobileDetailsStep({
     const currentCurrency = currency?.trim();
     if (currentCurrency === selected.currency) return;
 
-    const shouldAutoSetCurrency = !getFieldState("currency").isDirty || !currentCurrency;
+    const shouldAutoSetCurrency =
+      !currentCurrency || (!isEditing && !getFieldState("currency").isDirty);
     if (!shouldAutoSetCurrency) return;
 
     setValue("currency", selected.currency, {
@@ -388,7 +389,7 @@ export function MobileDetailsStep({
         shouldValidate: false,
       });
     }
-  }, [accountId, currency, filteredAccounts, getFieldState, isExternal, setValue]);
+  }, [accountId, currency, filteredAccounts, getFieldState, isExternal, setValue, isEditing]);
 
   useEffect(() => {
     if (!destinationAccount?.currency) return;
